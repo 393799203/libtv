@@ -1,0 +1,35 @@
+# ========== Go 后端 ==========
+server/server
+server/.env
+
+# ========== Node.js 前端 ==========
+node_modules
+dist
+dist-ssr
+other
+*.local
+
+# 日志
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 视频文件（大文件不入库）
+web/public/videos/
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 其他
+other/
