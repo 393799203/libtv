@@ -228,7 +228,7 @@ export default function VideoListPage() {
                 </div>
               )}
               <button
-                className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-black/70 transition-colors cursor-pointer"
+                className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-red-500 transition-colors cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDeleteProject(project);
@@ -291,10 +291,15 @@ export default function VideoListPage() {
                       {formatDuration(item.duration)}
                     </div>
                   )}
+                  {/* 头像 + 作者名，叠加在图片上 */}
+                  <div className="absolute bottom-2 left-2 flex items-center gap-1 z-20">
+                    <img src={`https://picsum.photos/16/16?random=${item.author}`} alt="" className="w-4 h-4 rounded-full border border-white/50" />
+                    <span className="text-white text-[11px] drop-shadow-sm truncate max-w-[100px]">{item.author}</span>
+                  </div>
                 </div>
                 <div className="p-3">
                   <div className="flex items-start justify-between">
-                    <p className="!mb-1 !text-sm font-medium truncate">
+                    <p className="!text-sm font-medium truncate">
                       {item.title}
                     </p>
                     <Dropdown menu={{ items: getVideoMenuItems(item.id) }} placement="bottomRight" trigger={['click']}>
@@ -306,10 +311,6 @@ export default function VideoListPage() {
                         onClick={(e) => e.stopPropagation()}
                       />
                     </Dropdown>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <img src="https://picsum.photos/16/16" alt="" className="w-4 h-4 rounded-full" />
-                    <span className="text-gray-400 !text-xs">{item.author}</span>
                   </div>
                   <div className="mt-1">
                     {item.tags?.map((tag, i) => (
