@@ -9,6 +9,7 @@ import {
   type Connection,
   type NodeChange,
   type EdgeChange,
+  type Viewport,
 } from '@xyflow/react';
 
 const MAX_HISTORY = 50;
@@ -27,6 +28,10 @@ interface ProjectCanvasData {
   selectedEdgeIds: string[];
   history: HistorySnapshot[];
   future: HistorySnapshot[];
+  /** 保存时的视口位置，下次加载时恢复 */
+  savedViewport: { x: number; y: number; zoom: number };
+  /** 当前操作是否应跳过历史记录（per-project） */
+  skipHistory: boolean;
 }
 
 function createEmptyProjectData(): ProjectCanvasData {
@@ -37,6 +42,8 @@ function createEmptyProjectData(): ProjectCanvasData {
     selectedEdgeIds: [],
     history: [],
     future: [],
+    savedViewport: { x: 0, y: 0, zoom: 1 },
+    skipHistory: false,
   };
 }
 
@@ -47,6 +54,8 @@ interface WorkspaceUIState {
   isDirty: boolean;
   isSaving: boolean;
   showMiniMap: boolean;
+  /** 是否正在从服务端加载数据（true 时组件显示 loading） */
+  isLoading: boolean;
 
   setProjectId: (id: string) => void;
   setDirty: (dirty: boolean) => void;
@@ -79,6 +88,9 @@ interface CanvasState extends WorkspaceUIState {
   updateNodeData: (id: string, data: Partial<LibTVNode['data']>) => void;
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
 
+  // 视口持久化
+  saveViewport: (viewport: Viewport) => void;
+
   // 边操作
   addEdge: (edge: LibTVEdge) => void;
   removeEdges: (ids: string[]) => void;
@@ -98,7 +110,6 @@ interface CanvasState extends WorkspaceUIState {
 let nodeChangeQueue: NodeChange<LibTVNode>[] = [];
 let edgeChangeQueue: EdgeChange<LibTVEdge>[] = [];
 let flushTimer: ReturnType<typeof queueMicrotask> | null = null;
-let shouldRecordHistory = true;
 
 function saveHistory(data: ProjectCanvasData): Pick<ProjectCanvasData, 'history' | 'future'> & { canUndo: boolean; canRedo: boolean } {
   const snapshot: HistorySnapshot = { nodes: [...data.nodes], edges: [...data.edges] };
@@ -119,6 +130,14 @@ function saveHistory(data: ProjectCanvasData): Pick<ProjectCanvasData, 'history'
   };
 }
 
+/**
+ * 判断 NodeChange 是否为节点变化（非选中状态变更）
+ * 用于 syncSelectIds 中区分 node select 和 edge select
+ */
+function isNodePositionOrDimensionChange(c: Record<string, unknown>): boolean {
+  return 'position' in c || 'dimensions' in c || 'dragging' in c;
+}
+
 function scheduleFlush(
   _get: () => CanvasState,
   set: (fn: (state: CanvasState) => Partial<CanvasState>) => void,
@@ -135,39 +154,34 @@ function scheduleFlush(
 
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
 
-      const cache = state._cache;
+      const cache = new Map(state._cache);
       let data = cache.get(pid);
       if (!data) data = createEmptyProjectData();
 
-      if (!shouldRecordHistory) {
-        shouldRecordHistory = true;
-        if (nChanges.length > 0) {
-          data.nodes = applyNodeChanges(nChanges, data.nodes);
-          syncSelectIds(nChanges, data);
-        }
-        if (eChanges.length > 0) {
-          data.edges = applyEdgeChanges(eChanges, data.edges);
-          syncSelectIds(eChanges, data);
-        }
-        cache.set(pid, data);
-        return { _cache: cache, ...syncFromCache(pid, cache) };
+      // 如果当前项目标记了 skipHistory，本次不记录快照
+      const shouldRecord = !data.skipHistory;
+      if (data.skipHistory) {
+        data.skipHistory = false;
       }
-
-      const updates: Partial<CanvasState> = { isDirty: true };
 
       if (nChanges.length > 0) {
         data.nodes = applyNodeChanges(nChanges, data.nodes);
-        syncSelectIds(nChanges, data);
+        syncSelectIds(nChanges, eChanges, data);
       }
       if (eChanges.length > 0) {
         data.edges = applyEdgeChanges(eChanges, data.edges);
-        syncSelectIds(eChanges, data);
       }
 
-      const hist = saveHistory(data);
-      Object.assign(data, hist);
+      const updates: Partial<CanvasState> = {};
+
+      if (shouldRecord) {
+        const hist = saveHistory(data);
+        Object.assign(data, hist);
+        updates.isDirty = true;
+      }
+
       cache.set(pid, data);
 
       return { _cache: cache, ...updates, ...syncFromCache(pid, cache) };
@@ -175,33 +189,44 @@ function scheduleFlush(
   });
 }
 
+/**
+ * 同步选中状态：从 changes 中提取 select 类型变化，分别更新 selectedNodeIds / selectedEdgeIds
+ * 通过 changes 数组的来源（nChanges vs eChanges）精确判断是节点还是边
+ */
 function syncSelectIds(
-  changes: (NodeChange<LibTVNode> | EdgeChange<LibTVEdge>)[],
+  nChanges: NodeChange<LibTVNode>[],
+  eChanges: EdgeChange<LibTVEdge>[],
   data: ProjectCanvasData,
 ): void {
-  const selChanges = changes.filter(
-    (c): c is { type: 'select'; id: string; selected: boolean } =>
+  // 节点的 select 变化
+  const nodeSelChanges = nChanges.filter(
+    (c): c is NodeChange<LibTVNode> & { type: 'select'; id: string; selected: boolean } =>
       c.type === 'select' && 'id' in c && 'selected' in c,
   );
-  if (selChanges.length === 0) return;
-
-  // 简化：统一处理 selectedNodeIds / selectedEdgeIds
-  for (const c of selChanges) {
-    const idsKey = 'selectedNodeIds' as keyof ProjectCanvasData;
-    let ids = data[idsKey] as string[];
+  let nodeIds = [...data.selectedNodeIds];
+  for (const c of nodeSelChanges) {
     if (c.selected) {
-      if (!ids.includes(c.id)) ids = [...ids, c.id];
+      if (!nodeIds.includes(c.id)) nodeIds.push(c.id);
     } else {
-      ids = ids.filter((id) => id !== c.id);
-    }
-    // 根据变化类型判断是 node 还是 edge
-    const change = c as Record<string, unknown>;
-    if ('position' in change || 'dimensions' in change || 'data' in change) {
-      data.selectedNodeIds = ids;
-    } else {
-      data.selectedEdgeIds = ids;
+      nodeIds = nodeIds.filter((id) => id !== c.id);
     }
   }
+  data.selectedNodeIds = nodeIds;
+
+  // 边的 select 变化
+  const edgeSelChanges = eChanges.filter(
+    (c): c is EdgeChange<LibTVEdge> & { type: 'select'; id: string; selected: boolean } =>
+      c.type === 'select' && 'id' in c && 'selected' in c,
+  );
+  let edgeIds = [...data.selectedEdgeIds];
+  for (const c of edgeSelChanges) {
+    if (c.selected) {
+      if (!edgeIds.includes(c.id)) edgeIds.push(c.id);
+    } else {
+      edgeIds = edgeIds.filter((id) => id !== c.id);
+    }
+  }
+  data.selectedEdgeIds = edgeIds;
 }
 
 /**
@@ -230,6 +255,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   isDirty: false,
   isSaving: false,
   showMiniMap: false,
+  isLoading: false,
 
   // --- 项目画布缓存 ---
   _cache: new Map<string, ProjectCanvasData>(),
@@ -243,15 +269,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   canRedo: false,
 
   // --- 工作区操作 ---
+  /**
+   * 切换项目：
+   * 1. 把当前项目数据存回 cache
+   * 2. 清空顶层显示（nodes=[]），设置 isLoading=true
+   * 3. 等待 loadCanvas() 从服务端加载数据后才会显示内容
+   *
+   * 这样避免了"先闪旧缓存/空白，再被API覆盖"的问题
+   */
   setProjectId: (id: string) => {
     set((state) => {
-      // 如果是同一个项目，不做任何事
       if (state.projectId === id) return {};
 
       const cache = new Map(state._cache);
 
-      // 把当前项目的数据保存回 cache（如果有的话）
-      if (state.projectId && (state.nodes.length > 0 || state.edges.length > 0)) {
+      // 把当前项目的数据保存回 cache（含视口位置）
+      if (state.projectId) {
         const currentData = cache.get(state.projectId) || createEmptyProjectData();
         currentData.nodes = state.nodes;
         currentData.edges = state.edges;
@@ -260,15 +293,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         cache.set(state.projectId, currentData);
       }
 
-      // 从 cache 加载目标项目数据（没有则空白）
-      const targetData = cache.get(id) || createEmptyProjectData();
-      cache.set(id, targetData); // 确保占位
+      // 目标项目：确保在 cache 中有占位，但不清空显示 — 由 loadCanvas 填充
+      if (!cache.has(id)) {
+        cache.set(id, createEmptyProjectData());
+      }
 
       return {
         projectId: id,
         isDirty: false,
+        isLoading: true,       // 标记正在加载，Canvas 组件会显示 loading
+        nodes: [],             // 先清空，等 API 返回后再填充
+        edges: [],
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        canUndo: false,
+        canRedo: false,
         _cache: cache,
-        ...syncFromCache(id, cache),
       };
     });
   },
@@ -291,7 +331,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onConnect: (connection: Connection) => {
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -317,7 +357,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   addNode: (node: LibTVNode) => {
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -334,7 +374,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const idSet = new Set(ids);
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -351,7 +391,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   updateNodeData: (id: string, upd: Partial<LibTVNode['data']>) => {
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -366,14 +406,29 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 
-  updateNodeStatus: (id: string, status: NodeExecutionStatus) => {
-    shouldRecordHistory = false;
+  saveViewport: (viewport: Viewport) => {
     set((state) => {
       const pid = state.projectId;
       if (!pid) return {};
       const cache = new Map(state._cache);
+      const data = cache.get(pid);
+      if (data) {
+        data.savedViewport = viewport;
+        cache.set(pid, data);
+      }
+      return { _cache: cache };
+    });
+  },
+
+  updateNodeStatus: (id: string, status: NodeExecutionStatus) => {
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid || state.isLoading) return {};
+      const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
+      // 标记跳过历史记录（执行状态变化不需要 undo）
+      data.skipHistory = true;
       data.nodes = data.nodes.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, status } as LibTVNode['data'] } : node,
       );
@@ -387,7 +442,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   addEdge: (edge: LibTVEdge) => {
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -404,7 +459,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const idSet = new Set(ids);
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -417,7 +472,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 
-  // --- 画布加载/导出 ---
+  // 画布加载/导出
+  /**
+   * 从服务端加载画布数据：
+   * 1. 写入 cache
+   * 2. 设置 isLoading=false（取消 loading 状态）
+   * 3. 同步到顶层属性 → 组件渲染真实数据
+   */
   loadCanvas: (data: CanvasData) => {
     set((state) => {
       const pid = state.projectId;
@@ -431,16 +492,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         selectedEdgeIds: [],
         history: [],
         future: [],
+        savedViewport: data.viewport || { x: 0, y: 0, zoom: 1 },
+        skipHistory: false,
       };
       cache.set(pid, projectData);
 
-      return { _cache: cache, isDirty: false, ...syncFromCache(pid, cache) };
+      return {
+        _cache: cache,
+        isLoading: false,     // 加载完成，取消 loading
+        isDirty: false,
+        ...syncFromCache(pid, cache),
+      };
     });
   },
 
   exportCanvas: () => {
-    const { nodes, edges } = get();
-    return { nodes, edges, viewport: { x: 0, y: 0, zoom: 1 } };
+    const { nodes, edges, projectId, _cache } = get();
+    const viewport = (_cache.get(projectId)?.savedViewport) || { x: 0, y: 0, zoom: 1 };
+    return { nodes, edges, viewport };
   },
 
   clearCanvas: () => {
@@ -457,7 +526,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   undo: () => {
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -466,7 +535,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const [prev, ...restHist] = data.history;
       const current: HistorySnapshot = { nodes: [...data.nodes], edges: [...data.edges] };
 
-      shouldRecordHistory = false;
+      // 标记跳过历史记录
+      data.skipHistory = true;
       data.nodes = prev.nodes;
       data.edges = prev.edges;
       data.selectedNodeIds = [];
@@ -482,7 +552,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   redo: () => {
     set((state) => {
       const pid = state.projectId;
-      if (!pid) return {};
+      if (!pid || state.isLoading) return {};
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
@@ -491,7 +561,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const [next, ...restFuture] = data.future;
       const current: HistorySnapshot = { nodes: [...data.nodes], edges: [...data.edges] };
 
-      shouldRecordHistory = false;
+      // 标记跳过历史记录
+      data.skipHistory = true;
       data.nodes = next.nodes;
       data.edges = next.edges;
       data.selectedNodeIds = [];
