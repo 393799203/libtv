@@ -1,0 +1,46 @@
+server:
+  port: 8080
+  mode: debug  # debug / release
+
+database:
+  host: localhost
+  port: 5432
+  user: libtv
+  password: libtv123
+  dbname: libtv
+  sslmode: disable
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+jwt:
+  secret: "libtv-mvp-secret-change-in-production"
+  expire_hours: 72
+
+storage:
+  driver: local  # local / oss
+  local_path: ./uploads
+  # oss:
+  #   endpoint: ""
+  #   access_key: ""
+  #   secret_key: ""
+  #   bucket: ""
+
+ai:
+  llm:
+    provider: openai  # openai / qwen
+    api_key: ""
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o"
+  image:
+    provider: sd_webui  # sd_webui / comfyui
+    api_url: "http://localhost:7860"
+  video:
+    provider: kling  # kling / seedance
+    api_key: ""
+    api_url: ""
+  audio:
+    provider: edge_tts  # edge_tts / fish_speech

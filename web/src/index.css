@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* 防止 Tooltip 弹出时触发滚动条闪动 */
+@layer base {
+  html, body, #root {
+    overflow: hidden;
+    height: 100%;
+  }
+}
+
+/* React Flow 基础样式覆盖 - 必须在 tailwindcss 之后 */
+@layer base {
+  .react-flow__node {
+    cursor: grab;
+    padding: 0 !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    overflow: hidden !important;
+  }
+
+  .react-flow__node:active {
+    cursor: grabbing;
+  }
+
+  .react-flow__node.selected,
+  .react-flow__node.selected.selected {
+    box-shadow: none !important;
+    outline: none !important;
+    border: none !important;
+  }
+}
+
+.react-flow__handle {
+  transition: all 0.15s ease;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.3);
+  background-color: #3b82f6 !important;
+}
+
+/* MiniMap 样式 */
+.react-flow__minimap {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* 控制栏样式 */
+.react-flow__controls {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.react-flow__controls-button {
+  border: none;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Ant Design 主题变量覆盖 */
+:root {
+  --ant-color-primary: #3b82f6;
+}
