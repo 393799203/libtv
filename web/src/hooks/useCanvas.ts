@@ -37,10 +37,11 @@ export function useCanvas() {
   );
 
   // 从后端加载画布
-  const loadCanvasFromServer = useCallback(async () => {
-    if (!projectId) return;
+  const loadCanvasFromServer = useCallback(async (id?: string) => {
+    const targetId = id || projectId;
+    if (!targetId) return;
     try {
-      const res = await canvasApi.getCanvas(projectId);
+      const res = await canvasApi.getCanvas(targetId);
       const data = res as any;
       let canvasData: CanvasData | null = null;
       if (data && data.nodes && Array.isArray(data.nodes)) {
@@ -49,7 +50,7 @@ export function useCanvas() {
         canvasData = data.data as CanvasData;
       }
 
-      if (canvasData && canvasData.nodes.length > 0) {
+      if (canvasData) {
         const cleanedNodes = canvasData.nodes.map((node) => ({
           ...node,
           data: { ...node.data, isEditing: false },

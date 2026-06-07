@@ -66,5 +66,9 @@ func (s *ProjectService) Update(ctx context.Context, id string, name, descriptio
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
+	// 先删除关联的画布
+	if err := s.canvasRepo.DeleteByProjectID(ctx, id); err != nil {
+		return err
+	}
 	return s.projectRepo.Delete(ctx, id)
 }

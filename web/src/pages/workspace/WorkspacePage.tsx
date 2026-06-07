@@ -16,17 +16,16 @@ import { useExecutionStore } from '@/stores/executionStore';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 
-function CanvasWithDrop() {
+function CanvasWithDrop({ urlProjectId }: { urlProjectId: string }) {
   const { createNodeFromDrop, loadCanvasFromServer } = useCanvas();
-  const projectId = useCanvasStore((s) => s.projectId);
   const loadedRef = useRef(false);
 
   useEffect(() => {
-    if (projectId && !loadedRef.current) {
+    if (urlProjectId && !loadedRef.current) {
       loadedRef.current = true;
-      loadCanvasFromServer();
+      loadCanvasFromServer(urlProjectId);
     }
-  }, [projectId, loadCanvasFromServer]);
+  }, [urlProjectId, loadCanvasFromServer]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -58,10 +57,14 @@ function WorkspaceInner() {
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // 设置当前项目 ID 并加载项目名称
+  // 同步设置 store 中的 projectId，避免竞态条件
+  if (urlProjectId && useCanvasStore.getState().projectId !== urlProjectId) {
+    setProjectId(urlProjectId);
+  }
+
+  // 加载项目名称
   useEffect(() => {
     if (urlProjectId) {
-      setProjectId(urlProjectId);
       projectApi.getProject(urlProjectId).then((project) => {
         setProjectName(project.name);
       }).catch(() => {
@@ -194,7 +197,7 @@ function WorkspaceInner() {
       {/* 画布区域 */}
       <div className="flex-1">
         <ReactFlowProvider>
-          <CanvasWithDrop />
+          <CanvasWithDrop urlProjectId={urlProjectId} />
         </ReactFlowProvider>
       </div>
     </div>

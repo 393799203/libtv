@@ -12,6 +12,7 @@ import (
 type CanvasRepo interface {
 	FindByProjectID(ctx context.Context, projectID string) (*model.Canvas, error)
 	Save(ctx context.Context, canvas *model.Canvas) error
+	DeleteByProjectID(ctx context.Context, projectID string) error
 }
 
 type canvasRepo struct {
@@ -45,4 +46,8 @@ func (r *canvasRepo) Save(ctx context.Context, canvas *model.Canvas) error {
 		"content": canvas.Content,
 		"version": canvas.Version,
 	}).Error
+}
+
+func (r *canvasRepo) DeleteByProjectID(ctx context.Context, projectID string) error {
+	return r.db.WithContext(ctx).Where("project_id = ?", projectID).Delete(&model.Canvas{}).Error
 }

@@ -236,7 +236,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
 
         {/* 内容区 */}
         <div
-          className="px-3 py-2 flex-1 min-h-0 overflow-y-auto"
+          className={`flex-1 min-h-0 ${isEditing ? 'overflow-hidden' : 'px-3 py-2 overflow-y-auto'}`}
           onDoubleClick={handleDoubleClick}
         >
           {isEditing ? (
@@ -246,7 +246,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
               onChange={(e) => handleContentChange(e.target.value)}
               onBlur={handleBlur}
               placeholder="输入内容，支持 Markdown 格式..."
-              className="w-full h-full text-sm text-gray-700 border-0 outline-none resize-none bg-transparent"
+              className="w-full h-full text-sm text-gray-700 border-0 outline-none resize-none bg-transparent px-3 py-2"
             />
           ) : content ? (
             <div className="text-sm text-gray-700 prose prose-sm max-w-none">

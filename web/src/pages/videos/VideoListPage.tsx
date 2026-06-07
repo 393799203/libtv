@@ -14,6 +14,7 @@ import {
   PlayCircleOutlined,
   MoreOutlined,
   SearchOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Swiper, SwiperSlide } from 'swiper/react';
@@ -21,6 +22,7 @@ import { EffectCoverflow, Pagination, Autoplay } from 'swiper/modules';
 import 'swiper/css';
 import 'swiper/css/effect-coverflow';
 import 'swiper/css/pagination';
+import { Modal } from 'antd';
 import { projectApi } from '@/services/projectApi';
 import { videoApi } from '@/services/videoApi';
 import { useAuthStore } from '@/stores/authStore';
@@ -108,6 +110,26 @@ export default function VideoListPage() {
     { key: 'delete', label: '删除', danger: true },
   ];
 
+  // 删除项目
+  const handleDeleteProject = async (project: ProjectListItem) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除项目「${project.name}」吗？此操作不可恢复。`,
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await projectApi.deleteProject(project.id);
+          setProjects((prev) => prev.filter((p) => p.id !== project.id));
+          message.success('项目已删除');
+        } catch {
+          message.error('删除失败，请重试');
+        }
+      },
+    });
+  };
+
   // 开始创作：未登录时弹出登录框，已登录时创建项目
   const handleCreateProject = async () => {
     if (!isAuthenticated) {
@@ -193,26 +215,31 @@ export default function VideoListPage() {
 
           {/* 项目列表 */}
           {projects.map((project) => (
-            <div key={project.id}>
-              <Card
-                hoverable
-                className="!rounded-lg overflow-hidden cursor-pointer"
-                styles={{ body: { padding: 0 } }}
-                onClick={() => isAuthenticated ? navigate(`/project/${project.id}`) : openLoginModal()}
-              >
-                <div className="h-28 bg-gray-100 relative overflow-hidden">
-                  {project.coverUrl ? (
-                    <img src={project.coverUrl} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-cyan-500">
-                      <img src={`https://picsum.photos/200/150?random=${project.id}`} alt="" className="w-full h-full object-cover" />
-                    </div>
-                  )}
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
-                    <p className="!text-white !text-xs truncate">{project.name}</p>
-                  </div>
+            <div
+              key={project.id}
+              className="h-28 bg-gray-100 relative rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => isAuthenticated ? navigate(`/project/${project.id}`) : openLoginModal()}
+            >
+              {project.coverUrl ? (
+                <img src={project.coverUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-cyan-500">
+                  <img src={`https://picsum.photos/200/150?random=${project.id}`} alt="" className="w-full h-full object-cover" />
                 </div>
-              </Card>
+              )}
+              <button
+                className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-black/70 transition-colors cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteProject(project);
+                }}
+                title="删除项目"
+              >
+                <DeleteOutlined style={{ fontSize: 12 }} />
+              </button>
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
+                <p className="!text-white !text-xs truncate">{project.name}</p>
+              </div>
             </div>
           ))}
         </div>
