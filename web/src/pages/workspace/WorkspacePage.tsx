@@ -56,6 +56,7 @@ function WorkspaceInner() {
   const [projectName, setProjectName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const projectNameLoadedRef = useRef(false);
 
   // 同步设置 store 中的 projectId，避免竞态条件
   if (urlProjectId && useCanvasStore.getState().projectId !== urlProjectId) {
@@ -64,14 +65,15 @@ function WorkspaceInner() {
 
   // 加载项目名称
   useEffect(() => {
-    if (urlProjectId) {
+    if (urlProjectId && !projectNameLoadedRef.current) {
+      projectNameLoadedRef.current = true;
       projectApi.getProject(urlProjectId).then((project) => {
         setProjectName(project.name);
       }).catch(() => {
         setProjectName('未命名项目');
       });
     }
-  }, [urlProjectId, setProjectId]);
+  }, [urlProjectId]);
 
   // 编辑项目名称
   const handleNameClick = useCallback(() => {
