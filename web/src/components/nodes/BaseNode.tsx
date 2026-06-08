@@ -12,6 +12,7 @@ interface BaseNodeProps {
   selected?: boolean;
   children: ReactNode;
   headerRight?: ReactNode;
+  className?: string; // 允许子节点追加容器样式（如编辑模式 nodrag）
 }
 
 const statusColorMap: Record<NodeExecutionStatus, string> = {
@@ -28,6 +29,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   selected,
   children,
   headerRight,
+  className,
 }) {
   const nodeType = data.type as NodeType;
   const config = NODE_TYPE_CONFIG[nodeType];
@@ -52,9 +54,10 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   return (
     <div
       className={`
-        min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200
+        min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-hidden
         transition-all duration-150
         ${selected ? 'shadow-lg ring-2 ring-blue-400 border-blue-300' : 'hover:shadow-lg'}
+        ${className || ''}
       `}
     >
       {/* 节点头部 */}
@@ -93,8 +96,8 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         </div>
       </div>
 
-      {/* 节点内容 */}
-      <div className="px-3 py-2 text-xs text-gray-600">
+      {/* 节点内容（flex-1 填充剩余空间，relative 供子节点绝对定位） */}
+      <div className="px-3 py-2 text-xs text-gray-600 flex-1 min-h-0 relative">
         {children}
       </div>
 

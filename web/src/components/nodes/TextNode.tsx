@@ -1,7 +1,7 @@
 import { memo, useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { NodeProps, Node } from '@xyflow/react';
-import { NodeResizer, useReactFlow, Handle, Position } from '@xyflow/react';
+import { NodeResizer, useReactFlow } from '@xyflow/react';
 import ReactMarkdown from 'react-markdown';
 import {
   FileTextOutlined,
@@ -14,6 +14,7 @@ import {
   LinkOutlined,
   CloseOutlined,
 } from '@ant-design/icons';
+import { BaseNode } from './BaseNode';
 import type { TextNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 
@@ -77,20 +78,13 @@ const Toolbar = memo(function Toolbar({
 
 export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, data, selected }) {
   const [isEditing, setIsEditing] = useState(false);
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [label, setLabel] = useState(data.label || '文本');
   const [content, setContent] = useState(data.content || '');
   const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 0 });
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const { getNode, flowToScreenPosition } = useReactFlow();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const labelInputRef = useRef<HTMLInputElement>(null);
 
-  // 同步外部 data（编辑/重命名时不同步，避免覆盖用户输入）
-  useEffect(() => {
-    if (!isRenaming) setLabel(data.label || '文本');
-  }, [data.label, isRenaming]);
-
+  // 同步外部 data（编辑时不同步，避免覆盖用户输入）
   useEffect(() => {
     if (!isEditing) setContent(data.content || '');
   }, [data.content, isEditing]);
@@ -125,13 +119,6 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
     }
   }, [isEditing]);
 
-  useEffect(() => {
-    if (isRenaming && labelInputRef.current) {
-      labelInputRef.current.focus();
-      labelInputRef.current.select();
-    }
-  }, [isRenaming]);
-
   // 进入编辑模式
   const handleDoubleClick = useCallback(() => {
     setIsEditing(true);
@@ -161,19 +148,6 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
     setIsEditing(false);
   }, [id, content, updateNodeData]);
 
-  // 标签变更
-  const handleLabelChange = useCallback((val: string) => {
-    setLabel(val);
-  }, []);
-
-  // 标签确认
-  const handleLabelConfirm = useCallback(() => {
-    setIsRenaming(false);
-    const finalLabel = label.trim() || '文本';
-    setLabel(finalLabel);
-    updateNodeData(id, { label: finalLabel });
-  }, [label, id, updateNodeData]);
-
   // 插入格式
   const insertFormat = useCallback((before: string, after: string = '') => {
     const ta = textareaRef.current;
@@ -200,44 +174,15 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
         minHeight={120}
       />
 
-      <div
-        className={`
-          w-full h-full rounded-xl border border-gray-200 bg-white shadow-md transition-all duration-150 flex flex-col
-          ${selected ? 'shadow-lg ring-2 ring-blue-400 border-blue-300' : 'hover:shadow-lg'}
-          ${isEditing ? 'nodrag nopan nowheel' : ''}
-        `}
+      <BaseNode
+        id={id}
+        data={data}
+        selected={selected}
+        className={`flex flex-col h-full ${isEditing ? 'nodrag nopan nowheel' : ''}`}
       >
-        {/* 简化标题行 */}
+        {/* 内容区（绝对定位填满 BaseNode 内容区） */}
         <div
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-t-[10px] text-white text-sm font-medium"
-          style={{ backgroundColor: '#8b5cf6' }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            setIsRenaming(true);
-          }}
-        >
-          <FileTextOutlined className="text-purple-500" />
-          {isRenaming ? (
-            <input
-              ref={labelInputRef}
-              value={label}
-              onChange={(e) => handleLabelChange(e.target.value)}
-              onBlur={handleLabelConfirm}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleLabelConfirm();
-                e.stopPropagation();
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-              className="flex-1 bg-white border border-purple-300 rounded px-1 py-0.5 text-xs outline-none focus:border-purple-500"
-            />
-          ) : (
-            <span className="truncate flex-1 font-medium">{label}</span>
-          )}
-        </div>
-
-        {/* 内容区 */}
-        <div
-          className={`flex-1 min-h-0 ${isEditing ? 'overflow-hidden' : 'px-3 py-2 overflow-y-auto'}`}
+          className={`absolute inset-0 ${isEditing ? 'overflow-hidden' : 'overflow-y-auto px-3 py-2'}`}
           onDoubleClick={handleDoubleClick}
         >
           {isEditing ? (
@@ -247,7 +192,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
               onChange={(e) => handleContentChange(e.target.value)}
               onBlur={handleBlur}
               placeholder="输入内容，支持 Markdown 格式..."
-              className="w-full h-full text-sm text-gray-700 border-0 outline-none resize-none bg-transparent px-3 py-2"
+              className="w-full h-full text-sm text-gray-700 border-0 outline-none resize-none bg-transparent"
             />
           ) : content ? (
             <div className="text-sm text-gray-700 prose prose-sm max-w-none">
@@ -260,11 +205,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
             </div>
           )}
         </div>
-
-        {/* Handles */}
-        <Handle type="target" position={Position.Left} className="!bg-[#8b5cf6]" />
-        <Handle type="source" position={Position.Right} className="!bg-[#8b5cf6]" />
-      </div>
+      </BaseNode>
 
       {/* 编辑工具栏 */}
       {isEditing && (

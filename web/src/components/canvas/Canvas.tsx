@@ -21,6 +21,7 @@ import {
   ZoomOutOutlined,
   UndoOutlined,
   RedoOutlined,
+  AimOutlined,
 } from '@ant-design/icons';
 
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -180,6 +181,10 @@ export const Canvas = memo(function Canvas() {
     zoomOut({ duration: 200 });
   }, [zoomOut]);
 
+  const handleZoomReset = useCallback(() => {
+    rfSetViewport({ x: 0, y: 0, zoom: 1 }, { duration: 200 });
+  }, [rfSetViewport]);
+
   const proOptions = useMemo(
     () => ({
       hideAttribution: true,
@@ -208,6 +213,21 @@ export const Canvas = memo(function Canvas() {
       hasRestoredViewport.current = false;
     }
   }, [isLoading]);
+
+  // 初始加载时自动适应画布
+  const hasFittedView = useRef(false);
+  useEffect(() => {
+    if (!isLoading && nodes.length > 0 && !hasFittedView.current) {
+      hasFittedView.current = true;
+      // 延迟一帧确保节点已渲染完成
+      requestAnimationFrame(() => {
+        fitView({ duration: 300, padding: 0.2 });
+      });
+    }
+    if (isLoading) {
+      hasFittedView.current = false;
+    }
+  }, [isLoading, nodes.length]);
 
   // 计算提示词框的位置
   const promptPosition = useMemo(() => {
@@ -304,7 +324,10 @@ export const Canvas = memo(function Canvas() {
               <Button type="text" size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut} />
             </Tooltip>
             <Tooltip title="适应画布">
-              <Button type="text" size="small" icon={<FullscreenOutlined />} onClick={handleFitView} />
+              <Button type="text" size="small" icon={<AimOutlined />} onClick={handleFitView} />
+            </Tooltip>
+            <Tooltip title="100%">
+              <Button type="text" size="small" icon={<FullscreenOutlined />} onClick={handleZoomReset} />
             </Tooltip>
           </div>
         </Panel>

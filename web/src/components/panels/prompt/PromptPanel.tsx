@@ -97,10 +97,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   );
 
   // 本地状态：提示词文本、@引用、模型、分辨率、比例
-  // 从节点数据中读取初始值
+  // 从节点数据中读取初始值（只取 prompt 字段，不 fallback 到 content）
   const [promptText, setPromptText] = useState(
-    ('prompt' in data ? (data as { prompt?: string }).prompt : '') ||
-    ('content' in data ? (data as { content?: string }).content : '')
+    ('prompt' in data ? (data as { prompt?: string }).prompt : '') || ''
   );
   const [mentions, setMentions] = useState<MentionMarker[]>([]);
   const [selectedModel, setSelectedModel] = useState(config.defaultModel);
