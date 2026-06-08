@@ -77,13 +77,10 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
 
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // 可用的上游输入（排除当前已引用的）
-  const availableInputs = upstreamInputs.filter(
-    (input) => !mentions.some((m) => m.nodeId === input.nodeId)
-  );
+  // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
   const filteredInputs = mentionFilter
-    ? availableInputs.filter((input) => input.label.includes(mentionFilter))
-    : availableInputs;
+    ? upstreamInputs.filter((input) => input.label.includes(mentionFilter))
+    : upstreamInputs;
 
   /** 构建初始 HTML（只在初始化时使用） */
   const buildHtml = useCallback((): string => {
@@ -149,6 +146,7 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
         ? `<img src="${escapeHtml(thumbUrl)}" class="libtv-mention-thumb" />`
         : NODE_TYPE_ICON_TEXT[input.nodeType] || '';
 
+    // 创建标签元素（整体不可编辑）
     const span = document.createElement('span');
     span.className = 'libtv-mention';
     span.contentEditable = 'false';
@@ -164,10 +162,9 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
 
     range.insertNode(span);
 
-    // 标签后面自动加一个空格（用不间断空格防止被合并）
+    // 标签后面插入一个不间断空格（独立文本节点，不在标签内）
     const spaceNode = document.createTextNode('\u00A0');
-    range.setStartAfter(span);
-    range.insertNode(spaceNode);
+    span.after(spaceNode);
 
     // 光标放到空格后面
     range.setStartAfter(spaceNode);
@@ -321,6 +318,11 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
 
       e.preventDefault();
       const label = mentionEl.getAttribute('data-label') || '';
+      // 同时删除标签后面的空格（如果存在的话）
+      const nextSibling = mentionEl.nextSibling;
+      if (nextSibling?.nodeType === Node.TEXT_NODE && nextSibling.textContent === '\u00A0') {
+        nextSibling.remove();
+      }
       mentionEl.remove();
 
       onChange(
@@ -419,6 +421,10 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
           object-fit: cover;
           display: inline-block;
           flex-shrink: 0;
+        }
+        .libtv-mention-space {
+          display: inline;
+          white-space: pre;
         }
         [contenteditable]:empty::before {
           content: "${escapeHtml(placeholder)}";
