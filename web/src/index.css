@@ -17,7 +17,6 @@
     outline: none !important;
     box-shadow: none !important;
     background: transparent !important;
-    overflow: hidden !important;
   }
 
   .react-flow__node:active {
@@ -34,11 +33,40 @@
 
 .react-flow__handle {
   transition: all 0.15s ease;
+  width: 8px !important;
+  height: 8px !important;
+  border: none !important;
+  border-radius: 50% !important;
 }
-
 .react-flow__handle:hover {
   transform: scale(1.3);
   background-color: #3b82f6 !important;
+}
+
+/* 基础节点连线区域 - 扩大热区 + 带圈+光标 */
+.libtv-handle {
+  position: relative;
+}
+.libtv-handle::after {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  cursor: cell;
+  border-radius: 50%;
+}
+
+/* 连线默认实线（不强制覆盖，由组件控制） */
+
+/* 拖拽连线：实线 */
+.react-flow__connection-line {
+  stroke-dasharray: none !important;
+}
+
+/* 上游连线动画 */
+@keyframes dash {
+  to {
+    stroke-dashoffset: -12;
+  }
 }
 
 /* MiniMap 样式 */

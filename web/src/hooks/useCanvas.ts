@@ -28,7 +28,7 @@ export function useCanvas() {
         type: nodeType,
         position,
         data: createDefaultNodeData(nodeType),
-        style: { width: 280, height: 200 },
+        style: { width: 280, ...(nodeType !== 'image' ? { height: 200 } : {}) },
       };
 
       addNode(newNode);

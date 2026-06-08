@@ -26,12 +26,14 @@ import {
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
 import { NODE_TYPE_CONFIG } from '@/types/canvas';
-import type { LibTVNode, LibTVEdge } from '@/types/canvas';
-import { PromptCompose } from '@/components/PromptCompose';
+import type { LibTVNode, LibTVEdge, NodeType } from '@/types/canvas';
+import { PromptCompose } from '@/components/panels/prompt';
 
 import { nodeTypes } from '@/components/nodes';
 import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
 import { CanvasContextMenu } from './CanvasContextMenu';
+import { NodeSelectPopup } from './NodeSelectPopup';
+import { createDefaultNodeData } from '@/utils/nodeFactory';
 
 const edgeTypes = {
   dataFlow: DataFlowEdge,
@@ -41,7 +43,6 @@ const nodeOrigin: NodeOrigin = [0.5, 0.5];
 
 const defaultEdgeOptions: DefaultEdgeOptions = {
   type: 'dataFlow',
-  animated: true,
 };
 
 const miniMapNodeColor = (node: LibTVNode) => {
@@ -55,6 +56,13 @@ export const Canvas = memo(function Canvas() {
   const viewportRef = useRef<Viewport | null>(null);
   const lastViewportUpdate = useRef(0);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [nodeSelectPopup, setNodeSelectPopup] = useState<{
+    position: { x: number; y: number };
+    sourceNodeId: string;
+    sourceHandle: string | null;
+  } | null>(null);
+  // 防止 onPaneClick 在连线释放时误关弹窗
+  const connectingRef = useRef(false);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
@@ -70,6 +78,8 @@ export const Canvas = memo(function Canvas() {
   const isExecuting = useExecutionStore((s) => s.isExecuting);
   const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const addNode = useCanvasStore((s) => s.addNode);
+  const addEdge = useCanvasStore((s) => s.addEdge);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
   const isLoading = useCanvasStore((s) => s.isLoading);
   const saveViewport = useCanvasStore((s) => s.saveViewport);
@@ -94,6 +104,59 @@ export const Canvas = memo(function Canvas() {
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null);
   }, []);
+
+  // 连线释放到空白区域时，弹出节点选择菜单（参考官方 add-node-on-edge-drop 示例）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent, connectionState?: any) => {
+      // 标记：本次释放是连线操作，onPaneClick 不应关闭弹窗
+      connectingRef.current = true;
+      // 短暂延迟后重置，让 onPaneClick 有机会读取
+      setTimeout(() => { connectingRef.current = false; }, 50);
+
+      // 释放到空白区域时 isValid 为 false，此时弹出选择菜单
+      if (!connectionState?.isValid) {
+        const { clientX, clientY } = 'changedTouches' in event
+          ? event.changedTouches[0]
+          : event as MouseEvent;
+        setNodeSelectPopup({
+          position: { x: clientX, y: clientY },
+          sourceNodeId: connectionState.fromNode?.id,
+          sourceHandle: connectionState.fromHandle?.id ?? null,
+        });
+      }
+    },
+    []
+  );
+
+  // 从选择菜单选中节点类型后：创建新节点 + 建立连线
+  const handleNodeSelect = useCallback(
+    (nodeType: NodeType) => {
+      if (!nodeSelectPopup) return;
+      const { position, sourceNodeId, sourceHandle } = nodeSelectPopup;
+      const flowPos = screenToFlowPosition(position);
+
+      const newNodeId = `${nodeType}-${Date.now()}`;
+      const newNode: LibTVNode = {
+        id: newNodeId,
+        type: nodeType,
+        position: { x: flowPos.x, y: flowPos.y },
+        data: createDefaultNodeData(nodeType),
+        style: { width: 280, ...(nodeType !== 'image' ? { height: 200 } : {}) },
+      };
+
+      addNode(newNode);
+      addEdge({
+        id: `${sourceNodeId}-${newNodeId}`,
+        source: sourceNodeId,
+        target: newNodeId,
+        type: 'dataFlow',
+        sourceHandle: sourceHandle || undefined,
+      });
+      setNodeSelectPopup(null);
+    },
+    [nodeSelectPopup, screenToFlowPosition, addNode, addEdge]
+  );
 
   const onViewportChange = useCallback((viewport: Viewport) => {
     const now = Date.now();
@@ -129,7 +192,8 @@ export const Canvas = memo(function Canvas() {
     ? nodes.find((n) => n.id === selectedNodeIds[0])
     : null;
 
-  const isTextNode = selectedNode?.data.type === 'text';
+  // 支持提示词面板的节点类型
+  const hasPromptPanel = selectedNode && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type);
   const isEditingNode = nodes.some((n) => n.data.isEditing);
 
   // 加载完成后恢复视口位置（仅执行一次）
@@ -175,8 +239,12 @@ export const Canvas = memo(function Canvas() {
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onConnectEnd={handleConnectEnd}
         onViewportChange={onViewportChange}
-        onPaneClick={handleCloseContextMenu}
+        onPaneClick={() => {
+          handleCloseContextMenu();
+          if (!connectingRef.current) setNodeSelectPopup(null);
+        }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodeOrigin={nodeOrigin}
@@ -251,8 +319,16 @@ export const Canvas = memo(function Canvas() {
         />
       )}
 
+      {nodeSelectPopup && (
+        <NodeSelectPopup
+          position={nodeSelectPopup.position}
+          onSelect={handleNodeSelect}
+          onClose={() => setNodeSelectPopup(null)}
+        />
+      )}
+
       {/* 选中节点时的提示词编辑组件 */}
-      {isTextNode && selectedNode && promptPosition && !selectedNode.data.isEditing && (
+      {hasPromptPanel && promptPosition && !selectedNode!.data.isEditing && (
         <div
           className="absolute pointer-events-none"
           style={{
@@ -263,7 +339,7 @@ export const Canvas = memo(function Canvas() {
           }}
         >
           {/* 箭头 */}
-          <div 
+          <div
             className="absolute left-1/2 -translate-x-1/2"
             style={{
               top: -6,
@@ -274,13 +350,13 @@ export const Canvas = memo(function Canvas() {
               borderBottom: '6px solid white'
             }}
           />
-          
+
           <div className="pointer-events-auto">
             <PromptCompose
-              value={(selectedNode.data.prompt as string) || ''}
-              onChange={(value) => updateNodeData(selectedNode.id, { prompt: value })}
-              placeholder="写下你想讲的故事、场景或角色设定。例如：一个来自未来的机器人，在城市屋顶看星星。"
-              maxLength={2000}
+              nodeId={selectedNode!.id}
+              nodeType={selectedNode!.data.type}
+              data={selectedNode!.data}
+              onUpdate={(partial) => updateNodeData(selectedNode!.id, partial)}
             />
           </div>
         </div>

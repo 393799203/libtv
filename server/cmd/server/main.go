@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 
 	"libtv/internal/config"
 	"libtv/internal/engine"
@@ -65,6 +66,7 @@ func main() {
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
 	videoHandler := handler.NewVideoHandler(videoService)
+	uploadHandler := handler.NewUploadHandler(filepath.Join("..", "public", "pic"))
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -77,6 +79,10 @@ func main() {
 
 	// 静态文件
 	r.Static("/uploads", config.C.Storage.LocalPath)
+	picDir := filepath.Join("..", "public", "pic")
+	r.Static("/pic", picDir)
+	videosDir := filepath.Join("..", "public", "videos")
+	r.Static("/videos", videosDir)
 
 	// 公开路由
 	auth := r.Group("/api/auth")
@@ -91,6 +97,9 @@ func main() {
 		publicVideos.GET("", videoHandler.List)
 		publicVideos.GET("/:id", videoHandler.Get)
 	}
+
+	// 图片上传（公开）
+	r.POST("/api/upload/image", uploadHandler.UploadImage)
 
 	// 需要认证的路由
 	api := r.Group("/api")

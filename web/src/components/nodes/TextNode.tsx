@@ -202,14 +202,15 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
 
       <div
         className={`
-          w-full h-full rounded-lg border-2 bg-white transition-shadow duration-150 flex flex-col overflow-hidden
-          ${selected ? 'shadow-lg border-purple-500' : 'shadow-sm hover:shadow-md border-purple-300'}
-          ${isEditing ? 'border-purple-500 nodrag nopan nowheel' : ''}
+          w-full h-full rounded-xl border border-gray-200 bg-white shadow-md transition-all duration-150 flex flex-col
+          ${selected ? 'shadow-lg ring-2 ring-blue-400 border-blue-300' : 'hover:shadow-lg'}
+          ${isEditing ? 'nodrag nopan nowheel' : ''}
         `}
       >
         {/* 简化标题行 */}
         <div
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-t-md text-xs text-purple-700 bg-purple-50 border-b border-purple-100"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-t-[10px] text-white text-sm font-medium"
+          style={{ backgroundColor: '#8b5cf6' }}
           onDoubleClick={(e) => {
             e.stopPropagation();
             setIsRenaming(true);
@@ -261,16 +262,8 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
         </div>
 
         {/* Handles */}
-        <Handle
-          type="target"
-          position={Position.Left}
-          className="!w-2.5 !h-2.5 !bg-purple-400 !border-2 !border-white"
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!w-2.5 !h-2.5 !bg-purple-400 !border-2 !border-white"
-        />
+        <Handle type="target" position={Position.Left} className="!bg-[#8b5cf6]" />
+        <Handle type="source" position={Position.Right} className="!bg-[#8b5cf6]" />
       </div>
 
       {/* 编辑工具栏 */}

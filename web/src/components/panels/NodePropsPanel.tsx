@@ -1,10 +1,12 @@
 import { memo, useCallback } from 'react';
 import { Typography, Empty } from 'antd';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { TextNodeEditor } from './TextNodeEditor';
+import { PromptCompose } from './prompt';
 import type { LibTVNodeData } from '@/types/canvas';
 
 const { Title } = Typography;
+
+const PROMPT_NODE_TYPES = ['text', 'image', 'video', 'audio', 'script'] as const;
 
 export const NodePropsPanel = memo(function NodePropsPanel() {
   const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
@@ -20,39 +22,19 @@ export const NodePropsPanel = memo(function NodePropsPanel() {
     updateNodeData(selectedNode.id, data);
   }, [selectedNode, updateNodeData]);
 
-  const renderEditor = () => {
-    if (!selectedNode) return null;
-
-    switch (selectedNode.data.type) {
-      case 'text':
-        return <TextNodeEditor data={selectedNode.data} onUpdate={handleUpdateNode} />;
-      case 'image':
-      case 'video':
-      case 'audio':
-      case 'script':
-      default:
-        return (
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-gray-500">ID</span>
-              <span className="text-gray-800 font-mono">{selectedNode.id}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">类型</span>
-              <span className="text-gray-800">{selectedNode.data.type}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">标签</span>
-              <span className="text-gray-800">{selectedNode.data.label}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">状态</span>
-              <span className="text-gray-800">{selectedNode.data.status}</span>
-            </div>
-          </div>
-        );
-    }
-  };
+  // 支持提示词面板的节点类型，统一使用 PromptCompose
+  if (selectedNode && PROMPT_NODE_TYPES.includes(selectedNode.data.type as typeof PROMPT_NODE_TYPES[number])) {
+    return (
+      <div className="p-3">
+        <PromptCompose
+          nodeId={selectedNode.id}
+          nodeType={selectedNode.data.type}
+          data={selectedNode.data}
+          onUpdate={handleUpdateNode}
+        />
+      </div>
+    );
+  }
 
   if (!selectedNode) {
     return (
@@ -74,7 +56,24 @@ export const NodePropsPanel = memo(function NodePropsPanel() {
       <Title level={5} className="!mb-3 !text-sm">
         属性面板
       </Title>
-      {renderEditor()}
+      <div className="space-y-2 text-xs">
+        <div className="flex justify-between">
+          <span className="text-gray-500">ID</span>
+          <span className="text-gray-800 font-mono">{selectedNode.id}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">类型</span>
+          <span className="text-gray-800">{selectedNode.data.type}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">标签</span>
+          <span className="text-gray-800">{selectedNode.data.label}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">状态</span>
+          <span className="text-gray-800">{selectedNode.data.status}</span>
+        </div>
+      </div>
     </div>
   );
 });
