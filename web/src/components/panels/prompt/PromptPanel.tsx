@@ -176,18 +176,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   return (
     <div className={panelClass}>
-      {/* 头部：全屏按钮（右上角 ⤢） */}
-      <div className="flex justify-end mb-0">
-        <button
-          className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors rounded hover:bg-gray-100"
-          onClick={() => setIsFullscreen(!isFullscreen)}
-        >
-          {isFullscreen
-            ? <ShrinkOutlined style={{ fontSize: 14 }} />
-            : <ArrowsAltOutlined style={{ fontSize: 14 }} />
-          }
-        </button>
-      </div>
 
       {/* 第一层：上游输入区 */}
       <PromptUpstreamBar
