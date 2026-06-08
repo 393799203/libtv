@@ -57,7 +57,7 @@ function getUpstreamInputs(
           return {
             nodeId: sourceNode.id,
             nodeType: 'text',
-            label: `文本${index + 1}`,
+            label: d.label || `文本${index + 1}`,
             textSnippet: d.content?.slice(0, 500),
           };
         case 'script':
