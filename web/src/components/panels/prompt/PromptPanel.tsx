@@ -172,7 +172,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[520px] flex flex-col overflow-hidden px-2 py-2';
+    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[520px] flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>
@@ -193,6 +193,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       <PromptUpstreamBar
         inputs={upstreamInputs}
         onInsertMention={handleInsertMention}
+        targetNodeId={nodeId}
       />
 
       {/* 第二层：提示词编辑区 */}
@@ -202,6 +203,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         placeholder={config.placeholder}
         maxLength={config.maxLength}
         upstreamInputs={upstreamInputs}
+        syncKey={nodeId}
         onChange={handlePromptChange}
       />
 
