@@ -115,6 +115,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
               alt={data.label}
               className="w-full block"
               loading="lazy"
+              decoding="async"
             />
           </div>
         ) : (

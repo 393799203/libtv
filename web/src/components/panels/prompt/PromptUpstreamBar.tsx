@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   PictureOutlined,
@@ -7,6 +7,7 @@ import {
   CodeOutlined,
   CloseOutlined,
 } from '@ant-design/icons';
+import ReactMarkdown from 'react-markdown';
 import type { UpstreamInput } from '@/types/prompt';
 import { useCanvasStore } from '@/stores/canvasStore';
 
@@ -34,7 +35,24 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
 }) {
   const removeEdges = useCanvasStore((s) => s.removeEdges);
   const [hoveredItem, setHoveredItem] = useState<UpstreamInput | null>(null);
-  const [hoverPos, setHoverPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  // 鼠标 x 坐标（作为浮层水平中心）+ 缩略图顶部（浮层显示在缩略图上方）
+  const [hoverPos, setHoverPos] = useState<{ mouseX: number; thumbTop: number }>({ mouseX: 0, thumbTop: 0 });
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 显示预览：取消隐藏定时器，记录位置
+  const handleMouseEnter = useCallback((e: React.MouseEvent, input: UpstreamInput) => {
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+    setHoveredItem(input);
+    setHoverPos({
+      mouseX: e.clientX,
+      thumbTop: e.currentTarget.getBoundingClientRect().top,
+    });
+  }, []);
+
+  // 隐藏预览：短延迟，给鼠标滑到浮层的时间
+  const handleMouseLeave = useCallback(() => {
+    hideTimerRef.current = setTimeout(() => { setHoveredItem(null); }, 100);
+  }, []);
 
   // 删除上游节点的依赖连线
   const handleRemove = useCallback(
@@ -45,17 +63,6 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     },
     [removeEdges, targetNodeId]
   );
-
-  const handleMouseEnter = useCallback((e: React.MouseEvent, input: UpstreamInput) => {
-    // 只对有缩略图的资源显示大图预览
-    if (!input.thumbnail) return;
-    setHoveredItem(input);
-    setHoverPos({ x: e.clientX, y: e.clientY });
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    setHoveredItem(null);
-  }, []);
 
   if (inputs.length === 0) return null;
 
@@ -98,21 +105,33 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
         </div>
       ))}
 
-      {/* hover 大图预览浮层（Portal 到 body，避免被父容器裁切） */}
-      {hoveredItem?.thumbnail && createPortal(
+      {/* hover 预览浮层（以鼠标 x 为水平中心，显示在缩略图上方） */}
+      {createPortal(
         <div
-          className="fixed z-[9999] pointer-events-none"
+          className="fixed z-[9999] transition-opacity duration-150"
           style={{
-            left: hoverPos.x - 80,
-            top: hoverPos.y - 20,
-            transform: 'translateY(-100%)',
+            left: hoverPos.mouseX,
+            top: hoverPos.thumbTop - 8,
+            transform: 'translate(-50%, -100%)',
+            opacity: hoveredItem ? 1 : 0,
+            pointerEvents: hoveredItem ? 'auto' : 'none',
           }}
+          onMouseEnter={() => { if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; } }}
+          onMouseLeave={() => { hideTimerRef.current = setTimeout(() => setHoveredItem(null), 100); }}
         >
-          <img
-            src={hoveredItem.thumbnail}
-            alt=""
-            className="max-w-[280px] max-h-[240px] object-contain rounded-lg shadow-2xl"
-          />
+          {hoveredItem?.thumbnail ? (
+            <img
+              src={hoveredItem.thumbnail}
+              alt=""
+              className="max-w-[280px] max-h-[240px] object-contain rounded-lg shadow-2xl"
+            />
+          ) : hoveredItem?.textSnippet ? (
+            <div className="max-w-[280px] max-h-[320px] overflow-y-auto bg-white rounded-lg shadow-2xl border border-gray-200 p-3">
+              <div className="prose prose-sm max-w-none text-[13px] text-gray-600 leading-relaxed">
+                <ReactMarkdown>{hoveredItem.textSnippet}</ReactMarkdown>
+              </div>
+            </div>
+          ) : null}
         </div>,
         document.body
       )}

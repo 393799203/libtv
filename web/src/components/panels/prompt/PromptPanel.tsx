@@ -58,14 +58,14 @@ function getUpstreamInputs(
             nodeId: sourceNode.id,
             nodeType: 'text',
             label: `文本${index + 1}`,
-            textSnippet: d.content?.slice(0, 50),
+            textSnippet: d.content?.slice(0, 500),
           };
         case 'script':
           return {
             nodeId: sourceNode.id,
             nodeType: 'script',
             label: '脚本',
-            textSnippet: d.scriptContent?.slice(0, 50),
+            textSnippet: d.scriptContent?.slice(0, 500),
           };
         default:
           return null;
@@ -83,13 +83,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // 从全局 store 获取节点和边，用于计算上游输入
+  // 注意：zustand 默认用 Object.is 比较，选择器内不能返回新对象/数组
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
 
   // 当前节点类型的配置
-  const config = useMemo(() => PROMPT_PANEL_CONFIGS[nodeType], [nodeType]);
+  const config = PROMPT_PANEL_CONFIGS[nodeType];
 
-  // 上游输入列表
+  // 上游输入列表（useMemo 稳定引用，避免子组件无效重渲染）
   const upstreamInputs = useMemo(
     () => getUpstreamInputs(nodeId, nodes, edges),
     [nodeId, nodes, edges]

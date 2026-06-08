@@ -33,7 +33,7 @@ function extractPlainText(el: HTMLElement): string {
   return clone.textContent || '';
 }
 
-/** 获取当前光标前一个可见字符（跳过不可见的 mention span） */
+/** 获取当前光标前一个可见字符（不修改 DOM，使用 TreeWalker 向前遍历） */
 function getCharBeforeCursor(el: HTMLElement): string | null {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return null;
@@ -48,16 +48,37 @@ function getCharBeforeCursor(el: HTMLElement): string | null {
     return range.startContainer.textContent![range.startOffset - 1];
   }
 
-  // 情况2：光标在元素节点中 → 向前找最近的文本内容
-  // 从光标位置往前遍历，找到最近的文本字符
-  const preRange = range.cloneRange();
-  el.appendChild(document.createTextNode('')); // 临时锚点
-  preRange.setEndAfter(el.lastChild!);
-  const textBefore = preRange.toString();
-  el.lastChild?.remove(); // 清理临时锚点
+  // 情况2：光标在元素节点中 → 用 TreeWalker 向前遍历找最近的文本字符
+  const walker = document.createTreeWalker(
+    el,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
 
-  if (textBefore.length > 0) {
-    return textBefore[textBefore.length - 1];
+  // 将 walker 移到光标位置前一个节点
+  let currentNode: Node | null = null;
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (
+      node === range.startContainer ||
+      (range.startContainer as Node).contains?.(node)
+    ) {
+      break;
+    }
+    currentNode = node;
+  }
+
+  // 如果光标所在的文本节点有 offset，取 offset 前一个字符
+  if (
+    range.startContainer.nodeType === Node.TEXT_NODE &&
+    range.startOffset > 0
+  ) {
+    return range.startContainer.textContent![range.startOffset - 1];
+  }
+
+  // 否则取 walker 停在的最后一个文本节点的末尾字符
+  if (currentNode && currentNode.textContent!.length > 0) {
+    return currentNode.textContent![currentNode.textContent!.length - 1];
   }
 
   return null;
@@ -76,6 +97,8 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   const editorRef = useRef<HTMLDivElement>(null);
+  // 防抖定时器：避免每次按键都 cloneNode 提取文本
+  const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
   const filteredInputs = mentionFilter
@@ -175,16 +198,32 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
     return true;
   }
 
-  /** 通知父组件数据变化 */
-  function emitChange() {
-    const el = editorRef.current;
-    if (!el) return;
-    onChange(extractPlainText(el), mentions);
-  }
+  /** 防抖通知父组件数据变化（避免每次按键都 cloneNode） */
+  const emitChangeDebounced = useCallback(() => {
+    if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
+    emitTimerRef.current = setTimeout(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      onChange(extractPlainText(el), mentions);
+    }, 150);
+  }, [onChange, mentions]);
+
+  /** 立即通知父组件（用于插入引用、删除标签等关键操作，直接调用 onChange 即可） */
+  // 组件卸载时确保最后一次防抖执行
+  useEffect(() => {
+    return () => {
+      if (emitTimerRef.current) {
+        clearTimeout(emitTimerRef.current);
+        // 卸载时同步一次最终状态
+        const el = editorRef.current;
+        if (el) onChange(extractPlainText(el), mentions);
+      }
+    };
+  }, [onChange, mentions]);
 
   /** 用户输入 */
   const handleInput = useCallback(() => {
-    emitChange();
+    emitChangeDebounced();
 
     const el = editorRef.current;
     if (!el) return;
@@ -203,7 +242,7 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
     if (showMentionMenu && charBefore && /[\s\n]/.test(charBefore)) {
       setShowMentionMenu(false);
     }
-  }, [mentions, showMentionMenu, onChange]);
+  }, [showMentionMenu, emitChangeDebounced]);
 
   /** 选择一个引用（点击或回车） */
   const handleSelectMention = useCallback(
@@ -218,6 +257,7 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
       };
 
       setShowMentionMenu(false);
+      // 插入引用后立即同步（不走防抖），将新 mention 合并传入
       onChange(extractPlainText(editorRef.current!), [...mentions, newMention]);
     },
     [mentions, onChange, upstreamInputs]
