@@ -55,8 +55,10 @@ func (h *VideoHandler) Get(c *gin.Context) {
 func (h *VideoHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	tag := c.Query("tag")
+	keyword := c.Query("keyword")
 
-	videos, total, err := h.videoService.List(c.Request.Context(), page, pageSize)
+	videos, total, err := h.videoService.List(c.Request.Context(), page, pageSize, tag, keyword)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
@@ -69,6 +71,8 @@ func (h *VideoHandler) List(c *gin.Context) {
 			"total":     total,
 			"page":      page,
 			"page_size": pageSize,
+			"tag":       tag,
+			"keyword":   keyword,
 		},
 	})
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"libtv/internal/model"
 
@@ -12,7 +13,7 @@ import (
 type VideoRepo interface {
 	Create(ctx context.Context, video *model.Video) error
 	FindByID(ctx context.Context, id string) (*model.Video, error)
-	List(ctx context.Context, offset, limit int) ([]*model.Video, int64, error)
+	List(ctx context.Context, offset, limit int, tag string, keyword string) ([]*model.Video, int64, error)
 	Update(ctx context.Context, video *model.Video) error
 	Delete(ctx context.Context, id string) error
 }
@@ -37,10 +38,17 @@ func (r *videoRepo) FindByID(ctx context.Context, id string) (*model.Video, erro
 	return &video, nil
 }
 
-func (r *videoRepo) List(ctx context.Context, offset, limit int) ([]*model.Video, int64, error) {
+func (r *videoRepo) List(ctx context.Context, offset, limit int, tag string, keyword string) ([]*model.Video, int64, error) {
 	var videos []*model.Video
 	var total int64
 	db := r.db.WithContext(ctx)
+	if tag != "" {
+		// tags 是 jsonb 类型，用 @> 包含查询
+		db = db.Where("tags @> ?", fmt.Sprintf(`["%s"]`, tag))
+	}
+	if keyword != "" {
+		db = db.Where("title ILIKE ? OR author ILIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
 	if err := db.Model(&model.Video{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

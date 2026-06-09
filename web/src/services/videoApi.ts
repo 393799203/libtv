@@ -94,9 +94,16 @@ const mockTvShowVideos: VideoListItem[] = [
 
 export const videoApi = {
   // 获取视频列表
-  getVideos: async (page = 1, pageSize = 20) => {
+  getVideos: async (page = 1, pageSize = 20, tag?: string, keyword?: string) => {
     try {
-      const data = await api.get('/videos', { params: { page, page_size: pageSize } }) as unknown;
+      const params: Record<string, unknown> = { page, page_size: pageSize };
+      if (tag && tag !== 'all') {
+        params.tag = tag;
+      }
+      if (keyword) {
+        params.keyword = keyword;
+      }
+      const data = await api.get('/videos', { params }) as unknown;
       const raw = data as { items: RawVideo[]; total: number; page: number; page_size: number };
       return {
         list: raw.items.map(mapRawToListItem),

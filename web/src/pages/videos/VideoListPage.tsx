@@ -66,15 +66,15 @@ const formatDuration = (seconds: number) => {
 export default function VideoListPage() {
   const { message } = App.useApp();
   const [activeCategory, setActiveCategory] = useState('all');
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [tvShowVideos, setTvShowVideos] = useState<VideoListItem[]>([]);
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
 
-  // 加载数据
-  const loadData = useCallback(async () => {
-    // 项目列表：仅登录后调用
+  // 加载项目列表：仅依赖登录状态
+  const loadProjects = useCallback(async () => {
     if (isAuthenticated) {
       try {
         const data = await projectApi.getProjects();
@@ -85,24 +85,20 @@ export default function VideoListPage() {
     } else {
       setProjects([]);
     }
+  }, [isAuthenticated]);
 
-    // 视频列表：无需登录即可获取
+  // 加载视频列表：支持标签筛选 + 关键词搜索
+  const loadVideos = useCallback(async () => {
     try {
-      const data = await videoApi.getVideos();
+      const data = await videoApi.getVideos(1, 20, activeCategory, searchKeyword);
       setTvShowVideos(data.list || []);
     } catch {
       setTvShowVideos(videoApi.getTvShowVideos());
     }
-  }, [isAuthenticated]);
+  }, [activeCategory, searchKeyword]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // 登录状态变化时刷新数据
-  useEffect(() => {
-    loadData();
-  }, [isAuthenticated, loadData]);
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+  useEffect(() => { loadVideos(); }, [loadVideos]);
 
   const getVideoMenuItems = (_id: string): MenuProps['items'] => [
     { key: 'download', label: '下载' },
@@ -267,6 +263,11 @@ export default function VideoListPage() {
               prefix={<SearchOutlined />}
               style={{ width: 200 }}
               size="small"
+              allowClear
+              onSearch={(value) => setSearchKeyword(value)}
+              onChange={(e) => {
+                if (!e.target.value) setSearchKeyword('');
+              }}
             />
           </div>
         </div>

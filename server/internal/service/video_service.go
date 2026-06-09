@@ -33,9 +33,9 @@ func (s *VideoService) GetByID(ctx context.Context, id string) (*model.Video, er
 	return s.videoRepo.FindByID(ctx, id)
 }
 
-func (s *VideoService) List(ctx context.Context, page, pageSize int) ([]*model.Video, int64, error) {
+func (s *VideoService) List(ctx context.Context, page, pageSize int, tag string, keyword string) ([]*model.Video, int64, error) {
 	offset := (page - 1) * pageSize
-	return s.videoRepo.List(ctx, offset, pageSize)
+	return s.videoRepo.List(ctx, offset, pageSize, tag, keyword)
 }
 
 func (s *VideoService) Update(ctx context.Context, id string, title, description string) (*model.Video, error) {
