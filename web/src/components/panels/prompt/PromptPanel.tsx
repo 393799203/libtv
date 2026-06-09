@@ -207,6 +207,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         inputs={upstreamInputs}
         onInsertMention={handleInsertMention}
         targetNodeId={nodeId}
+        showStyleSelector={nodeType === 'image'}
       />
 
       {/* 第二层：提示词编辑区 */}
