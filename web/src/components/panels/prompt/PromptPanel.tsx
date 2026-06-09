@@ -109,6 +109,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // 图片节点专属：摄像机/全景模式
+  const [cameraMode, setCameraMode] = useState<'normal' | 'camera' | 'panorama'>('normal');
+
   // 视频节点专属：生成模式（根据上游图片数量自动过滤可选模式）
   const [videoMode, setVideoMode] = useState<VideoMode>(
     nodeType === 'video' ? ((data as { videoMode?: VideoMode }).videoMode || 'text-to-video') : 'text-to-video'
@@ -189,7 +192,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[520px] flex flex-col px-2 py-2';
+    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[580px] flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>
@@ -207,15 +210,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       />
 
       {/* 第二层：提示词编辑区 */}
-      <PromptEditor
-        value={promptText}
-        mentions={mentions}
-        placeholder={config.placeholder}
-        maxLength={config.maxLength}
-        upstreamInputs={upstreamInputs}
-        syncKey={nodeId}
-        onChange={handlePromptChange}
-      />
+      <div className="flex-1 min-w-0 px-2">
+        <PromptEditor
+          value={promptText}
+          mentions={mentions}
+          placeholder={config.placeholder}
+          maxLength={config.maxLength}
+          upstreamInputs={upstreamInputs}
+          syncKey={nodeId}
+          onChange={handlePromptChange}
+          prefixTag={cameraMode === 'panorama' ? { label: '720全景', icon: '720' } : undefined}
+        />
+      </div>
 
       {/* 第三层：底部工具栏 */}
       <PromptToolbar
@@ -228,6 +234,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onAspectRatioChange={setSelectedAspectRatio}
         isGenerating={isGenerating}
         onGenerate={handleGenerate}
+        nodeType={nodeType}
+        cameraMode={cameraMode}
+        onCameraModeChange={setCameraMode}
       />
     </div>
   );

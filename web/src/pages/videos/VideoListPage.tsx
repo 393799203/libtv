@@ -8,6 +8,7 @@ import {
   Dropdown,
   Tag,
   App,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -67,6 +68,7 @@ export default function VideoListPage() {
   const { message } = App.useApp();
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [videosLoading, setVideosLoading] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [tvShowVideos, setTvShowVideos] = useState<VideoListItem[]>([]);
   const navigate = useNavigate();
@@ -89,11 +91,14 @@ export default function VideoListPage() {
 
   // 加载视频列表：支持标签筛选 + 关键词搜索
   const loadVideos = useCallback(async () => {
+    setVideosLoading(true);
     try {
       const data = await videoApi.getVideos(1, 20, activeCategory, searchKeyword);
       setTvShowVideos(data.list || []);
     } catch {
       setTvShowVideos(videoApi.getTvShowVideos());
+    } finally {
+      setVideosLoading(false);
     }
   }, [activeCategory, searchKeyword]);
 
@@ -273,7 +278,8 @@ export default function VideoListPage() {
         </div>
 
         {/* TV Show 网格 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <Spin spinning={videosLoading}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {tvShowVideos.map((item) => (
             <div key={item.id}>
               <Card
@@ -323,6 +329,7 @@ export default function VideoListPage() {
             </div>
           ))}
         </div>
+        </Spin>
       </section>
     </div>
   );

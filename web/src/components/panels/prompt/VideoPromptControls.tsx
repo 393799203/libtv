@@ -72,7 +72,12 @@ export const VideoModeSelector = memo<VideoModeSelectorProps>(function VideoMode
               }`}
               title={
                 !available
-                  ? `需要 ${mode.imageRange[1] > 0 ? `${mode.imageRange[0]}~${mode.imageRange[1]} 张` : '不需要'}图片`
+                  ? mode.imageRange[0] === 0
+                    ? '无上游图片时可用'
+                    : `需 ${mode.imageRange[0] === mode.imageRange[1]
+                        ? `${mode.imageRange[0]} 张`
+                        : `${mode.imageRange[0]}-${mode.imageRange[1]} 张`
+                      }图片（当前 ${imageCount} 张）`
                   : undefined
               }
             >

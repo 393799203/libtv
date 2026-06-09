@@ -90,29 +90,36 @@ export const AUDIO_MODELS: ModelOption[] = [
 
 export const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const;
 
-// ==================== 比例选项（按行排列） ====================
+// ==================== 画质选项 ====================
+
+export const QUALITY_OPTIONS = ['低画质', '标准画质', '高画质'] as const;
+
+// ==================== 比例选项（按行排列，精确匹配截图）====================
 
 export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> = [
+  // 第1行：自适应 + 常用竖屏/横屏
   [
     { value: 'free', label: '自适应' },
     { value: '1:1', label: '1:1' },
+    { value: '1:2', label: '1:2' },
+    { value: '2:1', label: '2:1' },
     { value: '9:16', label: '9:16' },
+  ],
+  // 第2行：常用比例（16:9 默认选中）
+  [
     { value: '16:9', label: '16:9' },
     { value: '3:4', label: '3:4' },
-  ],
-  [
     { value: '4:3', label: '4:3' },
     { value: '3:2', label: '3:2' },
     { value: '2:3', label: '2:3' },
-    { value: '4:5', label: '4:5' },
-    { value: '5:4', label: '5:4' },
   ],
+  // 第3行：特殊比例
   [
-    { value: '8:1', label: '8:1' },
-    { value: '1:8', label: '1:8' },
-    { value: '4:1', label: '4:1' },
-    { value: '1:4', label: '1:4' },
+    { value: '5:4', label: '5:4' },
+    { value: '4:5', label: '4:5' },
     { value: '21:9', label: '21:9' },
+    { value: '9:21', label: '9:21' },
+    { value: '', label: '' }, // 占位对齐
   ],
 ];
 

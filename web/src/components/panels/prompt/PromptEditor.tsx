@@ -9,6 +9,8 @@ interface PromptEditorProps {
   upstreamInputs: UpstreamInput[];
   syncKey?: string | number;
   onChange: (value: string, mentions: MentionMarker[]) => void;
+  /** 编辑器前缀标签（如 720全景），渲染为不可编辑的内联 span */
+  prefixTag?: { label: string; icon?: string };
 }
 
 const NODE_TYPE_ICON_TEXT: Record<string, string> = {
@@ -91,6 +93,7 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
   upstreamInputs,
   syncKey,
   onChange,
+  prefixTag,
 }) {
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
@@ -136,8 +139,20 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
         `</span>` +
         html.slice(idx + marker.length);
     }
+    // 前缀标签（如 720全景）
+    if (prefixTag) {
+      const iconHtml = prefixTag.icon
+        ? `<span class="libtv-mention-thumb" style="background:#bfdbfe;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#2563eb;">${prefixTag.icon}</span>`
+        : '';
+      html =
+        `<span class="libtv-mention libtv-prefix-tag" contenteditable="false" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;">` +
+        iconHtml +
+        `<span>${escapeHtml(prefixTag.label)}</span>` +
+        `</span>` +
+        (html || '<br>');
+    }
     return html;
-  }, [value, mentions, upstreamInputs]);
+  }, [value, mentions, upstreamInputs, prefixTag]);
 
   /** 在光标位置插入标签（替换 @） */
   function insertMentionSpan(input: UpstreamInput): boolean {
@@ -293,8 +308,25 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount) return;
       const range = sel.getRangeAt(0);
-      if (!range.collapsed) return;
       if (!el.contains(range.startContainer)) return;
+
+      // 非折叠选区：检查是否包含前缀标签，包含则阻止删除
+      if (!range.collapsed) {
+        const ancestor = range.commonAncestorContainer;
+        const containerEl = (ancestor.nodeType === Node.ELEMENT_NODE ? ancestor : ancestor.parentElement)!;
+        if (containerEl.contains(el) && el.querySelector('.libtv-prefix-tag')) {
+          // 检查选区范围是否覆盖了前缀标签
+          const tagRect = el.querySelector('.libtv-prefix-tag')?.getBoundingClientRect();
+          const rangeRects = range.getClientRects();
+          for (let i = 0; i < rangeRects.length; i++) {
+            if (tagRect && !(rangeRects[i].right < tagRect.left || rangeRects[i].left > tagRect.right)) {
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+        return;
+      }
 
       // 查找光标前面最近的 mention span
       let mentionEl: Element | null = null;
@@ -356,6 +388,12 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
 
       if (!mentionEl) return;
 
+      // 前缀标签（如720全景）不允许通过退格删除，只能通过工具栏按钮控制
+      if (mentionEl.classList.contains('libtv-prefix-tag')) {
+        e.preventDefault();
+        return;
+      }
+
       e.preventDefault();
       const label = mentionEl.getAttribute('data-label') || '';
       // 同时删除标签后面的空格（如果存在的话）
@@ -390,6 +428,50 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
     el.innerHTML = buildHtml();
     needsInitRef.current = false;
   }, [syncKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // prefixTag 变化时（如切换全景模式），动态插入/移除前缀标签
+  const prevPrefixTagRef = useRef(prefixTag);
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+
+    // 前缀标签未变化则跳过
+    if (
+      (prevPrefixTagRef.current === undefined && prefixTag === undefined) ||
+      (prevPrefixTagRef.current !== undefined && prefixTag !== undefined &&
+       prevPrefixTagRef.current?.label === prefixTag.label)
+    ) {
+      prevPrefixTagRef.current = prefixTag;
+      return;
+    }
+    prevPrefixTagRef.current = prefixTag;
+
+    // 移除已有的前缀标签
+    const existing = el.querySelector('.libtv-prefix-tag');
+    if (existing) existing.remove();
+
+    // 需要新增前缀标签
+    if (prefixTag) {
+      const iconHtml = prefixTag.icon
+        ? `<span class="libtv-mention-thumb" style="background:#bfdbfe;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#2563eb;">${prefixTag.icon}</span>`
+        : '';
+      const span = document.createElement('span');
+      span.className = 'libtv-mention libtv-prefix-tag';
+      span.contentEditable = 'false';
+      span.style.cssText = 'background:#eff6ff;color:#2563eb;border-color:#bfdbfe;';
+      span.setAttribute('data-label', prefixTag.label);
+      span.innerHTML = iconHtml + `<span>${escapeHtml(prefixTag.label)}</span>`;
+
+      // 如果编辑器为空，插入标签+换行；否则插到最前面
+      if (el.childNodes.length === 0 || (el.childNodes.length === 1 && el.textContent?.trim() === '')) {
+        el.innerHTML = '';
+        el.appendChild(span);
+        el.appendChild(document.createElement('br'));
+      } else {
+        el.insertBefore(span, el.firstChild);
+      }
+    }
+  }, [prefixTag]);
 
   return (
     <div className="relative flex-1 min-h-[72px] py-1">
