@@ -82,7 +82,7 @@ func main() {
 	picDir := filepath.Join("..", "public", "pic")
 	r.Static("/pic", picDir)
 	videosDir := filepath.Join("..", "public", "videos")
-	r.Static("/videos", videosDir)
+	r.Static("/media/videos", videosDir)
 
 	// 公开路由
 	auth := r.Group("/api/auth")

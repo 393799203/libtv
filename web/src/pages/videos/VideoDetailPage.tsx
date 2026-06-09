@@ -37,7 +37,7 @@ export default function VideoDetailPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(1);
+  const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [buffered, setBuffered] = useState(0);
@@ -66,7 +66,7 @@ export default function VideoDetailPage() {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !videoInfo?.videoUrl) return;
 
     const syncDuration = () => {
       if (video.readyState >= 1 && video.duration > 0 && isFinite(video.duration)) {
@@ -92,15 +92,11 @@ export default function VideoDetailPage() {
     video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('durationchange', onDurationChange);
 
-    video.play()
-      .then(() => setIsPlaying(true))
-      .catch(() => setIsPlaying(false));
-
     return () => {
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('durationchange', onDurationChange);
     };
-  }, []);
+  }, [videoInfo?.videoUrl]);
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -191,17 +187,22 @@ export default function VideoDetailPage() {
     >
       {/* 全屏视频区域 */}
       <div className="w-full h-screen flex items-center justify-center bg-black relative">
-        <video
-          ref={videoRef}
-          src={videoInfo.videoUrl}
-          className="w-full h-full object-cover"
-          loop
-          onTimeUpdate={handleTimeUpdate}
-          onProgress={handleProgress}
-          onPlay={() => { setIsPlaying(true); isPlayingRef.current = true; }}
-          onPause={() => { setIsPlaying(false); isPlayingRef.current = false; }}
-          onClick={togglePlay}
-        />
+        {videoInfo ? (
+          <video
+            ref={videoRef}
+            src={videoInfo.videoUrl}
+            className="w-full h-full object-cover"
+            loop
+            preload="metadata"
+            onTimeUpdate={handleTimeUpdate}
+            onProgress={handleProgress}
+            onPlay={() => { setIsPlaying(true); isPlayingRef.current = true; }}
+            onPause={() => { setIsPlaying(false); isPlayingRef.current = false; }}
+            onClick={togglePlay}
+          />
+        ) : (
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+        )}
         {/* 加载指示器 */}
         {!isPlaying && !isVideoLoaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/30 z-10">

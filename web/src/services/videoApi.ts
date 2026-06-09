@@ -57,7 +57,7 @@ const localVideos: Video[] = [
     title: '武松',
     description: '经典影视片段，讲述武松的英雄事迹',
     thumbnailUrl: 'https://picsum.photos/400/225?random=10',
-    videoUrl: '/videos/武松.mp4',
+    videoUrl: '/media/videos/武松.mp4',
     duration: 120,
     author: 'LibTV',
     authorAvatar: 'https://picsum.photos/48/48?random=100',
@@ -71,7 +71,7 @@ const localVideos: Video[] = [
     title: '没考好，没关系',
     description: '教育励志视频，鼓励孩子勇于面对失败',
     thumbnailUrl: 'https://picsum.photos/400/225?random=11',
-    videoUrl: '/videos/没考好，没关系.mp4',
+    videoUrl: '/media/videos/没考好，没关系.mp4',
     duration: 90,
     author: 'LibTV',
     authorAvatar: 'https://picsum.photos/48/48?random=101',
@@ -84,12 +84,12 @@ const localVideos: Video[] = [
 
 // TV Show 视频（暂为 mock，后续对接数据库）
 const mockTvShowVideos: VideoListItem[] = [
-  { id: 'c5a1b3d8f2e7046d', title: '死于罗曼蒂克CE', thumbnailUrl: 'https://picsum.photos/400/225?random=1', videoUrl: '/videos/武松.mp4', duration: 120, author: 'yoimachigusa', tags: ['手', '梦', '等单的事', '更多资源在QQ群里分享做事视频'] },
-  { id: 'd9e4b7c2a6f10385', title: '这一次，我会幸福', thumbnailUrl: 'https://picsum.photos/400/225?random=2', videoUrl: '/videos/没考好，没关系.mp4', duration: 180, author: 'Forest界', tags: ['故事', '励志', '等待的事'] },
-  { id: 'a8f2c5d1b3e70946', title: 'Zeno', thumbnailUrl: 'https://picsum.photos/400/225?random=3', videoUrl: '/videos/武松.mp4', duration: 210, author: 'Zeno', tags: ['UnToughable', 'AI音乐MV照片'] },
-  { id: 'b6d3e7f4a1c80529', title: 'Cat', thumbnailUrl: 'https://picsum.photos/400/225?random=4', videoUrl: '/videos/没考好，没关系.mp4', duration: 150, author: '微信用户Phof9', tags: ['Cat', '回忆', '城市'] },
-  { id: 'e1a9b4c7d2f50683', title: '等待的故事', thumbnailUrl: 'https://picsum.photos/400/225?random=5', videoUrl: '/videos/武松.mp4', duration: 135, author: '创作家', tags: ['等待', '治愈'] },
-  { id: 'f4b8c2d6e3a10795', title: '城市探索', thumbnailUrl: 'https://picsum.photos/400/225?random=6', videoUrl: '/videos/没考好，没关系.mp4', duration: 145, author: '探索者', tags: ['城市', '探险'] },
+  { id: 'c5a1b3d8f2e7046d', title: '死于罗曼蒂克CE', thumbnailUrl: 'https://picsum.photos/400/225?random=1', videoUrl: '/media/videos/武松.mp4', duration: 120, author: 'yoimachigusa', tags: ['手', '梦', '等单的事', '更多资源在QQ群里分享做事视频'] },
+  { id: 'd9e4b7c2a6f10385', title: '这一次，我会幸福', thumbnailUrl: 'https://picsum.photos/400/225?random=2', videoUrl: '/media/videos/没考好，没关系.mp4', duration: 180, author: 'Forest界', tags: ['故事', '励志', '等待的事'] },
+  { id: 'a8f2c5d1b3e70946', title: 'Zeno', thumbnailUrl: 'https://picsum.photos/400/225?random=3', videoUrl: '/media/videos/武松.mp4', duration: 210, author: 'Zeno', tags: ['UnToughable', 'AI音乐MV照片'] },
+  { id: 'b6d3e7f4a1c80529', title: 'Cat', thumbnailUrl: 'https://picsum.photos/400/225?random=4', videoUrl: '/media/videos/没考好，没关系.mp4', duration: 150, author: '微信用户Phof9', tags: ['Cat', '回忆', '城市'] },
+  { id: 'e1a9b4c7d2f50683', title: '等待的故事', thumbnailUrl: 'https://picsum.photos/400/225?random=5', videoUrl: '/media/videos/武松.mp4', duration: 135, author: '创作家', tags: ['等待', '治愈'] },
+  { id: 'f4b8c2d6e3a10795', title: '城市探索', thumbnailUrl: 'https://picsum.photos/400/225?random=6', videoUrl: '/media/videos/没考好，没关系.mp4', duration: 145, author: '探索者', tags: ['城市', '探险'] },
 ];
 
 export const videoApi = {
