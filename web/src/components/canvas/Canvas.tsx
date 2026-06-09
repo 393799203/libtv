@@ -79,6 +79,19 @@ export const Canvas = memo(function Canvas() {
   const isExecuting = useExecutionStore((s) => s.isExecuting);
   const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+
+  // 当选中节点变化时，重置之前节点的编辑状态（避免 isEditing 卡住导致提示词框不显示）
+  const prevSelectedIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    // 重置之前选中的文本节点的 isEditing 状态
+    for (const prevId of prevSelectedIdsRef.current) {
+      const prevNode = nodes.find((n) => n.id === prevId);
+      if (prevNode?.data.isEditing) {
+        updateNodeData(prevId, { isEditing: false });
+      }
+    }
+    prevSelectedIdsRef.current = selectedNodeIds;
+  }, [selectedNodeIds, nodes, updateNodeData]);
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdge = useCanvasStore((s) => s.addEdge);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
@@ -148,7 +161,7 @@ export const Canvas = memo(function Canvas() {
 
       addNode(newNode);
       addEdge({
-        id: `${sourceNodeId}-${newNodeId}`,
+        id: `e-${sourceNodeId}-${newNodeId}`,
         source: sourceNodeId,
         target: newNodeId,
         type: 'dataFlow',

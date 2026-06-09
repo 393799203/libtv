@@ -11,6 +11,8 @@ import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canv
 import { PromptUpstreamBar } from './PromptUpstreamBar';
 import { PromptEditor } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
+import { VideoModeSelector } from './VideoPromptControls';
+import type { VideoMode } from '@/types/canvas';
 
 interface PromptPanelProps {
   nodeId: string;
@@ -107,6 +109,16 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // 视频节点专属：生成模式（根据上游图片数量自动过滤可选模式）
+  const [videoMode, setVideoMode] = useState<VideoMode>(
+    nodeType === 'video' ? ((data as { videoMode?: VideoMode }).videoMode || 'text-to-video') : 'text-to-video'
+  );
+  // 上游已连接的图片节点数量（用于控制模式可用性）
+  const upstreamImageCount = useMemo(
+    () => upstreamInputs.filter((i) => i.nodeType === 'image').length,
+    [upstreamInputs]
+  );
+
   // 提示词文本变化
   const handlePromptChange = useCallback(
     (value: string, newMentions: MentionMarker[]) => {
@@ -145,14 +157,19 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         model: selectedModel,
         resolution: selectedResolution,
         aspectRatio: selectedAspectRatio,
+        ...(nodeType === 'video' && {
+          videoMode,
+        }),
       });
 
       // 模拟延迟
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       // 更新节点数据
-      if (nodeType === 'image' || nodeType === 'video') {
+      if (nodeType === 'image') {
         onUpdate({ prompt: promptText, model: selectedModel });
+      } else if (nodeType === 'video') {
+        onUpdate({ prompt: promptText, model: selectedModel, videoMode });
       } else if (nodeType === 'text') {
         onUpdate({ content: promptText });
       }
@@ -176,6 +193,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   return (
     <div className={panelClass}>
+
+      {/* 视频节点：模式选择器（根据上游图片数量自动过滤可选模式） */}
+      {nodeType === 'video' && (
+        <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} />
+      )}
 
       {/* 第一层：上游输入区 */}
       <PromptUpstreamBar

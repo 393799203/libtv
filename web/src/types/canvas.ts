@@ -31,6 +31,9 @@ export interface ImageNodeData extends Record<string, unknown> {
   error?: string;
 }
 
+// 视频生成模式
+export type VideoMode = 'text-to-video' | 'universal-ref' | 'first-last-frame' | 'video-ref';
+
 // 视频节点数据
 export interface VideoNodeData extends Record<string, unknown> {
   type: 'video';
@@ -40,6 +43,8 @@ export interface VideoNodeData extends Record<string, unknown> {
   duration: number;
   fps: number;
   videoUrl?: string;
+  videoMode?: VideoMode;       // 视频生成模式
+  referenceImages?: string[];   // 参考图片 URL 列表（全能参考/首尾帧模式）
   status: NodeExecutionStatus;
   error?: string;
 }

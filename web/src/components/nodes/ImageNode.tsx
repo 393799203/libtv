@@ -64,7 +64,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
       style: { width: 280 },
     });
     addEdge({
-      id: `${id}-${newNodeId}`,
+      id: `e-${id}-${newNodeId}`,
       source: id,
       target: newNodeId,
       type: 'dataFlow',

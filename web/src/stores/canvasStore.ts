@@ -464,6 +464,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       let data = cache.get(pid) || createEmptyProjectData();
 
       data.edges = data.edges.filter((e) => !idSet.has(e.id));
+
       const hist = saveHistory(data);
       Object.assign(data, hist);
       cache.set(pid, data);
