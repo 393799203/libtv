@@ -252,7 +252,7 @@ export const Canvas = memo(function Canvas() {
     const screenPos = flowToScreenPosition({ x: nodeCenterX, y: nodeBottomY });
     return {
       x: screenPos.x,
-      y: screenPos.y, // 完全贴紧节点底部
+      y: screenPos.y - 20
     };
   }, [selectedNode, flowToScreenPosition, viewport]);
 

@@ -16,19 +16,18 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
 
   return (
     <BaseNode id={id} data={data} selected={selected}>
-      <div className="space-y-1.5">
+      <div className="w-full aspect-video">
         {data.videoUrl && showPlayer ? (
           <video
             src={data.videoUrl}
-            className="w-full rounded"
-            style={{ maxHeight: 120, objectFit: 'cover' }}
+            className="w-full h-full rounded object-cover"
             muted
             controls
             autoPlay
           />
         ) : data.videoUrl ? (
           <div
-            className="relative flex items-center justify-center h-20 bg-gray-900 rounded cursor-pointer group"
+            className="relative w-full h-full flex items-center justify-center bg-gray-900 rounded cursor-pointer group"
             onClick={handlePlayClick}
           >
             <video
@@ -40,20 +39,10 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
             <PlayCircleOutlined className="relative text-2xl text-white/80 group-hover:text-white transition-colors" />
           </div>
         ) : (
-          <div className="flex items-center justify-center h-20 bg-gray-50 rounded border border-dashed border-gray-300">
+          <div className="flex items-center justify-center w-full h-full bg-gray-50 rounded border border-dashed border-gray-300">
             <VideoCameraOutlined className="text-2xl text-gray-300" />
           </div>
         )}
-        <p className="text-gray-500 text-[10px] truncate">
-          {data.prompt || '输入视频生成提示词'}
-        </p>
-        <div className="flex gap-1 text-[10px] text-gray-400">
-          <span>{data.model}</span>
-          <span>·</span>
-          <span>{data.duration}s</span>
-          <span>·</span>
-          <span>{data.fps}fps</span>
-        </div>
       </div>
     </BaseNode>
   );
