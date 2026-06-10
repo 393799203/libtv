@@ -87,7 +87,7 @@ export function AppLayout() {
                 }`}
               >
                 <ControlOutlined />
-                系统管理
+                运营管理
               </button>
             )}
 
