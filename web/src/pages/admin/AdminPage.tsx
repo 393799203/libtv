@@ -1081,7 +1081,7 @@ export default function AdminPage() {
                     notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
                     filterOption={false}
                     getPopupContainer={(trigger) => trigger.parentElement!}
-                    style={{ width: '100%' }}
+                    style={{ width: '100%', height: 38 }}
                   />
                 </div>
                 <div>
