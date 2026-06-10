@@ -219,6 +219,14 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "视频转码失败，请确认 ffmpeg 已安装"})
 			return
 		}
+
+		// 清理 FFmpeg 可能残留的临时文件
+		files, _ := os.ReadDir(h.videoDir)
+		for _, f := range files {
+			if strings.HasPrefix(f.Name(), "ts_segment") {
+				os.Remove(filepath.Join(h.videoDir, f.Name()))
+			}
+		}
 	}
 
 	// 第四步：移动到最终位置
