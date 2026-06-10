@@ -13,7 +13,6 @@ const WorkspacePage = lazy(() => import('@/pages/workspace/WorkspacePage'));
 const VideoListPage = lazy(() => import('@/pages/videos/VideoListPage'));
 const VideoDetailPage = lazy(() => import('@/pages/videos/VideoDetailPage'));
 const AIModelsPage = lazy(() => import('@/pages/ai-models/AIModelsPage'));
-const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
 const AdminPage = lazy(() => import('@/pages/admin/AdminPage'));
 
 const Loading = () => (
