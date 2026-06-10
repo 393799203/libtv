@@ -48,7 +48,7 @@ func (h *ShowHandler) ListCategories(c *gin.Context) {
 	for _, cat := range cats {
 		var count int64
 		// 通过 service 获取每个分类下的视频数
-		_, count, _ = h.showService.ListShows(c.Request.Context(), cat.ID, 1, 1)
+		_, count, _ = h.showService.ListShows(c.Request.Context(), cat.ID, "", 1, 1)
 		result = append(result, CatWithCount{
 			ShowCategory: *cat,
 			ShowCount:    count,
@@ -58,16 +58,17 @@ func (h *ShowHandler) ListCategories(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result})
 }
 
-// ListShows 获取视频列表（公开，支持按分类筛选）
+// ListShows 获取视频列表（公开，支持按分类筛选 + 关键词搜索）
 func (h *ShowHandler) ListShows(c *gin.Context) {
 	categoryID := c.Query("category_id")
+	keyword := c.Query("keyword")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
 	if pageSize > 100 {
 		pageSize = 100
 	}
 
-	shows, total, err := h.showService.ListShows(c.Request.Context(), categoryID, page, pageSize)
+	shows, total, err := h.showService.ListShows(c.Request.Context(), categoryID, keyword, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return

@@ -40,8 +40,8 @@ export const showApi = {
   categories: () =>
     api.get<ShowCategoryItem[]>('/shows/categories'),
 
-  /** 获取视频列表（公开，支持按分类筛选） */
-  list: (params?: { category_id?: string; page?: number; page_size?: number }) =>
+  /** 获取视频列表（公开，支持按分类筛选 + 关键词搜索） */
+  list: (params?: { category_id?: string; keyword?: string; page?: number; page_size?: number }) =>
     api.get<{ items: ShowItem[]; total: number; page: number; page_size: number }>('/shows', { params }),
 
   /** 获取视频详情（公开） */

@@ -27,9 +27,9 @@ func (s *ShowService) GetByID(ctx context.Context, id string) (*model.Show, erro
 	return s.showRepo.FindByID(ctx, id)
 }
 
-func (s *ShowService) ListShows(ctx context.Context, categoryID string, page, pageSize int) ([]*model.Show, int64, error) {
+func (s *ShowService) ListShows(ctx context.Context, categoryID string, keyword string, page, pageSize int) ([]*model.Show, int64, error) {
 	offset := (page - 1) * pageSize
-	return s.showRepo.ListShows(ctx, categoryID, offset, pageSize)
+	return s.showRepo.ListShows(ctx, categoryID, keyword, offset, pageSize)
 }
 
 func (s *ShowService) UpdateShow(ctx context.Context, show *model.Show) error {

@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
   Typography,
   Button,
-  Input,
   Dropdown,
   Tag,
   App,
@@ -15,6 +14,7 @@ import {
   PlayCircleOutlined,
   MoreOutlined,
   SearchOutlined,
+  CloseCircleOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -31,7 +31,6 @@ import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
 
 const { Title, Text } = Typography;
-const { Search } = Input;
 
 // 轮播图数据
 const carouselItems = [
@@ -63,6 +62,7 @@ export default function VideoListPage() {
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 加载项目列表：仅依赖登录状态
   const loadProjects = useCallback(async () => {
@@ -89,12 +89,13 @@ export default function VideoListPage() {
     }
   }, []);
 
-  // 加载视频列表：从 shows API 获取（支持分类筛选 + 关键词搜索）
-  const loadVideos = useCallback(async () => {
+  // 加载视频列表：从 shows API 获取（支持分类筛选 + 关键词后端搜索）
+  const loadVideos = useCallback(async (keyword?: string) => {
     setVideosLoading(true);
     try {
       const data = await showApi.list({
         category_id: activeCategory,
+        keyword: keyword || undefined,
         page: 1,
         page_size: 50,
       });
@@ -109,12 +110,20 @@ export default function VideoListPage() {
       }));
       setTvShowVideos(list);
     } catch {
-      // 后端未启动或接口失败，返回空列表
       setTvShowVideos([]);
     } finally {
       setVideosLoading(false);
     }
   }, [activeCategory]);
+
+  // 搜索防抖
+  const handleSearchChange = (value: string) => {
+    setSearchKeyword(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      loadVideos(value.trim());
+    }, 300);
+  };
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
   useEffect(() => { loadShowCategories(); }, [loadShowCategories]);
@@ -278,17 +287,23 @@ export default function VideoListPage() {
             ))}
           </div>
           <div className="flex-1" />
-          <Search
-            placeholder="请输入搜索内容"
-            prefix={<SearchOutlined />}
-            style={{ width: 200 }}
-            size="small"
-            allowClear
-            onSearch={(value) => setSearchKeyword(value)}
-            onChange={(e) => {
-              if (!e.target.value) setSearchKeyword('');
-            }}
-          />
+          <div className="relative">
+            <SearchOutlined className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[14px]" />
+            <input
+              value={searchKeyword}
+              onChange={e => handleSearchChange(e.target.value)}
+              placeholder="搜索视频..."
+              className="w-[280px] pl-9 pr-8 py-2 text-[14px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none bg-white"
+            />
+            {searchKeyword && (
+              <button
+                onClick={() => { setSearchKeyword(''); loadVideos(); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-0.5"
+              >
+                <CloseCircleOutlined className="text-[14px]" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* TV Show 网格 */}
