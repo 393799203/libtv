@@ -67,7 +67,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
 	uploadHandler := handler.NewUploadHandler(filepath.Join("..", "public", "canvas"), filepath.Join("..", "public", "videos"))
 	styleHandler := handler.NewStyleHandler(db, filepath.Join("..", "public", "styles"))
-	showHandler := handler.NewShowHandler(showService, filepath.Join("..", "public", "shows"))
+	showHandler := handler.NewShowHandler(showService, filepath.Join("..", "public", "shows"), db)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {

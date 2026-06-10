@@ -15,16 +15,18 @@ import (
 	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type ShowHandler struct {
 	showService *service.ShowService
 	uploadDir   string
 	videoDir    string
+	db          *gorm.DB
 }
 
-func NewShowHandler(showService *service.ShowService, uploadDir string) *ShowHandler {
-	return &ShowHandler{showService: showService, uploadDir: uploadDir, videoDir: filepath.Join("..", "public", "videos")}
+func NewShowHandler(showService *service.ShowService, uploadDir string, db *gorm.DB) *ShowHandler {
+	return &ShowHandler{showService: showService, uploadDir: uploadDir, videoDir: filepath.Join("..", "public", "videos"), db: db}
 }
 
 // ========== 公开接口：首页展示 ==========
@@ -350,13 +352,41 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": show})
 }
 
-// DeleteShow 删除视频（需登录）
+// DeleteShow 删除视频（需登录），同时清理关联的缩略图和视频文件
 func (h *ShowHandler) DeleteShow(c *gin.Context) {
 	id := c.Param("id")
+
+	// 先获取记录，拿到文件路径再删除
+	show, err := h.showService.GetByID(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "记录不存在"})
+		return
+	}
+
+	thumbnailURL := show.ThumbnailURL
+	videoURL := show.VideoURL
+
 	if err := h.showService.DeleteShow(c.Request.Context(), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
+
+	// 清理缩略图文件（存储在 public/shows 目录）
+	if thumbnailURL != "" && strings.HasPrefix(thumbnailURL, "/media/shows/") {
+		filename := filepath.Base(thumbnailURL)
+		os.Remove(filepath.Join(h.uploadDir, filename))
+	}
+
+	// 清理视频文件（检查是否还有其他 show 引用）
+	if videoURL != "" && strings.HasPrefix(videoURL, "/media/videos/") {
+		filename := filepath.Base(videoURL)
+		var count int64
+		h.db.Model(&model.Show{}).Where("video_url = ? AND id != ?", videoURL, id).Count(&count)
+		if count == 0 {
+			os.Remove(filepath.Join(h.videoDir, filename))
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
 }
 

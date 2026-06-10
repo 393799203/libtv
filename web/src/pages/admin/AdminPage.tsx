@@ -313,7 +313,29 @@ export default function AdminPage() {
   };
 
   const handleDeleteShow = async (id: string) => {
-    try { await showApi.delete(id); loadShows(activeShowCategory); loadShowCategories(); } catch {}
+    const show = shows.find(s => s.id === id);
+    if (!show) return;
+
+    // 使用 antd 的 modal 确认
+    const { Modal } = await import('antd');
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除视频「${show.title}」吗？此操作不可恢复，关联的封面图和视频文件也将被删除。`,
+      okText: '确定删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await showApi.delete(id);
+          message.success('删除成功');
+          loadShows(activeShowCategory);
+          loadShowCategories();
+        } catch (err) {
+          message.error('删除失败');
+          console.error(err);
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -463,9 +485,31 @@ export default function AdminPage() {
     setAdding(false);
   };
 
-  // 删除
+  // 删除风格
   const handleDelete = async (id: string) => {
-    try { await styleApi.delete(id); loadStyles(activeCategory); loadCategories(); } catch {}
+    const style = styles.find(s => s.id === id);
+    if (!style) return;
+
+    // 使用 antd 的 modal 确认
+    const { Modal } = await import('antd');
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除风格「${style.name}」吗？此操作不可恢复。`,
+      okText: '确定删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await styleApi.delete(id);
+          message.success('删除成功');
+          loadStyles(activeCategory);
+          loadCategories();
+        } catch (err) {
+          message.error('删除失败');
+          console.error(err);
+        }
+      },
+    });
   };
 
   // 侧边栏菜单
@@ -901,7 +945,7 @@ export default function AdminPage() {
                   <label className="block text-[12px] text-gray-500 mb-1.5">视频 {!editingShow && <span className="text-red-400">*</span>}</label>
                   <div
                     onClick={() => !videoUploading && document.getElementById('show-video-input')?.click()}
-                    className={`w-full h-28 border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer transition-colors overflow-hidden relative ${videoUploading ? 'border-blue-400 bg-blue-50 cursor-wait' : 'border-gray-200 hover:border-blue-300'}`}
+                    className={`w-full aspect-video border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer transition-colors overflow-hidden relative ${videoUploading ? 'border-blue-400 bg-blue-50 cursor-wait' : 'border-gray-200 hover:border-blue-300'}`}
                   >
                     {videoUploading ? (
                       /* 上传进度浮层 */
@@ -950,7 +994,7 @@ export default function AdminPage() {
                     封面图
                     {(videoUploadedUrl || videoPreviewUrl) ? <span className="text-green-500 ml-1">(已自动截取)</span> : !editingShow ? <span className="text-red-400">*</span> : null}
                   </label>
-                  <div onClick={() => document.getElementById('show-file-input')?.click()} className="w-full h-28 border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-300 transition-colors overflow-hidden">
+                  <div onClick={() => document.getElementById('show-file-input')?.click()} className="w-full aspect-[16/9] border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-300 transition-colors overflow-hidden">
                     {addShowPreviewUrl ? (
                       <img src={addShowPreviewUrl} alt="preview" className="w-full h-full object-cover" />
                     ) : (
