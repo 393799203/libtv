@@ -134,9 +134,9 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	allowedExts := map[string]bool{".mp4": true, ".webm": true, ".mov": true, ".avi": true, ".mkv": true}
+	allowedExts := map[string]bool{".mp4": true, ".webm": true, ".mov": true, ".avi": true, ".mkv": true, ".ts": true}
 	if !allowedExts[ext] {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的视频格式，支持 mp4/webm/mov/avi/mkv"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的视频格式，支持 mp4/webm/mov/avi/mkv/ts"})
 		return
 	}
 
@@ -195,13 +195,15 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 
 	finalPath := tmpPath
 	compressed := false
+	needConvert := (ext == ".ts") || (file.Size >= 50*1024*1024)
 
-	// 第三步：>=50MB 自动压缩
-	if file.Size >= 50*1024*1024 {
-		compressedPath := filepath.Join(h.videoDir, ".compressed_"+file.Filename)
-		cmd := exec.Command("ffmpeg",
+	// 第三步：TS 文件始终转码，其他格式 >=50MB 自动压缩
+	if needConvert {
+		compressedPath := filepath.Join(h.videoDir, ".compressed_"+filename)
+		cmd := exec.Command("/usr/local/Cellar/ffmpeg/8.1.1/bin/ffmpeg",
 			"-i", tmpPath,
-			"-c:v", "libx264", "-crf", "23", "-preset", "fast",
+			"-f", "mp4",
+			"-c:v", "libx264", "-crf", "23", "-preset", "ultrafast",
 			"-c:a", "aac", "-b:a", "128k",
 			"-movflags", "+faststart",
 			"-y",
@@ -211,6 +213,11 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 			os.Remove(tmpPath)
 			finalPath = compressedPath
 			compressed = true
+		} else if ext == ".ts" {
+			// TS 文件转码失败则报错，不能直接存为 mp4
+			os.Remove(tmpPath)
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "视频转码失败，请确认 ffmpeg 已安装"})
+			return
 		}
 	}
 

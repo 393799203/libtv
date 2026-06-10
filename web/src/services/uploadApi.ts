@@ -36,6 +36,7 @@ export async function uploadVideo(
     formData,
     {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000, // 视频转码可能需要较长时间，设置2分钟超时
       onUploadProgress: (e) => {
         if (e.total && onProgress) {
           const pct = Math.round((e.loaded / e.total) * 100);

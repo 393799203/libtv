@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { message, Select } from 'antd';
+import { App, Select } from 'antd';
 import {
   TagOutlined,
   SettingOutlined,
@@ -25,6 +25,7 @@ export default function AdminPage() {
   const navigate = useNavigate();
   const { tab = 'shows' } = useParams<{ tab: string }>();
   const activeTab: AdminTab = (tab as AdminTab) || 'shows';
+  const { message } = App.useApp();
 
   // ========== 风格管理状态 ==========
   const [categories, setCategories] = useState<CategoryItem[]>([]);
@@ -209,38 +210,7 @@ export default function AdminPage() {
     setAddShowForm(prev => ({ ...prev, video_url: '' }));
     setVideoUploadedUrl('');
     setVideoUploadProgress(0);
-
-    // 自动截取视频第一帧作为封面
-    const thumbFile = await new Promise<File | null>((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.muted = true;
-      video.playsInline = true;
-      video.src = URL.createObjectURL(file);
-
-      video.onloadeddata = () => {
-        video.currentTime = Math.min(1, video.duration * 0.01 || 1);
-        const dur = Math.round(video.duration) || 0;
-        setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-      };
-
-      video.onseeked = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        setAddShowPreviewUrl(dataUrl);
-        fetch(dataUrl).then(r => r.blob()).then(blob => {
-          resolve(new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' }));
-        });
-        URL.revokeObjectURL(video.src);
-      };
-
-      video.onerror = () => { URL.revokeObjectURL(video.src); resolve(null); };
-    });
-
-    if (thumbFile) setAddShowFile(thumbFile);
+    setAddShowFile(null);
 
     // 独立上传视频（不依赖 show ID）
     try {
@@ -259,6 +229,35 @@ export default function AdminPage() {
       } else {
         message.success('视频上传完成');
       }
+
+      // 上传成功后用 MP4 URL 截取缩略图（兼容 TS 等浏览器不支持的格式）
+      const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
+        video.crossOrigin = 'anonymous';
+        video.src = result.url;
+
+        video.onloadeddata = () => {
+          video.currentTime = Math.min(1, video.duration * 0.01 || 1);
+          const dur = Math.round(video.duration) || 0;
+          setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
+        };
+
+        video.onseeked = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          setAddShowPreviewUrl(dataUrl);
+          fetch(dataUrl).then(r => r.blob()).then(blob => {
+            const thumbFile = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
+            setAddShowFile(thumbFile);
+          });
+        };
+
+        video.onerror = () => {};
     } catch (err) {
       console.error('视频上传失败:', err);
       message.error('视频上传失败');
@@ -1020,7 +1019,7 @@ export default function AdminPage() {
                       </div>
                     )}
                   </div>
-                  <input id="show-video-input" type="file" accept=".mp4,.webm,.mov,.avi,.mkv" className="hidden" onChange={handleSelectShowVideo} />
+                  <input id="show-video-input" type="file" accept=".mp4,.webm,.mov,.avi,.mkv,.ts" className="hidden" onChange={handleSelectShowVideo} />
                 </div>
 
                 {/* 右：封面图 */}
