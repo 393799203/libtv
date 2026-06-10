@@ -292,7 +292,7 @@ export default function VideoListPage() {
             <input
               value={searchKeyword}
               onChange={e => handleSearchChange(e.target.value)}
-              placeholder="搜索视频..."
+              placeholder="搜索视频标题、作者、标签..."
               className="w-[280px] pl-9 pr-8 py-2 text-[14px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none bg-white"
             />
             {searchKeyword && (

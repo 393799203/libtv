@@ -54,7 +54,7 @@ func (r *showRepo) ListShows(ctx context.Context, categoryID string, keyword str
 		db = db.Where("category_id = ?", categoryID)
 	}
 	if keyword != "" {
-		db = db.Where("title ILIKE ? OR author ILIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+		db = db.Where("title ILIKE ? OR author ILIKE ? OR tags::text ILIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -67,7 +67,7 @@ func (r *showRepo) ListShows(ctx context.Context, categoryID string, keyword str
 		queryDB = queryDB.Where("category_id = ?", categoryID)
 	}
 	if keyword != "" {
-		queryDB = queryDB.Where("title ILIKE ? OR author ILIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+		queryDB = queryDB.Where("title ILIKE ? OR author ILIKE ? OR tags::text ILIKE ?", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
 	if err := queryDB.Offset(offset).Limit(limit).Find(&shows).Error; err != nil {
 		return nil, 0, err
