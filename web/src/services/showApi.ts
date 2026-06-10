@@ -8,6 +8,7 @@ export interface ShowItem {
   thumbnail_url: string;
   video_url: string;
   duration: number;
+  author_id: string;
   author: string;
   author_avatar: string;
   tags: string[];
@@ -68,8 +69,7 @@ export const showApi = {
     description?: string;
     video_url: string;
     duration?: number;
-    author?: string;
-    author_avatar?: string;
+    author_id?: string;
     tags?: string[];
     sort_order?: number;
   }) =>
@@ -104,8 +104,7 @@ export const showApi = {
     description?: string;
     video_url?: string;
     duration?: number;
-    author?: string;
-    author_avatar?: string;
+    author_id?: string;
     tags?: string[];
     sort_order?: number;
     category_id?: string;

@@ -57,7 +57,7 @@ export default function AdminPage() {
   const [newShowCatName, setNewShowCatName] = useState('');
   const [creatingShowCat, setCreatingShowCat] = useState(false);
   const [showAddShowDialog, setShowAddShowDialog] = useState(false);
-  const [addShowForm, setAddShowForm] = useState({ title: '', description: '', video_url: '', author: '', duration: 0, tags: '' });
+  const [addShowForm, setAddShowForm] = useState({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
   const [addShowFile, setAddShowFile] = useState<File | null>(null);
   const [addShowPreviewUrl, setAddShowPreviewUrl] = useState('');
   const [addShowVideoFile, setAddShowVideoFile] = useState<File | null>(null);
@@ -168,7 +168,7 @@ export default function AdminPage() {
 
   const openAddShowDialog = () => {
     setEditingShow(null);
-    setAddShowForm({ title: '', description: '', video_url: '', author: '', duration: 0, tags: '' });
+    setAddShowForm({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
     setAddShowFile(null);
     setAddShowPreviewUrl('');
     setAddShowVideoFile(null);
@@ -183,7 +183,7 @@ export default function AdminPage() {
       title: s.title,
       description: s.description || '',
       video_url: s.video_url,
-      author: s.author || '',
+      author_id: s.author_id || '',
       duration: s.duration,
       tags: (s.tags || []).join(', '),
     });
@@ -317,7 +317,7 @@ export default function AdminPage() {
           description: addShowForm.description.trim() || undefined,
           // 视频已在选择时上传完成，或用户手动填写了地址
           video_url: (videoUploadedUrl || addShowForm.video_url.trim()) || undefined,
-          author: addShowForm.author.trim() || undefined,
+          author_id: addShowForm.author_id || undefined,
           duration: addShowForm.duration || undefined,
           tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
         });
@@ -331,7 +331,7 @@ export default function AdminPage() {
           title: addShowForm.title.trim(),
           description: addShowForm.description.trim() || undefined,
           video_url: addShowForm.video_url.trim(),
-          author: addShowForm.author.trim() || undefined,
+          author_id: addShowForm.author_id || undefined,
           duration: addShowForm.duration || undefined,
           tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
         });
@@ -1071,13 +1071,13 @@ export default function AdminPage() {
                 <div>
                   <label className="block text-[12px] text-gray-500 mb-1.5">作者</label>
                   <Select
-                    value={addShowForm.author || undefined}
-                    onChange={val => setAddShowForm(prev => ({ ...prev, author: val }))}
+                    value={addShowForm.author_id || undefined}
+                    onChange={val => setAddShowForm(prev => ({ ...prev, author_id: val }))}
                     onSearch={fetchAuthors}
                     placeholder="点击选择或输入搜索"
                     showSearch
                     allowClear
-                    options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
+                    options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.id }))}
                     notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
                     filterOption={false}
                     getPopupContainer={(trigger) => trigger.parentElement!}

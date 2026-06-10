@@ -189,10 +189,11 @@ type Show struct {
 	ThumbnailURL string         `gorm:"size:500" json:"thumbnail_url"`
 	VideoURL     string         `gorm:"size:500;not null" json:"video_url"`
 	Duration     int            `gorm:"default:0" json:"duration"` // 秒
-	Author       string         `gorm:"size:100" json:"author"`
-	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`
-	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`    // []string
-	SortOrder    int            `gorm:"default:0" json:"sort_order"` // 同分类内排序
+	AuthorID     string         `gorm:"index;size:36" json:"author_id"`       // 关联用户 ID
+	Author       string         `gorm:"size:100" json:"author"`               // 冗余：作者昵称
+	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`        // 冗余：作者头像
+	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`              // []string
+	SortOrder    int            `gorm:"default:0" json:"sort_order"`          // 同分类内排序
 	Views        int            `gorm:"default:0" json:"views"`
 	Likes        int            `gorm:"default:0" json:"likes"`
 	CreatedAt    time.Time      `json:"created_at"`

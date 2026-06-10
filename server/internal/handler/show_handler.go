@@ -98,27 +98,42 @@ func (h *ShowHandler) GetShow(c *gin.Context) {
 // ========== 需登录接口：管理操作 ==========
 
 type CreateShowRequest struct {
-	CategoryID   string   `json:"category_id" binding:"required"`
-	Title        string   `json:"title" binding:"required"`
-	Description  string   `json:"description"`
-	VideoURL     string   `json:"video_url"`
-	Duration     int      `json:"duration"`
-	Author       string   `json:"author"`
-	AuthorAvatar string   `json:"author_avatar"`
-	Tags         []string `json:"tags"`
-	SortOrder    int      `json:"sort_order"`
+	CategoryID string   `json:"category_id" binding:"required"`
+	Title      string   `json:"title" binding:"required"`
+	Description string  `json:"description"`
+	VideoURL   string   `json:"video_url"`
+	Duration   int      `json:"duration"`
+	AuthorID   string   `json:"author_id"`
+	Tags       []string `json:"tags"`
+	SortOrder  int      `json:"sort_order"`
 }
 
 type UpdateShowRequest struct {
-	Title        *string  `json:"title"`
-	Description  *string  `json:"description"`
-	VideoURL     *string  `json:"video_url"`
-	Duration     *int     `json:"duration"`
-	Author       *string  `json:"author"`
-	AuthorAvatar *string  `json:"author_avatar"`
-	Tags         []string `json:"tags"`
-	SortOrder    *int     `json:"sort_order"`
-	CategoryID   *string  `json:"category_id"`
+	Title      *string  `json:"title"`
+	Description *string `json:"description"`
+	VideoURL   *string  `json:"video_url"`
+	Duration   *int     `json:"duration"`
+	AuthorID   *string  `json:"author_id"`
+	Tags       []string `json:"tags"`
+	SortOrder  *int     `json:"sort_order"`
+	CategoryID *string  `json:"category_id"`
+}
+
+// resolveAuthor 根据 author_id 查询用户，填充 author 和 author_avatar
+func (h *ShowHandler) resolveAuthor(show *model.Show, authorID string) {
+	if authorID == "" {
+		return
+	}
+	var user model.User
+	if err := h.db.Where("id = ?", authorID).First(&user).Error; err != nil {
+		return
+	}
+	show.AuthorID = user.ID
+	if user.Nickname != "" {
+		show.Author = user.Nickname
+	} else {
+		show.Author = user.Email
+	}
 }
 
 // CreateShow 创建视频条目（需登录）
@@ -131,16 +146,15 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 
 	tagsJSON, _ := json.Marshal(req.Tags)
 	show := &model.Show{
-		CategoryID:   req.CategoryID,
-		Title:        req.Title,
-		Description:  req.Description,
-		VideoURL:     req.VideoURL,
-		Duration:     req.Duration,
-		Author:       req.Author,
-		AuthorAvatar: req.AuthorAvatar,
-		Tags:         tagsJSON,
-		SortOrder:    req.SortOrder,
+		CategoryID:  req.CategoryID,
+		Title:       req.Title,
+		Description: req.Description,
+		VideoURL:    req.VideoURL,
+		Duration:    req.Duration,
+		Tags:        tagsJSON,
+		SortOrder:   req.SortOrder,
 	}
+	h.resolveAuthor(show, req.AuthorID)
 
 	if err := h.showService.CreateShow(c.Request.Context(), show); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建失败"})
@@ -325,11 +339,8 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 	if req.Duration != nil {
 		show.Duration = *req.Duration
 	}
-	if req.Author != nil {
-		show.Author = *req.Author
-	}
-	if req.AuthorAvatar != nil {
-		show.AuthorAvatar = *req.AuthorAvatar
+	if req.AuthorID != nil {
+		h.resolveAuthor(show, *req.AuthorID)
 	}
 	if req.Tags != nil {
 		tagsJSON, _ := json.Marshal(req.Tags)
