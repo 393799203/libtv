@@ -20,15 +20,16 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdge = useCanvasStore((s) => s.addEdge);
+  const projectId = useCanvasStore((s) => s.projectId);
 
-  // 图片上传（上传到服务端 public/pic/ 目录）
+  // 图片上传（上传到服务端 public/canvas/{projectId}/ 目录）
   const handleUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
       try {
-        const url = await uploadImage(file);
+        const url = await uploadImage(file, projectId || undefined);
         // 获取图片尺寸
         const img = new window.Image();
         img.onload = () => {

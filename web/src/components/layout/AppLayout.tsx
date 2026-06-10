@@ -81,7 +81,7 @@ export function AppLayout() {
             {/* 系统管理入口（仅管理员） */}
             {user?.role === 'admin' && (
               <button
-                onClick={() => navigate('/admin/styles')}
+                onClick={() => navigate('/admin')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
                   location.pathname.startsWith('/admin')
                     ? 'text-blue-600 bg-blue-50'

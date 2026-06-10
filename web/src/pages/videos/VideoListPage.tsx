@@ -25,7 +25,7 @@ import 'swiper/css/effect-coverflow';
 import 'swiper/css/pagination';
 import { Modal } from 'antd';
 import { projectApi } from '@/services/projectApi';
-import { videoApi } from '@/services/videoApi';
+import { showApi } from '@/services/showApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
@@ -42,20 +42,8 @@ const carouselItems = [
   { id: '5', title: '海量素材库', subtitle: '百万级素材，轻松创作', buttonText: '查看素材', imageColor: 'from-green-500 to-teal-600' },
 ];
 
-// TV Show 分类
-const tvShowCategories = [
-  { key: 'all', label: '全部' },
-  { key: 'douyin', label: '抖音 | v4.1 竖版笔记' },
-  { key: 'kuaishou', label: '快手 | v2 AI，经典构图风格' },
-  { key: 'professional', label: '专业电影' },
-  { key: 'fullscreen', label: '全屏影视' },
-  { key: 'picturebook', label: '图画书故事' },
-  { key: 'shortfilm', label: '短片电影' },
-  { key: 'ads', label: '商业广告' },
-  { key: 'education', label: '教育游戏' },
-  { key: 'daily', label: '教育生活' },
-  { key: 'tvshow', label: 'TV工具箱' },
-];
+// TV Show 分类（从 API 加载，初始含"全部"选项）
+const ALL_CATEGORY = { key: 'all', label: '全部' };
 
 const formatDuration = (seconds: number) => {
   if (seconds === 0) return '';
@@ -71,6 +59,7 @@ export default function VideoListPage() {
   const [videosLoading, setVideosLoading] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [tvShowVideos, setTvShowVideos] = useState<VideoListItem[]>([]);
+  const [showCategories, setShowCategories] = useState<{ key: string; label: string }[]>([ALL_CATEGORY]);
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
@@ -89,20 +78,46 @@ export default function VideoListPage() {
     }
   }, [isAuthenticated]);
 
-  // 加载视频列表：支持标签筛选 + 关键词搜索
+  // 加载 TV Show 分类标签
+  const loadShowCategories = useCallback(async () => {
+    try {
+      const cats = await showApi.categories();
+      const mapped = cats.map(c => ({ key: c.id, label: c.name }));
+      setShowCategories([ALL_CATEGORY, ...mapped]);
+    } catch {
+      // 后端未启动时保持默认
+    }
+  }, []);
+
+  // 加载视频列表：从 shows API 获取（支持分类筛选 + 关键词搜索）
   const loadVideos = useCallback(async () => {
     setVideosLoading(true);
     try {
-      const data = await videoApi.getVideos(1, 20, activeCategory, searchKeyword);
-      setTvShowVideos(data.list || []);
+      const data = await showApi.list({
+        category_id: activeCategory,
+        page: 1,
+        page_size: 50,
+      });
+      const list: VideoListItem[] = (data.items || []).map(item => ({
+        id: item.id,
+        title: item.title,
+        thumbnailUrl: item.thumbnail_url || undefined,
+        videoUrl: item.video_url,
+        duration: item.duration,
+        author: item.author || 'LibTV',
+        tags: item.tags || undefined,
+      }));
+      setTvShowVideos(list);
     } catch {
-      setTvShowVideos(videoApi.getTvShowVideos());
+      // 后端未启动或接口失败，返回空列表
+      setTvShowVideos([]);
     } finally {
       setVideosLoading(false);
     }
-  }, [activeCategory, searchKeyword]);
+  }, [activeCategory]);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
+  useEffect(() => { loadShowCategories(); }, [loadShowCategories]);
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
   const getVideoMenuItems = (_id: string): MenuProps['items'] => [
@@ -248,33 +263,32 @@ export default function VideoListPage() {
 
       {/* TV Show 分类 */}
       <section className="max-w-7xl mx-auto px-6">
-        <div className="flex items-center justify-between mb-4">
-          <Text className="text-gray-600 font-medium">TV Show</Text>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              {tvShowCategories.map((cat) => (
-                <Tag
-                  key={cat.key}
-                  color={activeCategory === cat.key ? 'blue' : undefined}
-                  className={`cursor-pointer text-xs`}
-                  onClick={() => setActiveCategory(cat.key)}
-                >
-                  {cat.label}
-                </Tag>
-              ))}
-            </div>
-            <Search
-              placeholder="请输入搜索内容"
-              prefix={<SearchOutlined />}
-              style={{ width: 200 }}
-              size="small"
-              allowClear
-              onSearch={(value) => setSearchKeyword(value)}
-              onChange={(e) => {
-                if (!e.target.value) setSearchKeyword('');
-              }}
-            />
+        <div className="flex items-center gap-4 mb-4">
+          <Text className="text-gray-600 font-medium shrink-0">TV Show</Text>
+          <div className="flex items-center gap-2 flex-wrap">
+            {showCategories.map((cat) => (
+              <Tag
+                key={cat.key}
+                color={activeCategory === cat.key ? 'blue' : undefined}
+                className={`cursor-pointer text-xs`}
+                onClick={() => setActiveCategory(cat.key)}
+              >
+                {cat.label}
+              </Tag>
+            ))}
           </div>
+          <div className="flex-1" />
+          <Search
+            placeholder="请输入搜索内容"
+            prefix={<SearchOutlined />}
+            style={{ width: 200 }}
+            size="small"
+            allowClear
+            onSearch={(value) => setSearchKeyword(value)}
+            onChange={(e) => {
+              if (!e.target.value) setSearchKeyword('');
+            }}
+          />
         </div>
 
         {/* TV Show 网格 */}
@@ -290,6 +304,14 @@ export default function VideoListPage() {
               >
                 <div className="h-40 bg-gray-100 relative overflow-hidden">
                   <img src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`} alt={item.title} className="w-full h-full object-cover" />
+                  {/* 标签 */}
+                  {(item.tags?.length || 0) > 0 && (
+                    <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
+                      {(item.tags || []).slice(0, 2).map(tag => (
+                        <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">{tag}</span>
+                      ))}
+                    </div>
+                  )}
                   <div className="absolute inset-0 bg-black/0 hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 hover:opacity-100 z-10">
                     <PlayCircleOutlined style={{ fontSize: '48px', color: 'white' }} />
                   </div>

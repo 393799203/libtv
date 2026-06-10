@@ -111,7 +111,6 @@ func (h *UserHandler) Delete(c *gin.Context) {
 	}
 
 	// 删除用户关联的数据（按外键顺序）
-	h.db.Where("user_id = ?", user.ID).Delete(&model.Video{})
 	h.db.Where("user_id = ?", user.ID).Delete(&model.Project{})
 	h.db.Where("user_id = ?", user.ID).Delete(&model.StyleFavorite{})
 

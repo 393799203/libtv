@@ -19,7 +19,7 @@ import {
   SoundOutlined,
   MutedOutlined,
 } from '@ant-design/icons';
-import { videoApi } from '@/services/videoApi';
+import { showApi } from '@/services/showApi';
 import type { Video } from '@/types/video';
 
 const { Text } = Typography;
@@ -46,11 +46,30 @@ export default function VideoDetailPage() {
   const hideControlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPlayingRef = useRef(false);
 
-  // 从 API 获取视频详情
+  // 从 Show API 获取视频详情
   useEffect(() => {
     if (!id) return;
-    videoApi.getVideo(id).then((data) => {
-      if (data) setVideoInfo(data);
+    showApi.get(id).then((show) => {
+      if (show) {
+        setVideoInfo({
+          id: show.id,
+          title: show.title,
+          description: show.description || '',
+          thumbnailUrl: show.thumbnail_url || '',
+          videoUrl: show.video_url || '',
+          duration: show.duration || 0,
+          author: show.author || '',
+          authorAvatar: show.author_avatar || '',
+          tags: show.tags || [],
+          stats: {
+            views: show.views || 0,
+            likes: show.likes || 0,
+            comments: 0,
+          },
+          createdAt: show.created_at,
+          updatedAt: show.updated_at,
+        });
+      }
     });
   }, [id]);
 

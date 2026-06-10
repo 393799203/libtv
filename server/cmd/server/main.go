@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// 自动迁移
-if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Video{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}); err != nil {
+if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -41,13 +41,13 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	canvasRepo := repository.NewCanvasRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
 	aiTaskRepo := repository.NewAITaskRepo(db)
-	videoRepo := repository.NewVideoRepo(db)
+	showRepo := repository.NewShowRepo(db)
 
 	// 初始化 Service
 	userService := service.NewUserService(userRepo)
 	projectService := service.NewProjectService(projectRepo, canvasRepo)
 	canvasService := service.NewCanvasService(canvasRepo)
-	videoService := service.NewVideoService(videoRepo)
+	showService := service.NewShowService(showRepo)
 
 	// 初始化工作流引擎
 	registry := engine.NewDefaultRegistry()
@@ -65,9 +65,9 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
-	videoHandler := handler.NewVideoHandler(videoService)
-	uploadHandler := handler.NewUploadHandler(filepath.Join("..", "public", "pic"))
+	uploadHandler := handler.NewUploadHandler(filepath.Join("..", "public", "canvas"), filepath.Join("..", "public", "videos"))
 	styleHandler := handler.NewStyleHandler(db, filepath.Join("..", "public", "styles"))
+	showHandler := handler.NewShowHandler(showService, filepath.Join("..", "public", "shows"))
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -80,12 +80,14 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 
 	// 静态文件（统一 /media 前缀）
 	r.Static("/uploads", config.C.Storage.LocalPath)
-	picDir := filepath.Join("..", "public", "pic")
-	r.Static("/media/pic", picDir)
+	canvasDir := filepath.Join("..", "public", "canvas")
+	r.Static("/media/canvas", canvasDir)
 	videosDir := filepath.Join("..", "public", "videos")
 	r.Static("/media/videos", videosDir)
 	stylesDir := filepath.Join("..", "public", "styles")
 	r.Static("/media/styles", stylesDir)
+	showsDir := filepath.Join("..", "public", "shows")
+	r.Static("/media/shows", showsDir)
 
 	// 公开路由
 	auth := r.Group("/api/auth")
@@ -94,15 +96,18 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		auth.POST("/login", userHandler.Login)
 	}
 
-	// 公开视频接口（无需登录）
-	publicVideos := r.Group("/api/videos")
+	// 公开首页展示接口（无需登录）
+	publicShows := r.Group("/api/shows")
 	{
-		publicVideos.GET("", videoHandler.List)
-		publicVideos.GET("/:id", videoHandler.Get)
+		publicShows.GET("/categories", showHandler.ListCategories)
+		publicShows.GET("", showHandler.ListShows)
+		publicShows.GET("/:id", showHandler.GetShow)
 	}
 
 	// 图片上传（公开）
 	r.POST("/api/upload/image", uploadHandler.UploadImage)
+	// 视频上传（公开，独立接口）
+	r.POST("/api/upload/video", uploadHandler.UploadVideo)
 
 	// 需要认证的路由
 	api := r.Group("/api")
@@ -132,14 +137,6 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			workflow.GET("/executions/:id", workflowHandler.GetExecution)
 		}
 
-		// 视频写操作（需登录）
-		videos := api.Group("/videos")
-		{
-			videos.POST("", videoHandler.Create)
-			videos.PUT("/:id", videoHandler.Update)
-			videos.DELETE("/:id", videoHandler.Delete)
-		}
-
 		// 分类管理（需登录）
 		categories := api.Group("/styles/categories")
 		{
@@ -160,6 +157,24 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			styles.POST("/:id/favorite", styleHandler.ToggleFavorite)
 			styles.GET("/favorites", styleHandler.ListFavorites)
 			styles.POST("/favorites/check", styleHandler.CheckFavorited)
+		}
+
+		// 首页展示分类管理（需登录）
+		showCategories := api.Group("/shows/categories")
+		{
+			showCategories.POST("", showHandler.CreateCategory)
+			showCategories.PUT("/:id", showHandler.UpdateCategory)
+			showCategories.DELETE("/:id", showHandler.DeleteCategory)
+		}
+
+		// 首页展示视频管理（需登录）
+		shows := api.Group("/shows")
+		{
+			shows.POST("", showHandler.CreateShow)
+			shows.POST("/:id/thumbnail", showHandler.UploadThumbnail)
+			shows.POST("/:id/video", showHandler.UploadVideo)
+			shows.PUT("/:id", showHandler.UpdateShow)
+			shows.DELETE("/:id", showHandler.DeleteShow)
 		}
 
 		// WebSocket

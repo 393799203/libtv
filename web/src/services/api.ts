@@ -39,8 +39,8 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      const { isAuthenticated, logout, openLoginModal } = useAuthStore.getState();
-      if (isAuthenticated) {
+      const { isAuthenticated, initializing, logout, openLoginModal } = useAuthStore.getState();
+      if (isAuthenticated && !initializing) {
         logout();
         // 延迟弹窗，避免初始化验证时弹出
         setTimeout(() => {

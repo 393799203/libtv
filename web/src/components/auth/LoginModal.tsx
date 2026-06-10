@@ -16,8 +16,7 @@ export function LoginModal() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
 
-  const [loginForm] = Form.useForm<LoginRequest>();
-  const [registerForm] = Form.useForm<RegisterRequest>();
+  const [form] = Form.useForm<LoginRequest & RegisterRequest>();
 
   const handleLogin = async (values: LoginRequest) => {
     setLoading(true);
@@ -26,7 +25,7 @@ export function LoginModal() {
       setAuth(response as unknown as import('@/types/api').AuthResponse);
       message.success('登录成功');
       closeLoginModal();
-      loginForm.resetFields();
+      form.resetFields();
       const redirect = sessionStorage.getItem('auth_redirect');
       if (redirect) {
         sessionStorage.removeItem('auth_redirect');
@@ -46,7 +45,7 @@ export function LoginModal() {
       setAuth(response as unknown as import('@/types/api').AuthResponse);
       message.success('注册成功');
       closeLoginModal();
-      registerForm.resetFields();
+      form.resetFields();
       const redirect = sessionStorage.getItem('auth_redirect');
       if (redirect) {
         sessionStorage.removeItem('auth_redirect');
@@ -61,11 +60,10 @@ export function LoginModal() {
 
   useEffect(() => {
     if (showLoginModal) {
-      loginForm.resetFields();
-      registerForm.resetFields();
+      form.resetFields();
       setLoading(false);
     }
-  }, [authMode, showLoginModal, loginForm, registerForm]);
+  }, [authMode, showLoginModal, form]);
 
   if (!showLoginModal) return null;
 
@@ -111,7 +109,7 @@ export function LoginModal() {
           </div>
 
           {authMode === 'login' ? (
-            <Form form={loginForm} layout="vertical" onFinish={handleLogin} requiredMark={false}>
+            <Form form={form} layout="vertical" onFinish={handleLogin} requiredMark={false}>
               <Form.Item
                 name="email"
                 rules={[
@@ -154,7 +152,7 @@ export function LoginModal() {
               </Form.Item>
             </Form>
           ) : (
-            <Form form={registerForm} layout="vertical" onFinish={handleRegister} requiredMark={false}>
+            <Form form={form} layout="vertical" onFinish={handleRegister} requiredMark={false}>
               <Form.Item
                 name="email"
                 rules={[

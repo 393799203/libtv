@@ -100,36 +100,6 @@ type AITask struct {
 
 func (AITask) TableName() string { return "ai_tasks" }
 
-// Video 视频模型
-type Video struct {
-	ID           string         `gorm:"primaryKey;size:36" json:"id"`
-	UserID       string         `gorm:"index;size:36;not null" json:"user_id"`
-	Title        string         `gorm:"size:255;not null" json:"title"`
-	Description  string         `gorm:"size:1000" json:"description"`
-	ThumbnailURL string         `gorm:"size:500" json:"thumbnail_url"`
-	VideoURL     string         `gorm:"size:500;not null" json:"video_url"`
-	Duration     int            `gorm:"default:0" json:"duration"` // 秒
-	Author       string         `gorm:"size:100" json:"author"`
-	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`
-	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`
-	Views        int            `gorm:"default:0" json:"views"`
-	Likes        int            `gorm:"default:0" json:"likes"`
-	Comments     int            `gorm:"default:0" json:"comments"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	User         User           `gorm:"foreignKey:UserID" json:"-"`
-}
-
-func (Video) TableName() string { return "videos" }
-
-// BeforeCreate 生成 UUID
-func (v *Video) BeforeCreate(tx *gorm.DB) error {
-	if v.ID == "" {
-		v.ID = uuid.New().String()
-	}
-	return nil
-}
-
 // Style 风格模型（风格市场）
 type Style struct {
 	ID         string         `gorm:"primaryKey;size:36" json:"id"`
@@ -184,6 +154,55 @@ func (f *StyleFavorite) BeforeCreate(tx *gorm.DB) error {
 
 // BeforeCreate 生成 UUID
 func (s *Style) BeforeCreate(tx *gorm.DB) error {
+	if s.ID == "" {
+		s.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// ========== 首页 TV Show 管理 ==========
+
+// ShowCategory 首页展示分类（标签）
+type ShowCategory struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	Name      string    `gorm:"size:100;uniqueIndex;not null" json:"name"`
+	SortOrder int       `gorm:"default:0" json:"sort_order"` // 排序权重，越大越靠前
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (ShowCategory) TableName() string { return "show_categories" }
+
+func (c *ShowCategory) BeforeCreate(tx *gorm.DB) error {
+	if c.ID == "" {
+		c.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// Show 首页展示的视频条目
+type Show struct {
+	ID           string         `gorm:"primaryKey;size:36" json:"id"`
+	CategoryID   string         `gorm:"index;size:36;not null" json:"category_id"` // 关联分类 ID
+	Title        string         `gorm:"size:255;not null" json:"title"`
+	Description  string         `gorm:"size:1000" json:"description"`
+	ThumbnailURL string         `gorm:"size:500" json:"thumbnail_url"`
+	VideoURL     string         `gorm:"size:500;not null" json:"video_url"`
+	Duration     int            `gorm:"default:0" json:"duration"` // 秒
+	Author       string         `gorm:"size:100" json:"author"`
+	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`
+	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`    // []string
+	SortOrder    int            `gorm:"default:0" json:"sort_order"` // 同分类内排序
+	Views        int            `gorm:"default:0" json:"views"`
+	Likes        int            `gorm:"default:0" json:"likes"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	Category     ShowCategory   `gorm:"foreignKey:CategoryID" json:"category"`
+}
+
+func (Show) TableName() string { return "shows" }
+
+func (s *Show) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
 	}
