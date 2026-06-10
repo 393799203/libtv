@@ -132,7 +132,6 @@ export default function VideoListPage() {
   const getVideoMenuItems = (_id: string): MenuProps['items'] => [
     { key: 'download', label: '下载' },
     { key: 'share', label: '分享' },
-    { key: 'delete', label: '删除', danger: true },
   ];
 
   // 删除项目
