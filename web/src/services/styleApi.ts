@@ -6,26 +6,47 @@ export interface StyleItem {
   author: string;
   image_url: string;
   likes: number;
-  category: string;
+  category_id: string;
+  category?: {
+    id: string;
+    name: string;
+    sort_order: number;
+  };
   tags: string[];
 }
 
 export interface CategoryItem {
-  category: string;
-  count: number;
+  id: string;
+  name: string;
+  sort_order: number;
+  style_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export const styleApi = {
-  /** 获取风格列表（公开） */
-  list: (params?: { category?: string; keyword?: string; page?: number; page_size?: number }) =>
+  /** 获取风格列表（需登录） */
+  list: (params?: { category_id?: string; keyword?: string; page?: number; page_size?: number }) =>
     api.get<{ items: StyleItem[]; total: number; page: number; page_size: number }>('/styles', { params }),
 
-  /** 获取所有分类（公开） */
+  /** 获取所有分类列表（需登录） */
   categories: () =>
     api.get<CategoryItem[]>('/styles/categories'),
 
+  /** 创建分类（需登录） */
+  createCategory: (data: { name: string; sort_order?: number }) =>
+    api.post<CategoryItem>('/styles/categories', data),
+
+  /** 更新分类（需登录） */
+  updateCategory: (id: string, data: { name?: string; sort_order?: number }) =>
+    api.put<CategoryItem>(`/styles/categories/${id}`, data),
+
+  /** 删除分类（需登录） */
+  deleteCategory: (id: string) =>
+    api.delete(`/styles/categories/${id}`),
+
   /** 创建风格（需登录） */
-  create: (data: { name: string; author?: string; category?: string; tags?: string[] }) =>
+  create: (data: { name: string; author?: string; category_id?: string; tags?: string[] }) =>
     api.post<StyleItem>('/styles', data),
 
   /** 上传风格图片（需登录） */
@@ -38,7 +59,7 @@ export const styleApi = {
   },
 
   /** 更新风格信息（需登录） */
-  update: (id: string, data: { name?: string; author?: string; category?: string; tags?: string[] }) =>
+  update: (id: string, data: { name?: string; author?: string; category_id?: string; tags?: string[] }) =>
     api.put<StyleItem>(`/styles/${id}`, data),
 
   /** 删除风格（需登录） */

@@ -46,10 +46,10 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
   };
 
   // 加载当前分类下的风格
-  const loadStyles = (cat: string) => {
+  const loadStyles = (categoryId: string) => {
     setLoading(true);
-    styleApi.list({ category: cat })
-      .then((res) => setStyles(res.items.filter(s => !s.name.startsWith('_cat_placeholder_'))))
+    styleApi.list({ category_id: categoryId })
+      .then((res) => setStyles((res.items || []).filter(s => !s.name.startsWith('_cat_placeholder_'))))
       .catch(() => {})
       .finally(() => setLoading(false));
   };
@@ -67,15 +67,19 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
     if (!newCatName.trim()) return;
     setCreatingCat(true);
     try {
-      await styleApi.create({
-        name: `${newCatName.trim()} - 示例`,
-        category: newCatName.trim(),
-        tags: ['待编辑'],
+      await styleApi.createCategory({
+        name: newCatName.trim(),
+        sort_order: 0,
       });
       setShowNewCatDialog(false);
       setNewCatName('');
       loadCategories();
-      setActiveCategory(newCatName.trim());
+      // 创建后选中新的分类
+      const res = await styleApi.categories();
+      if (res.length > 0) {
+        const newCat = res.find(c => c.name === newCatName.trim());
+        if (newCat) setActiveCategory(newCat.id);
+      }
     } catch {}
     setCreatingCat(false);
   };
@@ -105,7 +109,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
       const res = await styleApi.create({
         name: addForm.name.trim(),
         author: addForm.author.trim() || undefined,
-        category: activeCategory,
+        category_id: activeCategory,
         tags: addForm.tags ? addForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
       });
       await styleApi.uploadImage(res.id, addFile);
@@ -175,21 +179,21 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
 
         {/* 工具栏 */}
         <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-50 shrink-0">
-          {categories.length === 0 ? (
+          {(categories?.length || 0) === 0 ? (
             <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
           ) : (
             <div className="flex gap-1.5 overflow-x-auto">
-              {categories.map((cat) => (
+              {(categories || []).map((cat) => (
                 <button
-                  key={cat.category}
-                  onClick={() => { setActiveCategory(cat.category); setEditingId(null); }}
+                  key={cat.id}
+                  onClick={() => { setActiveCategory(cat.id); setEditingId(null); }}
                   className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
-                    activeCategory === cat.category ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+                    activeCategory === cat.id ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
                   }`}
                 >
-                  {cat.category}
-                  <span className={`text-[10px] ${activeCategory === cat.category ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
-                    {cat.count}
+                  {cat.name}
+                  <span className={`text-[10px] ${activeCategory === cat.id ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                    {cat.style_count}
                   </span>
                 </button>
               ))}
@@ -218,7 +222,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
 
         {/* 图墙区域 — 全图 + 底部透明浮层 */}
         <div className="flex-1 overflow-y-auto p-6 relative">
-          {!activeCategory && categories.length > 0 && (
+          {(!activeCategory) && (categories?.length || 0) > 0 && (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
               <FolderAddOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
               <div className="text-[14px]">选择一个分类查看或上传图片</div>
@@ -229,10 +233,10 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
             <div className="flex items-center justify-center py-20">
               <div className="text-gray-400 text-[14px]">加载中...</div>
             </div>
-          ) : activeCategory && styles.length === 0 ? (
+          ) : activeCategory && (styles?.length || 0) === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-400">
               <UploadOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
-              <div className="text-[14px] mb-2">「{activeCategory}」暂无风格图片</div>
+              <div className="text-[14px] mb-2">「{categories?.find(c => c.id === activeCategory)?.name || activeCategory}」暂无风格图片</div>
               <button
                 onClick={openAddDialog}
                 className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
@@ -241,13 +245,13 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                 上传第一张图片
               </button>
             </div>
-          ) : activeCategory && styles.length > 0 ? (
+          ) : activeCategory && (styles?.length || 0) > 0 ? (
             <>
               <div className="flex items-center justify-between mb-4">
-                <span className="text-[13px] text-gray-500">{styles.length} 张图片</span>
+                <span className="text-[13px] text-gray-500">{styles?.length || 0} 张图片</span>
               </div>
               <div className="grid grid-cols-4 gap-4">
-                {styles.map((style) => (
+                {(styles || []).map((style) => (
                   <div
                     key={style.id}
                     className={`group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all ${
@@ -332,7 +336,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                               <span className="text-white/70 text-[11px] truncate mr-2">{style.author}</span>
                             ) : <span />}
                             <div className="flex gap-1 flex-wrap justify-end">
-                              {style.tags.slice(0, 3).map(tag => (
+                              {(style.tags || []).slice(0, 3).map(tag => (
                                 <span key={tag} className="text-[9px] px-1.5 py-0.5 bg-white/15 text-white/80 rounded-full backdrop-blur-sm">{tag}</span>
                               ))}
                             </div>
@@ -367,7 +371,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
 
         {/* 底部统计 */}
         <div className="px-6 py-2.5 border-t border-gray-100 shrink-0 flex items-center justify-between text-[12px] text-gray-400">
-          <span>共 {categories.length} 个分类 · {activeCategory ? `${styles.length} 张图片` : ''}</span>
+          <span>共 {categories?.length || 0} 个分类 · {activeCategory ? `${styles?.length || 0} 张图片` : ''}</span>
           <span>Hover 卡片可编辑 / 替换 / 删除</span>
         </div>
 
@@ -378,7 +382,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
 
             <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150">
               <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">
-                添加风格图片 — {activeCategory}
+                添加风格图片 — {categories?.find(c => c.id === activeCategory)?.name || activeCategory}
               </h3>
 
               <div className="p-6 space-y-4">

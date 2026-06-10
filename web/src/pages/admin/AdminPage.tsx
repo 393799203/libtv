@@ -9,11 +9,12 @@ import {
   EditOutlined,
   UploadOutlined,
   HeartFilled,
-  HeartOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
+import { userApi, type UserItem } from '@/services/userApi';
 
-type AdminTab = 'styles' | 'favorites' | 'settings';
+type AdminTab = 'styles' | 'users' | 'settings';
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -29,22 +30,18 @@ export default function AdminPage() {
   const [newCatName, setNewCatName] = useState('');
   const [creatingCat, setCreatingCat] = useState(false);
 
-  // 添加图片弹窗
+  // 添加/编辑弹窗（复用：editingStyle=null 为新建，有值为编辑）
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', author: '', tags: '' });
   const [addFile, setAddFile] = useState<File | null>(null);
   const [addPreviewUrl, setAddPreviewUrl] = useState('');
   const [adding, setAdding] = useState(false);
+  const [editingStyle, setEditingStyle] = useState<StyleItem | null>(null); // 编辑时传入当前风格数据
   const addFileRef = useRef<HTMLInputElement>(null);
 
-  // 编辑模式
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', author: '', tags: '' });
-  const [uploadingId, setUploadingId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // 收藏加载状态
-  const [favLoading, setFavLoading] = useState(false);
+  // ========== 用户管理状态 ==========
+  const [users, setUsers] = useState<UserItem[]>([]);
+  const [userLoading, setUserLoading] = useState(false);
 
   // 加载分类
   const loadCategories = () => {
@@ -52,31 +49,36 @@ export default function AdminPage() {
   };
 
   // 加载风格列表
-  const loadStyles = (cat: string) => {
+  const loadStyles = (categoryId: string) => {
     setLoading(true);
-    styleApi.list({ category: cat })
+    styleApi.list({ category_id: categoryId })
       .then((res) => {
-        const filtered = res.items.filter(s => !s.name.startsWith('_cat_placeholder_'));
+        const filtered = res.items?.filter(s => !s.name.startsWith('_cat_placeholder_')) || [];
         setStyles(filtered);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
-  // 加载我的收藏
-  const loadFavorites = () => {
-    setLoading(true);
-    setFavLoading(true);
-    styleApi.listFavorites()
+  // 强制刷新当前列表（用于外部操作后同步数据）
+  const refreshCurrentList = () => {
+    if (activeTab === 'users') loadUsers();
+    else if (activeTab === 'styles' && activeCategory) loadStyles(activeCategory);
+  };
+
+  // 加载用户列表
+  const loadUsers = () => {
+    setUserLoading(true);
+    userApi.list()
       .then((res) => {
-        setStyles(res.items);
+        setUsers(res.items || []);
       })
       .catch(() => {})
-      .finally(() => { setLoading(false); setFavLoading(false); });
+      .finally(() => setUserLoading(false));
   };
 
   useEffect(() => {
-    if (activeTab === 'favorites') loadFavorites();
+    if (activeTab === 'users') loadUsers();
     else if (activeTab === 'styles') {
       // 先加载分类列表，选中第一个后再加载风格
       let cancelled = false;
@@ -85,17 +87,17 @@ export default function AdminPage() {
         .then((res) => {
           if (cancelled) return;
           setCategories(res);
-          const cat = res.length > 0 ? res[0].category : '';
+          const catId = res.length > 0 ? res[0].id : '';
           // 始终重置为第一个分类（确保切换回来时刷新数据）
-          if (cat) setActiveCategory(cat);
-          if (cat) {
-            return styleApi.list({ category: cat });
+          if (catId) setActiveCategory(catId);
+          if (catId) {
+            return styleApi.list({ category_id: catId });
           }
           return { items: [] as StyleItem[], total: 0, page: 1 };
         })
         .then((res) => {
           if (cancelled || !res) return;
-          const filtered = res.items.filter(s => !s.name.startsWith('_cat_placeholder_'));
+          const filtered = (res.items || []).filter(s => !s.name.startsWith('_cat_placeholder_'));
           setStyles(filtered);
         })
         .catch(() => {})
@@ -111,39 +113,55 @@ export default function AdminPage() {
     }
   }, [activeCategory, activeTab]); // 依赖 activeCategory 和 activeTab
 
-  // 切换收藏（用于"我的收藏" tab）
-  const handleToggleFav = async (e: React.MouseEvent, styleId: string) => {
-    e.stopPropagation();
-    try {
-      await styleApi.toggleFavorite(styleId);
-      // 取消收藏后重新加载列表
-      loadFavorites();
-    } catch {}
-  };
+  // 页面获得焦点时自动刷新（处理从其他页面返回的情况）
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshCurrentList();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [activeTab, activeCategory]);
 
   // 新建分类
   const handleCreateCategory = async () => {
     if (!newCatName.trim()) return;
     setCreatingCat(true);
     try {
-      await styleApi.create({
-        name: `_cat_placeholder_${newCatName.trim()}`,
-        category: newCatName.trim(),
-        tags: [],
+      await styleApi.createCategory({
+        name: newCatName.trim(),
+        sort_order: 0,
       });
       setShowNewCatDialog(false);
       setNewCatName('');
       loadCategories();
-      setActiveCategory(newCatName.trim());
+      // 创建后选中新的分类
+      const res = await styleApi.categories();
+      if (res.length > 0) {
+        // 找到刚创建的分类（按名称匹配）
+        const newCat = res.find(c => c.name === newCatName.trim());
+        if (newCat) setActiveCategory(newCat.id);
+      }
     } catch {}
     setCreatingCat(false);
   };
 
-  // 添加图片
+  // 打开添加弹窗
   const openAddDialog = () => {
+    setEditingStyle(null);
     setAddForm({ name: '', author: '', tags: '' });
     setAddFile(null);
     setAddPreviewUrl('');
+    setShowAddDialog(true);
+  };
+
+  // 打开编辑弹窗（复用添加弹窗，预填数据）
+  const openEditDialog = (s: StyleItem) => {
+    setEditingStyle(s);
+    setAddForm({ name: s.name, author: s.author, tags: (s.tags || []).join(', ') });
+    setAddFile(null); // 不预填文件，用户可选换图
+    setAddPreviewUrl(s.image_url || ''); // 显示当前图片
     setShowAddDialog(true);
   };
 
@@ -153,16 +171,32 @@ export default function AdminPage() {
   };
 
   const handleAddSubmit = async () => {
-    if (!addFile || !addForm.name.trim()) return;
+    if (!addForm.name.trim()) return;
+    // 新建模式必须有图片
+    if (!editingStyle && !addFile) return;
     setAdding(true);
     try {
-      const res = await styleApi.create({
-        name: addForm.name.trim(),
-        author: addForm.author.trim() || undefined,
-        category: activeCategory,
-        tags: addForm.tags ? addForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
-      });
-      await styleApi.uploadImage(res.id, addFile);
+      if (editingStyle) {
+        // 编辑模式：更新信息 + 可选换图
+        await styleApi.update(editingStyle.id, {
+          name: addForm.name.trim(),
+          author: addForm.author.trim() || undefined,
+          category_id: activeCategory,
+          tags: addForm.tags ? addForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
+        });
+        if (addFile) {
+          await styleApi.uploadImage(editingStyle.id, addFile);
+        }
+      } else {
+        // 新建模式：创建 + 上传图片
+        const res = await styleApi.create({
+          name: addForm.name.trim(),
+          author: addForm.author.trim() || undefined,
+          category_id: activeCategory,
+          tags: addForm.tags ? addForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
+        });
+        await styleApi.uploadImage(res.id, addFile);
+      }
       setShowAddDialog(false);
       URL.revokeObjectURL(addPreviewUrl);
       loadStyles(activeCategory);
@@ -171,38 +205,15 @@ export default function AdminPage() {
     setAdding(false);
   };
 
-  // 编辑
-  const startEdit = (s: StyleItem) => {
-    setEditingId(s.id);
-    setEditForm({ name: s.name, author: s.author, tags: s.tags.join(', ') });
-  };
-  const saveEdit = async () => {
-    if (!editingId || !editForm.name.trim()) return;
-    try {
-      await styleApi.update(editingId, {
-        name: editForm.name.trim(), author: editForm.author.trim() || undefined,
-        tags: editForm.tags ? editForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
-      });
-      setEditingId(null); loadStyles(activeCategory);
-    } catch {}
-  };
-
   // 删除
   const handleDelete = async (id: string) => {
     try { await styleApi.delete(id); loadStyles(activeCategory); loadCategories(); } catch {}
   };
 
-  // 替换图片
-  const handleUpload = async (id: string, file: File) => {
-    setUploadingId(id);
-    try { await styleApi.uploadImage(id, file); loadStyles(activeCategory); } catch {}
-    setUploadingId(null);
-  };
-
   // 侧边栏菜单
   const menuItems: { key: AdminTab; icon: React.ReactNode; label: string }[] = [
     { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
-    { key: 'favorites', icon: <HeartFilled />, label: '我的收藏' },
+    { key: 'users', icon: <UserOutlined />, label: '用户管理' },
     { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
   ];
 
@@ -239,21 +250,21 @@ export default function AdminPage() {
           <>
             {/* 工具栏 */}
             <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 shrink-0">
-              {categories.length === 0 ? (
+              {(categories?.length || 0) === 0 ? (
                 <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
               ) : (
                 <div className="flex gap-1.5 overflow-x-auto">
-                  {categories.map(cat => (
+                  {(categories || []).map(cat => (
                     <button
-                      key={cat.category}
-                      onClick={() => { setActiveCategory(cat.category); setEditingId(null); }}
+                      key={cat.id}
+                      onClick={() => setActiveCategory(cat.id)}
                       className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
-                        activeCategory === cat.category ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+                        activeCategory === cat.id ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
                       }`}
                     >
-                      {cat.category}
-                      <span className={`text-[10px] ${activeCategory === cat.category ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
-                        {cat.count}
+                      {cat.name}
+                      <span className={`text-[10px] ${activeCategory === cat.id ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                        {cat.style_count}
                       </span>
                     </button>
                   ))}
@@ -272,7 +283,7 @@ export default function AdminPage() {
 
             {/* 图墙 */}
             <div className="flex-1 overflow-y-auto p-6">
-              {!activeCategory && categories.length > 0 && (
+              {(!activeCategory) && (categories?.length || 0) > 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400">
                   <FolderAddOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
                   <div className="text-[14px]">选择一个分类查看或上传图片</div>
@@ -280,22 +291,22 @@ export default function AdminPage() {
               )}
               {loading ? (
                 <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
-              ) : activeCategory && styles.length === 0 ? (
+              ) : activeCategory && (styles?.length || 0) === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-gray-400">
                   <UploadOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
-                  <div className="text-[14px] mb-2">「{activeCategory}」暂无风格图片</div>
+                  <div className="text-[14px] mb-2">「{categories?.find(c => c.id === activeCategory)?.name || activeCategory}」暂无风格图片</div>
                   <button onClick={openAddDialog} className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
                     <PlusOutlined /> 上传第一张图片
                   </button>
                 </div>
-              ) : activeCategory && styles.length > 0 ? (
+              ) : activeCategory && (styles?.length || 0) > 0 ? (
                 <>
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-[13px] text-gray-500">{styles.length} 张图片</span>
+                    <span className="text-[13px] text-gray-500">{styles?.length || 0} 张图片</span>
                   </div>
                   <div className="grid grid-cols-4 gap-4">
-                    {styles.map(style => (
-                      <div key={style.id} className={`group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all ${editingId === style.id ? 'ring-2 ring-blue-400' : ''}`}>
+                    {(styles || []).map(style => (
+                      <div key={style.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
                         <div className="aspect-[4/3] relative bg-gray-100">
                           {style.image_url ? (
                             <img src={style.image_url} alt={style.name} className="w-full h-full object-cover" />
@@ -303,10 +314,10 @@ export default function AdminPage() {
                             <div className="w-full h-full flex items-center justify-center text-gray-300 text-[12px]">暂无图片</div>
                           )}
 
-                          {/* 右上角标签 */}
-                          {style.tags.length > 0 && (
-                            <div className="absolute top-2 right-2 flex gap-1 z-10 flex-wrap">
-                              {style.tags.slice(0, 2).map(tag => (
+                          {/* 左上角标签 */}
+                          {(style.tags?.length || 0) > 0 && (
+                            <div className="absolute top-2 left-2 flex gap-1 z-10 flex-wrap">
+                              {(style.tags || []).slice(0, 2).map(tag => (
                                 <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">
                                   {tag}
                                 </span>
@@ -314,39 +325,18 @@ export default function AdminPage() {
                             </div>
                           )}
 
-                          {/* Hover 操作栏 */}
+                          {/* Hover 操作栏：编辑 + 删除 */}
                           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                            <button onClick={() => startEdit(style)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-white/90 hover:text-white hover:bg-black/70 cursor-pointer" title="编辑信息">
+                            <button onClick={() => openEditDialog(style)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-white/90 hover:text-white hover:bg-black/70 cursor-pointer" title="编辑">
                               <EditOutlined style={{ fontSize: 11 }} />
-                            </button>
-                            <button onClick={() => fileInputRef.current?.click()} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-white/90 hover:text-white hover:bg-black/70 cursor-pointer" title="替换图片">
-                              <UploadOutlined style={{ fontSize: 11 }} />
                             </button>
                             <button onClick={() => handleDelete(style.id)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/50 cursor-pointer" title="删除">
                               <DeleteOutlined style={{ fontSize: 11 }} />
                             </button>
                           </div>
-                          {uploadingId === style.id && (
-                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-20">
-                              <span className="text-white text-[12px]">上传中...</span>
-                            </div>
-                          )}
-                          {/* 编辑模式 */}
-                          {editingId === style.id && (
-                            <div className="absolute inset-0 z-25 bg-white/95 backdrop-blur-sm p-3 flex flex-col gap-2">
-                              <input autoFocus value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} placeholder="风格名称 *" className="px-2.5 py-1.5 text-[12px] bg-white border border-blue-300 rounded-lg focus:border-blue-500 outline-none" />
-                              <input value={editForm.author} onChange={e => setEditForm(f => ({ ...f, author: e.target.value }))} placeholder="作者" className="px-2.5 py-1.5 text-[12px] bg-white border border-gray-200 rounded-lg focus:border-blue-400 outline-none" />
-                              <input value={editForm.tags} onChange={e => setEditForm(f => ({ ...f, tags: e.target.value }))} placeholder="标签（逗号分隔）" className="px-2.5 py-1.5 text-[12px] bg-white border border-gray-200 rounded-lg focus:border-blue-400 outline-none" />
-                              <div className="flex gap-2 mt-auto">
-                                <button onClick={saveEdit} className="flex-1 py-1.5 text-[12px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">保存</button>
-                                <button onClick={() => setEditingId(null)} className="flex-1 py-1.5 text-[12px] bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 cursor-pointer">取消</button>
-                              </div>
-                            </div>
-                          )}
+
                           {/* 底部浮层 + 点赞数 */}
-                          {editingId !== style.id && (
-                            <>
-                              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
+                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
                                 <p className="text-white text-[13px] font-medium truncate drop-shadow">{style.name}</p>
                                 <div className="flex items-center justify-between mt-1">
                                   {style.author ? <span className="text-white/70 text-[11px] truncate mr-2">{style.author}</span> : <span />}
@@ -357,91 +347,85 @@ export default function AdminPage() {
                                   </div>
                                 </div>
                               </div>
-                            </>
-                          )}
                         </div>
                       </div>
                     ))}
                   </div>
                 </>
               ) : null}
-
-              <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png,.webp,.gif" className="hidden"
-                onChange={e => {
-                  const f = e.target.files?.[0];
-                  if (f && editingId) handleUpload(editingId, f);
-                  else if (f && activeCategory) { openAddDialog(); setAddFile(f); setAddPreviewUrl(URL.createObjectURL(f)); }
-                  e.target.value = '';
-                }}
-              />
             </div>
 
             <div className="px-6 py-2.5 border-t border-gray-100 shrink-0 flex items-center justify-between text-[12px] text-gray-400 bg-white">
-              <span>共 {categories.length} 个分类 · {activeCategory ? `${styles.length} 张图片` : ''}</span>
-              <span>Hover 卡片可编辑 / 替换 / 删除</span>
+              <span>共 {categories?.length || 0} 个分类 · {activeCategory ? `${styles?.length || 0} 张图片` : ''}</span>
+              <span>Hover 卡片可编辑 / 删除</span>
             </div>
           </>
         )}
 
-        {/* ========== 我的收藏 Tab ========== */}
-        {activeTab === 'favorites' && (
+        {/* ========== 用户管理 Tab ========== */}
+        {activeTab === 'users' && (
           <div className="flex-1 overflow-y-auto p-6">
-            {favLoading || loading ? (
+            {userLoading ? (
               <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
-            ) : styles.length === 0 ? (
+            ) : (users?.length || 0) === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-                <HeartOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
-                <div className="text-[14px] mb-2">暂无收藏</div>
-                <span className="text-[12px]">在风格管理中点击卡片上的心形图标即可收藏</span>
+                <UserOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
+                <div className="text-[14px] mb-2">暂无用户</div>
               </div>
             ) : (
               <>
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-[13px] text-gray-500">共 {styles.length} 个收藏</span>
+                  <span className="text-[13px] text-gray-500">共 {users?.length || 0} 个用户</span>
                 </div>
-                <div className="grid grid-cols-4 gap-4">
-                  {styles.map(style => (
-                    <div key={style.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
-                      <div className="aspect-[4/3] relative bg-gray-100">
-                        {style.image_url ? (
-                          <img src={style.image_url} alt={style.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-300 text-[12px]">暂无图片</div>
-                        )}
-
-                        {/* 右上角标签 */}
-                        {style.tags.length > 0 && (
-                          <div className="absolute top-2 right-2 flex gap-1 z-10 flex-wrap">
-                            {style.tags.slice(0, 2).map(tag => (
-                              <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
-                          <p className="text-white text-[13px] font-medium truncate drop-shadow">{style.name}</p>
-                          <div className="flex items-center justify-between mt-1">
-                            {style.author && <span className="text-white/70 text-[11px] truncate mr-2">{style.author}</span>}
-                            {/* 点赞数显示 */}
-                            <div className="flex items-center gap-1 text-white/70 text-[10px]">
-                              <HeartFilled style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)' }} />
-                              <span>{style.likes || 0}</span>
-                            </div>
-                          </div>
-                        </div>
-                        {/* 取消收藏按钮 */}
-                        <button
-                          onClick={(e) => handleToggleFav(e, style.id)}
-                          className="absolute bottom-2 right-2 z-20 w-7 h-7 flex items-center justify-center rounded-full bg-red-500/80 backdrop-blur-md cursor-pointer hover:bg-red-500 transition-colors"
-                          title="取消收藏"
-                        >
-                          <HeartFilled style={{ color: '#fff', fontSize: 13 }} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <table className="w-full text-[13px]">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">ID</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">邮箱</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">昵称</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(users || []).map(user => (
+                        <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{user.id}</td>
+                          <td className="px-4 py-3 text-gray-800">{user.email}</td>
+                          <td className="px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded-full text-[11px] ${
+                              user.role === 'admin'
+                                ? 'bg-purple-100 text-purple-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {user.role === 'admin' ? '管理员' : '普通用户'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">
+                            {new Date(user.created_at).toLocaleDateString('zh-CN')}
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`确定要删除用户「${user.email}」吗？此操作不可恢复。`)) {
+                                  userApi.delete(user.id)
+                                    .then(() => loadUsers())
+                                    .catch(() => alert('删除失败'));
+                                }
+                              }}
+                              className="text-red-500 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer"
+                            >
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
@@ -488,7 +472,9 @@ export default function AdminPage() {
         <div className="fixed inset-0 z-[10000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} />
           <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
-            <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">添加风格图片 — {activeCategory}</h3>
+            <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">
+              {editingStyle ? '编辑风格' : '添加风格图片'} — {categories?.find(c => c.id === activeCategory)?.name || activeCategory}
+            </h3>
             <div className="p-6 space-y-4">
               <div className="flex gap-4">
                 <label className={`w-[200px] h-[180px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors shrink-0 ${addFile ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
@@ -517,8 +503,8 @@ export default function AdminPage() {
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
               <button onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
-              <button onClick={handleAddSubmit} disabled={!addFile || !addForm.name.trim() || adding} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
-                {adding ? '添加中...' : '确认添加'}
+              <button onClick={handleAddSubmit} disabled={(!editingStyle && !addFile) || !addForm.name.trim() || adding} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+                {adding ? (editingStyle ? '保存中...' : '添加中...') : (editingStyle ? '保存修改' : '确认添加')}
               </button>
             </div>
           </div>

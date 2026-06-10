@@ -67,7 +67,7 @@ func (s *UserService) Login(ctx context.Context, email, password string) (string
 	return token, user, nil
 }
 
-func (s *UserService) GetByID(ctx context.Context, id int64) (*model.User, error) {
+func (s *UserService) GetByID(ctx context.Context, id string) (*model.User, error) {
 	return s.userRepo.FindByID(ctx, id)
 }
 

@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// 自动迁移
-if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Video{}, &model.Style{}, &model.StyleFavorite{}); err != nil {
+if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Video{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -61,7 +61,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	}()
 
 	// 初始化 Handler
-	userHandler := handler.NewUserHandler(userService)
+	userHandler := handler.NewUserHandler(userService, db)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
@@ -104,16 +104,14 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 图片上传（公开）
 	r.POST("/api/upload/image", uploadHandler.UploadImage)
 
-	// 风格市场（公开）
-	r.GET("/api/styles", styleHandler.List)
-	r.GET("/api/styles/categories", styleHandler.Categories)
-
 	// 需要认证的路由
 	api := r.Group("/api")
 	api.Use(middleware.Auth())
 	{
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
+		api.GET("/users", userHandler.List) // 管理员：获取所有用户
+		api.DELETE("/users/:id", userHandler.Delete) // 管理员：删除用户
 
 		// 项目 + 画布
 		projects := api.Group("/projects")
@@ -142,9 +140,19 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			videos.DELETE("/:id", videoHandler.Delete)
 		}
 
+		// 分类管理（需登录）
+		categories := api.Group("/styles/categories")
+		{
+			categories.GET("", styleHandler.Categories)
+			categories.POST("", styleHandler.CreateCategory)
+			categories.PUT("/:id", styleHandler.UpdateCategory)
+			categories.DELETE("/:id", styleHandler.DeleteCategory)
+		}
+
 		// 风格管理（需登录）
 		styles := api.Group("/styles")
 		{
+			styles.GET("", styleHandler.List)
 			styles.POST("", styleHandler.Create)
 			styles.POST("/:id/image", styleHandler.UploadImage)
 			styles.PUT("/:id", styleHandler.Update)

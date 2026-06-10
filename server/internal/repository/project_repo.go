@@ -12,7 +12,7 @@ import (
 type ProjectRepo interface {
 	Create(ctx context.Context, project *model.Project) error
 	FindByID(ctx context.Context, id string) (*model.Project, error)
-	ListByUserID(ctx context.Context, userID int64, offset, limit int) ([]*model.Project, int64, error)
+	ListByUserID(ctx context.Context, userID string, offset, limit int) ([]*model.Project, int64, error)
 	Update(ctx context.Context, project *model.Project) error
 	Delete(ctx context.Context, id string) error
 }
@@ -37,7 +37,7 @@ func (r *projectRepo) FindByID(ctx context.Context, id string) (*model.Project, 
 	return &project, nil
 }
 
-func (r *projectRepo) ListByUserID(ctx context.Context, userID int64, offset, limit int) ([]*model.Project, int64, error) {
+func (r *projectRepo) ListByUserID(ctx context.Context, userID string, offset, limit int) ([]*model.Project, int64, error) {
 	var projects []*model.Project
 	var total int64
 	db := r.db.WithContext(ctx).Where("user_id = ?", userID)

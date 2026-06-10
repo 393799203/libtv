@@ -68,8 +68,10 @@ export function AppLayout() {
     <Layout className="h-screen">
       <AntHeader className="!bg-white !px-4 !h-12 flex items-center justify-between border-b border-gray-200 shadow-sm !leading-none">
         <div className="flex items-center gap-3">
-          <VideoCameraOutlined className="text-lg text-blue-500" />
-          <span className="font-semibold text-base text-gray-800">LibTV</span>
+          <button onClick={() => navigate('/')} className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer">
+            <VideoCameraOutlined className="text-lg text-blue-500" />
+            <span className="font-semibold text-base text-gray-800">LibTV</span>
+          </button>
           <span className="text-gray-300">|</span>
           <span className="text-sm text-gray-400">AI 视频创作工作台</span>
         </div>

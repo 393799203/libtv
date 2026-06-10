@@ -10,7 +10,7 @@ import (
 
 // User 用户模型
 type User struct {
-	ID           int64          `gorm:"primaryKey;autoIncrement" json:"id"`
+	ID           string         `gorm:"primaryKey;size:36" json:"id"`
 	Email        string         `gorm:"uniqueIndex;size:255;not null" json:"email"`
 	PasswordHash string         `gorm:"size:255;not null" json:"-"`
 	Nickname     string         `gorm:"size:100" json:"nickname"`
@@ -22,10 +22,18 @@ type User struct {
 
 func (User) TableName() string { return "users" }
 
+// BeforeCreate 生成 UUID
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if u.ID == "" {
+		u.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // Project 项目模型
 type Project struct {
 	ID          string         `gorm:"primaryKey;size:36" json:"id"`
-	UserID      int64          `gorm:"index;not null" json:"user_id"`
+	UserID      string         `gorm:"index;size:36;not null" json:"user_id"`
 	Name        string         `gorm:"size:255;not null" json:"name"`
 	Description string         `gorm:"size:1000" json:"description"`
 	CoverURL    string         `gorm:"size:500" json:"cover_url"`
@@ -95,7 +103,7 @@ func (AITask) TableName() string { return "ai_tasks" }
 // Video 视频模型
 type Video struct {
 	ID           string         `gorm:"primaryKey;size:36" json:"id"`
-	UserID       int64          `gorm:"index;not null" json:"user_id"`
+	UserID       string         `gorm:"index;size:36;not null" json:"user_id"`
 	Title        string         `gorm:"size:255;not null" json:"title"`
 	Description  string         `gorm:"size:1000" json:"description"`
 	ThumbnailURL string         `gorm:"size:500" json:"thumbnail_url"`
@@ -124,15 +132,16 @@ func (v *Video) BeforeCreate(tx *gorm.DB) error {
 
 // Style 风格模型（风格市场）
 type Style struct {
-	ID        string         `gorm:"primaryKey;size:36" json:"id"`
-	Name      string         `gorm:"size:255;not null" json:"name"`
-	Author    string         `gorm:"size:100" json:"author"`
-	ImageURL  string         `gorm:"size:500;not null" json:"image_url"`
-	Likes     int            `gorm:"default:0" json:"likes"`
-	Category  string         `gorm:"size:50;default:'推荐'" json:"category"`
-	Tags      datatypes.JSON `gorm:"type:jsonb" json:"tags"` // []string
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID         string         `gorm:"primaryKey;size:36" json:"id"`
+	Name       string         `gorm:"size:255;not null" json:"name"`
+	Author     string         `gorm:"size:100" json:"author"`
+	ImageURL   string         `gorm:"size:500;not null" json:"image_url"`
+	Likes      int            `gorm:"default:0" json:"likes"`
+	CategoryID string         `gorm:"size:36;index" json:"category_id"` // 关联分类 ID
+	Tags       datatypes.JSON `gorm:"type:jsonb" json:"tags"`           // []string
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	Category   Category       `gorm:"foreignKey:CategoryID" json:"category"` // 关联查询时返回分类信息
 }
 
 func (Style) TableName() string { return "styles" }
@@ -146,6 +155,24 @@ type StyleFavorite struct {
 }
 
 func (StyleFavorite) TableName() string { return "style_favorites" }
+
+// Category 风格分类模型
+type Category struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	Name      string    `gorm:"size:100;uniqueIndex;not null" json:"name"`
+	SortOrder int       `gorm:"default:0" json:"sort_order"` // 排序权重，越大越靠前
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (Category) TableName() string { return "style_categories" }
+
+func (c *Category) BeforeCreate(tx *gorm.DB) error {
+	if c.ID == "" {
+		c.ID = uuid.New().String()
+	}
+	return nil
+}
 
 // BeforeCreate 生成 UUID
 func (f *StyleFavorite) BeforeCreate(tx *gorm.DB) error {

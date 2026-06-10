@@ -16,7 +16,7 @@ func NewProjectService(projectRepo repository.ProjectRepo, canvasRepo repository
 	return &ProjectService{projectRepo: projectRepo, canvasRepo: canvasRepo}
 }
 
-func (s *ProjectService) Create(ctx context.Context, userID int64, name, description string) (*model.Project, error) {
+func (s *ProjectService) Create(ctx context.Context, userID string, name, description string) (*model.Project, error) {
 	project := &model.Project{
 		UserID:      userID,
 		Name:        name,
@@ -43,7 +43,7 @@ func (s *ProjectService) GetByID(ctx context.Context, id string) (*model.Project
 	return s.projectRepo.FindByID(ctx, id)
 }
 
-func (s *ProjectService) ListByUserID(ctx context.Context, userID int64, page, pageSize int) ([]*model.Project, int64, error) {
+func (s *ProjectService) ListByUserID(ctx context.Context, userID string, page, pageSize int) ([]*model.Project, int64, error) {
 	offset := (page - 1) * pageSize
 	return s.projectRepo.ListByUserID(ctx, userID, offset, pageSize)
 }

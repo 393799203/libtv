@@ -42,23 +42,23 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		userID, ok := claims["user_id"].(float64)
+		userID, ok := claims["user_id"].(string)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid user_id in token"})
 			c.Abort()
 			return
 		}
 
-		c.Set("user_id", int64(userID))
+		c.Set("user_id", userID)
 		c.Set("email", claims["email"])
 		c.Next()
 	}
 }
 
-func GetUserID(c *gin.Context) int64 {
+func GetUserID(c *gin.Context) string {
 	id, _ := c.Get("user_id")
 	if id == nil {
-		return 0
+		return ""
 	}
-	return id.(int64)
+	return id.(string)
 }

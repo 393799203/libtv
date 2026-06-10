@@ -69,17 +69,17 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     styleApi.categories()
       .then((res) => {
         if (cancelled) return;
-        setCategories(res);
+        setCategories(res || []);
         // 自动选中第一个分类
-        const cat = res.length > 0 ? res[0].category : '';
-        if (cat && !activeCategory) setActiveCategory(cat);
+        const catId = (res || []).length > 0 ? res[0].id : '';
+        if (catId && !activeCategory) setActiveCategory(catId);
         // 用选中的分类加载风格
-        return styleApi.list({ category: cat || activeCategory || undefined, keyword: searchKeyword });
+        return styleApi.list({ category_id: catId || activeCategory || undefined, keyword: searchKeyword });
       })
       .then((res) => {
         if (cancelled || !res) return;
-        setStyles(res.items);
-        if (res.items.length > 0) {
+        setStyles(res.items || []);
+        if ((res.items || []).length > 0) {
           styleApi.checkFavorited(res.items.map(s => s.id))
             .then(setFavoritedMap)
             .catch(() => {});
@@ -95,10 +95,10 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     if (category !== undefined) setActiveCategory(category);
     if (keyword !== undefined) setSearchKeyword(keyword);
     setStyleLoading(true);
-    styleApi.list({ category: category ?? activeCategory, keyword: keyword ?? searchKeyword })
+    styleApi.list({ category_id: category ?? activeCategory, keyword: keyword ?? searchKeyword })
       .then((res) => {
-        setStyles(res.items);
-        if (res.items.length > 0) {
+        setStyles(res.items || []);
+        if ((res.items || []).length > 0) {
           styleApi.checkFavorited(res.items.map(s => s.id))
             .then(setFavoritedMap)
             .catch(() => {});
@@ -210,17 +210,17 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
 
                 {/* 分类标签栏 */}
                 <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-50 overflow-x-auto shrink-0">
-                  {categories.length === 0 ? (
+                  {(categories?.length || 0) === 0 ? (
                     <span className="text-[12px] text-gray-400">暂无分类</span>
-                  ) : categories.map((cat) => (
+                  ) : (categories || []).map((cat) => (
                     <button
-                      key={cat.category}
-                      onClick={() => handleFilterChange(cat.category)}
+                      key={cat.id}
+                      onClick={() => handleFilterChange(cat.id)}
                       className={`px-3 py-1 text-[12px] whitespace-nowrap rounded-full transition-colors cursor-pointer ${
-                        activeCategory === cat.category ? 'text-gray-800 font-medium bg-gray-100' : 'text-gray-600 hover:bg-gray-100'
+                        activeCategory === cat.id ? 'text-gray-800 font-medium bg-gray-100' : 'text-gray-600 hover:bg-gray-100'
                       }`}
                     >
-                      {cat.category}
+                      {cat.name}
                     </button>
                   ))}
                 </div>
@@ -231,13 +231,13 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
                     <div className="flex items-center justify-center py-20">
                       <div className="text-gray-400 text-[13px]">加载中...</div>
                     </div>
-                  ) : styles.length === 0 ? (
+                  ) : (styles?.length || 0) === 0 ? (
                     <div className="flex items-center justify-center py-20">
                       <div className="text-gray-400 text-[13px]">暂无风格</div>
                     </div>
                   ) : (
                   <div className="grid grid-cols-4 gap-3">
-                    {styles.map((style) => (
+                    {(styles || []).map((style) => (
                       <div
                         key={style.id}
                         onClick={() => { setSelectedStyle(style); setStyleMarketOpen(false); }}
@@ -255,9 +255,9 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
                         />
 
                         {/* 右上角标签 */}
-                        {style.tags.length > 0 && (
+                        {(style.tags?.length || 0) > 0 && (
                           <div className="absolute top-2 left-2 right-8 flex gap-1 z-10 flex-wrap">
-                            {style.tags.slice(0, 2).map(tag => (
+                            {(style.tags || []).slice(0, 2).map(tag => (
                               <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">
                                 {tag}
                               </span>

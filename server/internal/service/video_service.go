@@ -15,7 +15,7 @@ func NewVideoService(videoRepo repository.VideoRepo) *VideoService {
 	return &VideoService{videoRepo: videoRepo}
 }
 
-func (s *VideoService) Create(ctx context.Context, userID int64, title, description, videoURL string, duration int) (*model.Video, error) {
+func (s *VideoService) Create(ctx context.Context, userID string, title, description, videoURL string, duration int) (*model.Video, error) {
 	video := &model.Video{
 		UserID:      userID,
 		Title:       title,
