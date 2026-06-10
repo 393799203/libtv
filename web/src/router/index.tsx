@@ -70,16 +70,6 @@ export const routes: RouteObject[] = [
         ),
       },
       {
-        path: 'settings',
-        element: (
-          <AuthGuard>
-            <LazyLoad>
-              <SettingsPage />
-            </LazyLoad>
-          </AuthGuard>
-        ),
-      },
-      {
         path: 'admin/:tab?',
         element: (
           <AuthGuard>

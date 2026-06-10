@@ -341,11 +341,6 @@ export default function VideoListPage() {
                       />
                     </Dropdown>
                   </div>
-                  <div className="mt-1">
-                    {item.tags?.map((tag, i) => (
-                      <span key={i} className="text-gray-400 !text-[10px] mr-1">#{tag}</span>
-                    ))}
-                  </div>
                 </div>
               </Card>
             </div>

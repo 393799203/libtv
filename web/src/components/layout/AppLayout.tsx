@@ -3,8 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Dropdown, Avatar, Space, Button, App } from 'antd';
 import {
   VideoCameraOutlined,
-  SettingOutlined,
-  UserOutlined,
+ UserOutlined,
   LogoutOutlined,
   ControlOutlined,
 } from '@ant-design/icons';
@@ -35,7 +34,6 @@ export function AppLayout() {
   };
 
   const userMenuItems: MenuProps['items'] = [
-    { key: 'settings', icon: <SettingOutlined />, label: '设置', onClick: () => navigate('/settings') },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
   ];
