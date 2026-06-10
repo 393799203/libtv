@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { message } from 'antd';
+import { message, Select } from 'antd';
 import {
   TagOutlined,
   SettingOutlined,
@@ -69,6 +69,39 @@ export default function AdminPage() {
   const [playingShowId, setPlayingShowId] = useState<string | null>(null); // 列表卡片正在播放的 show ID
   const [addingShow, setAddingShow] = useState(false);
   const [editingShow, setEditingShow] = useState<ShowItem | null>(null);
+  const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
+  const [authorSearching, setAuthorSearching] = useState(false);
+  const authorFetchIdRef = useRef(0);
+  const authorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 远程搜索作者（防抖 + 请求时序控制）
+  const fetchAuthors = (keyword: string) => {
+    const fetchId = ++authorFetchIdRef.current;
+
+    // 防抖：仅对用户输入生效，首次加载（空keyword）立即执行
+    const needDebounce = keyword.trim().length > 0;
+    if (needDebounce && authorDebounceRef.current) clearTimeout(authorDebounceRef.current);
+
+    const doFetch = async () => {
+      setAuthorSearching(true);
+      try {
+        const res = await userApi.search(keyword.trim());
+        // 只接受最后一次请求的结果
+        if (fetchId === authorFetchIdRef.current) {
+          setAuthorOptions(res.items || []);
+        }
+      } catch {}
+      if (fetchId === authorFetchIdRef.current) {
+        setAuthorSearching(false);
+      }
+    };
+
+    if (needDebounce) {
+      authorDebounceRef.current = setTimeout(doFetch, 300);
+    } else {
+      doFetch();
+    }
+  };
 
   // 加载分类
   const loadCategories = () => {
@@ -141,6 +174,7 @@ export default function AdminPage() {
     setAddShowVideoFile(null);
     setAddShowVideoName('');
     setShowAddShowDialog(true);
+    if (authorOptions.length === 0) fetchAuthors('');
   };
 
   const openEditShowDialog = (s: ShowItem) => {
@@ -158,6 +192,7 @@ export default function AdminPage() {
     setAddShowVideoFile(null);
     setAddShowVideoName(s.video_url ? s.video_url.split('/').pop() || '' : '');
     setShowAddShowDialog(true);
+    if (authorOptions.length === 0) fetchAuthors('');
   };
 
   const handleSelectShowFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1035,11 +1070,18 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] text-gray-500 mb-1.5">作者</label>
-                  <input
-                    value={addShowForm.author}
-                    onChange={e => setAddShowForm(prev => ({ ...prev, author: e.target.value }))}
-                    placeholder="作者名称"
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
+                  <Select
+                    value={addShowForm.author || undefined}
+                    onChange={val => setAddShowForm(prev => ({ ...prev, author: val }))}
+                    onSearch={fetchAuthors}
+                    placeholder="点击选择或输入搜索"
+                    showSearch
+                    allowClear
+                    options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
+                    notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
+                    filterOption={false}
+                    getPopupContainer={(trigger) => trigger.parentElement!}
+                    style={{ width: '100%' }}
                   />
                 </div>
                 <div>

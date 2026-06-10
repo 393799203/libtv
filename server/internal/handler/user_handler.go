@@ -80,8 +80,15 @@ func (h *UserHandler) Me(c *gin.Context) {
 
 // List 获取所有用户列表（管理员）
 func (h *UserHandler) List(c *gin.Context) {
+	keyword := c.Query("keyword")
+
+	query := h.db.Order("created_at DESC")
+	if keyword != "" {
+		query = query.Where("nickname LIKE ? OR email LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+
 	var users []model.User
-	h.db.Order("created_at DESC").Find(&users)
+	query.Find(&users)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
