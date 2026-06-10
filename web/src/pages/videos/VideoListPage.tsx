@@ -271,9 +271,9 @@ export default function VideoListPage() {
 
       {/* TV Show 分类 */}
       <section className="max-w-7xl mx-auto px-6">
+        <Text className="text-gray-600 font-medium text-lg mb-3 block">TV Show</Text>
         <div className="flex items-center gap-4 mb-4">
-          <Text className="text-gray-600 font-medium shrink-0">TV Show</Text>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap flex-1">
             {showCategories.map((cat) => (
               <Tag
                 key={cat.key}
@@ -285,7 +285,6 @@ export default function VideoListPage() {
               </Tag>
             ))}
           </div>
-          <div className="flex-1" />
           <div className="relative">
             <SearchOutlined className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[14px]" />
             <input
