@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Video{}); err != nil {
+if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Video{}, &model.Style{}, &model.StyleFavorite{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -67,6 +67,7 @@ func main() {
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
 	videoHandler := handler.NewVideoHandler(videoService)
 	uploadHandler := handler.NewUploadHandler(filepath.Join("..", "public", "pic"))
+	styleHandler := handler.NewStyleHandler(db, filepath.Join("..", "public", "styles"))
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -77,12 +78,14 @@ func main() {
 	// 中间件
 	r.Use(middleware.CORS())
 
-	// 静态文件
+	// 静态文件（统一 /media 前缀）
 	r.Static("/uploads", config.C.Storage.LocalPath)
 	picDir := filepath.Join("..", "public", "pic")
-	r.Static("/pic", picDir)
+	r.Static("/media/pic", picDir)
 	videosDir := filepath.Join("..", "public", "videos")
 	r.Static("/media/videos", videosDir)
+	stylesDir := filepath.Join("..", "public", "styles")
+	r.Static("/media/styles", stylesDir)
 
 	// 公开路由
 	auth := r.Group("/api/auth")
@@ -100,6 +103,10 @@ func main() {
 
 	// 图片上传（公开）
 	r.POST("/api/upload/image", uploadHandler.UploadImage)
+
+	// 风格市场（公开）
+	r.GET("/api/styles", styleHandler.List)
+	r.GET("/api/styles/categories", styleHandler.Categories)
 
 	// 需要认证的路由
 	api := r.Group("/api")
@@ -133,6 +140,18 @@ func main() {
 			videos.POST("", videoHandler.Create)
 			videos.PUT("/:id", videoHandler.Update)
 			videos.DELETE("/:id", videoHandler.Delete)
+		}
+
+		// 风格管理（需登录）
+		styles := api.Group("/styles")
+		{
+			styles.POST("", styleHandler.Create)
+			styles.POST("/:id/image", styleHandler.UploadImage)
+			styles.PUT("/:id", styleHandler.Update)
+			styles.DELETE("/:id", styleHandler.Delete)
+			styles.POST("/:id/favorite", styleHandler.ToggleFavorite)
+			styles.GET("/favorites", styleHandler.ListFavorites)
+			styles.POST("/favorites/check", styleHandler.CheckFavorited)
 		}
 
 		// WebSocket

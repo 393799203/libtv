@@ -169,6 +169,11 @@ function scheduleFlush(
       if (nChanges.length > 0) {
         data.nodes = applyNodeChanges(nChanges, data.nodes);
         syncSelectIds(nChanges, eChanges, data);
+        // 清理已删除节点的选中状态（避免残留 ID 导致选中判断异常）
+        const currentIds = new Set(data.nodes.map((n) => n.id));
+        if (data.selectedNodeIds.some((id) => !currentIds.has(id))) {
+          data.selectedNodeIds = data.selectedNodeIds.filter((id) => currentIds.has(id));
+        }
       }
       if (eChanges.length > 0) {
         data.edges = applyEdgeChanges(eChanges, data.edges);
@@ -380,6 +385,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       data.nodes = data.nodes.filter((n) => !idSet.has(n.id));
       data.edges = data.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target));
+      // 清理被删节点的选中状态
+      data.selectedNodeIds = data.selectedNodeIds.filter((id) => !idSet.has(id));
       const hist = saveHistory(data);
       Object.assign(data, hist);
       cache.set(pid, data);

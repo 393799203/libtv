@@ -14,6 +14,7 @@ const VideoListPage = lazy(() => import('@/pages/videos/VideoListPage'));
 const VideoDetailPage = lazy(() => import('@/pages/videos/VideoDetailPage'));
 const AIModelsPage = lazy(() => import('@/pages/ai-models/AIModelsPage'));
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
+const AdminPage = lazy(() => import('@/pages/admin/AdminPage'));
 
 const Loading = () => (
   <div className="w-full h-screen flex items-center justify-center">
@@ -74,6 +75,16 @@ export const routes: RouteObject[] = [
           <AuthGuard>
             <LazyLoad>
               <SettingsPage />
+            </LazyLoad>
+          </AuthGuard>
+        ),
+      },
+      {
+        path: 'admin/:tab?',
+        element: (
+          <AuthGuard>
+            <LazyLoad>
+              <AdminPage />
             </LazyLoad>
           </AuthGuard>
         ),

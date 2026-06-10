@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Dropdown, Avatar, Space, Button, App } from 'antd';
 import {
@@ -6,6 +6,7 @@ import {
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
+  ControlOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
@@ -74,14 +75,31 @@ export function AppLayout() {
         </div>
 
         {isAuthenticated ? (
-          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-            <Button type="text" size="small">
-              <Space>
-                <Avatar size={24} icon={<UserOutlined />} src={user?.avatarUrl || undefined} />
-                <span className="text-sm">{user?.nickname ?? '用户'}</span>
-              </Space>
-            </Button>
-          </Dropdown>
+          <div className="flex items-center gap-2">
+            {/* 系统管理入口（仅管理员） */}
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => navigate('/admin/styles')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
+                  location.pathname.startsWith('/admin')
+                    ? 'text-blue-600 bg-blue-50'
+                    : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                }`}
+              >
+                <ControlOutlined />
+                系统管理
+              </button>
+            )}
+
+            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+              <Button type="text" size="small">
+                <Space>
+                  <Avatar size={24} icon={<UserOutlined />} src={user?.avatarUrl || undefined} />
+                  <span className="text-sm">{user?.nickname ?? '用户'}</span>
+                </Space>
+              </Button>
+            </Dropdown>
+          </div>
         ) : (
           <button
             onClick={() => openLoginModal()}

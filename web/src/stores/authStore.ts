@@ -60,10 +60,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       // 验证 token 是否仍然有效
       try {
-        const me = await api.get('/auth/me') as { id: number; email: string; nickname: string; avatar_url: string };
+        const me = await api.get('/auth/me') as { id: number; email: string; nickname: string; avatar_url: string; role?: string };
         // token 有效，更新用户信息
         set({
-          user: { id: me.id, email: me.email, nickname: me.nickname, avatarUrl: me.avatar_url },
+          user: { id: me.id, email: me.email, nickname: me.nickname, avatarUrl: me.avatar_url, role: me.role },
           isInitialized: true,
         });
       } catch {

@@ -21,11 +21,7 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
-      '/media/videos': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/pic': {
+      '/media': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

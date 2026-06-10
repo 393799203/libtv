@@ -15,6 +15,7 @@ type User struct {
 	PasswordHash string         `gorm:"size:255;not null" json:"-"`
 	Nickname     string         `gorm:"size:100" json:"nickname"`
 	AvatarURL    string         `gorm:"size:500" json:"avatar_url"`
+	Role         string         `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
@@ -117,6 +118,47 @@ func (Video) TableName() string { return "videos" }
 func (v *Video) BeforeCreate(tx *gorm.DB) error {
 	if v.ID == "" {
 		v.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// Style 风格模型（风格市场）
+type Style struct {
+	ID        string         `gorm:"primaryKey;size:36" json:"id"`
+	Name      string         `gorm:"size:255;not null" json:"name"`
+	Author    string         `gorm:"size:100" json:"author"`
+	ImageURL  string         `gorm:"size:500;not null" json:"image_url"`
+	Likes     int            `gorm:"default:0" json:"likes"`
+	Category  string         `gorm:"size:50;default:'推荐'" json:"category"`
+	Tags      datatypes.JSON `gorm:"type:jsonb" json:"tags"` // []string
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+func (Style) TableName() string { return "styles" }
+
+// StyleFavorite 风格收藏
+type StyleFavorite struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	UserID    string    `gorm:"size:36;not null;index:idx_user_style" json:"user_id"`
+	StyleID   string    `gorm:"size:36;not null;index:idx_user_style" json:"style_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (StyleFavorite) TableName() string { return "style_favorites" }
+
+// BeforeCreate 生成 UUID
+func (f *StyleFavorite) BeforeCreate(tx *gorm.DB) error {
+	if f.ID == "" {
+		f.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// BeforeCreate 生成 UUID
+func (s *Style) BeforeCreate(tx *gorm.DB) error {
+	if s.ID == "" {
+		s.ID = uuid.New().String()
 	}
 	return nil
 }

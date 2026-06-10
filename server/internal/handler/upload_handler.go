@@ -73,7 +73,7 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 			"code": 0,
 			"msg":  "ok",
 			"data": gin.H{
-				"url": "/pic/" + filename,
+				"url": "/media/pic/" + filename,
 			},
 		})
 		return
@@ -104,7 +104,7 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		"code": 0,
 		"msg":  "ok",
 		"data": gin.H{
-			"url": "/pic/" + filename,
+			"url": "/media/pic/" + filename,
 		},
 	})
 }
