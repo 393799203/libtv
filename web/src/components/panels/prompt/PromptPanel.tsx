@@ -1,5 +1,4 @@
 import { memo, useState, useCallback, useMemo } from 'react';
-import { ArrowsAltOutlined, ShrinkOutlined } from '@ant-design/icons';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
 import type {

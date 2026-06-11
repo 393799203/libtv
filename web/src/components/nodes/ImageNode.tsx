@@ -9,7 +9,7 @@ import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { BaseNode } from './BaseNode';
 import { uploadImage } from '@/services/uploadApi';
-import { createDefaultNodeData } from '@/utils/nodeFactory';
+import { createNode } from '@/utils/nodeFactory';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
 
@@ -62,18 +62,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     const posX = currentNode?.position.x ?? 0;
     const posY = currentNode?.position.y ?? 0;
 
-    const newNodeId = `image-${Date.now()}`;
-    addNode({
-      id: newNodeId,
-      type: 'image',
-      position: { x: posX + 350, y: posY },
-      data: createDefaultNodeData('image'),
-      style: { width: 280 },
-    });
+    const newNode = createNode('image', { x: posX + 350, y: posY });
+    addNode(newNode);
     addEdge({
-      id: `e-${id}-${newNodeId}`,
+      id: `e-${id}-${newNode.id}`,
       source: id,
-      target: newNodeId,
+      target: newNode.id,
       type: 'dataFlow',
     });
   }, [id, addNode, addEdge]);

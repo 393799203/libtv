@@ -9,7 +9,8 @@ import {
 } from '@ant-design/icons';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { NODE_TYPE_CONFIG, type NodeType, type LibTVNode } from '@/types/canvas';
+import { type NodeType } from '@/types/canvas';
+import { createNode } from '@/utils/nodeFactory';
 
 interface ContextMenuProps {
   position: { x: number; y: number };
@@ -27,75 +28,9 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
   const handleMenuItemClick = useCallback(
     (e: { key: React.Key }) => {
       const nodeType = e.key as NodeType;
-      const config = NODE_TYPE_CONFIG[nodeType];
-
       const flowPosition = screenToFlowPosition(position);
 
-      const baseData = {
-        type: nodeType,
-        label: config.label,
-        status: 'idle' as const,
-      };
-
-      let nodeData;
-      switch (nodeType) {
-        case 'text':
-          nodeData = {
-            ...baseData,
-            type: 'text' as const,
-            content: '',
-          };
-          break;
-        case 'image':
-          nodeData = {
-            ...baseData,
-            type: 'image' as const,
-            prompt: '',
-            model: 'stable-diffusion-xl',
-            width: 1024,
-            height: 1024,
-          };
-          break;
-        case 'video':
-          nodeData = {
-            ...baseData,
-            type: 'video' as const,
-            prompt: '',
-            model: 'kling-v1',
-            duration: 5,
-            fps: 24,
-          };
-          break;
-        case 'audio':
-          nodeData = {
-            ...baseData,
-            type: 'audio' as const,
-            text: '',
-            voice: 'zh-CN-XiaoxiaoNeural',
-            speed: 1,
-          };
-          break;
-        case 'script':
-          nodeData = {
-            ...baseData,
-            type: 'script' as const,
-            scriptContent: '',
-            shots: [],
-          };
-          break;
-      }
-
-      const newNode: LibTVNode = {
-        id: `${nodeType}-${Date.now()}`,
-        type: nodeType,
-        position: flowPosition,
-        data: nodeData as LibTVNode['data'],
-        style: {
-          width: 280,
-          ...(nodeType === 'video' ? { width: 320, height: 180 } : nodeType !== 'image' ? { height: 200 } : {}),
-        },
-      };
-
+      const newNode = createNode(nodeType, flowPosition);
       addNode(newNode);
       onClose();
     },

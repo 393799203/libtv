@@ -1,4 +1,44 @@
-import type { NodeType, LibTVNodeData } from '@/types/canvas';
+import type { NodeType, LibTVNodeData, LibTVNode } from '@/types/canvas';
+import type { XYPosition } from '@xyflow/react';
+
+// 各类型节点的默认尺寸
+const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
+  text: { width: 280, height: 280 },
+  image: { width: 280 },
+  video: { width: 320, height: 180 },
+  audio: { width: 280, height: 200 },
+  script: { width: 280, height: 200 },
+};
+
+/**
+ * 统一创建节点工厂 — 所有节点只走这一套逻辑
+ * @param nodeType 节点类型
+ * @param position 画布位置
+ * @param overrides 可选覆盖（id / data / style）
+ */
+export function createNode(
+  nodeType: NodeType,
+  position: XYPosition,
+  overrides?: {
+    id?: string;
+    data?: Partial<LibTVNodeData>;
+    style?: React.CSSProperties;
+  },
+): LibTVNode {
+  return {
+    id: overrides?.id ?? `${nodeType}-${Date.now()}`,
+    type: nodeType,
+    position,
+    data: {
+      ...createDefaultNodeData(nodeType),
+      ...overrides?.data,
+    } as LibTVNodeData,
+    style: {
+      ...DEFAULT_STYLE[nodeType],
+      ...overrides?.style,
+    },
+  };
+}
 
 // 创建节点默认数据
 export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {

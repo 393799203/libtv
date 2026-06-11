@@ -14,7 +14,7 @@ import type { UpstreamInput } from '@/types/prompt';
 import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
-import { createDefaultNodeData } from '@/utils/nodeFactory';
+import { createNode } from '@/utils/nodeFactory';
 
 interface PromptUpstreamBarProps {
   inputs: UpstreamInput[];
@@ -125,19 +125,16 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     const posY = current?.position.y ?? 0;
 
     const newNodeId = `style-${Date.now()}`;
-    const nodeData = createDefaultNodeData('image') as ImageNodeData;
-    nodeData.label = `风格-${style.name}`;
-    nodeData.imageUrl = style.image_url;
-    // 把后端 styleId 存到风格节点上，恢复时从这里取
-    (nodeData as Record<string, string>).styleId = style.id;
-
-    addNode({
+    const styleNode = createNode('image', { x: posX, y: posY }, {
       id: newNodeId,
-      type: 'image',
-      position: { x: posX, y: posY },
-      data: nodeData,
-      style: { width: 280 },
+      data: {
+        label: `风格-${style.name}`,
+        imageUrl: style.image_url,
+        styleId: style.id,
+      } as any,
     });
+
+    addNode(styleNode);
     addEdgeFn({
       id: `e-${newNodeId}-${targetNodeId}`,
       source: newNodeId,

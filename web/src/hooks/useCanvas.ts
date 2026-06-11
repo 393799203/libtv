@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
-import type { NodeType, LibTVNode, CanvasData } from '@/types/canvas';
-import { createDefaultNodeData } from '@/utils/nodeFactory';
+import type { NodeType, CanvasData } from '@/types/canvas';
+import { createNode } from '@/utils/nodeFactory';
 
 export function useCanvas() {
   const { screenToFlowPosition } = useReactFlow();
@@ -23,16 +23,7 @@ export function useCanvas() {
         y: event.clientY,
       });
 
-      const newNode: LibTVNode = {
-        id: `${nodeType}-${Date.now()}`,
-        type: nodeType,
-        position,
-        data: createDefaultNodeData(nodeType),
-        style: {
-          width: 280,
-          ...(nodeType === 'video' ? { width: 320, height: 180 } : nodeType !== 'image' ? { height: 200 } : {}),
-        },
-      };
+      const newNode = createNode(nodeType, position);
 
       addNode(newNode);
     },

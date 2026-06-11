@@ -34,7 +34,7 @@ import { nodeTypes } from '@/components/nodes';
 import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
 import { CanvasContextMenu } from './CanvasContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
-import { createDefaultNodeData } from '@/utils/nodeFactory';
+import { createNode } from '@/utils/nodeFactory';
 
 const edgeTypes = {
   dataFlow: DataFlowEdge,
@@ -150,23 +150,13 @@ export const Canvas = memo(function Canvas() {
       const { position, sourceNodeId, sourceHandle } = nodeSelectPopup;
       const flowPos = screenToFlowPosition(position);
 
-      const newNodeId = `${nodeType}-${Date.now()}`;
-      const newNode: LibTVNode = {
-        id: newNodeId,
-        type: nodeType,
-        position: { x: flowPos.x, y: flowPos.y },
-        data: createDefaultNodeData(nodeType),
-        style: {
-          width: 280,
-          ...(nodeType === 'video' ? { width: 320, height: 180 } : nodeType !== 'image' ? { height: 200 } : {}),
-        },
-      };
+      const newNode = createNode(nodeType, flowPos);
 
       addNode(newNode);
       addEdge({
-        id: `e-${sourceNodeId}-${newNodeId}`,
+        id: `e-${sourceNodeId}-${newNode.id}`,
         source: sourceNodeId,
-        target: newNodeId,
+        target: newNode.id,
         type: 'dataFlow',
         sourceHandle: sourceHandle || undefined,
       });
@@ -257,7 +247,7 @@ export const Canvas = memo(function Canvas() {
     const screenPos = flowToScreenPosition({ x: nodeCenterX, y: nodeBottomY });
     return {
       x: screenPos.x,
-      y: screenPos.y - 20
+      y: screenPos.y
     };
   }, [selectedNode, flowToScreenPosition, viewport]);
 
