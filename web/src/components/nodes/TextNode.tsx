@@ -199,7 +199,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
               <ReactMarkdown>{content}</ReactMarkdown>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-4 text-gray-400">
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
               <FileTextOutlined className="text-3xl mb-1" />
               <span className="text-xs">双击编辑</span>
             </div>

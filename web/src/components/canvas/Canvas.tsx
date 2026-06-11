@@ -237,19 +237,16 @@ export const Canvas = memo(function Canvas() {
     }
   }, [isLoading, nodes.length]);
 
-  // 计算提示词框的位置
+  // 计算提示词框的位置 — 用 ReactFlow 坐标系（跟随缩放/平移），从 getNodes() 取最新 measured
   const promptPosition = useMemo(() => {
     if (!selectedNode) return null;
-    // 因为 nodeOrigin 是 [0.5, 0.5]，所以 position 是节点中心点
-    const nodeCenterX = selectedNode.position.x;
-    const nodeBottomY = selectedNode.position.y + (selectedNode.measured?.height || 200) / 2;
-    // 转换为屏幕坐标
-    const screenPos = flowToScreenPosition({ x: nodeCenterX, y: nodeBottomY });
-    return {
-      x: screenPos.x,
-      y: screenPos.y
-    };
-  }, [selectedNode, flowToScreenPosition, viewport]);
+    // 从 store 取最新节点数据（measured 可能异步更新，selectedNode 可能是旧的）
+    const latestNode = getNodes().find((n) => n.id === selectedNode.id);
+    const node = latestNode || selectedNode;
+    // nodeOrigin [0.5, 0.5] → position 是中心点，底部 = position.y + height/2
+    const nodeBottomY = node.position.y + (node.measured?.height || 200) / 2;
+    return flowToScreenPosition({ x: node.position.x, y: nodeBottomY });
+  }, [selectedNode?.id, flowToScreenPosition, viewport, getNodes]);
 
   return (
     <div className="w-full h-full relative" onContextMenu={handleContextMenu}>
@@ -373,7 +370,7 @@ export const Canvas = memo(function Canvas() {
           <div
             className="absolute left-1/2 -translate-x-1/2"
             style={{
-              top: -6,
+              top: -5,
               width: 0,
               height: 0,
               borderLeft: '6px solid transparent',

@@ -107,9 +107,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
               <PlayCircleOutlined className="relative text-2xl text-white/80 group-hover:text-white transition-colors" />
             </div>
           ) : (
-            <div className="relative flex items-center justify-center w-full h-full bg-gray-50 rounded border border-dashed border-gray-300 cursor-pointer"
-              onClick={(e) => { if (!uploading) { e.stopPropagation(); fileInputRef.current?.click(); } }}
-            >
+            <div className="flex items-center justify-center w-full h-full bg-gray-50 rounded border border-dashed border-gray-300">
               {uploading ? (
                 <div className="flex flex-col items-center gap-2 px-4">
                   <VideoCameraOutlined className="text-xl text-gray-400 animate-pulse" />
