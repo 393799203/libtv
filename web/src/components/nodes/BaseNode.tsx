@@ -15,6 +15,8 @@ interface BaseNodeProps {
   /** 覆盖头部背景色（如风格节点用紫色） */
   headerColor?: string;
   className?: string; // 允许子节点追加容器样式（如编辑模式 nodrag）
+  /** 去掉内容区域 padding */
+  noContentPadding?: boolean;
 }
 
 const statusColorMap: Record<NodeExecutionStatus, string> = {
@@ -33,6 +35,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   headerRight,
   headerColor,
   className,
+  noContentPadding,
 }) {
   const nodeType = data.type as NodeType;
   const config = NODE_TYPE_CONFIG[nodeType];
@@ -59,16 +62,15 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   return (
     <div
       className={`
-        min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-hidden
-        transition-all duration-150
+        min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
+        transition-all duration-150 relative
         ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
         ${className || ''}
       `}
     >
-      {/* 节点头部 */}
+      {/* 节点头部 — 绝对定位在节点上方，不占用节点高度 */}
       <div
-        className="flex items-center justify-between px-3 py-1.5 rounded-t-[10px] text-white text-sm font-medium"
-        style={{ backgroundColor: effectiveColor }}
+        className="absolute -top-8 left-0 right-0 flex items-center justify-between py-1 rounded-t-lg text-sm font-medium text-gray-700"
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsRenaming(true);
@@ -102,7 +104,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       </div>
 
       {/* 节点内容（flex-1 填充剩余空间，relative 供子节点绝对定位） */}
-      <div className="px-3 py-2 text-xs text-gray-600 flex-1 min-h-0 relative">
+      <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 min-h-0 relative`}>
         {children}
       </div>
 

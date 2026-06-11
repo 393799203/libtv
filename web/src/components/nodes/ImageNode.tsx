@@ -75,9 +75,9 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 标题栏右侧内容 — useMemo 避免每次渲染重建 JSX 导致 BaseNode 无效重渲染
   const headerRight = useMemo(() => {
     if (isStyleNode) {
-      // 风格节点：显示风格标记，不显示图生图
+      // 风格节点：显示风格标记
       return (
-        <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/20 text-[11px] text-white/90">
+        <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500 text-[11px] text-white">
           <ExperimentOutlined className="text-[10px]" />
           风格
         </span>
@@ -86,11 +86,11 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     if (data.imageUrl) {
       return (
         <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-          <span className="text-[11px] text-white/70">
+          <span className="text-[11px] text-gray-400">
             {data.width} × {data.height}
           </span>
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] text-white transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               handleCreateDownstream();
@@ -105,7 +105,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     }
     return (
       <button
-        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[12px] text-white transition-colors cursor-pointer flex-shrink-0"
+        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[12px] text-white transition-colors cursor-pointer flex-shrink-0"
         onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
       >
         <UploadOutlined className="text-[11px]" />
@@ -122,7 +122,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         selected={selected}
         headerRight={headerRight}
         headerColor={styleColor}
-        className={isStyleNode ? '!ring-pink-400 !border-pink-300' : ''}
+        noContentPadding
       >
         {/* 图片区域 */}
         {data.imageUrl ? (
@@ -136,7 +136,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
             />
           </div>
         ) : (
-          <div className="w-full h-[180px] rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center">
+          <div className="w-full h-[180px] rounded-lg bg-gray-50 flex flex-col items-center justify-center">
             <PictureOutlined className="text-4xl text-gray-300" />
           </div>
         )}

@@ -62,6 +62,8 @@ export const Canvas = memo(function Canvas() {
     sourceNodeId: string;
     sourceHandle: string | null;
   } | null>(null);
+  // 拖动/框选操作期间抑制提示框显示，纯点击时重置
+  const suppressPromptRef = useRef(false);
   // 防止 onPaneClick 在连线释放时误关弹窗
   const connectingRef = useRef(false);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
@@ -203,8 +205,9 @@ export const Canvas = memo(function Canvas() {
     ? nodes.find((n) => n.id === selectedNodeIds[0])
     : null;
 
-  // 支持提示词面板的节点类型（排除风格图片节点）
+  // 支持提示词面板的节点类型（排除风格图片节点、拖动/框选操作）
   const hasPromptPanel = selectedNode
+    && !suppressPromptRef.current
     && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type)
     && !selectedNode.id.startsWith('style-');
   const isEditingNode = nodes.some((n) => n.data.isEditing);
@@ -237,19 +240,23 @@ export const Canvas = memo(function Canvas() {
     }
   }, [isLoading, nodes.length]);
 
-  // 计算提示词框的位置 — 用 ReactFlow 坐标系（跟随缩放/平移），从 getNodes() 取最新 measured
+  // 计算提示词框的位置 — 拖动期间不更新
   const promptPosition = useMemo(() => {
-    if (!selectedNode) return null;
+    if (!selectedNode || suppressPromptRef.current) return null;
     // 从 store 取最新节点数据（measured 可能异步更新，selectedNode 可能是旧的）
     const latestNode = getNodes().find((n) => n.id === selectedNode.id);
     const node = latestNode || selectedNode;
     // nodeOrigin [0.5, 0.5] → position 是中心点，底部 = position.y + height/2
     const nodeBottomY = node.position.y + (node.measured?.height || 200) / 2;
-    return flowToScreenPosition({ x: node.position.x, y: nodeBottomY });
+    return flowToScreenPosition({ x: node.position.x, y: nodeBottomY - 20 });
   }, [selectedNode?.id, flowToScreenPosition, viewport, getNodes]);
 
   return (
     <div className="w-full h-full relative" onContextMenu={handleContextMenu}>
+      <style>{`
+        .react-flow-cursor-default .react-flow__pane { cursor: default !important; }
+        .react-flow-cursor-default .react-flow__pane:active { cursor: default !important; }
+      `}</style>
       {isLoading ? (
         <div className="w-full h-full flex items-center justify-center bg-gray-50">
           <div className="flex flex-col items-center gap-3">
@@ -265,6 +272,14 @@ export const Canvas = memo(function Canvas() {
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
         onConnectEnd={handleConnectEnd}
+        onNodeDragStart={() => { suppressPromptRef.current = true; }}
+        onNodeClick={() => { suppressPromptRef.current = false; }}
+        onMouseDown={(e) => {
+          // 画布空白区域按下鼠标（框选/平移）→ 抑制提示框
+          if ((e.target as HTMLElement).classList.contains('react-flow__pane')) {
+            suppressPromptRef.current = true;
+          }
+        }}
         onViewportChange={onViewportChange}
         onPaneClick={() => {
           handleCloseContextMenu();
@@ -283,16 +298,18 @@ export const Canvas = memo(function Canvas() {
         nodesDraggable={!isExecuting}
         nodesConnectable={!isExecuting}
         elementsSelectable
-        selectNodesOnDrag={false}
-        panOnDrag
-        panOnScroll={false}
+        onlyRenderVisibleElements={true}
+        selectNodesOnDrag={true}
+        selectionOnDrag={true}
+        panOnDrag={[1, 2]}
+        panOnScroll={true}
         panOnScrollSpeed={0.5}
-        zoomOnScroll
-        zoomOnPinch
+        zoomOnScroll={true}
+        zoomOnPinch={true}
         zoomOnDoubleClick={false}
         deleteKeyCode={['Backspace', 'Delete']}
         multiSelectionKeyCode="Shift"
-        className="!cursor-grab active:!cursor-grabbing"
+        className="react-flow-cursor-default"
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
 
@@ -310,7 +327,7 @@ export const Canvas = memo(function Canvas() {
           />
         )}
 
-        <Panel position="top-center">
+        <Panel position="top-right">
           <div className="bg-white/90 backdrop-blur-sm rounded-lg shadow-md px-3 py-1.5 flex items-center gap-1">
             <Tooltip title="撤销">
               <Button type="text" size="small" icon={<UndoOutlined />} disabled={!canUndo} onClick={undo} />

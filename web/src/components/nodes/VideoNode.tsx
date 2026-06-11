@@ -54,7 +54,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     if (data.videoUrl) {
       return (
         <button
-          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] text-white transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
           onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
           title="重新上传视频"
         >
@@ -66,7 +66,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     return (
       <button
         className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[12px] text-white transition-colors cursor-pointer flex-shrink-0 ${
-          uploading ? 'bg-white/10 cursor-wait' : 'bg-white/20 hover:bg-white/30'
+          uploading ? 'bg-blue-300 cursor-wait' : 'bg-blue-500 hover:bg-blue-600'
         }`}
         onClick={(e) => { e.stopPropagation(); if (!uploading) fileInputRef.current?.click(); }}
       >
@@ -83,6 +83,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         data={data}
         selected={selected}
         headerRight={headerRight}
+        noContentPadding
       >
         <div className="w-full aspect-video">
           {data.videoUrl && showPlayer ? (
@@ -107,7 +108,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
               <PlayCircleOutlined className="relative text-2xl text-white/80 group-hover:text-white transition-colors" />
             </div>
           ) : (
-            <div className="flex items-center justify-center w-full h-full bg-gray-50 rounded border border-dashed border-gray-300">
+            <div className="flex items-center justify-center w-full h-full bg-gray-50 rounded">
               {uploading ? (
                 <div className="flex flex-col items-center gap-2 px-4">
                   <VideoCameraOutlined className="text-xl text-gray-400 animate-pulse" />
