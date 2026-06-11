@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Select } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -9,6 +10,7 @@ import {
   FolderAddOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
+import { userApi, type UserItem } from '@/services/userApi';
 
 interface StyleManagerModalProps {
   open: boolean;
@@ -37,6 +39,37 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
   const [editForm, setEditForm] = useState({ name: '', author: '', tags: '' });
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 作者选择
+  const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
+  const [authorSearching, setAuthorSearching] = useState(false);
+  const authorFetchIdRef = useRef(0);
+  const authorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchAuthors = (keyword: string) => {
+    const fetchId = ++authorFetchIdRef.current;
+    const needDebounce = keyword.trim().length > 0;
+    if (needDebounce && authorDebounceRef.current) clearTimeout(authorDebounceRef.current);
+
+    const doFetch = async () => {
+      setAuthorSearching(true);
+      try {
+        const res = await userApi.search(keyword.trim());
+        if (fetchId === authorFetchIdRef.current) {
+          setAuthorOptions(res.items || []);
+        }
+      } catch {}
+      if (fetchId === authorFetchIdRef.current) {
+        setAuthorSearching(false);
+      }
+    };
+
+    if (needDebounce) {
+      authorDebounceRef.current = setTimeout(doFetch, 300);
+    } else {
+      doFetch();
+    }
+  };
 
   // 加载分类列表
   const loadCategories = () => {
@@ -90,6 +123,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
     setAddFile(null);
     setAddPreviewUrl('');
     setShowAddDialog(true);
+    if (authorOptions.length === 0) fetchAuthors('');
   };
 
   // 选择文件预览
@@ -125,6 +159,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
   const startEdit = (s: StyleItem) => {
     setEditingId(s.id);
     setEditForm({ name: s.name, author: s.author, tags: s.tags.join(', ') });
+    if (authorOptions.length === 0) fetchAuthors('');
   };
 
   const saveEdit = async () => {
@@ -250,7 +285,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
               <div className="flex items-center justify-between mb-4">
                 <span className="text-[13px] text-gray-500">{styles?.length || 0} 张图片</span>
               </div>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-6 gap-3">
                 {(styles || []).map((style) => (
                   <div
                     key={style.id}
@@ -259,7 +294,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                     }`}
                   >
                     {/* 全图区域 */}
-                    <div className="aspect-[4/3] relative bg-gray-100">
+                    <div className="aspect-[9/16] relative bg-gray-100">
                       {style.image_url ? (
                         <img src={style.image_url} alt={style.name} className="w-full h-full object-cover" />
                       ) : (
@@ -308,11 +343,20 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                             placeholder="风格名称 *"
                             className="px-2.5 py-1.5 text-[12px] bg-white border border-blue-300 rounded-lg focus:border-blue-500 outline-none"
                           />
-                          <input
-                            value={editForm.author}
-                            onChange={(e) => setEditForm(f => ({ ...f, author: e.target.value }))}
-                            placeholder="作者"
-                            className="px-2.5 py-1.5 text-[12px] bg-white border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
+                          <Select
+                            value={editForm.author || undefined}
+                            onChange={(val) => setEditForm(f => ({ ...f, author: val }))}
+                            onSearch={fetchAuthors}
+                            onDropdownVisibleChange={(open) => { if (open && authorOptions.length === 0) fetchAuthors(''); }}
+                            placeholder="选择作者"
+                            showSearch
+                            allowClear
+                            size="small"
+                            options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
+                            notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
+                            filterOption={false}
+                            getPopupContainer={(trigger) => trigger.parentElement!}
+                            style={{ width: '100%' }}
                           />
                           <input
                             value={editForm.tags}
@@ -389,7 +433,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                 {/* 图片选择 + 预览 */}
                 <div className="flex gap-4">
                   {/* 上传区 */}
-                  <label className={`w-[200px] h-[180px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors shrink-0 ${
+                  <label className={`w-[150px] h-[200px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors shrink-0 ${
                     addFile ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
                   }`}>
                     {addPreviewUrl ? (
@@ -422,11 +466,19 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                     </div>
                     <div>
                       <label className="text-[11px] text-gray-500 mb-0.5 block">作者</label>
-                      <input
-                        value={addForm.author}
-                        onChange={(e) => setAddForm(f => ({ ...f, author: e.target.value }))}
-                        placeholder="作者名（可选）"
-                        className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
+                      <Select
+                        value={addForm.author || undefined}
+                        onChange={(val) => setAddForm(f => ({ ...f, author: val }))}
+                        onSearch={fetchAuthors}
+                        onDropdownVisibleChange={(open) => { if (open && authorOptions.length === 0) fetchAuthors(''); }}
+                        placeholder="点击选择或输入搜索"
+                        showSearch
+                        allowClear
+                        options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
+                        notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
+                        filterOption={false}
+                        getPopupContainer={(trigger) => trigger.parentElement!}
+                        style={{ width: '100%' }}
                       />
                     </div>
                     <div>

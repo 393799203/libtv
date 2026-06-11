@@ -777,10 +777,10 @@ export default function AdminPage() {
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-[13px] text-gray-500">{styles?.length || 0} 张图片</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-6 gap-3">
                     {(styles || []).map(style => (
                       <div key={style.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
-                        <div className="aspect-[4/3] relative bg-gray-100">
+                        <div className="aspect-[3/4] relative bg-gray-100">
                           {style.image_url ? (
                             <img src={style.image_url} alt={style.name} className="w-full h-full object-cover" />
                           ) : (
@@ -1139,7 +1139,7 @@ export default function AdminPage() {
             </h3>
             <div className="p-6 space-y-4">
               <div className="flex gap-4">
-                <label className={`w-[200px] h-[180px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors shrink-0 ${addFile ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+                <label className={`w-[150px] h-[200px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors shrink-0 ${addFile ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
                   {addPreviewUrl ? (
                     <img src={addPreviewUrl} alt="" className="w-full h-full object-cover rounded-md" />
                   ) : (
@@ -1154,7 +1154,19 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <label className="text-[11px] text-gray-500 mb-0.5 block">作者</label>
-                    <input value={addForm.author} onChange={e => setAddForm(f => ({ ...f, author: e.target.value }))} placeholder="作者名（可选）" className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none" />
+                    <Select
+                      value={addForm.author || undefined}
+                      onChange={(val) => setAddForm(f => ({ ...f, author: val }))}
+                      onSearch={fetchAuthors}
+                      placeholder="点击选择或输入搜索"
+                      showSearch
+                      allowClear
+                      options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
+                      notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
+                      filterOption={false}
+                      getPopupContainer={(trigger) => trigger.parentElement!}
+                      style={{ width: '100%', height: 38 }}
+                    />
                   </div>
                   <div>
                     <label className="text-[11px] text-gray-500 mb-0.5 block">标签</label>
