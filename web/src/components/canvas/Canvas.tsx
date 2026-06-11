@@ -56,6 +56,7 @@ const VIEWPORT_CHANGE_THROTTLE = 100;
 export const Canvas = memo(function Canvas() {
   const viewportRef = useRef<Viewport | null>(null);
   const lastViewportUpdate = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [nodeSelectPopup, setNodeSelectPopup] = useState<{
     position: { x: number; y: number };
@@ -190,8 +191,36 @@ export const Canvas = memo(function Canvas() {
   }, [zoomOut]);
 
   const handleZoomReset = useCallback(() => {
-    rfSetViewport({ x: 0, y: 0, zoom: 1 }, { duration: 200 });
-  }, [rfSetViewport]);
+    const nodes = getNodes();
+    if (nodes.length === 0) {
+      rfSetViewport({ x: 0, y: 0, zoom: 1 }, { duration: 200 });
+      return;
+    }
+    // 计算所有节点的边界中心（flow 坐标）
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const node of nodes) {
+      const w = node.measured?.width ?? (node.style?.width as number ?? 280);
+      const h = node.measured?.height ?? (node.style?.height as number ?? 200);
+      // nodeOrigin [0.5, 0.5] → position 是节点中心
+      minX = Math.min(minX, node.position.x - w / 2);
+      minY = Math.min(minY, node.position.y - h / 2);
+      maxX = Math.max(maxX, node.position.x + w / 2);
+      maxY = Math.max(maxY, node.position.y + h / 2);
+    }
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+
+    // 获取容器尺寸，将内容中心对齐到容器屏幕中心
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      rfSetViewport(
+        { x: rect.width / 2 - contentCenterX, y: rect.height / 2 - contentCenterY, zoom: 1 },
+        { duration: 200 },
+      );
+    } else {
+      rfSetViewport({ x: -contentCenterX, y: -contentCenterY, zoom: 1 }, { duration: 200 });
+    }
+  }, [rfSetViewport, getNodes]);
 
   const proOptions = useMemo(
     () => ({
@@ -252,7 +281,7 @@ export const Canvas = memo(function Canvas() {
   }, [selectedNode?.id, flowToScreenPosition, viewport, getNodes]);
 
   return (
-    <div className="w-full h-full relative" onContextMenu={handleContextMenu}>
+    <div ref={containerRef} className="w-full h-full relative" onContextMenu={handleContextMenu}>
       <style>{`
         .react-flow-cursor-default .react-flow__pane { cursor: default !important; }
         .react-flow-cursor-default .react-flow__pane:active { cursor: default !important; }
