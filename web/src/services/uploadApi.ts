@@ -19,17 +19,20 @@ export async function uploadImage(file: File, projectId?: string): Promise<strin
 }
 
 /**
- * 独立上传视频文件到 public/videos/ 目录（不依赖 show ID）
+ * 上传视频文件（支持按项目 ID 存入 canvas/{projectId}/ 子目录）
  * @param file 视频文件
+ * @param projectId 可选的项目 ID，传入后视频存入 canvas/{projectId}/ 子目录
  * @param onProgress 上传进度回调 0-100
  * @returns 上传结果（url + 压缩/缓存状态）
  */
 export async function uploadVideo(
   file: File,
   onProgress?: (percent: number) => void,
+  projectId?: string,
 ): Promise<{ url: string; compressed: boolean; cached: boolean }> {
   const formData = new FormData();
   formData.append('file', file);
+  if (projectId) formData.append('project_id', projectId);
 
   const res = await api.post<{ url: string; compressed: boolean; cached: boolean }>(
     '/upload/video',
@@ -48,4 +51,12 @@ export async function uploadVideo(
 
   onProgress?.(100);
   return res;
+}
+
+/**
+ * 删除指定项目的 canvas 文件夹（删除项目时调用）
+ * @param projectId 项目 ID
+ */
+export async function deleteCanvasDir(projectId: string): Promise<void> {
+  await api.delete(`/upload/canvas/${projectId}`);
 }

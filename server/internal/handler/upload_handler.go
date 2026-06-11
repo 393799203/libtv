@@ -133,6 +133,18 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
+	// 读取可选的 project_id，有则存到 canvas/ 目录（和图片上传一致）
+	projectID := c.PostForm("project_id")
+	var saveDir string
+	var urlPrefix string
+	if projectID != "" && projectID != "." && projectID != ".." {
+		saveDir = filepath.Join(h.uploadDir, projectID)
+		urlPrefix = "/media/canvas/" + projectID + "/"
+	} else {
+		saveDir = h.videoDir
+		urlPrefix = "/media/videos/"
+	}
+
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	allowedExts := map[string]bool{".mp4": true, ".webm": true, ".mov": true, ".avi": true, ".mkv": true, ".ts": true}
 	if !allowedExts[ext] {
@@ -145,7 +157,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	if err := os.MkdirAll(h.videoDir, 0755); err != nil {
+	if err := os.MkdirAll(saveDir, 0755); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建目录失败"})
 		return
 	}
@@ -161,14 +173,14 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	src.Close()
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
 	filename := fileHash[:12] + ".mp4"
-	savePath := filepath.Join(h.videoDir, filename)
+	savePath := filepath.Join(saveDir, filename)
 
 	// 文件已存在 → 直接返回 URL（避免重复存储）
 	if _, err := os.Stat(savePath); err == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code": 0,
 			"data": gin.H{
-				"url":        "/media/videos/" + filename,
+				"url":        urlPrefix + filename,
 				"compressed": false,
 				"cached":     true,
 			},
@@ -177,7 +189,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	}
 
 	// 第二步：新文件，先保存到临时路径
-	tmpPath := filepath.Join(h.videoDir, ".tmp_"+file.Filename)
+	tmpPath := filepath.Join(saveDir, ".tmp_"+file.Filename)
 	src2, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
@@ -199,7 +211,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 
 	// 第三步：TS 文件始终转码，其他格式 >=50MB 自动压缩
 	if needConvert {
-		compressedPath := filepath.Join(h.videoDir, ".compressed_"+filename)
+		compressedPath := filepath.Join(saveDir, ".compressed_"+filename)
 		cmd := exec.Command("/usr/local/Cellar/ffmpeg/8.1.1/bin/ffmpeg",
 			"-i", tmpPath,
 			"-f", "mp4",
@@ -221,10 +233,10 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		}
 
 		// 清理 FFmpeg 可能残留的临时文件
-		files, _ := os.ReadDir(h.videoDir)
+		files, _ := os.ReadDir(saveDir)
 		for _, f := range files {
 			if strings.HasPrefix(f.Name(), "ts_segment") {
-				os.Remove(filepath.Join(h.videoDir, f.Name()))
+				os.Remove(filepath.Join(saveDir, f.Name()))
 			}
 		}
 	}
@@ -239,9 +251,31 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"url":        "/media/videos/" + filename,
+			"url":        urlPrefix + filename,
 			"compressed": compressed,
 			"cached":     false,
 		},
 	})
+}
+
+// DeleteCanvasDir 删除指定项目的 canvas 文件夹
+func (h *UploadHandler) DeleteCanvasDir(c *gin.Context) {
+	projectID := c.Param("projectId")
+	if projectID == "" || projectID == "." || projectID == ".." {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "无效的项目 ID"})
+		return
+	}
+
+	dir := filepath.Join(h.uploadDir, projectID)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "目录不存在，无需删除"})
+		return
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "已删除"})
 }

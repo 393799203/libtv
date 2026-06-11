@@ -23,8 +23,8 @@ import { EffectCoverflow, Pagination, Autoplay } from 'swiper/modules';
 import 'swiper/css';
 import 'swiper/css/effect-coverflow';
 import 'swiper/css/pagination';
-import { Modal } from 'antd';
 import { projectApi } from '@/services/projectApi';
+import { deleteCanvasDir } from '@/services/uploadApi';
 import { showApi } from '@/services/showApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { ProjectListItem } from '@/types/project';
@@ -52,7 +52,7 @@ const formatDuration = (seconds: number) => {
 };
 
 export default function VideoListPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [videosLoading, setVideosLoading] = useState(false);
@@ -136,7 +136,7 @@ export default function VideoListPage() {
 
   // 删除项目
   const handleDeleteProject = async (project: ProjectListItem) => {
-    Modal.confirm({
+    modal.confirm({
       title: '确认删除',
       content: `确定要删除项目「${project.name}」吗？此操作不可恢复。`,
       okText: '删除',
@@ -145,6 +145,8 @@ export default function VideoListPage() {
       onOk: async () => {
         try {
           await projectApi.deleteProject(project.id);
+          // 同步删除该项目的 canvas 文件夹（静默失败，不影响主流程）
+          deleteCanvasDir(project.id).catch(() => {});
           setProjects((prev) => prev.filter((p) => p.id !== project.id));
           message.success('项目已删除');
         } catch {

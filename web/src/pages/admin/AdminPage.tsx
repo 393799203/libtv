@@ -25,7 +25,7 @@ export default function AdminPage() {
   const navigate = useNavigate();
   const { tab = 'shows' } = useParams<{ tab: string }>();
   const activeTab: AdminTab = (tab as AdminTab) || 'shows';
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
 
   // ========== 风格管理状态 ==========
   const [categories, setCategories] = useState<CategoryItem[]>([]);
@@ -524,9 +524,7 @@ export default function AdminPage() {
     const style = styles.find(s => s.id === id);
     if (!style) return;
 
-    // 使用 antd 的 modal 确认
-    const { Modal } = await import('antd');
-    Modal.confirm({
+    modal.confirm({
       title: '确认删除',
       content: `确定要删除风格「${style.name}」吗？此操作不可恢复。`,
       okText: '确定删除',

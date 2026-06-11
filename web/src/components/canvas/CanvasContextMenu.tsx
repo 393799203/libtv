@@ -90,7 +90,10 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
         type: nodeType,
         position: flowPosition,
         data: nodeData as LibTVNode['data'],
-        style: { width: 280, ...(nodeType !== 'image' ? { height: 200 } : {}) },
+        style: {
+          width: 280,
+          ...(nodeType === 'video' ? { width: 320, height: 180 } : nodeType !== 'image' ? { height: 200 } : {}),
+        },
       };
 
       addNode(newNode);
