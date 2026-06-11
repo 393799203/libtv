@@ -43,7 +43,6 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdgeFn = useCanvasStore((s) => s.addEdge);
   const removeNodes = useCanvasStore((s) => s.removeNodes);
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const [hoveredItem, setHoveredItem] = useState<UpstreamInput | null>(null);
   const [hoverPos, setHoverPos] = useState<{ mouseX: number; thumbTop: number }>({ mouseX: 0, thumbTop: 0 });
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,31 +60,24 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   // 风格在画布上对应的图片节点 ID
   const [styleNodeId, setStyleNodeId] = useState<string | null>(null);
 
-  // 从节点数据恢复风格状态（重新聚焦时），同时验证画布上的风格节点是否仍存在
+  // 从上游连线推导风格状态（重新聚焦时）
   useEffect(() => {
     if (!targetNodeId) return;
     const { nodes, edges } = useCanvasStore.getState();
-    const current = nodes.find((n) => n.id === targetNodeId);
-    if (!current) return;
-    const d = current.data as ImageNodeData;
-    if (d.styleId && d.styleImageUrl) {
-      // 先验证画布上对应的风格节点和连线是否还存在
-      const styleNode = nodes.find((n) => n.data.label?.startsWith('风格-') &&
-        edges.some((e) => e.source === n.id && e.target === targetNodeId));
-      if (styleNode) {
-        // 风格节点存在 → 恢复完整状态
-        setSelectedStyle({ id: d.styleId, name: d.styleName!, image_url: d.styleImageUrl } as StyleItem);
-        setStyleNodeId(styleNode.id);
-      } else {
-        // 风格节点已被外部删除 → 清理残留数据
-        setSelectedStyle(undefined);
-        setStyleNodeId(null);
-        updateNodeData(targetNodeId, {
-          styleId: undefined,
-          styleName: undefined,
-          styleImageUrl: undefined,
-        });
-      }
+    // 找到上游"风格-"节点
+    const styleNode = nodes.find((n) =>
+      n.id.startsWith('style-') &&
+      edges.some((e) => e.source === n.id && e.target === targetNodeId)
+    );
+    if (styleNode) {
+      // 从风格节点本身取信息（styleId 存在风格节点 data 里）
+      const sd = styleNode.data as ImageNodeData;
+      setSelectedStyle({
+        id: (sd as Record<string, string>).styleId || '',
+        name: styleNode.data.label!.replace('风格-', ''),
+        image_url: sd.imageUrl || '',
+      } as StyleItem);
+      setStyleNodeId(styleNode.id);
     } else {
       setSelectedStyle(undefined);
       setStyleNodeId(null);
@@ -136,6 +128,8 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     const nodeData = createDefaultNodeData('image') as ImageNodeData;
     nodeData.label = `风格-${style.name}`;
     nodeData.imageUrl = style.image_url;
+    // 把后端 styleId 存到风格节点上，恢复时从这里取
+    (nodeData as Record<string, string>).styleId = style.id;
 
     addNode({
       id: newNodeId,
@@ -151,13 +145,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       type: 'dataFlow',
     });
     setStyleNodeId(newNodeId);
-    // 持久化风格信息到节点数据
-    updateNodeData(targetNodeId, {
-      styleId: style.id,
-      styleName: style.name,
-      styleImageUrl: style.image_url,
-    });
-  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges, updateNodeData]);
+  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges]);
 
   // 移除风格：删除连线 + 删除图片节点
   const handleRemoveStyle = useCallback((e: React.MouseEvent) => {
@@ -176,13 +164,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     // 删除图片节点
     removeNodes([styleNodeId]);
     setStyleNodeId(null);
-    // 清除节点数据中的风格信息
-    updateNodeData(targetNodeId, {
-      styleId: undefined,
-      styleName: undefined,
-      styleImageUrl: undefined,
-    });
-  }, [styleNodeId, targetNodeId, removeEdges, removeNodes, updateNodeData]);
+  }, [styleNodeId, targetNodeId, removeEdges, removeNodes]);
 
   // 切换收藏
   const handleToggleFav = async (e: React.MouseEvent, styleId: string) => {

@@ -86,7 +86,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
       }
 
       const newNode: LibTVNode = {
-        id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `${nodeType}-${Date.now()}`,
         type: nodeType,
         position: flowPosition,
         data: nodeData as LibTVNode['data'],

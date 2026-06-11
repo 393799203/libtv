@@ -36,8 +36,8 @@ function getUpstreamInputs(
       const sourceNode = nodes.find((n) => n.id === edge.source);
       if (!sourceNode) return null;
 
-      // 过滤掉风格图片节点（label 以"风格-"开头）
-      if (sourceNode.data.label?.startsWith('风格-')) return null;
+      // 过滤掉风格图片节点（ID 以"style-"开头）
+      if (sourceNode.id.startsWith('style-')) return null;
 
       const d = sourceNode.data;
 

@@ -213,7 +213,7 @@ export const Canvas = memo(function Canvas() {
   // 支持提示词面板的节点类型（排除风格图片节点）
   const hasPromptPanel = selectedNode
     && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type)
-    && !selectedNode.data.label?.startsWith('风格-');
+    && !selectedNode.id.startsWith('style-');
   const isEditingNode = nodes.some((n) => n.data.isEditing);
 
   // 加载完成后恢复视口位置（仅执行一次）

@@ -583,3 +583,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 }));
+
+// 全局监听 store 变动，打印最新状态
+useCanvasStore.subscribe((state) => {
+  console.log('store 最新状态:', state);
+});

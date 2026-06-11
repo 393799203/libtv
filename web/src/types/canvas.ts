@@ -29,10 +29,6 @@ export interface ImageNodeData extends Record<string, unknown> {
   imageUrl?: string;
   status: NodeExecutionStatus;
   error?: string;
-  // 风格关联字段（选中风格时持久化到节点数据）
-  styleId?: string;
-  styleName?: string;
-  styleImageUrl?: string;
 }
 
 // 视频生成模式

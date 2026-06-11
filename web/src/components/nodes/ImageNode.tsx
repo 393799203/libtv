@@ -24,7 +24,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   const projectId = useCanvasStore((s) => s.projectId);
 
   // 是否为风格图片节点
-  const isStyleNode = data.label?.startsWith('风格-');
+  const isStyleNode = id.startsWith('style-');
   // 风格节点使用粉色主题
   const styleColor = isStyleNode ? '#ec4899' : undefined;
 
