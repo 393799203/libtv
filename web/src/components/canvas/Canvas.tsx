@@ -210,8 +210,10 @@ export const Canvas = memo(function Canvas() {
     ? nodes.find((n) => n.id === selectedNodeIds[0])
     : null;
 
-  // 支持提示词面板的节点类型
-  const hasPromptPanel = selectedNode && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type);
+  // 支持提示词面板的节点类型（排除风格图片节点）
+  const hasPromptPanel = selectedNode
+    && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type)
+    && !selectedNode.data.label?.startsWith('风格-');
   const isEditingNode = nodes.some((n) => n.data.isEditing);
 
   // 加载完成后恢复视口位置（仅执行一次）

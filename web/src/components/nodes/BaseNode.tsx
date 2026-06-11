@@ -12,6 +12,8 @@ interface BaseNodeProps {
   selected?: boolean;
   children: ReactNode;
   headerRight?: ReactNode;
+  /** 覆盖头部背景色（如风格节点用紫色） */
+  headerColor?: string;
   className?: string; // 允许子节点追加容器样式（如编辑模式 nodrag）
 }
 
@@ -29,10 +31,13 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   selected,
   children,
   headerRight,
+  headerColor,
   className,
 }) {
   const nodeType = data.type as NodeType;
   const config = NODE_TYPE_CONFIG[nodeType];
+  // 支持覆盖头部颜色（风格节点用紫色）
+  const effectiveColor = headerColor || config.color;
   const status = data.status;
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
@@ -56,14 +61,14 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       className={`
         min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-hidden
         transition-all duration-150
-        ${selected ? 'shadow-lg ring-2 ring-blue-400 border-blue-300' : 'hover:shadow-lg'}
+        ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
         ${className || ''}
       `}
     >
       {/* 节点头部 */}
       <div
         className="flex items-center justify-between px-3 py-1.5 rounded-t-[10px] text-white text-sm font-medium"
-        style={{ backgroundColor: config.color }}
+        style={{ backgroundColor: effectiveColor }}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsRenaming(true);
@@ -113,7 +118,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         type="target"
         position={Position.Left}
         className="!bg-[var(--node-color)] libtv-handle"
-        style={{ '--node-color': config.color } as React.CSSProperties}
+        style={{ '--node-color': effectiveColor } as React.CSSProperties}
       />
 
       {/* 输出 Handle */}
@@ -121,7 +126,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         type="source"
         position={Position.Right}
         className="!bg-[var(--node-color)] libtv-handle"
-        style={{ '--node-color': config.color } as React.CSSProperties}
+        style={{ '--node-color': effectiveColor } as React.CSSProperties}
       />
     </div>
   );

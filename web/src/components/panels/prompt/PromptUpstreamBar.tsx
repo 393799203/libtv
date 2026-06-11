@@ -11,8 +11,10 @@ import {
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import type { UpstreamInput } from '@/types/prompt';
+import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
+import { createDefaultNodeData } from '@/utils/nodeFactory';
 
 interface PromptUpstreamBarProps {
   inputs: UpstreamInput[];
@@ -36,8 +38,12 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   targetNodeId,
   showStyleSelector = false,
 }) {
+  // 仅订阅 action 函数（zustand 中这些是稳定引用），不订阅 nodes/edges 数组
   const removeEdges = useCanvasStore((s) => s.removeEdges);
-  const edges = useCanvasStore((s) => s.edges);
+  const addNode = useCanvasStore((s) => s.addNode);
+  const addEdgeFn = useCanvasStore((s) => s.addEdge);
+  const removeNodes = useCanvasStore((s) => s.removeNodes);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const [hoveredItem, setHoveredItem] = useState<UpstreamInput | null>(null);
   const [hoverPos, setHoverPos] = useState<{ mouseX: number; thumbTop: number }>({ mouseX: 0, thumbTop: 0 });
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,6 +57,110 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   const [searchKeyword, setSearchKeyword] = useState('');
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [favoritedMap, setFavoritedMap] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<'market' | 'favorites'>('market');
+  // 风格在画布上对应的图片节点 ID
+  const [styleNodeId, setStyleNodeId] = useState<string | null>(null);
+
+  // 从节点数据恢复风格状态（重新聚焦时）
+  useEffect(() => {
+    if (!targetNodeId) return;
+    const { nodes, edges } = useCanvasStore.getState();
+    const current = nodes.find((n) => n.id === targetNodeId);
+    if (!current) return;
+    const d = current.data as any;
+    if (d.styleId && d.styleImageUrl) {
+      setSelectedStyle({ id: d.styleId, name: d.styleName, image_url: d.styleImageUrl } as StyleItem);
+      // 找到对应的风格节点 ID
+      const styleNode = nodes.find((n) => n.data.label?.startsWith('风格-') &&
+        edges.some((e) => e.source === n.id && e.target === targetNodeId));
+      if (styleNode) setStyleNodeId(styleNode.id);
+    } else {
+      setSelectedStyle(undefined);
+      setStyleNodeId(null);
+    }
+  }, [targetNodeId]);
+
+  // 加载收藏列表
+  const loadFavorites = useCallback(() => {
+    setStyleLoading(true);
+    styleApi.listFavorites()
+      .then((res) => {
+        const items = res.items || [];
+        setStyles(items);
+        if (items.length > 0) {
+          styleApi.checkFavorited(items.map(s => s.id))
+            .then(setFavoritedMap)
+            .catch(() => {});
+        }
+      })
+      .catch(() => {})
+      .finally(() => setStyleLoading(false));
+  }, []);
+
+  // 选中风格：创建图片节点 + 连接到当前节点
+  const handleSelectStyle = useCallback((style: StyleItem) => {
+    setSelectedStyle(style);
+    setStyleMarketOpen(false);
+
+    if (!targetNodeId) return;
+
+    // 按需读取当前节点位置（不订阅 nodes，避免无关更新触发重渲染）
+    const { nodes } = useCanvasStore.getState();
+    const current = nodes.find((n) => n.id === targetNodeId);
+    const posX = (current?.position.x ?? 0) - 350;
+    const posY = current?.position.y ?? 0;
+
+    const newNodeId = `style-${Date.now()}`;
+    const nodeData = createDefaultNodeData('image') as ImageNodeData;
+    nodeData.label = `风格-${style.name}`;
+    nodeData.imageUrl = style.image_url;
+
+    addNode({
+      id: newNodeId,
+      type: 'image',
+      position: { x: posX, y: posY },
+      data: nodeData,
+      style: { width: 280 },
+    });
+    addEdgeFn({
+      id: `e-${newNodeId}-${targetNodeId}`,
+      source: newNodeId,
+      target: targetNodeId,
+      type: 'dataFlow',
+    });
+    setStyleNodeId(newNodeId);
+    // 持久化风格信息到节点数据
+    updateNodeData(targetNodeId, {
+      styleId: style.id,
+      styleName: style.name,
+      styleImageUrl: style.image_url,
+    });
+  }, [targetNodeId, addNode, addEdgeFn, updateNodeData]);
+
+  // 移除风格：删除连线 + 删除图片节点
+  const handleRemoveStyle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedStyle(undefined);
+
+    if (!styleNodeId || !targetNodeId) return;
+
+    // 按需读取 edges（不订阅，避免无关更新触发重渲染）
+    const { edges } = useCanvasStore.getState();
+    const edge = edges.find(
+      (ed) => ed.source === styleNodeId && ed.target === targetNodeId
+    );
+    if (edge) removeEdges([edge.id]);
+
+    // 删除图片节点
+    removeNodes([styleNodeId]);
+    setStyleNodeId(null);
+    // 清除节点数据中的风格信息
+    updateNodeData(targetNodeId, {
+      styleId: undefined,
+      styleName: undefined,
+      styleImageUrl: undefined,
+    });
+  }, [styleNodeId, targetNodeId, removeEdges, removeNodes, updateNodeData]);
 
   // 切换收藏
   const handleToggleFav = async (e: React.MouseEvent, styleId: string) => {
@@ -129,7 +239,8 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       e.stopPropagation();
       e.preventDefault();
       if (!targetNodeId) return;
-      // 从 store 的 edges 中查找匹配的边，取其真实 ID
+      // 按需读取 edges
+      const { edges } = useCanvasStore.getState();
       const edge = edges.find(
         (ed) => ed.source === upstreamNodeId && ed.target === targetNodeId
       );
@@ -137,7 +248,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
         removeEdges([edge.id]);
       }
     },
-    [removeEdges, targetNodeId, edges]
+    [removeEdges, targetNodeId]
   );
 
   if (inputs.length === 0 && !showStyleSelector) return null;
@@ -158,7 +269,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
               />
               {/* 删除按钮 */}
               <button
-                onClick={(e) => { e.stopPropagation(); setSelectedStyle(undefined); }}
+                onClick={(e) => { handleRemoveStyle(e); }}
                 className="absolute top-0 right-0 w-4 h-4 bg-black/60 text-white rounded-full flex items-center justify-center opacity-0 group-hover/style:opacity-100 transition-opacity cursor-pointer z-10"
               >
                 <CloseOutlined style={{ fontSize: 10 }} />
@@ -186,29 +297,53 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
 
               {/* 居中面板 */}
               <div className="relative w-[900px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
-                {/* 顶部栏：标题 + 搜索 + 关闭 */}
+                {/* 顶部栏：标题 + Tab + 搜索 + 关闭 */}
                 <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 shrink-0">
-                  <div className="flex gap-1.5">
-                    <button className="px-3 py-1 text-[13px] text-gray-800 font-medium rounded-full bg-gray-100">广场</button>
-                    <button className="px-3 py-1 text-[13px] text-gray-500 hover:text-gray-700 rounded-full">我的收藏</button>
-                    <button className="px-3 py-1 text-[13px] text-gray-500 hover:text-gray-700 rounded-full">最近使用</button>
+                  {/* Tab 切换 */}
+                  <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      onClick={() => { setActiveTab('market'); handleFilterChange(activeCategory); }}
+                      className={`px-4 py-1.5 text-[13px] rounded-md transition-all cursor-pointer ${
+                        activeTab === 'market'
+                          ? 'bg-white text-gray-800 font-medium shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      广场
+                    </button>
+                    <button
+                      onClick={() => { setActiveTab('favorites'); loadFavorites(); }}
+                      className={`px-4 py-1.5 text-[13px] rounded-md transition-all cursor-pointer ${
+                        activeTab === 'favorites'
+                          ? 'bg-white text-gray-800 font-medium shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      我的收藏
+                    </button>
                   </div>
-                  <div className="flex-1 max-w-xs mx-auto">
-                    <input
-                      placeholder="搜索模型名称、作者、标签"
-                      className="w-full px-3 py-1.5 text-[13px] bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-gray-300"
-                      onChange={(e) => handleFilterChange(undefined, e.target.value)}
-                    />
-                  </div>
+
+                  {/* 搜索（仅广场显示） */}
+                  {activeTab === 'market' && (
+                    <div className="flex-1 max-w-xs">
+                      <input
+                        placeholder="搜索风格名称、作者、标签"
+                        className="w-full px-3 py-1.5 text-[13px] bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                        onChange={(e) => handleFilterChange(undefined, e.target.value)}
+                      />
+                    </div>
+                  )}
+
                   <button
                     onClick={() => setStyleMarketOpen(false)}
-                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 cursor-pointer transition-colors"
+                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 cursor-pointer transition-colors ml-auto shrink-0"
                   >
                     ✕
                   </button>
                 </div>
 
-                {/* 分类标签栏 */}
+                {/* 分类标签栏（仅广场） */}
+                {activeTab === 'market' && (
                 <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-50 overflow-x-auto shrink-0">
                   {(categories?.length || 0) === 0 ? (
                     <span className="text-[12px] text-gray-400">暂无分类</span>
@@ -224,6 +359,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
                     </button>
                   ))}
                 </div>
+                )}
 
                 {/* 风格卡片网格 */}
                 <div className="flex-1 overflow-y-auto p-5">
@@ -236,11 +372,11 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
                       <div className="text-gray-400 text-[13px]">暂无风格</div>
                     </div>
                   ) : (
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className="grid grid-cols-6 gap-2.5">
                     {(styles || []).map((style) => (
                       <div
                         key={style.id}
-                        onClick={() => { setSelectedStyle(style); setStyleMarketOpen(false); }}
+                        onClick={() => { handleSelectStyle(style); }}
                         className={`group relative rounded-xl overflow-hidden border transition-all cursor-pointer ${
                           selectedStyle?.id === style.id
                             ? 'border-blue-400 ring-2 ring-blue-100'
@@ -251,7 +387,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
                         <img
                           src={style.image_url}
                           alt={style.name}
-                          className="aspect-[4/3] w-full object-cover group-hover:opacity-90 transition-opacity"
+                          className="aspect-[3/4] w-full object-cover group-hover:opacity-90 transition-opacity"
                         />
 
                         {/* 右上角标签 */}

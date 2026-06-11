@@ -3,6 +3,7 @@ import type { NodeProps, Node } from '@xyflow/react';
 import {
   PictureOutlined,
   UploadOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -21,6 +22,11 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdge = useCanvasStore((s) => s.addEdge);
   const projectId = useCanvasStore((s) => s.projectId);
+
+  // 是否为风格图片节点
+  const isStyleNode = data.label?.startsWith('风格-');
+  // 风格节点使用粉色主题
+  const styleColor = isStyleNode ? '#ec4899' : undefined;
 
   // 图片上传（上传到服务端 public/canvas/{projectId}/ 目录）
   const handleUpload = useCallback(
@@ -74,6 +80,15 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
 
   // 标题栏右侧内容 — useMemo 避免每次渲染重建 JSX 导致 BaseNode 无效重渲染
   const headerRight = useMemo(() => {
+    if (isStyleNode) {
+      // 风格节点：显示风格标记，不显示图生图
+      return (
+        <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/20 text-[11px] text-white/90">
+          <ExperimentOutlined className="text-[10px]" />
+          风格
+        </span>
+      );
+    }
     if (data.imageUrl) {
       return (
         <div className="flex items-center gap-2 flex-shrink-0 ml-2">
@@ -107,7 +122,14 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
 
   return (
     <>
-      <BaseNode id={id} data={data} selected={selected} headerRight={headerRight}>
+      <BaseNode
+        id={id}
+        data={data}
+        selected={selected}
+        headerRight={headerRight}
+        headerColor={styleColor}
+        className={isStyleNode ? '!ring-pink-400 !border-pink-300' : ''}
+      >
         {/* 图片区域 */}
         {data.imageUrl ? (
           <div className="relative rounded-lg overflow-hidden bg-gray-100">
