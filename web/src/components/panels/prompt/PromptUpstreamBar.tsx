@@ -61,19 +61,31 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   // 风格在画布上对应的图片节点 ID
   const [styleNodeId, setStyleNodeId] = useState<string | null>(null);
 
-  // 从节点数据恢复风格状态（重新聚焦时）
+  // 从节点数据恢复风格状态（重新聚焦时），同时验证画布上的风格节点是否仍存在
   useEffect(() => {
     if (!targetNodeId) return;
     const { nodes, edges } = useCanvasStore.getState();
     const current = nodes.find((n) => n.id === targetNodeId);
     if (!current) return;
-    const d = current.data as any;
+    const d = current.data as ImageNodeData;
     if (d.styleId && d.styleImageUrl) {
-      setSelectedStyle({ id: d.styleId, name: d.styleName, image_url: d.styleImageUrl } as StyleItem);
-      // 找到对应的风格节点 ID
+      // 先验证画布上对应的风格节点和连线是否还存在
       const styleNode = nodes.find((n) => n.data.label?.startsWith('风格-') &&
         edges.some((e) => e.source === n.id && e.target === targetNodeId));
-      if (styleNode) setStyleNodeId(styleNode.id);
+      if (styleNode) {
+        // 风格节点存在 → 恢复完整状态
+        setSelectedStyle({ id: d.styleId, name: d.styleName!, image_url: d.styleImageUrl } as StyleItem);
+        setStyleNodeId(styleNode.id);
+      } else {
+        // 风格节点已被外部删除 → 清理残留数据
+        setSelectedStyle(undefined);
+        setStyleNodeId(null);
+        updateNodeData(targetNodeId, {
+          styleId: undefined,
+          styleName: undefined,
+          styleImageUrl: undefined,
+        });
+      }
     } else {
       setSelectedStyle(undefined);
       setStyleNodeId(null);
@@ -97,12 +109,22 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       .finally(() => setStyleLoading(false));
   }, []);
 
-  // 选中风格：创建图片节点 + 连接到当前节点
+  // 选中风格：先清理旧风格，再创建新图片节点 + 连接
   const handleSelectStyle = useCallback((style: StyleItem) => {
     setSelectedStyle(style);
     setStyleMarketOpen(false);
 
     if (!targetNodeId) return;
+
+    // 如果已有旧风格节点，先删除它和连线
+    if (styleNodeId) {
+      const { edges } = useCanvasStore.getState();
+      const oldEdge = edges.find(
+        (ed) => ed.source === styleNodeId && ed.target === targetNodeId
+      );
+      if (oldEdge) removeEdges([oldEdge.id]);
+      removeNodes([styleNodeId]);
+    }
 
     // 按需读取当前节点位置（不订阅 nodes，避免无关更新触发重渲染）
     const { nodes } = useCanvasStore.getState();
@@ -135,7 +157,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       styleName: style.name,
       styleImageUrl: style.image_url,
     });
-  }, [targetNodeId, addNode, addEdgeFn, updateNodeData]);
+  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges, updateNodeData]);
 
   // 移除风格：删除连线 + 删除图片节点
   const handleRemoveStyle = useCallback((e: React.MouseEvent) => {
