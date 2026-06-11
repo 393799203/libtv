@@ -444,46 +444,54 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
         </div>
       )}
 
-      {inputs.map((input, index) => (
-        <div
-          key={input.nodeId}
-          className="relative group"
-        >
-          {/* 缩略图 */}
-          {input.thumbnail ? (
-            <div className="relative w-[44px] h-[44px] rounded-lg bg-gray-100 border border-gray-200">
-              {/* 图片：控制预览浮层的显示/隐藏 */}
-              <img
-                src={input.thumbnail}
-                alt={input.label}
-                className="w-full h-full object-cover rounded-lg"
+      {(() => {
+        // 按类型独立计数，角标编号不受 label 影响
+        const counters: Record<string, number> = {};
+        return inputs.map((input) => {
+          counters[input.nodeType] = (counters[input.nodeType] || 0) + 1;
+          const num = counters[input.nodeType];
+          return (
+          <div
+            key={input.nodeId}
+            className="relative group"
+          >
+            {/* 缩略图 */}
+            {input.thumbnail ? (
+              <div className="relative w-[44px] h-[44px] rounded-lg bg-gray-100 border border-gray-200">
+                {/* 图片：控制预览浮层的显示/隐藏 */}
+                <img
+                  src={input.thumbnail}
+                  alt={input.label}
+                  className="w-full h-full object-cover rounded-lg"
+                  onMouseEnter={(e) => handleThumbEnter(e, input)}
+                  onMouseLeave={handleThumbLeave}
+                />
+                {/* 删除按钮：纯 CSS group-hover 控制，不依赖 React 状态 */}
+                <button
+                  className="absolute top-0 right-0 w-4 h-4 bg-black/60 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+                  onClick={(e) => handleRemove(e, input.nodeId)}
+                >
+                  <CloseOutlined style={{ fontSize: 10 }} />
+                </button>
+                {/* 序号角标 */}
+                <span className="absolute bottom-0.5 right-0.5 w-4 h-4 bg-black/60 text-white text-[9px] rounded-full flex items-center justify-center font-medium shadow-sm pointer-events-none">
+                  {num}
+                </span>
+              </div>
+            ) : (
+              <div
+                className="w-[44px] h-[44px] rounded-lg bg-gray-50 border border-dashed border-gray-250 flex flex-col items-center justify-center gap-0.5"
                 onMouseEnter={(e) => handleThumbEnter(e, input)}
                 onMouseLeave={handleThumbLeave}
-              />
-              {/* 删除按钮：纯 CSS group-hover 控制，不依赖 React 状态 */}
-              <button
-                className="absolute top-0 right-0 w-4 h-4 bg-black/60 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
-                onClick={(e) => handleRemove(e, input.nodeId)}
               >
-                <CloseOutlined style={{ fontSize: 10 }} />
-              </button>
-              {/* 序号角标 */}
-              <span className="absolute bottom-0.5 right-0.5 w-4 h-4 bg-black/60 text-white text-[9px] rounded-full flex items-center justify-center font-medium shadow-sm pointer-events-none">
-                {index + 1}
-              </span>
-            </div>
-          ) : (
-            <div
-              className="w-[44px] h-[44px] rounded-lg bg-gray-50 border border-dashed border-gray-250 flex flex-col items-center justify-center gap-0.5"
-              onMouseEnter={(e) => handleThumbEnter(e, input)}
-              onMouseLeave={handleThumbLeave}
-            >
-              {NODE_TYPE_ICON[input.nodeType]}
-              <span className="text-[9px] text-gray-400 leading-none">{input.label}</span>
+                {NODE_TYPE_ICON[input.nodeType]}
+                <span className="text-[9px] text-gray-400 leading-none">{input.label}</span>
             </div>
           )}
         </div>
-      ))}
+          );
+        });
+      })()}
 
       {/* hover 预览浮层（Portal 渲染到 body） */}
       {createPortal(

@@ -31,8 +31,11 @@ function getUpstreamInputs(
 ): UpstreamInput[] {
   const incomingEdges = edges.filter((e) => e.target === nodeId);
 
+  // 按类型独立计数，确保"图片1"、"图片2"连续编号
+  const typeCounters: Record<string, number> = {};
+
   return incomingEdges
-    .map((edge, index) => {
+    .map((edge) => {
       const sourceNode = nodes.find((n) => n.id === edge.source);
       if (!sourceNode) return null;
 
@@ -40,13 +43,16 @@ function getUpstreamInputs(
       if (sourceNode.id.startsWith('style-')) return null;
 
       const d = sourceNode.data;
+      // 当前类型的序号 +1
+      typeCounters[d.type] = (typeCounters[d.type] || 0) + 1;
+      const num = typeCounters[d.type];
 
       switch (d.type) {
         case 'image':
           return {
             nodeId: sourceNode.id,
             nodeType: 'image',
-            label: `图片${index + 1}`,
+            label: `图片${num}`,
             thumbnail: d.imageUrl,
             previewUrl: d.imageUrl,
           };
@@ -54,7 +60,7 @@ function getUpstreamInputs(
           return {
             nodeId: sourceNode.id,
             nodeType: 'video',
-            label: `视频${index + 1}`,
+            label: `视频${num}`,
             thumbnail: undefined,
             previewUrl: d.videoUrl,
           };
@@ -62,7 +68,7 @@ function getUpstreamInputs(
           return {
             nodeId: sourceNode.id,
             nodeType: 'text',
-            label: d.label || `文本${index + 1}`,
+            label: d.label || `文本${num}`,
             textSnippet: d.content?.slice(0, 500),
           };
         case 'script':
