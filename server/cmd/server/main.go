@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 
 	"libtv/internal/config"
@@ -17,6 +18,16 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+// getPublicDir 根据环境返回 public 目录路径
+// Docker 环境：使用绝对路径 /app/public
+// 本地开发：使用相对路径 ../public
+func getPublicDir(subdir string) string {
+	if os.Getenv("RUN_MODE") == "docker" {
+		return filepath.Join("/app/public", subdir)
+	}
+	return filepath.Join("..", "public", subdir)
+}
 
 func main() {
 	// 加载配置
@@ -65,9 +76,9 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
-	uploadHandler := handler.NewUploadHandler(filepath.Join("..", "public", "canvas"), filepath.Join("..", "public", "videos"))
-	styleHandler := handler.NewStyleHandler(db, filepath.Join("..", "public", "styles"))
-	showHandler := handler.NewShowHandler(showService, filepath.Join("..", "public", "shows"), db)
+	uploadHandler := handler.NewUploadHandler(getPublicDir("canvas"), getPublicDir("videos"))
+	styleHandler := handler.NewStyleHandler(db, getPublicDir("styles"))
+	showHandler := handler.NewShowHandler(showService, getPublicDir("shows"), db)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -83,14 +94,10 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 
 	// 静态文件（统一 /media 前缀）
 	r.Static("/uploads", config.C.Storage.LocalPath)
-	canvasDir := filepath.Join("..", "public", "canvas")
-	r.Static("/media/canvas", canvasDir)
-	videosDir := filepath.Join("..", "public", "videos")
-	r.Static("/media/videos", videosDir)
-	stylesDir := filepath.Join("..", "public", "styles")
-	r.Static("/media/styles", stylesDir)
-	showsDir := filepath.Join("..", "public", "shows")
-	r.Static("/media/shows", showsDir)
+	r.Static("/media/canvas", getPublicDir("canvas"))
+	r.Static("/media/videos", getPublicDir("videos"))
+	r.Static("/media/styles", getPublicDir("styles"))
+	r.Static("/media/shows", getPublicDir("shows"))
 
 	// 公开路由
 	auth := r.Group("/api/auth")
