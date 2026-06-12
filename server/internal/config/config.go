@@ -103,5 +103,14 @@ func Load(path string) error {
 	if err := yaml.Unmarshal(data, &C); err != nil {
 		return fmt.Errorf("parse config file: %w", err)
 	}
+
+	// 支持环境变量覆盖（用于 Docker 环境）
+	if host := os.Getenv("DB_HOST"); host != "" {
+		C.Database.Host = host
+	}
+	if host := os.Getenv("REDIS_HOST"); host != "" {
+		C.Redis.Host = host
+	}
+
 	return nil
 }

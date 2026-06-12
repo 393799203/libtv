@@ -129,3 +129,38 @@ func (h *UserHandler) Delete(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
 }
+
+// UpdateRole 更新用户角色（管理员）
+func (h *UserHandler) UpdateRole(c *gin.Context) {
+	id := c.Param("id")
+
+	var req struct {
+		Role string `json:"role" binding:"required,oneof=user admin"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "角色必须是 user 或 admin"})
+		return
+	}
+
+	// 检查用户是否存在
+	var user model.User
+	if result := h.db.Where("id = ?", id).First(&user); result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
+		return
+	}
+
+	// 不允许修改自己的角色
+	currentUserID := middleware.GetUserID(c)
+	if user.ID == currentUserID {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能修改自己的角色"})
+		return
+	}
+
+	// 更新角色
+	if err := h.db.Model(&user).Update("role", req.Role).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败：" + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": user})
+}

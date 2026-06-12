@@ -75,6 +75,9 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	}
 	r := gin.Default()
 
+	// 设置 multipart form 内存限制（用于大文件上传）
+	r.MaxMultipartMemory = 100 << 20 // 100MB
+
 	// 中间件
 	r.Use(middleware.CORS())
 
@@ -120,6 +123,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
 		api.GET("/users", userHandler.List) // 管理员：获取所有用户
+		api.PUT("/users/:id/role", userHandler.UpdateRole) // 管理员：更新用户角色
 		api.DELETE("/users/:id", userHandler.Delete) // 管理员：删除用户
 
 		// 项目 + 画布

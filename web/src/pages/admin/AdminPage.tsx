@@ -18,6 +18,7 @@ import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
 import { uploadVideo } from '@/services/uploadApi';
+import { useAuthStore } from '@/stores/authStore';
 
 type AdminTab = 'shows' | 'styles' | 'users' | 'settings';
 
@@ -26,6 +27,7 @@ export default function AdminPage() {
   const { tab = 'shows' } = useParams<{ tab: string }>();
   const activeTab: AdminTab = (tab as AdminTab) || 'shows';
   const { message, modal } = App.useApp();
+  const currentUser = useAuthStore((s) => s.user); // 获取当前登录用户
 
   // ========== 风格管理状态 ==========
   const [categories, setCategories] = useState<CategoryItem[]>([]);
@@ -897,40 +899,56 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(users || []).map(user => (
-                        <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{user.id}</td>
-                          <td className="px-4 py-3 text-gray-800">{user.email}</td>
-                          <td className="px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[11px] ${
-                              user.role === 'admin'
-                                ? 'bg-purple-100 text-purple-700'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}>
-                              {user.role === 'admin' ? '管理员' : '普通用户'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-500">
-                            {new Date(user.created_at).toLocaleDateString('zh-CN')}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm(`确定要删除用户「${user.email}」吗？此操作不可恢复。`)) {
-                                  userApi.delete(user.id)
-                                    .then(() => loadUsers())
-                                    .catch(() => alert('删除失败'));
-                                }
-                              }}
-                              className="text-red-500 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer"
-                            >
-                              删除
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {(users || []).map(user => {
+                        const isCurrentUser = currentUser && user.id === currentUser.id;
+                        return (
+                          <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{user.id}</td>
+                            <td className="px-4 py-3 text-gray-800">{user.email}</td>
+                            <td className="px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
+                            <td className="px-4 py-3">
+                              <Select
+                                value={user.role}
+                                size="small"
+                                style={{ width: 100 }}
+                                disabled={isCurrentUser}
+                                options={[
+                                  { value: 'user', label: '普通用户' },
+                                  { value: 'admin', label: '管理员' },
+                                ]}
+                                onChange={(value) => {
+                                  userApi.updateRole(user.id, value as 'user' | 'admin')
+                                    .then(() => {
+                                      message.success('角色已更新');
+                                      loadUsers();
+                                    })
+                                    .catch(() => message.error('更新失败'));
+                                }}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-gray-500">
+                              {new Date(user.created_at).toLocaleDateString('zh-CN')}
+                            </td>
+                            <td className="px-4 py-3">
+                              {!isCurrentUser && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (window.confirm(`确定要删除用户「${user.email}」吗？此操作不可恢复。`)) {
+                                      userApi.delete(user.id)
+                                        .then(() => loadUsers())
+                                        .catch(() => alert('删除失败'));
+                                    }
+                                  }}
+                                  className="text-red-500 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer"
+                                >
+                                  删除
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
