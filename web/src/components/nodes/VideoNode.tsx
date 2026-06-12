@@ -8,12 +8,16 @@ import { uploadVideo } from '@/services/uploadApi';
 
 type VideoNodeType = Node<VideoNodeData, 'video'>;
 
+type UploadPhase = 'uploading' | 'processing';
+
 export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id, data, selected }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectId = useCanvasStore((s) => s.projectId);
   const [showPlayer, setShowPlayer] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('uploading');
+  const [errorMsg, setErrorMsg] = useState<string>('');
 
   // 视频上传
   const handleUpload = useCallback(
@@ -23,18 +27,25 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
 
       setUploading(true);
       setUploadPercent(0);
+      setUploadPhase('uploading');
+      setErrorMsg('');
 
       try {
         const res = await uploadVideo(
           file,
-          (pct) => setUploadPercent(pct),
+          (pct, phase) => {
+            setUploadPercent(pct);
+            if (phase) setUploadPhase(phase);
+          },
           projectId || undefined,
         );
         useCanvasStore.getState().updateNodeData(id, {
           videoUrl: res.url,
         } as Partial<VideoNodeData>);
       } catch (err) {
+        const message = err instanceof Error ? err.message : '视频上传失败';
         console.error('视频上传失败:', err);
+        setErrorMsg(message);
       } finally {
         setUploading(false);
         setUploadPercent(0);
@@ -42,7 +53,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
 
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
-    [id]
+    [id, projectId]
   );
 
   const handlePlayClick = useCallback((e: React.MouseEvent) => {
@@ -76,6 +87,8 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     );
   }, [data.videoUrl, uploading, uploadPercent]);
 
+  const phaseLabel = uploadPhase === 'processing' ? '压缩转码中...' : `上传中 ${uploadPercent}%`;
+
   return (
     <>
       <BaseNode
@@ -105,20 +118,40 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
                 muted
                 preload="metadata"
               />
-              <PlayCircleOutlined className="relative text-2xl text-white/80 group-hover:text-white transition-colors" />
+              <PlayCircleOutlined className="relative text-5xl !text-white" />
             </div>
           ) : (
             <div className="flex items-center justify-center w-full h-full bg-gray-50 rounded">
               {uploading ? (
                 <div className="flex flex-col items-center gap-2 px-4">
-                  <VideoCameraOutlined className="text-xl text-gray-400 animate-pulse" />
-                  <span className="text-xs text-gray-500">上传中 {uploadPercent}%</span>
+                  <div className={`w-6 h-6 border-2 rounded-full animate-spin ${
+                    uploadPhase === 'processing'
+                      ? 'border-orange-200 border-t-orange-500'
+                      : 'border-blue-200 border-t-blue-500'
+                  }`} />
+                  <span className={`text-xs font-medium ${
+                    uploadPhase === 'processing' ? 'text-orange-500' : 'text-gray-500'
+                  }`}>
+                    {phaseLabel}
+                  </span>
                   <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-blue-500 rounded-full transition-all duration-200"
+                      className={`h-full rounded-full transition-all duration-200 ${
+                        uploadPhase === 'processing' ? 'bg-orange-500' : 'bg-blue-500'
+                      }`}
                       style={{ width: `${uploadPercent}%` }}
                     />
                   </div>
+                </div>
+              ) : errorMsg ? (
+                <div className="flex flex-col items-center gap-2 px-4 text-center">
+                  <span className="text-xs text-red-500 leading-relaxed">{errorMsg}</span>
+                  <button
+                    className="px-3 py-1 text-[11px] bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); setErrorMsg(''); fileInputRef.current?.click(); }}
+                  >
+                    重新上传
+                  </button>
                 </div>
               ) : (
                 <VideoCameraOutlined className="text-2xl text-gray-300" />

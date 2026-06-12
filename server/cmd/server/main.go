@@ -108,6 +108,8 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	r.POST("/api/upload/image", uploadHandler.UploadImage)
 	// 视频上传（公开，独立接口）
 	r.POST("/api/upload/video", uploadHandler.UploadVideo)
+	// 视频转码状态查询（公开）
+	r.GET("/api/upload/video/status/:taskId", uploadHandler.GetVideoStatus)
 	// 删除项目 canvas 文件夹（需认证）
 	r.DELETE("/api/upload/canvas/:projectId", middleware.Auth(), uploadHandler.DeleteCanvasDir)
 

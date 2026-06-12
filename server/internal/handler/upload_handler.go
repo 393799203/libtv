@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,17 +24,40 @@ func NewUploadHandler(uploadDir, videoDir string) *UploadHandler {
 	return &UploadHandler{uploadDir: uploadDir, videoDir: videoDir}
 }
 
+// ========== 视频异步转码任务管理 ==========
+
+type VideoTaskStatus string
+
+const (
+	TaskStatusProcessing VideoTaskStatus = "processing" // 转码中
+	TaskStatusDone       VideoTaskStatus = "done"       // 完成
+	TaskStatusFailed     VideoTaskStatus = "failed"     // 失败
+)
+
+type VideoTask struct {
+	Status    VideoTaskStatus `json:"status"`
+	URL       string          `json:"url,omitempty"`
+	Compressed bool           `json:"compressed"`
+	Error     string          `json:"error,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+var (
+	videoTasks   = make(map[string]*VideoTask)
+	videoTasksMu sync.RWMutex
+)
+
 // UploadImage 上传图片到本地 canvas/ 目录，按项目 ID 分文件夹存储，相同内容不重复存储
 func (h *UploadHandler) UploadImage(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择图片文件"})
 		return
 	}
 
 	// 校验文件类型
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
+	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webm": true, ".gif": true}
 	if !allowedExts[ext] {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的图片格式"})
 		return
@@ -124,8 +149,7 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 	})
 }
 
-// UploadVideo 独立上传视频文件到 videos/ 目录，不依赖 show ID
-// >=50MB 的文件会自动用 ffmpeg 压缩（H.264 + AAC, CRF=23）
+// UploadVideo 异步视频上传：文件保存后立即返回 task_id，需要转码时后台执行 ffmpeg
 func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -133,7 +157,6 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	// 读取可选的 project_id，有则存到 canvas/ 目录（和图片上传一致）
 	projectID := c.PostForm("project_id")
 	var saveDir string
 	var urlPrefix string
@@ -162,7 +185,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	// 第一步：先算原始文件的哈希，用于查重
+	// 第一步：计算哈希用于查重
 	src, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
@@ -175,12 +198,13 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	filename := fileHash[:12] + ".mp4"
 	savePath := filepath.Join(saveDir, filename)
 
-	// 文件已存在 → 直接返回 URL（避免重复存储）
+	// 文件已存在 → 直接返回（无需转码）
 	if _, err := os.Stat(savePath); err == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code": 0,
 			"data": gin.H{
 				"url":        urlPrefix + filename,
+				"task_id":    "",
 				"compressed": false,
 				"cached":     true,
 			},
@@ -188,7 +212,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	// 第二步：新文件，先保存到临时路径
+	// 第二步：保存到临时路径
 	tmpPath := filepath.Join(saveDir, ".tmp_"+file.Filename)
 	src2, err := file.Open()
 	if err != nil {
@@ -205,13 +229,45 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	tmpFile.Close()
 	src2.Close()
 
-	finalPath := tmpPath
-	compressed := false
 	needConvert := (ext == ".ts") || (file.Size >= 50*1024*1024)
 
-	// 第三步：TS 文件始终转码，其他格式 >=50MB 自动压缩
-	if needConvert {
-		compressedPath := filepath.Join(saveDir, ".compressed_"+filename)
+	// 不需要转码 → 直接移动到最终位置并返回
+	if !needConvert {
+		if err := os.Rename(tmpPath, savePath); err != nil {
+			os.Remove(tmpPath)
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
+			"data": gin.H{
+				"url":        urlPrefix + filename,
+				"task_id":    "",
+				"compressed": false,
+				"cached":     false,
+			},
+		})
+		return
+	}
+
+	// 需要转码 → 创建任务，后台异步执行 ffmpeg
+	taskID := fileHash[:16]
+	compressedPath := filepath.Join(saveDir, ".compressed_"+filename)
+
+	task := &VideoTask{
+		Status:     TaskStatusProcessing,
+		URL:        "",
+		Compressed: false,
+		Error:      "",
+		CreatedAt:  time.Now(),
+	}
+
+	videoTasksMu.Lock()
+	videoTasks[taskID] = task
+	videoTasksMu.Unlock()
+
+	// 异步执行 ffmpeg 转码
+	go func() {
 		cmd := exec.Command("/usr/local/Cellar/ffmpeg/8.1.1/bin/ffmpeg",
 			"-i", tmpPath,
 			"-f", "mp4",
@@ -223,38 +279,84 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		)
 		if err := cmd.Run(); err == nil {
 			os.Remove(tmpPath)
-			finalPath = compressedPath
-			compressed = true
+			// 移动到最终位置
+			if err := os.Rename(compressedPath, savePath); err != nil {
+				os.Remove(compressedPath)
+				videoTasksMu.Lock()
+				task.Status = TaskStatusFailed
+				task.Error = "保存转码结果失败"
+				videoTasksMu.Unlock()
+				return
+			}
+			videoTasksMu.Lock()
+			task.Status = TaskStatusDone
+			task.URL = urlPrefix + filename
+			task.Compressed = true
+			videoTasksMu.Unlock()
 		} else if ext == ".ts" {
-			// TS 文件转码失败则报错，不能直接存为 mp4
 			os.Remove(tmpPath)
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "视频转码失败，请确认 ffmpeg 已安装"})
-			return
+			videoTasksMu.Lock()
+			task.Status = TaskStatusFailed
+			task.Error = "TS 视频转码失败，请确认 ffmpeg 已安装"
+			videoTasksMu.Unlock()
+		} else {
+			// 非TS 格式压缩失败 → 使用原始文件
+			if err := os.Rename(tmpPath, savePath); err != nil {
+				os.Remove(tmpPath)
+				videoTasksMu.Lock()
+				task.Status = TaskStatusFailed
+				task.Error = "转码失败且原始文件也无法保存"
+				videoTasksMu.Unlock()
+				return
+			}
+			videoTasksMu.Lock()
+			task.Status = TaskStatusDone
+			task.URL = urlPrefix + filename
+			task.Compressed = false
+			videoTasksMu.Unlock()
 		}
 
-		// 清理 FFmpeg 可能残留的临时文件
+		// 清理残留临时文件
 		files, _ := os.ReadDir(saveDir)
 		for _, f := range files {
 			if strings.HasPrefix(f.Name(), "ts_segment") {
 				os.Remove(filepath.Join(saveDir, f.Name()))
 			}
 		}
+	}()
+
+	// 立即返回任务 ID，前端轮询状态
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"url":        "", // 转码完成后通过 status 接口获取
+			"task_id":    taskID,
+			"compressed": false,
+			"cached":     false,
+		},
+	})
+}
+
+// GetVideoStatus 查询视频转码任务状态
+func (h *UploadHandler) GetVideoStatus(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "缺少 task_id"})
+		return
 	}
 
-	// 第四步：移动到最终位置
-	if err := os.Rename(finalPath, savePath); err != nil {
-		os.Remove(finalPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存失败"})
+	videoTasksMu.RLock()
+	task, ok := videoTasks[taskID]
+	videoTasksMu.RUnlock()
+
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "任务不存在或已过期"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
-		"data": gin.H{
-			"url":        urlPrefix + filename,
-			"compressed": compressed,
-			"cached":     false,
-		},
+		"data": task,
 	})
 }
 
