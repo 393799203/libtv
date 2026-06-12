@@ -268,7 +268,7 @@ export default function VideoDetailPage() {
         {/* 作者头像 */}
         <div className="flex flex-col items-center">
           <div className="relative">
-            <Avatar size={48} src={videoInfo.authorAvatar} style={{ border: '2px solid white' }} />
+            <Avatar size={48} src={videoInfo.authorAvatar || undefined} style={{ border: '2px solid white' }} />
             <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
               <PlusOutlined style={{ fontSize: '12px', color: 'white' }} />
             </div>

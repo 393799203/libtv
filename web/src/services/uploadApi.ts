@@ -88,7 +88,7 @@ export async function uploadVideo(
   // 第二阶段：轮询转码状态
   onProgress?.(99, 'processing');
 
-  const POLL_INTERVAL = 1500; // 1.5秒轮询一次
+  const POLL_INTERVAL = 5000; // 5秒轮询一次
   const MAX_WAIT = 10 * 60 * 1000; // 最长等待10分钟
   const startTime = Date.now();
 

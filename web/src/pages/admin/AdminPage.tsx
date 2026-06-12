@@ -44,6 +44,7 @@ export default function AdminPage() {
   const [adding, setAdding] = useState(false);
   const [editingStyle, setEditingStyle] = useState<StyleItem | null>(null); // 编辑时传入当前风格数据
   const addFileRef = useRef<HTMLInputElement>(null);
+  const coverPickVideoRef = useRef<HTMLVideoElement>(null);
 
   // ========== 用户管理状态 ==========
   const [users, setUsers] = useState<UserItem[]>([]);
@@ -65,6 +66,8 @@ export default function AdminPage() {
   const [addShowVideoName, setAddShowVideoName] = useState('');
   const [videoUploading, setVideoUploading] = useState(false);
   const [videoUploadProgress, setVideoUploadProgress] = useState(0);
+  const [videoUploadPhase, setVideoUploadPhase] = useState<'uploading' | 'processing' | 'pickCover'>('uploading');
+  const [videoErrorMsg, setVideoErrorMsg] = useState<string>('');
   const [videoUploadedUrl, setVideoUploadedUrl] = useState('');
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(''); // 填写地址后用于预览视频
   const [playingShowId, setPlayingShowId] = useState<string | null>(null); // 列表卡片正在播放的 show ID
@@ -192,6 +195,12 @@ export default function AdminPage() {
     setAddShowPreviewUrl(s.thumbnail_url || '');
     setAddShowVideoFile(null);
     setAddShowVideoName(s.video_url ? s.video_url.split('/').pop() || '' : '');
+    // 重置视频上传状态
+    setVideoUploadedUrl(s.video_url || '');
+    setVideoUploading(false);
+    setVideoUploadProgress(0);
+    setVideoUploadPhase('uploading');
+    setVideoErrorMsg('');
     setShowAddShowDialog(true);
     if (authorOptions.length === 0) fetchAuthors('');
   };
@@ -210,14 +219,18 @@ export default function AdminPage() {
     setAddShowForm(prev => ({ ...prev, video_url: '' }));
     setVideoUploadedUrl('');
     setVideoUploadProgress(0);
+    setVideoUploadPhase('uploading');
+    setVideoErrorMsg('');
     setAddShowFile(null);
 
     // 独立上传视频（不依赖 show ID）
     try {
       setVideoUploading(true);
       setVideoUploadProgress(0);
-      const result = await uploadVideo(file, (pct) => {
+      setVideoUploadPhase('uploading');
+      const result = await uploadVideo(file, (pct, phase) => {
         setVideoUploadProgress(pct);
+        if (phase) setVideoUploadPhase(phase);
       });
       // 上传成功：填入表单 + 标记已上传
       setAddShowForm(prev => ({ ...prev, video_url: result.url }));
@@ -230,40 +243,63 @@ export default function AdminPage() {
         message.success('视频上传完成');
       }
 
-      // 上传成功后用 MP4 URL 截取缩略图（兼容 TS 等浏览器不支持的格式）
-      const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.muted = true;
-        video.playsInline = true;
-        video.crossOrigin = 'anonymous';
-        video.src = result.url;
+      // 上传成功：先自动截取第一帧，同时进入封面选择模式（用户可手动替换）
+      setVideoUploadPhase('pickCover');
+      const dur = await new Promise<number>((resolve) => {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.muted = true;
+        v.src = result.url;
+        v.onloadeddata = () => resolve(Math.round(v.duration) || 0);
+        v.onerror = () => resolve(0);
+      });
+      if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
 
-        video.onloadeddata = () => {
-          video.currentTime = Math.min(1, video.duration * 0.01 || 1);
-          const dur = Math.round(video.duration) || 0;
-          setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-        };
-
-        video.onseeked = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-          setAddShowPreviewUrl(dataUrl);
-          fetch(dataUrl).then(r => r.blob()).then(blob => {
-            const thumbFile = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
-            setAddShowFile(thumbFile);
-          });
-        };
-
-        video.onerror = () => {};
-    } catch (err) {
+      // 默认截取第1帧
+      const thumbVideo = document.createElement('video');
+      thumbVideo.preload = 'auto';
+      thumbVideo.muted = true;
+      thumbVideo.src = result.url;
+      thumbVideo.onloadeddata = () => {
+        thumbVideo.currentTime = Math.min(1, thumbVideo.duration * 0.01 || 1);
+      };
+      thumbVideo.onseeked = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = thumbVideo.videoWidth;
+        canvas.height = thumbVideo.videoHeight;
+        canvas.getContext('2d')?.drawImage(thumbVideo, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        setAddShowPreviewUrl(dataUrl);
+        fetch(dataUrl).then(r => r.blob()).then(blob => {
+          const thumbFile = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
+          setAddShowFile(thumbFile);
+        });
+      };
+    } catch (err: any) {
       console.error('视频上传失败:', err);
-      message.error('视频上传失败');
+      const msg = err?.response?.data?.msg || err?.message || '视频上传失败';
+      setVideoErrorMsg(msg);
     } finally {
       setVideoUploading(false);
     }
+  };
+
+  // 截取当前视频帧作为封面
+  const handleCaptureCover = () => {
+    const video = coverPickVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    setAddShowPreviewUrl(dataUrl);
+    fetch(dataUrl).then(r => r.blob()).then(blob => {
+      const thumbFile = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
+      setAddShowFile(thumbFile);
+    });
+    setVideoUploadPhase('uploading'); // 退出选封面模式，显示最终结果
+    message.success('封面已截取');
   };
 
   // 填写视频地址失焦后，加载视频预览 + 自动截取封面
@@ -974,24 +1010,114 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-3">
                 {/* 左：视频预览/上传区域 */}
                 <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">视频 {!editingShow && <span className="text-red-400">*</span>}</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[12px] text-gray-500">视频 {!editingShow && <span className="text-red-400">*</span>}</label>
+                    {/* 编辑模式 / pickCover 模式：显示操作按钮 */}
+                    {(!videoUploading && videoUploadPhase === 'pickCover' && videoUploadedUrl) || (editingShow && !videoUploading) ? (
+                      <div className="flex gap-1.5">
+                        {videoUploadPhase === 'pickCover' ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCaptureCover(); }}
+                            className="px-2.5 py-0.5 bg-blue-500 hover:bg-blue-600 text-white text-[11px] rounded shadow transition-colors cursor-pointer"
+                          >
+                            截取封面
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setVideoUploadPhase('pickCover');
+                              // 用当前视频 URL 进入选封面模式
+                              if (!videoUploadedUrl) setVideoUploadedUrl(addShowForm.video_url);
+                            }}
+                            className="px-2.5 py-0.5 bg-green-50 hover:bg-green-100 text-green-600 text-[11px] rounded border border-green-200 transition-colors cursor-pointer"
+                          >
+                            换封面
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); document.getElementById('show-video-input')?.click(); }}
+                          className="px-2.5 py-0.5 bg-orange-50 hover:bg-orange-100 text-orange-600 text-[11px] rounded border border-orange-200 transition-colors cursor-pointer"
+                        >
+                          换视频
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <div
-                    onClick={() => !videoUploading && document.getElementById('show-video-input')?.click()}
-                    className={`w-full aspect-video border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer transition-colors overflow-hidden relative ${videoUploading ? 'border-blue-400 bg-blue-50 cursor-wait' : 'border-gray-200 hover:border-blue-300'}`}
+                    onClick={() => {
+                      if (videoUploading) return;
+                      if (editingShow && addShowForm.video_url && !videoUploadedUrl) return; // 编辑模式有视频时点击不触发上传
+                      document.getElementById('show-video-input')?.click();
+                    }}
+                    className={`w-full aspect-video border-2 rounded-lg flex items-center justify-center cursor-pointer transition-colors overflow-hidden relative ${
+                      videoUploading ? 'border-blue-400 bg-blue-50 cursor-wait' :
+                      videoErrorMsg ? 'border-red-300 bg-red-50' :
+                      editingShow && !videoUploading && addShowForm.video_url ? 'border-gray-200' :
+                      'border-dashed border-gray-200 hover:border-blue-300'
+                    }`}
                   >
                     {videoUploading ? (
-                      /* 上传进度浮层 */
+                      /* 上传/转码进度浮层 */
                       <>
                         <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
-                          <div className="flex flex-col items-center gap-1">
-                            <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            <div className="text-[11px] text-white font-medium">上传 {videoUploadProgress}%</div>
+                          <div className="flex flex-col items-center gap-2 px-4">
+                            <div className={`w-6 h-6 border-2 rounded-full animate-spin ${
+                              videoUploadPhase === 'processing'
+                                ? 'border-orange-200 border-t-orange-500'
+                                : 'border-white/30 border-t-white'
+                            }`} />
+                            <span className={`text-[11px] font-medium ${
+                              videoUploadPhase === 'processing' ? 'text-orange-400' : 'text-white'
+                            }`}>
+                              {videoUploadPhase === 'processing' ? `压缩转码中...` : `上传中 ${videoUploadProgress}%`}
+                            </span>
+                            <div className="w-28 h-1.5 bg-white/20 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-200 ${
+                                  videoUploadPhase === 'processing' ? 'bg-orange-500' : 'bg-blue-500'
+                                }`}
+                                style={{ width: `${videoUploadProgress}%` }}
+                              />
+                            </div>
                           </div>
                         </div>
                         {videoPreviewUrl && (
                           <video src={videoPreviewUrl} className="w-full h-full object-contain" muted playsInline />
                         )}
                       </>
+                    ) : videoErrorMsg ? (
+                      /* 上传失败 */
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span className="text-xs text-red-500 text-center px-4">{videoErrorMsg}</span>
+                        <button
+                          className="px-3 py-1 text-[11px] bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); setVideoErrorMsg(''); document.getElementById('show-video-input')?.click(); }}
+                        >
+                          重新上传
+                        </button>
+                      </div>
+                    ) : !videoUploading && videoUploadPhase === 'pickCover' && videoUploadedUrl ? (
+                      /* 选封面模式：视频播放器（按钮在标题栏） */
+                      <video
+                        ref={coverPickVideoRef}
+                        src={videoUploadedUrl}
+                        className="w-full h-full object-contain"
+                        muted
+                        playsInline
+                        controls
+                        onClick={e => e.stopPropagation()}
+                      />
+                    ) : editingShow && !videoUploading && addShowForm.video_url ? (
+                      /* 编辑模式：显示已有视频 */
+                      <video
+                        src={addShowForm.video_url}
+                        className="w-full h-full object-contain"
+                        muted
+                        playsInline
+                        controls
+                        onClick={e => e.stopPropagation()}
+                      />
                     ) : videoUploadedUrl ? (
                       /* 上传完成：显示可播放视频 */
                       <video
@@ -1024,7 +1150,7 @@ export default function AdminPage() {
                 <div>
                   <label className="block text-[12px] text-gray-500 mb-1.5">
                     封面图
-                    {(videoUploadedUrl || videoPreviewUrl) ? <span className="text-green-500 ml-1">(已自动截取)</span> : !editingShow ? <span className="text-red-400">*</span> : null}
+                    {(videoUploadPhase === 'pickCover') ? <span className="text-blue-500 ml-1">(等待截取)</span> : (videoUploadedUrl || videoPreviewUrl) ? <span className="text-green-500 ml-1">(已截取)</span> : !editingShow ? <span className="text-red-400">*</span> : null}
                   </label>
                   <div onClick={() => document.getElementById('show-file-input')?.click()} className="w-full aspect-[16/9] border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-300 transition-colors overflow-hidden">
                     {addShowPreviewUrl ? (

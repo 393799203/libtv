@@ -213,6 +213,13 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 
 	if _, err := os.Stat(savePath); err == nil {
 		imageURL := "/media/shows/" + filename
+
+		// 删除旧封面文件
+		if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL && strings.HasPrefix(show.ThumbnailURL, "/media/shows/") {
+			oldFile := filepath.Join(h.uploadDir, filepath.Base(show.ThumbnailURL))
+			os.Remove(oldFile)
+		}
+
 		show.ThumbnailURL = imageURL
 		h.showService.UpdateShow(c.Request.Context(), show)
 		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
@@ -232,6 +239,13 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	io.Copy(dst, src2)
 
 	imageURL := "/media/shows/" + filename
+
+	// 删除旧封面文件
+	if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL && strings.HasPrefix(show.ThumbnailURL, "/media/shows/") {
+		oldFile := filepath.Join(h.uploadDir, filepath.Base(show.ThumbnailURL))
+		os.Remove(oldFile)
+	}
+
 	show.ThumbnailURL = imageURL
 	h.showService.UpdateShow(c.Request.Context(), show)
 

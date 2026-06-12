@@ -175,8 +175,8 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	if file.Size > 1024*1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "视频大小不能超过 1GB"})
+	if file.Size > 2*1024*1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "视频大小不能超过 2GB"})
 		return
 	}
 
