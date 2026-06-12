@@ -16,8 +16,9 @@ export const DataFlowEdge = memo<EdgeProps<DataFlowEdgeType>>(function DataFlowE
   targetPosition,
   selected,
 }) {
-  // 检查目标节点是否被选中
-  const targetNodeSelected = useCanvasStore((s) => s.nodes.find((n) => n.id === target)?.selected ?? false);
+  // 直接用 selectedNodeIds 判断目标节点是否选中（O(M)，M=选中数，而非 O(N) 遍历全部节点）
+  const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
+  const targetNodeSelected = selectedNodeIds.includes(target);
 
   const [edgePath] = getBezierPath({
     sourceX,

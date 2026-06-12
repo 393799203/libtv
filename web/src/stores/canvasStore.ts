@@ -112,18 +112,38 @@ let edgeChangeQueue: EdgeChange<LibTVEdge>[] = [];
 let flushTimer: ReturnType<typeof queueMicrotask> | null = null;
 
 function saveHistory(data: ProjectCanvasData): Pick<ProjectCanvasData, 'history' | 'future'> & { canUndo: boolean; canRedo: boolean } {
-  const snapshot: HistorySnapshot = { nodes: [...data.nodes], edges: [...data.edges] };
+  const snapshot: HistorySnapshot = { nodes: data.nodes, edges: data.edges };
 
   if (data.history.length > 0) {
     const last = data.history[0];
-    if (JSON.stringify(last.nodes) === JSON.stringify(snapshot.nodes) &&
-        JSON.stringify(last.edges) === JSON.stringify(snapshot.edges)) {
+    // 轻量对比：引用相等 + 长度一致 → 数据未变（避免 JSON.stringify 全量序列化）
+    if (last.nodes === snapshot.nodes && last.edges === snapshot.edges) {
       return {} as any;
+    }
+    // 引用不同时，用长度 + 关键字段快速比对（覆盖拖拽/选中等高频场景）
+    if (last.nodes.length === snapshot.nodes.length && last.edges.length === snapshot.edges.length) {
+      let unchanged = true;
+      for (let i = 0; i < last.nodes.length && unchanged; i++) {
+        const a = last.nodes[i];
+        const b = snapshot.nodes[i];
+        if (a.id !== b.id || a.position.x !== b.position.x || a.position.y !== b.position.y ||
+            a.selected !== b.selected || a.measured?.width !== b.measured?.width ||
+            a.measured?.height !== b.measured?.height) {
+          unchanged = false;
+        }
+      }
+      for (let i = 0; i < last.edges.length && unchanged; i++) {
+        if (last.edges[i].id !== snapshot.edges[i].id || last.edges[i].selected !== snapshot.edges[i].selected) {
+          unchanged = false;
+        }
+      }
+      if (unchanged) return {} as any;
     }
   }
 
+  // 确实有变化时才深拷贝存入历史（延迟拷贝，无变化时不分配内存）
   return {
-    history: [snapshot, ...data.history].slice(0, MAX_HISTORY),
+    history: [{ nodes: [...snapshot.nodes], edges: [...snapshot.edges] }, ...data.history].slice(0, MAX_HISTORY),
     future: [],
     canUndo: true,
     canRedo: false,
@@ -584,7 +604,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 }));
 
-// 全局监听 store 变动，打印最新状态
-useCanvasStore.subscribe((state) => {
-  console.log('store 最新状态:', state);
-});
+// 开发调试时可临时取消注释（注意：大量节点时会影响性能）
+// useCanvasStore.subscribe((state) => {
+//   console.log('store 最新状态:', state);
+// });
