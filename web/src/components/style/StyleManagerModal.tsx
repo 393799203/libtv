@@ -285,7 +285,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
               <div className="flex items-center justify-between mb-4">
                 <span className="text-[13px] text-gray-500">{styles?.length || 0} 张图片</span>
               </div>
-              <div className="grid grid-cols-6 gap-3">
+              <div className="grid grid-cols-8 gap-2">
                 {(styles || []).map((style) => (
                   <div
                     key={style.id}

@@ -775,7 +775,7 @@ export default function AdminPage() {
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-[13px] text-gray-500">{styles?.length || 0} 张图片</span>
                   </div>
-                  <div className="grid grid-cols-6 gap-3">
+                  <div className="grid grid-cols-8 gap-2">
                     {(styles || []).map(style => (
                       <div key={style.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
                         <div className="aspect-[3/4] relative bg-gray-100">
