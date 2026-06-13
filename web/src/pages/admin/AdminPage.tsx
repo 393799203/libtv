@@ -261,6 +261,7 @@ export default function AdminPage() {
       const thumbVideo = document.createElement('video');
       thumbVideo.preload = 'auto';
       thumbVideo.muted = true;
+      thumbVideo.crossOrigin = 'anonymous'; // 允许跨域资源导出
       thumbVideo.src = result.url;
       thumbVideo.onloadeddata = () => {
         thumbVideo.currentTime = Math.min(1, thumbVideo.duration * 0.01 || 1);
@@ -1124,6 +1125,7 @@ export default function AdminPage() {
                         muted
                         playsInline
                         controls
+                        crossOrigin="anonymous"
                         onClick={e => e.stopPropagation()}
                       />
                     ) : editingShow && !videoUploading && addShowForm.video_url ? (
@@ -1134,6 +1136,7 @@ export default function AdminPage() {
                         muted
                         playsInline
                         controls
+                        crossOrigin="anonymous"
                         onClick={e => e.stopPropagation()}
                       />
                     ) : videoUploadedUrl ? (
