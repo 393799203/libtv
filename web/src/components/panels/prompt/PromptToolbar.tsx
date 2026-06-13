@@ -40,6 +40,11 @@ interface PromptToolbarProps {
   nodeType?: NodeType;
   cameraMode?: 'normal' | 'camera' | 'panorama';
   onCameraModeChange?: (mode: 'normal' | 'camera' | 'panorama') => void;
+  // 音频节点专属：音色和语速
+  selectedVoice?: string;
+  onVoiceChange?: (voice: string) => void;
+  selectedSpeed?: number;
+  onSpeedChange?: (speed: number) => void;
 }
 
 // ==================== 模型选择器（截图2）====================
@@ -303,13 +308,43 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   nodeType = 'image',
   cameraMode = 'normal',
   onCameraModeChange,
+  selectedVoice = 'default',
+  onVoiceChange,
+  selectedSpeed = 1.0,
+  onSpeedChange,
 }) {
   const isVideo = nodeType === 'video';
+  const isAudio = nodeType === 'audio';
   const unit = isVideo ? '个' : '张';
 
   const [countOpen, setCountOpen] = useState(false);
   const [count, setCount] = useState(1);
   const countOptions = [1, 2, 4];
+
+  // 音色选项
+  const VOICE_OPTIONS = [
+    { value: 'default', label: '默认音色' },
+    { value: 'male-young', label: '青年男声' },
+    { value: 'female-young', label: '青年女声' },
+    { value: 'male-mature', label: '成熟男声' },
+    { value: 'female-mature', label: '成熟女声' },
+    { value: 'child', label: '童声' },
+  ];
+
+  // 语速选项
+  const SPEED_OPTIONS = [
+    { value: 0.5, label: '0.5x 慢速' },
+    { value: 0.75, label: '0.75x' },
+    { value: 1.0, label: '1.0x 正常' },
+    { value: 1.25, label: '1.25x' },
+    { value: 1.5, label: '1.5x 快速' },
+    { value: 2.0, label: '2.0x' },
+  ];
+
+  // 音色选择器状态
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  // 语速选择器状态
+  const [speedOpen, setSpeedOpen] = useState(false);
 
   return (
     <div className="flex items-center gap-0.5 pt-2.5 mt-0.5 border-t border-gray-100">
@@ -323,8 +358,73 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       {/* 分隔 */}
       <span className="w-px h-4 bg-gray-200 mx-0.5" />
 
-      {/* 分辨率/比例（仅图片/视频节点） */}
-      {nodeType !== 'text' && (
+      {/* 音色选择器（仅音频节点） */}
+      {isAudio && (
+        <div className="relative">
+          <button
+            onClick={() => setVoiceOpen(!voiceOpen)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+          >
+            <SoundOutlined className="text-gray-500 text-xs" />
+            <span className="text-gray-800 font-medium">
+              {VOICE_OPTIONS.find((v) => v.value === selectedVoice)?.label || '音色'}
+            </span>
+            <span className="text-[10px] text-gray-400">^</span>
+          </button>
+          {voiceOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setVoiceOpen(false)} />
+              <div className="absolute bottom-full left-0 mb-2 w-[140px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+                {VOICE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                      selectedVoice === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => { onVoiceChange?.(opt.value); setVoiceOpen(false); }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 语速选择器（仅音频节点） */}
+      {isAudio && (
+        <div className="relative">
+          <button
+            onClick={() => setSpeedOpen(!speedOpen)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+          >
+            <span className="text-gray-600">{selectedSpeed}x</span>
+            <span className="text-[10px] text-gray-400">^</span>
+          </button>
+          {speedOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setSpeedOpen(false)} />
+              <div className="absolute bottom-full left-0 mb-2 w-[120px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+                {SPEED_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                      selectedSpeed === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => { onSpeedChange?.(opt.value); setSpeedOpen(false); }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 分辨率/比例（仅图片/视频节点，非文本和音频） */}
+      {nodeType !== 'text' && !isAudio && (
         <AspectRatioSelector
           resolution={selectedResolution}
           aspectRatio={selectedAspectRatio}
@@ -334,7 +434,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       )}
 
       {/* 分隔（仅图片/视频节点） */}
-      {nodeType !== 'text' && (
+      {nodeType !== 'text' && !isAudio && (
         <span className="w-px h-4 bg-gray-200 mx-0.5" />
       )}
 
@@ -367,7 +467,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       {/* 右侧区域 */}
       <div className="flex items-center gap-0.5 ml-auto">
         {/* 生成数量（仅图片/视频节点） */}
-        {nodeType !== 'text' && (
+        {!isAudio && nodeType !== 'text' && (
         <div className="relative">
           <button
             onClick={() => setCountOpen(!countOpen)}

@@ -308,6 +308,89 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 	})
 }
 
+// UploadAudio 上传音频文件（哈希去重，按项目ID分文件夹）
+func (h *UploadHandler) UploadAudio(c *gin.Context) {
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
+		return
+	}
+
+	projectID := c.PostForm("project_id")
+
+	hasher := sha256.New()
+	io.Copy(hasher, file)
+	file.Close()
+	fileHash := hex.EncodeToString(hasher.Sum(nil))
+
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		ext = ".mp3"
+	}
+	filename := fileHash[:12] + ext
+
+	var objectName string
+	if projectID != "" {
+		objectName = "canvas/" + projectID + "/" + filename
+	} else {
+		objectName = "audio/" + filename
+	}
+
+	_, err = h.storage.StatObject(objectName)
+	if err == nil {
+		url := h.storage.GetURL(objectName)
+		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
+			"msg":  "上传成功（已存在）",
+			"data": gin.H{
+				"url":          url,
+				"storage_type": h.storage.GetType(),
+				"filename":     objectName,
+				"cached":       true,
+			},
+		})
+		return
+	}
+
+	src2, err := header.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
+		return
+	}
+	defer src2.Close()
+
+	contentType := "audio/mpeg"
+	switch strings.ToLower(ext) {
+	case ".wav":
+		contentType = "audio/wav"
+	case ".ogg":
+		contentType = "audio/ogg"
+	case ".m4a":
+		contentType = "audio/mp4"
+	case ".flac":
+		contentType = "audio/flac"
+	}
+
+	err = h.storage.PutObject(objectName, src2, header.Size, contentType)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败"})
+		return
+	}
+
+	url := h.storage.GetURL(objectName)
+	storageType := h.storage.GetType()
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "上传成功",
+		"data": gin.H{
+			"url":          url,
+			"storage_type": storageType,
+			"filename":     objectName,
+		},
+	})
+}
+
 // GetFile 获取文件（代理MinIO，支持Range请求）
 func (h *UploadHandler) GetFile(c *gin.Context) {
 	filePath := c.Param("filepath")

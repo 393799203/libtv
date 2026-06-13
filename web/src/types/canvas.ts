@@ -53,10 +53,14 @@ export interface VideoNodeData extends Record<string, unknown> {
 export interface AudioNodeData extends Record<string, unknown> {
   type: 'audio';
   label: string;
-  text: string;
-  voice: string;
-  speed: number;
-  audioUrl?: string;
+  prompt: string;          // 提示词（文本生成音频时使用）
+  text: string;            // 上游文本节点传入的文本内容
+  voice: string;           // 音色/语音模型
+  speed: number;           // 语速
+  model: string;           // 音频生成模型
+  duration: number;        // 音频时长（秒）
+  audioUrl?: string;       // 音频文件 URL
+  audioName?: string;      // 音频名称（显示在头部）
   status: NodeExecutionStatus;
   error?: string;
 }

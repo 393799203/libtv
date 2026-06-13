@@ -12,6 +12,7 @@ import { PromptEditor } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
 import { VideoModeSelector } from './VideoPromptControls';
 import type { VideoMode } from '@/types/canvas';
+import type { AudioNodeData } from '@/types/canvas';
 
 interface PromptPanelProps {
   nodeId: string;
@@ -130,6 +131,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     [upstreamInputs]
   );
 
+  // 音频节点专属：音色和语速
+  const [selectedVoice, setSelectedVoice] = useState(
+    nodeType === 'audio' ? ((data as AudioNodeData).voice || 'default') : 'default'
+  );
+  const [selectedSpeed, setSelectedSpeed] = useState(
+    nodeType === 'audio' ? ((data as AudioNodeData).speed || 1.0) : 1.0
+  );
+
   // 提示词文本变化
   const handlePromptChange = useCallback(
     (value: string, newMentions: MentionMarker[]) => {
@@ -183,6 +192,13 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onUpdate({ prompt: promptText, model: selectedModel, videoMode });
       } else if (nodeType === 'text') {
         onUpdate({ content: promptText });
+      } else if (nodeType === 'audio') {
+        onUpdate({
+          prompt: promptText,
+          model: selectedModel,
+          voice: selectedVoice,
+          speed: selectedSpeed,
+        } as Partial<AudioNodeData>);
       }
     } finally {
       setIsGenerating(false);
@@ -195,6 +211,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     selectedModel,
     selectedResolution,
     selectedAspectRatio,
+    selectedVoice,
+    selectedSpeed,
     onUpdate,
   ]);
 
@@ -246,6 +264,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         nodeType={nodeType}
         cameraMode={cameraMode}
         onCameraModeChange={setCameraMode}
+        selectedVoice={selectedVoice}
+        onVoiceChange={setSelectedVoice}
+        selectedSpeed={selectedSpeed}
+        onSpeedChange={setSelectedSpeed}
       />
     </div>
   );

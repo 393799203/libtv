@@ -6,7 +6,7 @@ const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
   text: { width: 280, height: 360 },
   image: { width: 280 },
   video: { width: 480, height: 270 },
-  audio: { width: 280, height: 200 },
+  audio: { width: 320, height: 140 },
   script: { width: 280, height: 200 },
 };
 
@@ -54,6 +54,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         type: 'text',
         label: '文本节点',
         content: '',
+        prompt: '',
       };
     case 'image':
       return {
@@ -83,9 +84,12 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         ...baseData,
         type: 'audio',
         label: '音频节点',
+        prompt: '',
         text: '',
         voice: 'default',
         speed: 1.0,
+        model: 'tts-1',
+        duration: 0,
         audioUrl: undefined,
       };
     case 'script':

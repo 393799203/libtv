@@ -199,6 +199,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	{
 		publicUpload.POST("/image", uploadHandler.UploadImage)
 		publicUpload.POST("/video", uploadHandler.UploadVideo)
+		publicUpload.POST("/audio", uploadHandler.UploadAudio)
 		publicUpload.GET("/video/status/:taskId", uploadHandler.GetVideoStatus)
 	}
 

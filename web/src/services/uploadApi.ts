@@ -124,6 +124,37 @@ export async function uploadVideo(
 }
 
 /**
+ * 上传音频文件到服务端（按项目 ID 分文件夹）
+ * @param file 音频文件
+ * @param onProgress 进度回调 0-100
+ * @param projectId 项目 ID
+ * @returns 音频 URL
+ */
+export async function uploadAudio(
+  file: File,
+  onProgress?: (percent: number) => void,
+  projectId?: string,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (projectId) formData.append('project_id', projectId);
+
+  const res = await api.post<{ url: string }>('/upload/audio', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+    onUploadProgress: (e) => {
+      if (e.total && onProgress) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        onProgress(Math.min(pct, 99));
+      }
+    },
+  });
+
+  onProgress?.(100);
+  return res.url;
+}
+
+/**
  * 删除指定项目的 canvas 文件夹（删除项目时调用）
  * @param projectId 项目 ID
  */

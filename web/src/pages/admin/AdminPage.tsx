@@ -116,14 +116,14 @@ export default function AdminPage() {
    * @param video HTMLVideoElement元素
    * @returns { file: File, dataUrl: string } 缩略图文件和DataURL
    */
-  const captureVideoElementFrame = (video: HTMLVideoElement): { file: File; dataUrl: string } => {
+  const captureVideoElementFrame = async (video: HTMLVideoElement): Promise<{ file: File; dataUrl: string }> => {
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    const blob = new Blob([dataUrl.split(',')[1]], { type: 'image/jpeg' });
+    const blob = await fetch(dataUrl).then(r => r.blob());
     const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
 
     return { file, dataUrl };
@@ -347,11 +347,11 @@ export default function AdminPage() {
   };
 
   // 截取当前视频帧作为封面
-  const handleCaptureCover = () => {
+  const handleCaptureCover = async () => {
     const video = coverPickVideoRef.current;
     if (!video) return;
 
-    const { file: thumbFile, dataUrl: thumbDataUrl } = captureVideoElementFrame(video);
+    const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoElementFrame(video);
     setAddShowPreviewUrl(thumbDataUrl);
     setAddShowFile(thumbFile);
 
