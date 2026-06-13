@@ -49,13 +49,16 @@ var (
 	videoTasksMu sync.RWMutex
 )
 
-// UploadVideo 上传视频（哈希去重）
+// UploadVideo 上传视频（哈希去重，按项目ID分文件夹）
 func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
 		return
 	}
+
+	// 获取项目ID（可选参数，用于画布视频节点）
+	projectID := c.PostForm("project_id")
 
 	// 第一步：计算哈希用于去重
 	hasher := sha256.New()
@@ -69,7 +72,16 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		ext = ".mp4"
 	}
 	filename := fileHash[:12] + ext
-	objectName := "videos/" + filename
+
+	// 根据项目ID确定存储路径
+	var objectName string
+	if projectID != "" {
+		// 有项目ID：存储到 canvas/项目ID/ 目录（画布视频节点）
+		objectName = "canvas/" + projectID + "/" + filename
+	} else {
+		// 无项目ID：存储到 videos/ 目录（通用视频上传）
+		objectName = "videos/" + filename
+	}
 
 	// 检查文件是否已存在（通过StatObject）
 	_, err = h.storage.StatObject(objectName)
