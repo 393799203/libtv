@@ -48,6 +48,87 @@ export default function AdminPage() {
   const addFileRef = useRef<HTMLInputElement>(null);
   const coverPickVideoRef = useRef<HTMLVideoElement>(null);
 
+  // ========== 通用视频处理工具函数 ==========
+
+  /**
+   * 从视频URL截取指定帧，生成缩略图File对象
+   * @param videoUrl 视频URL
+   * @param timeInSeconds 截取时间点（秒），默认取1秒或视频1%位置
+   * @returns { file: File, dataUrl: string } 缩略图文件和DataURL
+   */
+  const captureVideoFrame = async (
+    videoUrl: string,
+    timeInSeconds?: number
+  ): Promise<{ file: File; dataUrl: string }> => {
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.crossOrigin = 'anonymous';
+    video.src = videoUrl;
+
+    // 等待视频数据加载
+    await new Promise<void>((resolve, reject) => {
+      video.onloadeddata = () => resolve();
+      video.onerror = () => reject(new Error('视频加载失败'));
+    });
+
+    // 设置截取时间点
+    video.currentTime = timeInSeconds ?? Math.min(1, video.duration * 0.01 || 1);
+
+    // 等待帧加载完成
+    await new Promise<void>((resolve) => {
+      video.onseeked = () => resolve();
+    });
+
+    // 截取帧到canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // 生成图片文件
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    const blob = await fetch(dataUrl).then(r => r.blob());
+    const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
+
+    return { file, dataUrl };
+  };
+
+  /**
+   * 获取视频时长（秒）
+   * @param videoUrl 视频URL
+   * @returns 视频时长（秒），失败返回0
+   */
+  const getVideoDuration = async (videoUrl: string): Promise<number> => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.src = videoUrl;
+
+    return new Promise<number>((resolve) => {
+      video.onloadeddata = () => resolve(Math.round(video.duration) || 0);
+      video.onerror = () => resolve(0);
+    });
+  };
+
+  /**
+   * 从video元素截取当前帧，生成缩略图File对象
+   * @param video HTMLVideoElement元素
+   * @returns { file: File, dataUrl: string } 缩略图文件和DataURL
+   */
+  const captureVideoElementFrame = (video: HTMLVideoElement): { file: File; dataUrl: string } => {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    const blob = new Blob([dataUrl.split(',')[1]], { type: 'image/jpeg' });
+    const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
+
+    return { file, dataUrl };
+  };
+
   // ========== 用户管理状态 ==========
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
@@ -247,37 +328,15 @@ export default function AdminPage() {
 
       // 上传成功：先自动截取第一帧，同时进入封面选择模式（用户可手动替换）
       setVideoUploadPhase('pickCover');
-      const dur = await new Promise<number>((resolve) => {
-        const v = document.createElement('video');
-        v.preload = 'metadata';
-        v.muted = true;
-        v.src = result.url;
-        v.onloadeddata = () => resolve(Math.round(v.duration) || 0);
-        v.onerror = () => resolve(0);
-      });
+
+      // 获取视频时长
+      const dur = await getVideoDuration(result.url);
       if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
 
-      // 默认截取第1帧
-      const thumbVideo = document.createElement('video');
-      thumbVideo.preload = 'auto';
-      thumbVideo.muted = true;
-      thumbVideo.crossOrigin = 'anonymous'; // 允许跨域资源导出
-      thumbVideo.src = result.url;
-      thumbVideo.onloadeddata = () => {
-        thumbVideo.currentTime = Math.min(1, thumbVideo.duration * 0.01 || 1);
-      };
-      thumbVideo.onseeked = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = thumbVideo.videoWidth;
-        canvas.height = thumbVideo.videoHeight;
-        canvas.getContext('2d')?.drawImage(thumbVideo, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        setAddShowPreviewUrl(dataUrl);
-        fetch(dataUrl).then(r => r.blob()).then(blob => {
-          const thumbFile = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
-          setAddShowFile(thumbFile);
-        });
-      };
+      // 自动截取第一帧作为封面
+      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(result.url);
+      setAddShowPreviewUrl(thumbDataUrl);
+      setAddShowFile(thumbFile);
     } catch (err: any) {
       console.error('视频上传失败:', err);
       const msg = err?.response?.data?.msg || err?.message || '视频上传失败';
@@ -291,55 +350,39 @@ export default function AdminPage() {
   const handleCaptureCover = () => {
     const video = coverPickVideoRef.current;
     if (!video) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    setAddShowPreviewUrl(dataUrl);
-    fetch(dataUrl).then(r => r.blob()).then(blob => {
-      const thumbFile = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
-      setAddShowFile(thumbFile);
-    });
+
+    const { file: thumbFile, dataUrl: thumbDataUrl } = captureVideoElementFrame(video);
+    setAddShowPreviewUrl(thumbDataUrl);
+    setAddShowFile(thumbFile);
+
     setVideoUploadPhase('uploading'); // 退出选封面模式，显示最终结果
     message.success('封面已截取');
   };
 
   // 填写视频地址失焦后，加载视频预览 + 自动截取封面
-  const handleVideoUrlBlur = (url: string) => {
+  const handleVideoUrlBlur = async (url: string) => {
     if (!url.trim() || videoUploading || addShowVideoFile || videoUploadedUrl) return;
+
     // 清除之前的预览
     setVideoPreviewUrl('');
     const fullUrl = url.trim().startsWith('/') ? url.trim() : url.trim();
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-    video.crossOrigin = 'anonymous';
-    video.src = fullUrl;
 
-    video.onloadeddata = () => {
+    try {
       // 显示视频预览在上方区域
       setVideoPreviewUrl(fullUrl);
-      // 跳转截取第一帧作为封面
-      video.currentTime = Math.min(1, video.duration * 0.01 || 1);
-      const dur = Math.round(video.duration) || 0;
-      setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-    };
 
-    video.onseeked = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      setAddShowPreviewUrl(dataUrl);
-      fetch(dataUrl).then(r => r.blob()).then(blob => {
-        setAddShowFile(new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' }));
-      });
-    };
+      // 获取视频时长
+      const dur = await getVideoDuration(fullUrl);
+      if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
 
-    video.onerror = () => {};
+      // 自动截取第一帧作为封面
+      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(fullUrl);
+      setAddShowPreviewUrl(thumbDataUrl);
+      setAddShowFile(thumbFile);
+    } catch (err) {
+      console.error('视频加载失败:', err);
+      message.error('视频加载失败，请检查URL是否正确');
+    }
   };
 
   const handleAddShowSubmit = async () => {
