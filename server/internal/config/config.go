@@ -52,16 +52,24 @@ type JWTConfig struct {
 }
 
 type StorageConfig struct {
-	Driver    string     `yaml:"driver"`
-	LocalPath string     `yaml:"local_path"`
-	OSS       OSSConfig  `yaml:"oss"`
+	Type   string        `yaml:"type"`
+	Local  LocalConfig   `yaml:"local"`
+	MinIO  MinIOConfigYaml `yaml:"minio"`
 }
 
-type OSSConfig struct {
-	Endpoint  string `yaml:"endpoint"`
-	AccessKey string `yaml:"access_key"`
-	SecretKey string `yaml:"secret_key"`
-	Bucket    string `yaml:"bucket"`
+type LocalConfig struct {
+	BasePath string `yaml:"base_path"`
+}
+
+type MinIOConfigYaml struct {
+	Endpoint        string `yaml:"endpoint"`
+	AccessKey       string `yaml:"access_key"`
+	SecretKey       string `yaml:"secret_key"`
+	Bucket          string `yaml:"bucket"`
+	UseSSL          bool   `yaml:"use_ssl"`
+	PublicEndpoint  string `yaml:"public_endpoint"`
+	CheckInterval   string `yaml:"check_interval"`
+	CheckTimeout    string `yaml:"check_timeout"`
 }
 
 type AIConfig struct {
@@ -110,6 +118,25 @@ func Load(path string) error {
 	}
 	if host := os.Getenv("REDIS_HOST"); host != "" {
 		C.Redis.Host = host
+	}
+
+	// MinIO配置环境变量覆盖
+	if endpoint := os.Getenv("MINIO_ENDPOINT"); endpoint != "" {
+		C.Storage.MinIO.Endpoint = endpoint
+	}
+	if publicEndpoint := os.Getenv("MINIO_PUBLIC_ENDPOINT"); publicEndpoint != "" {
+		C.Storage.MinIO.PublicEndpoint = publicEndpoint
+	}
+	if accessKey := os.Getenv("MINIO_ACCESS_KEY"); accessKey != "" {
+		C.Storage.MinIO.AccessKey = accessKey
+	}
+	if secretKey := os.Getenv("MINIO_SECRET_KEY"); secretKey != "" {
+		C.Storage.MinIO.SecretKey = secretKey
+	}
+
+	// 存储类型环境变量覆盖（docker-compose中设置）
+	if storageType := os.Getenv("STORAGE_TYPE"); storageType != "" {
+		C.Storage.Type = storageType
 	}
 
 	return nil

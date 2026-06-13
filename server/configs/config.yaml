@@ -21,13 +21,18 @@ jwt:
   expire_hours: 72
 
 storage:
-  driver: local  # local / oss
-  local_path: ./uploads
-  # oss:
-  #   endpoint: ""
-  #   access_key: ""
-  #   secret_key: ""
-  #   bucket: ""
+  type: local  # fallback / minio / local (本地开发使用local)
+  local:
+    base_path: ./uploads
+  minio:
+    endpoint: 192.168.110.207:9000  # 内网地址
+    access_key: admin
+    secret_key: password123
+    bucket: libtv
+    use_ssl: false
+    public_endpoint: http://39.171.58.10:9990  # 公网访问地址（MinIO端口映射）
+    check_interval: 30s  # 健康检查间隔
+    check_timeout: 3s    # 健康检查超时
 
 ai:
   llm:

@@ -22,6 +22,12 @@ services:
       - DB_HOST=db
       - REDIS_HOST=redis
       - RUN_MODE=docker
+      - STORAGE_TYPE=fallback  # MinIO优先，本地降级
+      # MinIO配置 - 使用宿主机IP访问
+      - MINIO_ENDPOINT=192.168.110.207:9000
+      - MINIO_PUBLIC_ENDPOINT=http://39.171.58.10:9990  # MinIO公网访问地址（端口映射）
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=password123
     env_file:
       - .env
     depends_on:
@@ -35,6 +41,9 @@ services:
     volumes:
       - uploads-data:/app/uploads
       - public-data:/app/public
+    # 使用extra_hosts确保容器能访问宿主机网络
+    extra_hosts:
+      - "minio-host:192.168.110.207"
 
   db:
     image: postgres:15-alpine

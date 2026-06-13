@@ -1215,6 +1215,7 @@ export default function AdminPage() {
                     value={addShowForm.author_id || undefined}
                     onChange={val => setAddShowForm(prev => ({ ...prev, author_id: val }))}
                     onSearch={fetchAuthors}
+                    onDropdownVisibleChange={(open) => { if (open) fetchAuthors(''); }}
                     placeholder="点击选择或输入搜索"
                     showSearch
                     allowClear
@@ -1300,6 +1301,7 @@ export default function AdminPage() {
                       value={addForm.author || undefined}
                       onChange={(val) => setAddForm(f => ({ ...f, author: val }))}
                       onSearch={fetchAuthors}
+                      onDropdownVisibleChange={(open) => { if (open) fetchAuthors(''); }}
                       placeholder="点击选择或输入搜索"
                       showSearch
                       allowClear

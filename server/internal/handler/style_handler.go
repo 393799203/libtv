@@ -7,25 +7,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"libtv/internal/middleware"
 	"libtv/internal/model"
+	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 type StyleHandler struct {
-	db       *gorm.DB
-	uploadDir string
+	db      *gorm.DB
+	storage storage.Storage
 }
 
-func NewStyleHandler(db *gorm.DB, uploadDir string) *StyleHandler {
-	return &StyleHandler{db: db, uploadDir: uploadDir}
+func NewStyleHandler(db *gorm.DB, storage storage.Storage) *StyleHandler {
+	return &StyleHandler{db: db, storage: storage}
 }
 
 // CreateRequest 创建风格请求
@@ -153,12 +152,6 @@ func (h *StyleHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	// 确保目录存在
-	if err := os.MkdirAll(h.uploadDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建目录失败"})
-		return
-	}
-
 	// 计算内容哈希用于去重
 	src, err := file.Open()
 	if err != nil {
@@ -176,17 +169,19 @@ func (h *StyleHandler) UploadImage(c *gin.Context) {
 
 	// 用哈希前12位 + 原始扩展名作为存储文件名，同内容不重复存储
 	filename := fileHash[:12] + ext
-	savePath := filepath.Join(h.uploadDir, filename)
+	objectName := "styles/" + filename
 
-	// 文件已存在则直接返回已有路径
-	if _, err := os.Stat(savePath); err == nil {
-		imageURL := "/media/styles/" + filename
+	// 检查文件是否已存在（通过StatObject）
+	_, err = h.storage.StatObject(objectName)
+	if err == nil {
+		// 文件已存在，直接返回已有路径
+		imageURL := h.storage.GetURL(objectName)
 		h.db.Model(&style).Update("image_url", imageURL)
 		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
 		return
 	}
 
-	// 需要重新打开文件来保存（io.Copy 后已读到末尾）
+	// 需要重新打开文件来上传（io.Copy 后已读到末尾）
 	src2, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
@@ -194,16 +189,14 @@ func (h *StyleHandler) UploadImage(c *gin.Context) {
 	}
 	defer src2.Close()
 
-	dst, err := os.Create(savePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存失败"})
+	// 上传到存储（MinIO优先，降级本地）
+	contentType := "image/" + strings.TrimPrefix(ext, ".")
+	if err := h.storage.PutObject(objectName, src2, file.Size, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败: " + err.Error()})
 		return
 	}
-	defer dst.Close()
 
-	io.Copy(dst, src2)
-
-	imageURL := "/media/styles/" + filename
+	imageURL := h.storage.GetURL(objectName)
 
 	// 更新风格记录的图片地址
 	h.db.Model(&style).Update("image_url", imageURL)
@@ -364,11 +357,21 @@ func (h *StyleHandler) Update(c *gin.Context) {
 func (h *StyleHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
-	result := h.db.Delete(&model.Style{}, "id = ?", id)
-	if result.RowsAffected == 0 {
+	// 先获取风格记录，拿到图片URL
+	var style model.Style
+	if result := h.db.First(&style, "id = ?", id); result.Error != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "风格不存在"})
 		return
 	}
+
+	// 删除MinIO文件（如果有图片）
+	if style.ImageURL != "" && strings.HasPrefix(style.ImageURL, "/media/styles/") {
+		objectName := "styles/" + strings.TrimPrefix(style.ImageURL, "/media/styles/")
+		h.storage.DeleteObject(objectName)
+	}
+
+	// 删除数据库记录
+	h.db.Delete(&model.Style{}, "id = ?", id)
 
 	// 同时删除关联的收藏记录
 	h.db.Where("style_id = ?", id).Delete(&model.StyleFavorite{})

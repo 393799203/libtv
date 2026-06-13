@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"libtv/internal/config"
 	"libtv/internal/engine"
@@ -13,6 +14,7 @@ import (
 	"libtv/internal/model"
 	"libtv/internal/repository"
 	"libtv/internal/service"
+	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
@@ -27,6 +29,81 @@ func getPublicDir(subdir string) string {
 		return filepath.Join("/app/public", subdir)
 	}
 	return filepath.Join("..", "public", subdir)
+}
+
+// initStorage 初始化存储（支持MinIO降级）
+func initStorage() storage.Storage {
+	cfg := config.C.Storage
+
+	switch cfg.Type {
+	case "minio":
+		// 只使用MinIO
+		checkInterval, _ := time.ParseDuration(cfg.MinIO.CheckInterval)
+		if checkInterval == 0 {
+			checkInterval = 30 * time.Second
+		}
+
+		minioStorage, err := storage.NewMinIOStorage(&storage.MinIOConfig{
+			Endpoint:       cfg.MinIO.Endpoint,
+			AccessKey:      cfg.MinIO.AccessKey,
+			SecretKey:      cfg.MinIO.SecretKey,
+			Bucket:         cfg.MinIO.Bucket,
+			UseSSL:         cfg.MinIO.UseSSL,
+			PublicEndpoint: cfg.MinIO.PublicEndpoint,
+			CheckInterval:  checkInterval,
+		})
+		if err != nil {
+			log.Printf("⚠️ MinIO初始化失败，降级到本地存储: %v", err)
+			localStorage, _ := storage.NewLocalStorage(getPublicDir(""))
+			return localStorage
+		}
+		return minioStorage
+
+	case "local":
+		// 只使用本地存储
+		localStorage, err := storage.NewLocalStorage(getPublicDir(""))
+		if err != nil {
+			log.Fatalf("本地存储初始化失败: %v", err)
+		}
+		return localStorage
+
+	case "fallback":
+		// MinIO优先，本地降级
+		checkInterval, _ := time.ParseDuration(cfg.MinIO.CheckInterval)
+		if checkInterval == 0 {
+			checkInterval = 30 * time.Second
+		}
+
+		minioStorage, err := storage.NewMinIOStorage(&storage.MinIOConfig{
+			Endpoint:       cfg.MinIO.Endpoint,
+			AccessKey:      cfg.MinIO.AccessKey,
+			SecretKey:      cfg.MinIO.SecretKey,
+			Bucket:         cfg.MinIO.Bucket,
+			UseSSL:         cfg.MinIO.UseSSL,
+			PublicEndpoint: cfg.MinIO.PublicEndpoint,
+			CheckInterval:  checkInterval,
+		})
+
+		localStorage, err2 := storage.NewLocalStorage(getPublicDir(""))
+		if err2 != nil {
+			log.Fatalf("本地存储初始化失败: %v", err2)
+		}
+
+		if err != nil {
+			log.Printf("⚠️ MinIO初始化失败，只使用本地存储: %v", err)
+			return localStorage
+		}
+
+		return storage.NewFallbackStorage(minioStorage, localStorage)
+
+	default:
+		// 默认使用本地存储
+		localStorage, err := storage.NewLocalStorage(getPublicDir(""))
+		if err != nil {
+			log.Fatalf("本地存储初始化失败: %v", err)
+		}
+		return localStorage
+	}
 }
 
 func main() {
@@ -71,14 +148,17 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		}
 	}()
 
+	// 初始化存储
+	appStorage := initStorage()
+
 	// 初始化 Handler
 	userHandler := handler.NewUserHandler(userService, db)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
-	uploadHandler := handler.NewUploadHandler(getPublicDir("canvas"), getPublicDir("videos"))
-	styleHandler := handler.NewStyleHandler(db, getPublicDir("styles"))
-	showHandler := handler.NewShowHandler(showService, getPublicDir("shows"), db)
+	uploadHandler := handler.NewUploadHandler(appStorage) // 使用新存储
+	styleHandler := handler.NewStyleHandler(db, appStorage) // 使用新存储
+	showHandler := handler.NewShowHandler(showService, appStorage, db) // 使用新存储
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -92,12 +172,12 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 中间件
 	r.Use(middleware.CORS())
 
-	// 静态文件（统一 /media 前缀）
-	r.Static("/uploads", config.C.Storage.LocalPath)
-	r.Static("/media/canvas", getPublicDir("canvas"))
-	r.Static("/media/videos", getPublicDir("videos"))
-	r.Static("/media/styles", getPublicDir("styles"))
-	r.Static("/media/shows", getPublicDir("shows"))
+	// 代理路由：统一访问MinIO和本地存储
+	r.GET("/media/*filepath", uploadHandler.GetFile)
+	r.DELETE("/media/*filepath", uploadHandler.DeleteFile)
+
+	// 保留旧的静态文件路由（兼容）
+	r.Static("/uploads", config.C.Storage.Local.BasePath)
 
 	// 公开路由
 	auth := r.Group("/api/auth")
@@ -114,19 +194,27 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		publicShows.GET("/:id", showHandler.GetShow)
 	}
 
-	// 图片上传（公开）
-	r.POST("/api/upload/image", uploadHandler.UploadImage)
-	// 视频上传（公开，独立接口）
-	r.POST("/api/upload/video", uploadHandler.UploadVideo)
-	// 视频转码状态查询（公开）
-	r.GET("/api/upload/video/status/:taskId", uploadHandler.GetVideoStatus)
-	// 删除项目 canvas 文件夹（需认证）
-	r.DELETE("/api/upload/canvas/:projectId", middleware.Auth(), uploadHandler.DeleteCanvasDir)
+	// 公开上传接口
+	publicUpload := r.Group("/api/upload")
+	{
+		publicUpload.POST("/image", uploadHandler.UploadImage)
+		publicUpload.POST("/video", uploadHandler.UploadVideo)
+		publicUpload.GET("/video/status/:taskId", uploadHandler.GetVideoStatus)
+	}
+
+	// 公开存储状态监控
+	r.GET("/api/storage/status", uploadHandler.GetStorageStatus)
 
 	// 需要认证的路由
 	api := r.Group("/api")
 	api.Use(middleware.Auth())
 	{
+		// 删除项目 canvas 文件夹（需认证）
+		api.DELETE("/upload/canvas/:projectId", uploadHandler.DeleteCanvasDir)
+		// 存储同步（管理员专用）
+		api.POST("/storage/sync", uploadHandler.SyncStorage)              // 同步本地存储到MinIO
+		api.POST("/storage/sync-volume", uploadHandler.SyncFromVolume)    // 从Docker volume同步
+
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
 		api.GET("/users", userHandler.List) // 管理员：获取所有用户

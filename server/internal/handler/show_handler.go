@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"libtv/internal/model"
 	"libtv/internal/service"
+	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -20,13 +20,12 @@ import (
 
 type ShowHandler struct {
 	showService *service.ShowService
-	uploadDir   string
-	videoDir    string
+	storage     storage.Storage
 	db          *gorm.DB
 }
 
-func NewShowHandler(showService *service.ShowService, uploadDir string, db *gorm.DB) *ShowHandler {
-	return &ShowHandler{showService: showService, uploadDir: uploadDir, videoDir: filepath.Join("..", "public", "videos"), db: db}
+func NewShowHandler(showService *service.ShowService, storage storage.Storage, db *gorm.DB) *ShowHandler {
+	return &ShowHandler{showService: showService, storage: storage, db: db}
 }
 
 // ========== 公开接口：首页展示 ==========
@@ -192,11 +191,6 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 		return
 	}
 
-	if err := os.MkdirAll(h.uploadDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建目录失败"})
-		return
-	}
-
 	src, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
@@ -209,19 +203,22 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
 
 	filename := fileHash[:12] + ext
-	savePath := filepath.Join(h.uploadDir, filename)
+	objectName := "shows/" + filename
 
-	if _, err := os.Stat(savePath); err == nil {
-		imageURL := "/media/shows/" + filename
+	// 检查文件是否已存在
+	_, err = h.storage.StatObject(objectName)
+	if err == nil {
+		imageURL := h.storage.GetURL(objectName)
 
-		// 删除旧封面文件
-		if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL && strings.HasPrefix(show.ThumbnailURL, "/media/shows/") {
-			oldFile := filepath.Join(h.uploadDir, filepath.Base(show.ThumbnailURL))
-			os.Remove(oldFile)
+		// 删除旧封面文件（如果不同）
+		if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL {
+			oldObjectName := "shows/" + filepath.Base(show.ThumbnailURL)
+			h.storage.DeleteObject(oldObjectName)
 		}
 
 		show.ThumbnailURL = imageURL
 		h.showService.UpdateShow(c.Request.Context(), show)
+
 		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
 		return
 	}
@@ -229,21 +226,19 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	src2, _ := file.Open()
 	defer src2.Close()
 
-	dst, err := os.Create(savePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存失败"})
+	// 上传到存储（MinIO优先，降级本地）
+	contentType := "image/" + strings.TrimPrefix(ext, ".")
+	if err := h.storage.PutObject(objectName, src2, file.Size, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败: " + err.Error()})
 		return
 	}
-	defer dst.Close()
 
-	io.Copy(dst, src2)
+	imageURL := h.storage.GetURL(objectName)
 
-	imageURL := "/media/shows/" + filename
-
-	// 删除旧封面文件
-	if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL && strings.HasPrefix(show.ThumbnailURL, "/media/shows/") {
-		oldFile := filepath.Join(h.uploadDir, filepath.Base(show.ThumbnailURL))
-		os.Remove(oldFile)
+	// 删除旧封面文件（如果不同）
+	if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL {
+		oldObjectName := "shows/" + filepath.Base(show.ThumbnailURL)
+		h.storage.DeleteObject(oldObjectName)
 	}
 
 	show.ThumbnailURL = imageURL
@@ -252,7 +247,7 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
 }
 
-// UploadVideo 上传视频文件到 public/videos
+// UploadVideo 上传视频文件到MinIO
 func (h *ShowHandler) UploadVideo(c *gin.Context) {
 	id := c.Param("id")
 
@@ -280,11 +275,6 @@ func (h *ShowHandler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	if err := os.MkdirAll(h.videoDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建目录失败"})
-		return
-	}
-
 	src, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
@@ -297,9 +287,11 @@ func (h *ShowHandler) UploadVideo(c *gin.Context) {
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
 
 	filename := fileHash[:12] + ext
-	savePath := filepath.Join(h.videoDir, filename)
+	objectName := "videos/" + filename
 
-	if _, err := os.Stat(savePath); err == nil {
+	// 检查文件是否已存在
+	_, err = h.storage.StatObject(objectName)
+	if err == nil {
 		videoURL := "/media/videos/" + filename
 		show.VideoURL = videoURL
 		h.showService.UpdateShow(c.Request.Context(), show)
@@ -310,14 +302,12 @@ func (h *ShowHandler) UploadVideo(c *gin.Context) {
 	src2, _ := file.Open()
 	defer src2.Close()
 
-	dst, err := os.Create(savePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "保存失败"})
+	// 上传到存储（MinIO优先，降级本地）
+	contentType := "video/" + strings.TrimPrefix(ext, ".")
+	if err := h.storage.PutObject(objectName, src2, file.Size, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败: " + err.Error()})
 		return
 	}
-	defer dst.Close()
-
-	io.Copy(dst, src2)
 
 	videoURL := "/media/videos/" + filename
 	show.VideoURL = videoURL
@@ -397,19 +387,19 @@ func (h *ShowHandler) DeleteShow(c *gin.Context) {
 		return
 	}
 
-	// 清理缩略图文件（存储在 public/shows 目录）
+	// 清理缩略图文件（存储在MinIO）
 	if thumbnailURL != "" && strings.HasPrefix(thumbnailURL, "/media/shows/") {
-		filename := filepath.Base(thumbnailURL)
-		os.Remove(filepath.Join(h.uploadDir, filename))
+		objectName := "shows/" + filepath.Base(thumbnailURL)
+		h.storage.DeleteObject(objectName)
 	}
 
 	// 清理视频文件（检查是否还有其他 show 引用）
 	if videoURL != "" && strings.HasPrefix(videoURL, "/media/videos/") {
-		filename := filepath.Base(videoURL)
+		objectName := "videos/" + filepath.Base(videoURL)
 		var count int64
 		h.db.Model(&model.Show{}).Where("video_url = ? AND id != ?", videoURL, id).Count(&count)
 		if count == 0 {
-			os.Remove(filepath.Join(h.videoDir, filename))
+			h.storage.DeleteObject(objectName)
 		}
 	}
 

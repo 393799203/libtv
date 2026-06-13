@@ -347,7 +347,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                             value={editForm.author || undefined}
                             onChange={(val) => setEditForm(f => ({ ...f, author: val }))}
                             onSearch={fetchAuthors}
-                            onDropdownVisibleChange={(open) => { if (open && authorOptions.length === 0) fetchAuthors(''); }}
+                            onDropdownVisibleChange={(open) => { if (open) fetchAuthors(''); }}
                             placeholder="选择作者"
                             showSearch
                             allowClear
@@ -470,7 +470,7 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
                         value={addForm.author || undefined}
                         onChange={(val) => setAddForm(f => ({ ...f, author: val }))}
                         onSearch={fetchAuthors}
-                        onDropdownVisibleChange={(open) => { if (open && authorOptions.length === 0) fetchAuthors(''); }}
+                        onDropdownVisibleChange={(open) => { if (open) fetchAuthors(''); }}
                         placeholder="点击选择或输入搜索"
                         showSearch
                         allowClear
