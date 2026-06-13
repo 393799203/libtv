@@ -137,7 +137,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     maxLength: 2000,
   },
   video: {
-    acceptedInputs: ['image', 'video', 'text', 'script'],
+    acceptedInputs: ['image', 'video', 'text', 'script', 'audio'],
     defaultModel: 'kling-2.0',
     defaultResolution: '1K',
     defaultAspectRatio: '9:16',

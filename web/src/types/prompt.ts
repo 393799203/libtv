@@ -3,7 +3,7 @@ import type { NodeType } from './canvas';
 // 上游输入类型
 export interface UpstreamInput {
   nodeId: string;
-  nodeType: 'image' | 'video' | 'text' | 'script';
+  nodeType: 'image' | 'video' | 'text' | 'script' | 'audio';
   label: string;
   thumbnail?: string;
   previewUrl?: string;
@@ -58,7 +58,7 @@ export type ToolbarControl =
 
 // 每种节点对应的提示词面板配置
 export interface PromptPanelConfig {
-  acceptedInputs: ('image' | 'video' | 'text' | 'script')[];
+  acceptedInputs: ('image' | 'video' | 'text' | 'script' | 'audio')[];
   defaultModel: string;
   defaultResolution: ResolutionOption;
   defaultAspectRatio: AspectRatioOption;

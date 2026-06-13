@@ -78,6 +78,13 @@ function getUpstreamInputs(
             label: '脚本',
             textSnippet: d.scriptContent?.slice(0, 500),
           };
+        case 'audio':
+          return {
+            nodeId: sourceNode.id,
+            nodeType: 'audio',
+            label: d.label || `音频${num}`,
+            previewUrl: d.audioUrl,
+          };
         default:
           return null;
       }

@@ -237,10 +237,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
 
   const handleEnded = useCallback(() => {
     setIsPlaying(false);
-    setCurrentTime(0);
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-    }
+    // 不重置 currentTime，让红线停留在末尾
   }, []);
 
   const handleSeek = useCallback((ratio: number) => {
@@ -295,7 +292,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
             /* 有音频：显示波形播放器 */
             <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
               {/* 波形区域 */}
-              <div className="relative px-2 pt-2 pb-1">
+              <div className="relative px-2 pt-2 pb-2">
                 {/* 波形 */}
                 <WaveformVisualizer
                   audioUrl={data.audioUrl}
@@ -306,12 +303,12 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
               </div>
 
               {/* 底部控制栏：时间 + 播放按钮 */}
-              <div className="flex items-center justify-between px-2 pb-2 pt-1">
+              <div className="flex items-center justify-between px-2 pb-2 pt-1 relative">
                 <span className="text-xs text-gray-500 font-mono tabular-nums">
                   {formatTime(currentTime)} / {formatTime(displayDuration)}
                 </span>
                 <button
-                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors cursor-pointer absolute left-1/2 -translate-x-1/2 ${
                     isPlaying
                       ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

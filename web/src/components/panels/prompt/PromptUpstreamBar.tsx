@@ -5,6 +5,7 @@ import {
   VideoCameraOutlined,
   FileTextOutlined,
   CodeOutlined,
+  AudioOutlined,
   CloseOutlined,
   HeartFilled,
   HeartOutlined,
@@ -30,6 +31,7 @@ const NODE_TYPE_ICON: Record<UpstreamInput['nodeType'], React.ReactNode> = {
   video: <VideoCameraOutlined className="text-red-500" />,
   text: <FileTextOutlined className="text-purple-500" />,
   script: <CodeOutlined className="text-amber-500" />,
+  audio: <AudioOutlined className="text-emerald-500" />,
 };
 
 export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUpstreamBar({
@@ -442,11 +444,17 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       )}
 
       {(() => {
-        // 按类型独立计数，角标编号不受 label 影响
+        // 先统计各类型总数，只有同类型 ≥ 2 个才显示角标
+        const typeCounts: Record<string, number> = {};
+        inputs.forEach((input) => {
+          typeCounts[input.nodeType] = (typeCounts[input.nodeType] || 0) + 1;
+        });
+        // 按类型独立计数
         const counters: Record<string, number> = {};
         return inputs.map((input) => {
           counters[input.nodeType] = (counters[input.nodeType] || 0) + 1;
           const num = counters[input.nodeType];
+          const showBadge = typeCounts[input.nodeType] >= 2;
           return (
           <div
             key={input.nodeId}
@@ -470,19 +478,27 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
                 >
                   <CloseOutlined style={{ fontSize: 10 }} />
                 </button>
-                {/* 序号角标 */}
-                <span className="absolute bottom-0.5 right-0.5 w-4 h-4 bg-black/60 text-white text-[9px] rounded-full flex items-center justify-center font-medium shadow-sm pointer-events-none">
-                  {num}
-                </span>
+                {showBadge && (
+                  /* 序号角标：同类型 ≥ 2 个才显示 */
+                  <span className="absolute bottom-0.5 right-0.5 w-4 h-4 bg-black/60 text-white text-[9px] rounded-full flex items-center justify-center font-medium shadow-sm pointer-events-none">
+                    {num}
+                  </span>
+                )}
               </div>
             ) : (
               <div
-                className="w-[44px] h-[44px] rounded-lg bg-gray-50 border border-dashed border-gray-250 flex flex-col items-center justify-center gap-0.5"
+                className="relative w-[44px] h-[44px] rounded-lg bg-gray-50 border border-dashed border-gray-250 flex flex-col items-center justify-center gap-0.5"
                 onMouseEnter={(e) => handleThumbEnter(e, input)}
                 onMouseLeave={handleThumbLeave}
               >
                 {NODE_TYPE_ICON[input.nodeType]}
                 <span className="text-[9px] text-gray-400 leading-none">{input.label}</span>
+                {showBadge && (
+                  /* 序号角标：同类型 ≥ 2 个才显示 */
+                  <span className="absolute bottom-0.5 right-0.5 w-4 h-4 bg-black/60 text-white text-[9px] rounded-full flex items-center justify-center font-medium shadow-sm pointer-events-none">
+                    {num}
+                  </span>
+                )}
             </div>
           )}
         </div>

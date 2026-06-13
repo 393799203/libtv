@@ -91,37 +91,31 @@ echo ""
 echo "[3/6] 同步项目文件到服务器..."
 ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${PROJECT_DIR}"
 
+# rsync SSH 保活参数
+RSYNC_RSH="ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=10 -o ConnectTimeout=30"
+
 if [ "$FRONTEND_ONLY" = true ]; then
-    # 仅同步前端和 docker-compose.yml
-    rsync -avz --delete \
-        --exclude='node_modules' \
-        --exclude='dist' \
-        --exclude='.git' \
+    rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
+        --exclude='node_modules' --exclude='dist' --exclude='.git' \
         ${LOCAL_DIR}/web/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/web/
-    rsync -avz ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
+    rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
+        ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
 elif [ "$BACKEND_ONLY" = true ]; then
-    # 仅同步后端和 docker-compose.yml
-    rsync -avz --delete \
-        --exclude='.git' \
-        --exclude='public' \
-        --exclude='uploads' \
+    rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
+        --exclude='.git' --exclude='public' --exclude='uploads' --exclude='bin' \
         ${LOCAL_DIR}/server/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/server/
-    rsync -avz ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
+    rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
+        ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
 else
-    # 全量同步
-    rsync -avz --delete \
-        --exclude='node_modules' \
-        --exclude='dist' \
-        --exclude='.git' \
-        --exclude='public' \
-        --exclude='uploads' \
+    rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
+        --exclude='node_modules' --exclude='dist' --exclude='.git' \
+        --exclude='public' --exclude='uploads' \
         ${LOCAL_DIR}/web/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/web/
-    rsync -avz --delete \
-        --exclude='.git' \
-        --exclude='public' \
-        --exclude='uploads' \
+    rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
+        --exclude='.git' --exclude='public' --exclude='uploads' --exclude='bin' \
         ${LOCAL_DIR}/server/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/server/
-    rsync -avz ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
+    rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
+        ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
 fi
 
 # [4/6] 构建并启动Docker容器
