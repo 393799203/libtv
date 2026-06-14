@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { UpstreamInput, MentionMarker } from '@/types/prompt';
 
 interface PromptEditorProps {
@@ -11,6 +11,13 @@ interface PromptEditorProps {
   onChange: (value: string, mentions: MentionMarker[]) => void;
   /** 编辑器前缀标签（如 720全景），渲染为不可编辑的内联 span */
   prefixTag?: { label: string; icon?: string };
+}
+
+export interface PromptEditorHandle {
+  /** 在光标位置插入文本 */
+  insertTextAtCursor: (text: string) => void;
+  /** 在光标位置插入 HTML 标签（用于停顿/语气词） */
+  insertTagAtCursor: (html: string, text: string) => void;
 }
 
 const NODE_TYPE_ICON_TEXT: Record<string, string> = {
@@ -31,6 +38,15 @@ function extractPlainText(el: HTMLElement): string {
   const clone = el.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('.libtv-mention').forEach((n) => {
     n.replaceWith(`${MARKER}${n.getAttribute('data-label') || ''}${MARKER}`);
+  });
+  // 音频标签：提取原始文本
+  clone.querySelectorAll('.libtv-audio-pause').forEach((n) => {
+    const val = n.getAttribute('data-value') || n.textContent?.match(/<#([\d.]+)#>/)?.[1] || '';
+    n.replaceWith(`<#${val}#>`);
+  });
+  clone.querySelectorAll('.libtv-audio-tone').forEach((n) => {
+    const label = n.getAttribute('data-label') || n.textContent?.match(/\(([^)]+)\)/)?.[1] || '';
+    n.replaceWith(`(${label})`);
   });
   return clone.textContent || '';
 }
@@ -86,7 +102,7 @@ function getCharBeforeCursor(el: HTMLElement): string | null {
   return null;
 }
 
-export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
+export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({
   value,
   mentions,
   placeholder = '描述你想生成的内容...',
@@ -94,7 +110,7 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
   syncKey,
   onChange,
   prefixTag,
-}) {
+}, ref) {
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -102,6 +118,61 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   // 防抖定时器：避免每次按键都 cloneNode 提取文本
   const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 暴露插入方法给父组件
+  useImperativeHandle(ref, () => ({
+    insertTextAtCursor: (text: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (!el.contains(range.startContainer)) {
+        const newRange = document.createRange();
+        newRange.selectNodeContents(el);
+        newRange.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
+      const node = document.createTextNode(text);
+      const insertRange = sel.getRangeAt(0);
+      insertRange.insertNode(node);
+      insertRange.setStartAfter(node);
+      insertRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(insertRange);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    insertTagAtCursor: (html: string, _text: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (!el.contains(range.startContainer)) {
+        const newRange = document.createRange();
+        newRange.selectNodeContents(el);
+        newRange.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
+      // 创建临时容器解析 HTML
+      const tmp = document.createElement('span');
+      tmp.innerHTML = html;
+      const fragment = document.createDocumentFragment();
+      while (tmp.firstChild) {
+        fragment.appendChild(tmp.firstChild);
+      }
+      const insertRange = sel.getRangeAt(0);
+      insertRange.insertNode(fragment);
+      insertRange.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(insertRange);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+  }), []);
 
   // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
   const filteredInputs = mentionFilter
@@ -139,6 +210,17 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
         `</span>` +
         html.slice(idx + marker.length);
     }
+    // 停顿标签：<#N#> → 渲染为青色标签
+    html = html.replace(/&lt;#([\d.]+)#&gt;/g, (_match, val) =>
+      `<span class="libtv-audio-tag libtv-audio-pause" contenteditable="false" data-tag-type="pause"><span class="libtv-audio-tag-icon">&lt;#${val}#&gt;</span></span>`
+    );
+    // 语气词标签：(label) → 渲染为橙色标签（排除已处理的 mention marker）
+    html = html.replace(/\(([^)\ufffc]+?)\)/g, (_match, label) => {
+      if (['笑声', '轻笑', '咳嗽', '清嗓子', '正常换气', '喘气'].includes(label)) {
+        return `<span class="libtv-audio-tag libtv-audio-tone" contenteditable="false" data-tag-type="tone"><span class="libtv-audio-tag-icon">(${label})</span></span>`;
+      }
+      return _match;
+    });
     // 前缀标签（如 720全景）
     if (prefixTag) {
       const iconHtml = prefixTag.icon
@@ -548,6 +630,37 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
           display: inline;
           white-space: pre;
         }
+        .libtv-audio-tag {
+          display: inline-flex;
+          align-items: center;
+          padding: 0 5px;
+          margin: 0 2px;
+          border-radius: 4px;
+          font-size: 11px;
+          line-height: 18px;
+          vertical-align: middle;
+          white-space: nowrap;
+          user-select: none;
+        }
+        .libtv-audio-pause {
+          background: #ecfeff;
+          color: #0891b2;
+          border: 1px solid #a5f3fc;
+        }
+        .libtv-audio-pause .libtv-audio-tag-icon {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          font-size: 10px;
+          font-weight: 600;
+        }
+        .libtv-audio-tone {
+          background: #fff7ed;
+          color: #c2410c;
+          border: 1px solid #fed7aa;
+        }
+        .libtv-audio-tone .libtv-audio-tag-icon {
+          font-size: 11px;
+          font-weight: 500;
+        }
         [contenteditable]:empty::before {
           content: "${escapeHtml(placeholder)}";
           color: #9ca3af;
@@ -556,4 +669,4 @@ export const PromptEditor = memo<PromptEditorProps>(function PromptEditor({
       `}</style>
     </div>
   );
-});
+}));

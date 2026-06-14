@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useMemo } from 'react';
+import { memo, useState, useCallback, useMemo, useRef } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
 import type {
@@ -8,9 +8,10 @@ import type {
 } from '@/types/prompt';
 import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canvas';
 import { PromptUpstreamBar } from './PromptUpstreamBar';
-import { PromptEditor } from './PromptEditor';
+import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
 import { VideoModeSelector } from './VideoPromptControls';
+import { AudioPromptControls, type AudioTagInsert } from './AudioPromptControls';
 import type { VideoMode } from '@/types/canvas';
 import type { AudioNodeData } from '@/types/canvas';
 
@@ -98,7 +99,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   data,
   onUpdate,
 }) {
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen] = useState(false);
+
+  // 编辑器 ref，用于插入停顿/语气词
+  const editorRef = useRef<PromptEditorHandle>(null);
 
   // 从全局 store 获取节点和边，用于计算上游输入
   // 注意：zustand 默认用 Object.is 比较，选择器内不能返回新对象/数组
@@ -254,8 +258,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           syncKey={nodeId}
           onChange={handlePromptChange}
           prefixTag={cameraMode === 'panorama' ? { label: '720全景', icon: '720' } : undefined}
+          ref={editorRef}
         />
       </div>
+
+      {/* 音频节点：停顿 + 语气词控件 */}
+      {nodeType === 'audio' && (
+        <AudioPromptControls onInsertTag={(tag: AudioTagInsert) => editorRef.current?.insertTagAtCursor(tag.html, tag.text)} />
+      )}
 
       {/* 第三层：底部工具栏 */}
       <PromptToolbar
