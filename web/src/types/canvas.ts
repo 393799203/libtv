@@ -71,18 +71,37 @@ export interface ScriptNodeData extends Record<string, unknown> {
   label: string;
   scriptContent: string;
   shots: ScriptShot[];
+  /** 当前工作流步骤：1-确认镜头 / 2-准备资产 / 3-合成提示词 */
+  currentStep: 1 | 2 | 3;
+  /** 作者 */
+  author?: string;
+  /** 创建日期（ISO字符串） */
+  createdAt?: string;
   status: NodeExecutionStatus;
   error?: string;
 }
 
-// 分镜数据
+// 分镜数据（扩展版，匹配截图中的表格列）
 export interface ScriptShot {
   id: string;
   shotNumber: number;
-  description: string;
-  dialogue?: string;
-  cameraMovement?: string;
-  duration?: number;
+  /** 时长（秒） */
+  duration: number;
+  /** 画面提示词（AI生成，含高亮标记） */
+  visualPrompt: string;
+  /** 镜别：中景/特写/全景/近景等 */
+  shotSize: string;
+  /** 拍摄角度 */
+  cameraAngle: string;
+  /** 对白/旁白 */
+  dialogue: string;
+  /** 音效描述 */
+  soundEffect: string;
+  /** 运镜方式 */
+  cameraMovement: string;
+  /** 基调/风格提示方式 */
+  toneHint: string;
+  /** 生成的参考图 URL */
   imageUrl?: string;
 }
 
