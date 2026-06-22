@@ -53,6 +53,9 @@ function WorkspaceInner() {
   const isExecuting = useExecutionStore((s) => s.isExecuting);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
 
+  // 执行事件 SSE 订阅已下沉到各 PromptPanel（useExecutionStream）
+  // 每个节点面板在用户点"生成"时单独订阅自己触发的 executionId
+
   const [projectName, setProjectName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);

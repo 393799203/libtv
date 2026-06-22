@@ -1,36 +1,36 @@
-# ========== Go 后端 ==========
-server/server
-server/.env
+# ---- Go build artifacts ----
+server/bin/
+server/*.exe
+server/*.test
+server/*.out
 
-# ========== Node.js 前端 ==========
-node_modules
-dist
-dist-ssr
+# ---- Node / Vite ----
 other
 public
-*.local
-
-# 日志
-logs
+web/node_modules/
+web/dist/
+web/.vite/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# 视频文件（大文件不入库）
-web/public/videos/
-
-# 编辑器
-.vscode/*
-!.vscode/extensions.json
-.idea
+# ---- IDE / OS ----
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# 其他
-other/
+# ---- Local env ----
+.env
+.env.local
+.env.*.local
+
+# ---- Runtime data ----
+*.db
+*.sqlite
+*.sqlite3
+storage/
+data/

@@ -10,6 +10,7 @@ import (
 	"libtv/internal/config"
 	"libtv/internal/engine"
 	"libtv/internal/handler"
+	"libtv/internal/llm"
 	"libtv/internal/middleware"
 	"libtv/internal/model"
 	"libtv/internal/repository"
@@ -137,16 +138,12 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo)
 
-	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry()
-	eng := engine.NewWorkflowEngine(registry)
+	// 初始化 LLM 客户端
+	llmClient := llm.NewScriptClient(config.C.AI)
 
-	// 启动事件消费（防止 channel 满阻塞）
-	go func() {
-		for range eng.Events() {
-			// events are consumed in the WebSocket handler
-		}
-	}()
+	// 初始化工作流引擎
+	registry := engine.NewDefaultRegistry(llmClient)
+	eng := engine.NewWorkflowEngine(registry)
 
 	// 初始化存储
 	appStorage := initStorage()
@@ -155,7 +152,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	userHandler := handler.NewUserHandler(userService, db)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
-	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, eng, registry)
+	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, eng, registry)
 	uploadHandler := handler.NewUploadHandler(appStorage) // 使用新存储
 	styleHandler := handler.NewStyleHandler(db, appStorage) // 使用新存储
 	showHandler := handler.NewShowHandler(showService, appStorage, db) // 使用新存储
@@ -231,10 +228,19 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			projects.PUT("/:id", projectHandler.Update)
 			projects.DELETE("/:id", projectHandler.Delete)
 			projects.GET("/:id/canvas", canvasHandler.Get)
-			projects.PUT("/:id/canvas", canvasHandler.Save)
-		}
+		projects.PUT("/:id/canvas", canvasHandler.Save)
+		// 工作流（路径对齐前端 api/services/workflowApi.ts）
+		projects.POST("/:id/workflows/execute", workflowHandler.Execute)
+		projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)
+		// SSE 流式订阅工作流执行进度（必须单独注册在 r 上，不能走 Auth 中间件：
+		//   原生 EventSource 不支持自定义 header，token 只能放 query ，
+		//   所以鉴权由 StreamExecution 内部处理，见 workflow_handler.go）
+	}
 
-		// 工作流
+	// SSE 工作流流（独立鉴权：query 传 token）
+	r.GET("/api/projects/:id/workflows/:execId/stream", workflowHandler.StreamExecution)
+
+		// 工作流（兼容旧路由 /api/workflow/*）
 		workflow := api.Group("/workflow")
 		{
 			workflow.POST("/execute", workflowHandler.Execute)
@@ -280,9 +286,6 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			shows.PUT("/:id", showHandler.UpdateShow)
 			shows.DELETE("/:id", showHandler.DeleteShow)
 		}
-
-		// WebSocket
-		api.GET("/ws/execution/:id", workflowHandler.WebSocket)
 	}
 
 	// 启动服务

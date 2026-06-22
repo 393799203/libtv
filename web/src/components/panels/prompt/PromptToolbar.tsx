@@ -496,15 +496,13 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         </div>
         )}
 
-        {/* 发送按钮 */}
+        {/* 生成按钮 */}
         <button
-          className="w-8 h-8 rounded-xl bg-gradient-to-br from-gray-800 to-gray-950 text-white flex items-center justify-center hover:from-gray-700 hover:to-gray-900 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+          className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-gray-800 to-gray-950 text-white flex items-center justify-center hover:from-gray-700 hover:to-gray-900 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm text-[13px] font-medium tracking-wide"
           onClick={onGenerate}
           disabled={isGenerating}
         >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12.5 12.5L3.5 3.5M3.5 3.5H10.5M3.5 3.5V10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
+          {isGenerating ? '生成中…' : '生成'}
         </button>
       </div>
     </div>

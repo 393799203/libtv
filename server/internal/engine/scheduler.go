@@ -59,3 +59,63 @@ func TopologicalSort(schema *WorkflowSchema) (*ExecutionPlan, error) {
 		Schema: *schema,
 	}, nil
 }
+
+// FilterFromStart 把 ExecutionPlan 裁剪为只包含 startNodeID 及其所有上游节点
+// （用于"只跑这个节点 + 上游依赖"的场景，避免下游节点空跑）
+// 裁剪后重新做一次拓扑分层。
+func FilterFromStart(plan *ExecutionPlan, startNodeID string) (*ExecutionPlan, error) {
+	if startNodeID == "" {
+		return plan, nil
+	}
+
+	// 检查起点节点存在
+	var found bool
+	for _, n := range plan.Schema.Nodes {
+		if n.ID == startNodeID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("startNodeID not found in plan: %s", startNodeID)
+	}
+
+	// 反向邻接表：target -> [sources...]
+	reverseAdj := make(map[string][]string)
+	for _, c := range plan.Schema.Connections {
+		reverseAdj[c.Target] = append(reverseAdj[c.Target], c.Source)
+	}
+
+	// BFS 收集从 startNodeID 出发所有可达祖先
+	keep := map[string]bool{startNodeID: true}
+	queue := []string{startNodeID}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, src := range reverseAdj[cur] {
+			if !keep[src] {
+				keep[src] = true
+				queue = append(queue, src)
+			}
+		}
+	}
+
+	// 筛选节点
+	filtered := WorkflowSchema{
+		Nodes:       make([]WorkflowNode, 0),
+		Connections: make([]Connection, 0),
+	}
+	for _, n := range plan.Schema.Nodes {
+		if keep[n.ID] {
+			filtered.Nodes = append(filtered.Nodes, n)
+		}
+	}
+	for _, c := range plan.Schema.Connections {
+		if keep[c.Source] && keep[c.Target] {
+			filtered.Connections = append(filtered.Connections, c)
+		}
+	}
+
+	// 重新拓扑分层
+	return TopologicalSort(&filtered)
+}

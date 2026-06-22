@@ -7,11 +7,22 @@ interface ExecutionState {
   status: WorkflowStatus;
   isExecuting: boolean;
 
+  // 正在生成的节点 id（用于节点内部骨架屏）
+  generatingNodeId: string | null;
+
+  // 当前执行级别的错误信息（来自 execution_failed 或 SSE 异常）
+  lastError: string | null;
+  // 节点级错误映射：nodeId -> 错误信息
+  nodeErrors: Record<string, string>;
+
   // Actions
   setCurrentExecution: (execution: WorkflowExecution | null) => void;
   setExecutionStatus: (status: WorkflowStatus) => void;
   updateNodeExecution: (nodeId: string, updates: Partial<NodeExecution>) => void;
   handleWSEvent: (event: WSEvent) => void;
+  setGeneratingNodeId: (id: string | null) => void;
+  setLastError: (msg: string | null) => void;
+  setNodeError: (nodeId: string, msg: string | null) => void;
   resetExecution: () => void;
 }
 
@@ -19,6 +30,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   currentExecution: null,
   status: 'idle',
   isExecuting: false,
+  generatingNodeId: null,
+  lastError: null,
+  nodeErrors: {},
 
   setCurrentExecution: (execution) =>
     set({
@@ -49,6 +63,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     switch (event.type) {
       case 'execution_started':
         setExecutionStatus('running');
+        set({ lastError: null });
         break;
       case 'node_started':
         updateNodeExecution(event.nodeId!, { status: 'running', progress: 0 });
@@ -65,19 +80,33 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           progress: 100,
           output: event.data?.output as Record<string, unknown>,
         });
-        break;
-      case 'node_failed':
-        updateNodeExecution(event.nodeId!, {
-          status: 'failed',
-          error: event.data?.error as string,
+        // 清掉该节点的错误
+        set((s) => {
+          if (!s.nodeErrors[event.nodeId!]) return s;
+          const next = { ...s.nodeErrors };
+          delete next[event.nodeId!];
+          return { nodeErrors: next };
         });
         break;
+      case 'node_failed': {
+        const errMsg = (event.data?.error as string) || '节点执行失败';
+        updateNodeExecution(event.nodeId!, {
+          status: 'failed',
+          error: errMsg,
+        });
+        set((s) => ({ nodeErrors: { ...s.nodeErrors, [event.nodeId!]: errMsg } }));
+        break;
+      }
       case 'execution_completed':
         setExecutionStatus('completed');
+        set({ lastError: null });
         break;
-      case 'execution_failed':
+      case 'execution_failed': {
+        const errMsg = (event.data?.error as string) || '工作流执行失败';
         setExecutionStatus('failed');
+        set({ lastError: errMsg });
         break;
+      }
     }
   },
 
@@ -86,5 +115,18 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       currentExecution: null,
       status: 'idle',
       isExecuting: false,
+      generatingNodeId: null,
+      lastError: null,
+      nodeErrors: {},
+    }),
+
+  setGeneratingNodeId: (id) => set({ generatingNodeId: id }),
+  setLastError: (msg) => set({ lastError: msg }),
+  setNodeError: (nodeId, msg) =>
+    set((s) => {
+      const next = { ...s.nodeErrors };
+      if (msg) next[nodeId] = msg;
+      else delete next[nodeId];
+      return { nodeErrors: next };
     }),
 }));

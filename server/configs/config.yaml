@@ -35,11 +35,24 @@ storage:
     check_timeout: 3s    # 健康检查超时
 
 ai:
+  # ---- Provider 运行时凭据（对应 models.yaml 中的 providers）----
+  providers:
+    siliconflow:
+      api_key: "sk-rjknkdqxefbxebrbfawaokciapqzjejqzqfvlehyhohiknys"
+      base_url: "https://api.siliconflow.cn/v1"
+    openai:
+      api_key: ""
+      base_url: "https://api.openai.com/v1"
+    qwen:
+      api_key: ""
+      base_url: ""
+
+  # ---- LLM 默认配置（向后兼容）----
   llm:
-    provider: openai  # openai / qwen
-    api_key: ""
-    base_url: "https://api.openai.com/v1"
-    model: "gpt-4o"
+    provider: siliconflow
+    api_key: ""  # 优先使用 providers.<name>.api_key
+    base_url: ""
+    model: "deepseek-ai/DeepSeek-V4-Flash"
   image:
     provider: sd_webui  # sd_webui / comfyui
     api_url: "http://localhost:7860"

@@ -73,10 +73,17 @@ type MinIOConfigYaml struct {
 }
 
 type AIConfig struct {
-	LLM   LLMConfig   `yaml:"llm"`
-	Image ImageConfig `yaml:"image"`
-	Video VideoConfig `yaml:"video"`
-	Audio AudioConfig `yaml:"audio"`
+	Providers map[string]ProviderConfig `yaml:"providers"`
+	LLM       LLMConfig                 `yaml:"llm"`
+	Image     ImageConfig               `yaml:"image"`
+	Video     VideoConfig               `yaml:"video"`
+	Audio     AudioConfig               `yaml:"audio"`
+}
+
+// ProviderConfig AI Provider 运行时凭据
+type ProviderConfig struct {
+	APIKey  string `yaml:"api_key"`
+	BaseURL string `yaml:"base_url"`
 }
 
 type LLMConfig struct {

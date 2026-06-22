@@ -1,0 +1,89 @@
+# ============================================
+#  统一模型配置文件 (Model Registry)
+# ============================================
+# 定义所有可用模型及其归属的 Provider。
+# 实际调用凭据（api_key 等）放在 config.yaml 的 ai.providers 中。
+
+models:
+  # ---------- LLM / 文本生成 ----------
+  llm:
+    # 剧本生成（文本节点 → 脚本节点）
+    - id: script-default
+      name: "DeepSeek V4 Flash"
+      provider: siliconflow
+      model_id: "deepseek-ai/DeepSeek-V4-Flash"
+      usage: [script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "硅基流动 DeepSeek-V4-Flash，适合剧本分镜生成"
+
+    # 通用文本（预留）
+    - id: text-general
+      name: "DeepSeek V4 Flash"
+      provider: siliconflow
+      model_id: "deepseek-ai/DeepSeek-V4-Flash"
+      usage: [text]
+      max_tokens: 4096
+      temperature: 0.7
+
+    # 图像提示词优化（预留）
+    - id: prompt-refine
+      name: "DeepSeek V4 Flash"
+      provider: siliconflow
+      model_id: "deepseek-ai/DeepSeek-V4-Flash"
+      usage: [image_prompt, video_prompt]
+      max_tokens: 2048
+      temperature: 0.5
+
+  # ---------- 图像生成（预留）----------
+  image:
+    - id: image-default
+      name: "Lib Navo 2"
+      provider: lib_image
+      model_id: "lib-navo-2"
+      usage: [image]
+
+  # ---------- 视频生成（预留）----------
+  video:
+    - id: video-default
+      name: "Kling 2.0"
+      provider: kling
+      model_id: "kling-2.0"
+      usage: [video]
+
+  # ---------- 音频 / TTS（预留）----------
+  audio:
+    - id: audio-default
+      name: "Edge TTS"
+      provider: edge_tts
+      model_id: "edge-tts"
+      usage: [audio]
+
+
+# ============================================
+#  Provider 定义（运行时凭据在 config.yaml）
+# ============================================
+providers:
+  siliconflow:
+    type: openai_compatible
+    base_url_template: "https://api.siliconflow.cn/v1"
+
+  openai:
+    type: openai_compatible
+    base_url_template: "https://api.openai.com/v1"
+
+  qwen:
+    type: openai_compatible
+    base_url_template: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+  lib_image:
+    type: custom
+    base_url_template: ""
+
+  kling:
+    type: custom
+    base_url_template: ""
+
+  edge_tts:
+    type: local
+    base_url_template: ""

@@ -76,9 +76,7 @@ export const VIDEO_MODELS: ModelOption[] = [
 ];
 
 export const TEXT_MODELS: ModelOption[] = [
-  { value: 'gvlm-4', label: 'GVLM 4', icon: 'robot' },
-  { value: 'claude', label: 'Claude', icon: 'message' },
-  { value: 'gpt-4', label: 'GPT-4', icon: 'openai' },
+  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', icon: 'robot', description: '响应快、性价比高，中文创作能力强' },
 ];
 
 export const AUDIO_MODELS: ModelOption[] = [
@@ -148,7 +146,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   },
   text: {
     acceptedInputs: ['text', 'script', 'image'],
-    defaultModel: 'gvlm-4',
+    defaultModel: 'deepseek-v4-flash',
     defaultResolution: '1K',
     defaultAspectRatio: 'free',
     availableModels: TEXT_MODELS,
@@ -168,12 +166,12 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   },
   script: {
     acceptedInputs: ['text'],
-    defaultModel: 'gvlm-4',
+    defaultModel: 'deepseek-v4-flash',
     defaultResolution: '1K',
     defaultAspectRatio: 'free',
     availableModels: TEXT_MODELS,
     toolbarControls: ['model', 'tokenCount'],
-    placeholder: '描述故事大纲、场景、角色...',
+    placeholder: '连接上游文本节点后，点击生成剧本分镜...',
     maxLength: 8000,
   },
 };

@@ -2,10 +2,17 @@ import api from './api';
 import type { WorkflowExecution } from '@/types/workflow';
 import type { ApiResponse } from '@/types/api';
 
+export interface ExecuteResponse {
+  executionId: number;
+}
+
 export const workflowApi = {
   // 执行工作流
-  execute: (projectId: string) =>
-    api.post<ApiResponse<WorkflowExecution>>(`/projects/${projectId}/workflows/execute`),
+  // options.startNodeId：只跑该节点 + 上游依赖（不传就跑全画布）
+  execute: (projectId: string, options?: { startNodeId?: string }) =>
+    api.post<ExecuteResponse>(`/projects/${projectId}/workflows/execute`, {
+      startNodeId: options?.startNodeId,
+    }),
 
   // 停止执行
   stop: (projectId: string, executionId: string) =>

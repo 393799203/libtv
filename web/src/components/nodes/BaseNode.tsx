@@ -62,8 +62,8 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   return (
     <div
       className={`
-        min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
-        transition-all duration-150 relative
+        min-w-[200px] w-full min-h-[120px] rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
+        transition-all duration-150 relative flex flex-col
         ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
         ${className || ''}
       `}

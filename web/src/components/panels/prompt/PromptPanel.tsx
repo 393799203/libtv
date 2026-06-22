@@ -1,6 +1,10 @@
-import { memo, useState, useCallback, useMemo, useRef } from 'react';
+import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useExecutionStore } from '@/stores/executionStore';
+import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
+import { workflowApi } from '@/services/workflowApi';
+import { canvasApi } from '@/services/canvasApi';
 import type {
   UpstreamInput,
   MentionMarker,
@@ -100,6 +104,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   onUpdate,
 }) {
   const [isFullscreen] = useState(false);
+  const [activeExecutionId, setActiveExecutionId] = useState<string | number | null>(null);
 
   // 编辑器 ref，用于插入停顿/语气词
   const editorRef = useRef<PromptEditorHandle>(null);
@@ -108,6 +113,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 注意：zustand 默认用 Object.is 比较，选择器内不能返回新对象/数组
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
+  const projectId = useCanvasStore((s) => s.projectId);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+
+  // 订阅当前执行的 SSE 流
+  useExecutionStream(projectId, activeExecutionId);
 
   // 当前节点类型的配置
   const config = PROMPT_PANEL_CONFIGS[nodeType];
@@ -176,56 +186,68 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 发送生成
   const handleGenerate = useCallback(async () => {
+    if (!projectId) {
+      console.error('projectId 不存在，无法执行工作流');
+      return;
+    }
+
     setIsGenerating(true);
+    // 标记正在生成的节点（TextNode 会读这个来显示骨架屏）
+    useExecutionStore.getState().setGeneratingNodeId(nodeId);
     try {
-      // TODO: 调用后端 API 执行生成
-      // 将 promptText、mentions（引用的节点ID）、model、resolution、aspectRatio 一并提交
-      console.log('Generate:', {
-        nodeId,
-        nodeType,
-        prompt: promptText,
-        mentions,
-        model: selectedModel,
-        resolution: selectedResolution,
-        aspectRatio: selectedAspectRatio,
-        ...(nodeType === 'video' && {
-          videoMode,
-        }),
-      });
-
-      // 模拟延迟
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // 更新节点数据
-      if (nodeType === 'image') {
-        onUpdate({ prompt: promptText, model: selectedModel });
-      } else if (nodeType === 'video') {
-        onUpdate({ prompt: promptText, model: selectedModel, videoMode });
-      } else if (nodeType === 'text') {
-        onUpdate({ content: promptText });
-      } else if (nodeType === 'audio') {
-        onUpdate({
-          prompt: promptText,
-          model: selectedModel,
-          voice: selectedVoice,
-          speed: selectedSpeed,
-        } as Partial<AudioNodeData>);
+      // 1) 把用户在提示词框输入的文案持久化到节点 data.prompt
+      //    （下次打开节点/重看历史，都能知道这个内容是怎么生成的）
+      if (nodeType === 'text' || nodeType === 'image' || nodeType === 'video' || nodeType === 'audio') {
+        updateNodeData(nodeId, { prompt: promptText, model: selectedModel } as Partial<LibTVNodeData>);
+      } else if (nodeType === 'script') {
+        updateNodeData(nodeId, { scriptPrompt: promptText, model: selectedModel } as Partial<LibTVNodeData>);
       }
-    } finally {
+
+      // 2) 把当前画布持久化到后端（让后端能读到最新的 prompt 字段）
+      try {
+        await canvasApi.saveCanvas(projectId, { nodes, edges, viewport: { x: 0, y: 0, zoom: 1 } });
+      } catch (e) {
+        console.warn('保存画布失败（继续执行）:', e);
+      }
+
+      // 3) 调用后端执行工作流，返回 executionId
+      const resp = await workflowApi.execute(projectId, { startNodeId: nodeId });
+      if (resp?.executionId) {
+        // 4) 触发 useExecutionStream 订阅该 execution 的 SSE 事件流
+        //    - node_completed 时 useExecutionStream 会自动把 output.content 写回 canvas store
+        //    - execution_completed/failed 时 useExecutionStream 会自动 close
+        setActiveExecutionId(resp.executionId);
+      } else {
+        setIsGenerating(false);
+      }
+    } catch (error) {
+      console.error('生成失败:', error);
       setIsGenerating(false);
     }
   }, [
+    projectId,
     nodeId,
     nodeType,
     promptText,
-    mentions,
     selectedModel,
-    selectedResolution,
-    selectedAspectRatio,
-    selectedVoice,
-    selectedSpeed,
-    onUpdate,
+    nodes,
+    edges,
+    updateNodeData,
   ]);
+
+  // 监听执行状态：终态时关掉 loading
+  const executionStatus = useExecutionStore((s) => s.status);
+  const lastError = useExecutionStore((s) => s.lastError);
+  useEffect(() => {
+    if (executionStatus === 'completed' || executionStatus === 'failed') {
+      setIsGenerating(false);
+      // 关闭骨架屏
+      useExecutionStore.getState().setGeneratingNodeId(null);
+      // 给 node_completed 一点时间更新 store，再清掉 activeExecutionId（触发 SSE close）
+      const t = setTimeout(() => setActiveExecutionId(null), 500);
+      return () => clearTimeout(t);
+    }
+  }, [executionStatus]);
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
@@ -233,6 +255,21 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   return (
     <div className={panelClass}>
+
+      {/* 错误提示条（lastError 有值时显示） */}
+      {executionStatus === 'failed' && lastError && (
+        <div className="mb-2 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
+          <span className="flex-1 break-all">{lastError}</span>
+          <button
+            onClick={() => useExecutionStore.getState().setLastError(null)}
+            className="text-red-500 hover:text-red-700 flex-shrink-0"
+            title="关闭"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* 视频节点：模式选择器（根据上游图片数量自动过滤可选模式） */}
       {nodeType === 'video' && (
