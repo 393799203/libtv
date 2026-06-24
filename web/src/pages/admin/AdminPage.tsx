@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { App, Select } from 'antd';
 import {
   TagOutlined,
+  SettingOutlined,
   FolderAddOutlined,
   PlusOutlined,
   DeleteOutlined,
@@ -12,16 +13,14 @@ import {
   UserOutlined,
   VideoCameraOutlined,
   CaretRightOutlined,
-  PictureOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
-import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { uploadVideo } from '@/services/uploadApi';
 import { useAuthStore } from '@/stores/authStore';
 
-type AdminTab = 'shows' | 'styles' | 'users' | 'banners';
+type AdminTab = 'shows' | 'styles' | 'users' | 'settings';
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -134,16 +133,6 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
 
-  // ========== 资源位管理状态 ==========
-  const [banners, setBanners] = useState<BannerItem[]>([]);
-  const [bannersLoading, setBannersLoading] = useState(false);
-  const [showAddBannerDialog, setShowAddBannerDialog] = useState(false);
-  const [addBannerForm, setAddBannerForm] = useState({ title: '', image_url: '', link_url: '', sort_order: 0, is_active: true });
-  const [addBannerFile, setAddBannerFile] = useState<File | null>(null);
-  const [addBannerPreviewUrl, setAddBannerPreviewUrl] = useState('');
-  const [editingBanner, setEditingBanner] = useState<BannerItem | null>(null);
-  const [addingBanner, setAddingBanner] = useState(false);
-
   // ========== 首页管理状态 ==========
   const [showCategories, setShowCategories] = useState<ShowCategoryItem[]>([]);
   const [shows, setShows] = useState<ShowItem[]>([]);
@@ -223,7 +212,6 @@ export default function AdminPage() {
     if (activeTab === 'users') loadUsers();
     else if (activeTab === 'shows' && activeShowCategory) loadShows(activeShowCategory);
     else if (activeTab === 'styles' && activeCategory) loadStyles(activeCategory);
-    else if (activeTab === 'banners') loadBanners();
   };
 
   // 加载用户列表
@@ -235,78 +223,6 @@ export default function AdminPage() {
       })
       .catch(() => {})
       .finally(() => setUserLoading(false));
-  };
-
-  // ========== 资源位管理函数 ==========
-  const loadBanners = () => {
-    setBannersLoading(true);
-    bannerApi.list()
-      .then((res) => {
-        setBanners(res || []);
-      })
-      .catch(() => {})
-      .finally(() => setBannersLoading(false));
-  };
-
-  const handleCreateBanner = async () => {
-    if (!addBannerForm.title || !addBannerForm.image_url) {
-      message.error('请填写标题和图片');
-      return;
-    }
-    setAddingBanner(true);
-    try {
-      await bannerApi.create(addBannerForm);
-      message.success('创建成功');
-      setShowAddBannerDialog(false);
-      setAddBannerForm({ title: '', image_url: '', link_url: '', sort_order: 0, is_active: true });
-      setAddBannerPreviewUrl('');
-      loadBanners();
-    } catch {
-      message.error('创建失败');
-    } finally {
-      setAddingBanner(false);
-    }
-  };
-
-  const handleUpdateBanner = async () => {
-    if (!editingBanner || !addBannerForm.title || !addBannerForm.image_url) {
-      message.error('请填写标题和图片');
-      return;
-    }
-    setAddingBanner(true);
-    try {
-      await bannerApi.update(editingBanner.id, addBannerForm);
-      message.success('更新成功');
-      setShowAddBannerDialog(false);
-      setEditingBanner(null);
-      setAddBannerForm({ title: '', image_url: '', link_url: '', sort_order: 0, is_active: true });
-      setAddBannerPreviewUrl('');
-      loadBanners();
-    } catch {
-      message.error('更新失败');
-    } finally {
-      setAddingBanner(false);
-    }
-  };
-
-  const handleDeleteBanner = async (id: string, title: string) => {
-    const { Modal } = await import('antd');
-    Modal.confirm({
-      title: '删除资源位',
-      content: `确定要删除资源位「${title}」吗？`,
-      okText: '确认删除',
-      cancelText: '取消',
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          await bannerApi.delete(id);
-          message.success('删除成功');
-          loadBanners();
-        } catch {
-          message.error('删除失败');
-        }
-      },
-    });
   };
 
   // ========== 首页管理函数 ==========
@@ -580,8 +496,6 @@ export default function AdminPage() {
         .catch(() => {})
         .finally(() => { if (!cancelled) setLoading(false); });
       return () => { cancelled = true; };
-    } else if (activeTab === 'banners') {
-      loadBanners();
     } else setStyles([]);
   }, [activeTab]); // 每次切换 tab 时都会重新加载
 
@@ -714,10 +628,10 @@ export default function AdminPage() {
 
   // 侧边栏菜单
   const menuItems: { key: AdminTab; icon: React.ReactNode; label: string }[] = [
-    { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
-    { key: 'banners', icon: <PictureOutlined />, label: '资源位管理' },
+    { key: 'shows', icon: <VideoCameraOutlined />, label: '首页管理' },
     { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
     { key: 'users', icon: <UserOutlined />, label: '用户管理' },
+    { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
   ];
 
   return (
@@ -880,78 +794,6 @@ export default function AdminPage() {
             <div className="px-6 py-2.5 border-t border-gray-100 shrink-0 flex items-center justify-between text-[12px] text-gray-400 bg-white">
               <span>共 {showCategories?.length || 0} 个标签 · {activeShowCategory ? `${shows?.length || 0} 个视频` : ''}</span>
               <span>Hover 卡片可编辑 / 删除</span>
-            </div>
-          </>
-        )}
-
-        {/* ========== 资源位管理 Tab ========== */}
-        {activeTab === 'banners' && (
-          <>
-            {/* 工具栏 */}
-            <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 shrink-0">
-              <span className="text-[13px] text-gray-500">首页轮播图管理</span>
-              <div className="flex-1" />
-              <button onClick={() => { setEditingBanner(null); setAddBannerForm({ title: '', image_url: '', link_url: '', sort_order: banners.length, is_active: true }); setShowAddBannerDialog(true); }} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
-                <PlusOutlined /> 添加资源位
-              </button>
-            </div>
-
-            {/* 资源位列表 */}
-            <div className="flex-1 overflow-y-auto p-6">
-              {bannersLoading ? (
-                <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
-              ) : (banners?.length || 0) === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                  <ImageOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
-                  <div className="text-[14px]">暂无资源位，点击上方按钮添加</div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {banners.map(banner => (
-                    <div key={banner.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
-                      {/* 图片预览 */}
-                      <div className="relative aspect-video bg-gray-100">
-                        {banner.image_url ? (
-                          <img src={banner.image_url} alt={banner.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-400">
-                            <ImageOutlined style={{ fontSize: 32 }} />
-                          </div>
-                        )}
-                        {/* 状态标签 */}
-                        {banner.is_active ? (
-                          <span className="absolute top-2 right-2 px-2 py-0.5 text-[10px] bg-green-500 text-white rounded">启用</span>
-                        ) : (
-                          <span className="absolute top-2 right-2 px-2 py-0.5 text-[10px] bg-gray-400 text-white rounded">禁用</span>
-                        )}
-                        {/* 排序序号 */}
-                        <span className="absolute top-2 left-2 px-2 py-0.5 text-[10px] bg-black/50 text-white rounded">{banner.sort_order + 1}</span>
-                      </div>
-                      {/* 信息区域 */}
-                      <div className="p-4">
-                        <h3 className="text-[14px] font-medium text-gray-800 truncate">{banner.title}</h3>
-                        {banner.link_url && (
-                          <p className="text-[12px] text-gray-400 truncate mt-1">{banner.link_url}</p>
-                        )}
-                        {/* 操作按钮 */}
-                        <div className="flex gap-2 mt-3">
-                          <button onClick={() => { setEditingBanner(banner); setAddBannerForm({ title: banner.title, image_url: banner.image_url, link_url: banner.link_url || '', sort_order: banner.sort_order, is_active: banner.is_active }); setShowAddBannerDialog(true); }} className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-[12px] text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
-                            <EditOutlined style={{ fontSize: 11 }} /> 编辑
-                          </button>
-                          <button onClick={() => handleDeleteBanner(banner.id, banner.title)} className="flex items-center justify-center gap-1 px-3 py-1.5 text-[12px] text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
-                            <DeleteOutlined style={{ fontSize: 11 }} /> 删除
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="px-6 py-2.5 border-t border-gray-100 shrink-0 flex items-center justify-between text-[12px] text-gray-400 bg-white">
-              <span>共 {banners?.length || 0} 个资源位</span>
-              <span>点击卡片可编辑 / 删除</span>
             </div>
           </>
         )}
@@ -1188,6 +1030,15 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* ========== 系统设置 Tab（占位）========== */}
+        {activeTab === 'settings' && (
+          <div className="flex-1 overflow-y-auto p-6 flex items-center justify-center text-gray-400">
+            <div className="text-center">
+              <SettingOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
+              <div className="text-[14px]">系统设置功能开发中...</div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* ========== 首页管理：新建标签弹窗 ========== */}
@@ -1547,93 +1398,6 @@ export default function AdminPage() {
               <button onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
               <button onClick={handleAddSubmit} disabled={(!editingStyle && !addFile) || !addForm.name.trim() || adding} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
                 {adding ? (editingStyle ? '保存中...' : '添加中...') : (editingStyle ? '保存修改' : '确认添加')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========== 资源位管理：新建/编辑弹窗 ========== */}
-      {showAddBannerDialog && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddBannerDialog(false); setEditingBanner(null); }} />
-          <div className="relative bg-white rounded-xl w-[480px] max-h-[90vh] overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold text-gray-800">{editingBanner ? '编辑资源位' : '新建资源位'}</h3>
-              <button onClick={() => { setShowAddBannerDialog(false); setEditingBanner(null); }} className="text-gray-400 hover:text-gray-600 cursor-pointer">
-                <XOutlined />
-              </button>
-            </div>
-
-            <div className="px-6 py-4 max-h-[50vh] overflow-y-auto">
-              <div className="space-y-4">
-                {/* 标题 */}
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">标题 *</label>
-                  <input
-                    value={addBannerForm.title}
-                    onChange={e => setAddBannerForm(prev => ({ ...prev, title: e.target.value }))}
-                    placeholder="输入资源位标题"
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                  />
-                </div>
-
-                {/* 图片预览和上传 */}
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">图片地址 *</label>
-                  <input
-                    value={addBannerForm.image_url}
-                    onChange={e => { setAddBannerForm(prev => ({ ...prev, image_url: e.target.value })); setAddBannerPreviewUrl(e.target.value); }}
-                    placeholder="输入图片URL"
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                  />
-                  {addBannerForm.image_url && (
-                    <div className="mt-2 rounded-lg overflow-hidden border border-gray-100">
-                      <img src={addBannerForm.image_url} alt="预览" className="w-full h-32 object-cover" />
-                    </div>
-                  )}
-                </div>
-
-                {/* 跳转链接 */}
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">跳转链接（可选）</label>
-                  <input
-                    value={addBannerForm.link_url}
-                    onChange={e => setAddBannerForm(prev => ({ ...prev, link_url: e.target.value }))}
-                    placeholder="点击后跳转的URL"
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                  />
-                </div>
-
-                {/* 排序序号 */}
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">排序序号</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={addBannerForm.sort_order}
-                    onChange={e => setAddBannerForm(prev => ({ ...prev, sort_order: parseInt(e.target.value) || 0 }))}
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                  />
-                </div>
-
-                {/* 是否启用 */}
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] text-gray-500">是否启用</span>
-                  <button
-                    onClick={() => setAddBannerForm(prev => ({ ...prev, is_active: !prev.is_active }))}
-                    className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${addBannerForm.is_active ? 'bg-blue-600' : 'bg-gray-300'}`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${addBannerForm.is_active ? 'left-6' : 'left-0.5'}`} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 shrink-0">
-              <button onClick={() => { setShowAddBannerDialog(false); setEditingBanner(null); }} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
-              <button onClick={editingBanner ? handleUpdateBanner : handleCreateBanner} disabled={addingBanner || !addBannerForm.title.trim() || !addBannerForm.image_url.trim()} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
-                {addingBanner ? '提交中...' : (editingBanner ? '保存修改' : '创建')}
               </button>
             </div>
           </div>
