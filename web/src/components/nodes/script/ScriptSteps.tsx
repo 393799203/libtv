@@ -4,7 +4,6 @@ import type { ScriptNodeData } from '@/types/canvas';
 
 interface ScriptStepsProps {
   currentStep: ScriptNodeData['currentStep'];
-  shotCount: number;
 }
 
 const STEPS = [
@@ -13,7 +12,7 @@ const STEPS = [
   { key: 3 as const, label: '合成提示词', icon: ClockCircleOutlined },
 ] as const;
 
-export const ScriptSteps = memo<ScriptStepsProps>(function ScriptSteps({ currentStep, shotCount }) {
+export const ScriptSteps = memo<ScriptStepsProps>(function ScriptSteps({ currentStep }) {
   return (
     <div className="flex items-center justify-center gap-3 px-2 py-1">
       {STEPS.map((step, idx) => {
@@ -64,13 +63,6 @@ export const ScriptSteps = memo<ScriptStepsProps>(function ScriptSteps({ current
           </div>
         );
       })}
-
-      {/* 镜头数量 */}
-      {shotCount > 0 && (
-        <span className="ml-2 text-[10px] text-amber-600 font-medium">
-          {shotCount} 镜
-        </span>
-      )}
     </div>
   );
 });

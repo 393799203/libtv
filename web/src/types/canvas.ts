@@ -1,4 +1,5 @@
 import type { Node, Edge } from '@xyflow/react';
+import type { MentionMarker } from './prompt';
 
 // 节点类型枚举
 export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script';
@@ -6,19 +7,30 @@ export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script';
 // 节点执行状态
 export type NodeExecutionStatus = 'idle' | 'pending' | 'running' | 'success' | 'failed';
 
+// 所有节点数据共有的基类字段。
+// - status: 当前执行状态
+// - error: 上一次执行失败信息
+// - stale: 瞬时标记，表示"上游节点刚刚被重新生成，本节点输出可能已过期"。
+//   只在会话内有效，saveCanvas 持久化前会清掉（脏标不存盘）。
+// - mentions: 提示词中的 @ 引用列表，与 data.prompt 里的 [[m:ID]] 占位符一一对应。
+export interface BaseNodeFields {
+  status: NodeExecutionStatus;
+  error?: string;
+  stale?: boolean;
+  mentions?: MentionMarker[];
+}
+
 // 文本节点数据
-export interface TextNodeData extends Record<string, unknown> {
+export interface TextNodeData extends BaseNodeFields, Record<string, unknown> {
   type: 'text';
   label: string;
   content: string;       // 节点展示的内容（由AI生成或手动编辑）
   prompt: string;        // 提示词（用户输入，用于AI生成内容）
   isEditing?: boolean;
-  status: NodeExecutionStatus;
-  error?: string;
 }
 
 // 图像节点数据
-export interface ImageNodeData extends Record<string, unknown> {
+export interface ImageNodeData extends BaseNodeFields, Record<string, unknown> {
   type: 'image';
   label: string;
   prompt: string;
@@ -27,15 +39,13 @@ export interface ImageNodeData extends Record<string, unknown> {
   width: number;
   height: number;
   imageUrl?: string;
-  status: NodeExecutionStatus;
-  error?: string;
 }
 
 // 视频生成模式
 export type VideoMode = 'text-to-video' | 'universal-ref' | 'first-last-frame' | 'video-ref';
 
 // 视频节点数据
-export interface VideoNodeData extends Record<string, unknown> {
+export interface VideoNodeData extends BaseNodeFields, Record<string, unknown> {
   type: 'video';
   label: string;
   prompt: string;
@@ -45,12 +55,10 @@ export interface VideoNodeData extends Record<string, unknown> {
   videoUrl?: string;
   videoMode?: VideoMode;       // 视频生成模式
   referenceImages?: string[];   // 参考图片 URL 列表（全能参考/首尾帧模式）
-  status: NodeExecutionStatus;
-  error?: string;
 }
 
 // 音频节点数据
-export interface AudioNodeData extends Record<string, unknown> {
+export interface AudioNodeData extends BaseNodeFields, Record<string, unknown> {
   type: 'audio';
   label: string;
   prompt: string;          // 提示词（文本生成音频时使用）
@@ -61,24 +69,18 @@ export interface AudioNodeData extends Record<string, unknown> {
   duration: number;        // 音频时长（秒）
   audioUrl?: string;       // 音频文件 URL
   audioName?: string;      // 音频名称（显示在头部）
-  status: NodeExecutionStatus;
-  error?: string;
 }
 
 // 脚本节点数据
-export interface ScriptNodeData extends Record<string, unknown> {
+export interface ScriptNodeData extends BaseNodeFields, Record<string, unknown> {
   type: 'script';
   label: string;
-  scriptContent: string;
-  shots: ScriptShot[];
-  /** 当前工作流步骤：1-确认镜头 / 2-准备资产 / 3-合成提示词 */
+  prompt: string;         // 用户输入的提示词（用于生成剧本）
+  scriptContent: string;  // 生成的剧本正文
+  shots: ScriptShot[];    // 生成的分镜列表
   currentStep: 1 | 2 | 3;
-  /** 作者 */
   author?: string;
-  /** 创建日期（ISO字符串） */
   createdAt?: string;
-  status: NodeExecutionStatus;
-  error?: string;
 }
 
 // 分镜数据（扩展版，匹配截图中的表格列）

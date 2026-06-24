@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -291,7 +292,17 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 启动服务
 	addr := fmt.Sprintf(":%d", config.C.Server.Port)
 	log.Printf("LibTV server starting on %s", addr)
-	if err := r.Run(addr); err != nil {
+
+	// 自定义 HTTP Server：SSE 长连接需要禁用读写超时
+	srv := &http.Server{
+		Addr:           addr,
+		Handler:        r,
+		ReadTimeout:    0, // 不设读超时（SSE 长连接）
+		WriteTimeout:   0, // 不设写超时（SSE 长连接）
+		IdleTimeout:    0, // 不设空闲超时
+		MaxHeaderBytes: 1 << 20,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("start server: %v", err)
 	}
 }

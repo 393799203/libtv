@@ -16,6 +16,17 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
+        // SSE 长连接：禁用超时，防止 ~14s 断连
+        timeout: 0,
+        proxyTimeout: 0,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            // SSE 长连接：禁用压缩，防止缓冲
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              delete proxyRes.headers['content-encoding'];
+            }
+          });
+        },
       },
       '/ws': {
         target: 'ws://localhost:8080',

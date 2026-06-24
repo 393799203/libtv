@@ -27,17 +27,25 @@ const NODE_TYPE_ICON_TEXT: Record<string, string> = {
   script: '📜',
 };
 
-const MARKER = '\uFFFC';
+/** mention 占位符：[[m:<id>]]，id 对应 mentions 数组里的 entry */
+function mentionMarker(id: string): string {
+  return `[[m:${id}]]`;
+}
+/** 同步生成不重复的 mention id（短随机，避免 Date.now() 冲突） */
+function genMentionId(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** 从编辑器 DOM 提取纯文本 */
+/** 从编辑器 DOM 提取纯文本：把 mention span 替换回 [[m:id]] 占位符 */
 function extractPlainText(el: HTMLElement): string {
   const clone = el.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('.libtv-mention').forEach((n) => {
-    n.replaceWith(`${MARKER}${n.getAttribute('data-label') || ''}${MARKER}`);
+  clone.querySelectorAll('.libtv-mention:not(.libtv-prefix-tag)').forEach((n) => {
+    const id = n.getAttribute('data-mention-id') || '';
+    if (id) n.replaceWith(mentionMarker(id));
   });
   // 音频标签：提取原始文本
   clone.querySelectorAll('.libtv-audio-pause').forEach((n) => {
@@ -186,13 +194,14 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     for (const u of upstreamInputs) thumbMap[u.nodeId] = u.thumbnail;
 
     let html = escapeHtml(value);
+    // 按占位符在 value 里的出现位置排序（后出现的先替换，避免索引错位）
     const sorted = [...mentions].sort(
       (a, b) =>
-        value.lastIndexOf(`${MARKER}${b.label}${MARKER}`) -
-        value.lastIndexOf(`${MARKER}${a.label}${MARKER}`)
+        value.lastIndexOf(mentionMarker(b.id)) -
+        value.lastIndexOf(mentionMarker(a.id))
     );
     for (const m of sorted) {
-      const marker = `${MARKER}${m.label}${MARKER}`;
+      const marker = mentionMarker(m.id);
       const idx = html.lastIndexOf(escapeHtml(marker));
       if (idx === -1) continue;
 
@@ -204,11 +213,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
 
       html =
         html.slice(0, idx) +
-        `<span class="libtv-mention" contenteditable="false" data-node-id="${m.nodeId}" data-label="${escapeHtml(m.label)}">` +
+        `<span class="libtv-mention" contenteditable="false" data-mention-id="${escapeHtml(m.id)}" data-node-id="${m.nodeId}" data-label="${escapeHtml(m.label)}">` +
         iconPart +
         `<span>${escapeHtml(m.label)}</span>` +
         `</span>` +
-        html.slice(idx + marker.length);
+        html.slice(idx + escapeHtml(marker).length);
     }
     // 停顿标签：<#N#> → 渲染为青色标签
     html = html.replace(/&lt;#([\d.]+)#&gt;/g, (_match, val) =>
@@ -236,12 +245,12 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     return html;
   }, [value, mentions, upstreamInputs, prefixTag]);
 
-  /** 在光标位置插入标签（替换 @） */
-  function insertMentionSpan(input: UpstreamInput): boolean {
+  /** 在光标位置插入标签（替换 @）。返回生成的 mention id，调用方把它加到 mentions 数组 */
+  function insertMentionSpan(input: UpstreamInput): string | null {
     const el = editorRef.current;
-    if (!el) return false;
+    if (!el) return null;
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return false;
+    if (!sel || !sel.rangeCount) return null;
     const range = sel.getRangeAt(0);
 
     // 找 @ 字符位置
@@ -257,7 +266,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       atOffset = range.startOffset - 1;
     }
 
-    if (!atNode) return false;
+    if (!atNode) return null;
 
     // 创建标签元素
     const thumbUrl = upstreamInputs.find((u) => u.nodeId === input.nodeId)?.thumbnail;
@@ -266,10 +275,14 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         ? `<img src="${escapeHtml(thumbUrl)}" class="libtv-mention-thumb" />`
         : NODE_TYPE_ICON_TEXT[input.nodeType] || '';
 
+    // 生成唯一 id 并写到 span 的 data-mention-id 上
+    const id = genMentionId();
+
     // 创建标签元素（整体不可编辑）
     const span = document.createElement('span');
     span.className = 'libtv-mention';
     span.contentEditable = 'false';
+    span.setAttribute('data-mention-id', id);
     span.setAttribute('data-node-id', input.nodeId);
     span.setAttribute('data-label', input.label);
     span.innerHTML = iconPart + '<span>' + escapeHtml(input.label) + '</span>';
@@ -292,7 +305,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     sel.removeAllRanges();
     sel.addRange(range);
 
-    return true;
+    return id;
   }
 
   /** 防抖通知父组件数据变化（避免每次按键都 cloneNode） */
@@ -306,6 +319,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   }, [onChange, mentions]);
 
   /** 立即通知父组件（用于插入引用、删除标签等关键操作，直接调用 onChange 即可） */
+  // 用 ref 存最新 mentions，避免把 mentions 放进 cleanup effect 的 deps 导致 setMentions 死循环
+  const mentionsRef = useRef(mentions);
+  mentionsRef.current = mentions;
   // 组件卸载时确保最后一次防抖执行
   useEffect(() => {
     return () => {
@@ -313,10 +329,10 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         clearTimeout(emitTimerRef.current);
         // 卸载时同步一次最终状态
         const el = editorRef.current;
-        if (el) onChange(extractPlainText(el), mentions);
+        if (el) onChange(extractPlainText(el), mentionsRef.current);
       }
     };
-  }, [onChange, mentions]);
+  }, [onChange]);
 
   /** 用户输入 */
   const handleInput = useCallback(() => {
@@ -344,10 +360,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   /** 选择一个引用（点击或回车） */
   const handleSelectMention = useCallback(
     (input: UpstreamInput) => {
-      if (!insertMentionSpan(input)) return;
+      const newId = insertMentionSpan(input);
+      if (!newId) return;
 
       const newMention: MentionMarker = {
-        id: `${Date.now()}`,
+        id: newId,
         nodeId: input.nodeId,
         label: input.label,
         nodeType: input.nodeType,
@@ -477,7 +494,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       }
 
       e.preventDefault();
-      const label = mentionEl.getAttribute('data-label') || '';
+      const mentionId = mentionEl.getAttribute('data-mention-id') || '';
       // 同时删除标签后面的空格（如果存在的话）
       const nextSibling = mentionEl.nextSibling;
       if (nextSibling?.nodeType === Node.TEXT_NODE && nextSibling.textContent === '\u00A0') {
@@ -487,7 +504,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
 
       onChange(
         extractPlainText(el),
-        mentions.filter((m) => m.label !== label)
+        mentionId ? mentions.filter((m) => m.id !== mentionId) : mentions
       );
     },
     [mentions, onChange, showMentionMenu, filteredInputs, selectedIdx, handleSelectMention]

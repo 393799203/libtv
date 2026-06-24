@@ -457,7 +457,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       // 标记跳过历史记录（执行状态变化不需要 undo）
       data.skipHistory = true;
       data.nodes = data.nodes.map((node) =>
-        node.id === id ? { ...node, data: { ...node.data, status } as LibTVNode['data'] } : node,
+        node.id === id ? { ...node, data: { ...node.data, status, progressMessage: undefined } as LibTVNode['data'] } : node,
       );
       cache.set(pid, data);
 

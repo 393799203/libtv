@@ -43,23 +43,27 @@ func NewClient(cfg config.AIConfig, providerName string) *Client {
 		baseURL: baseURL,
 		model:   cfg.LLM.Model,
 		httpCli: &http.Client{
-			Timeout: 60 * time.Second,
-			// 禁用连接池 keep-alive，避免长跑进程下 IdleConn 被某中间链路污染/死链
-			// 每次 Chat 都新建连接
-			Transport: &http.Transport{
-				DisableKeepAlives:   true,
-				MaxIdleConns:        0,
-				MaxIdleConnsPerHost: 0,
-				IdleConnTimeout:     1 * time.Second,
-				// 显式较短 dial 超时，避免依赖 Client.Timeout 等死
-				DialContext: (&net.Dialer{
-					Timeout:   10 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 90 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			},
+			// 整体客户端超时：放宽到 5 分钟，脚本/图像生成长 prompt + 大输出需要更久
+				Timeout: 5 * time.Minute,
+				// 禁用连接池 keep-alive，避免长跑进程下 IdleConn 被某中间链路污染/死链
+				// 每次 Chat 都新建连接
+				Transport: &http.Transport{
+					DisableKeepAlives:   true,
+					MaxIdleConns:        0,
+					MaxIdleConnsPerHost: 0,
+					IdleConnTimeout:     1 * time.Second,
+					// 显式较短 dial 超时，避免依赖 Client.Timeout 等死
+					DialContext: (&net.Dialer{
+						Timeout:   10 * time.Second,
+						KeepAlive: 30 * time.Second,
+					}).DialContext,
+					TLSHandshakeTimeout: 15 * time.Second,
+					// ResponseHeaderTimeout：服务器开始返回 headers 之前的等待上限。
+					// 硅基流动的长 prompt/分镜生成经常要 2-3 分钟才开始返回首字节，
+					// 90s 远远不够；这里直接对齐 Client.Timeout=5min。
+					ResponseHeaderTimeout: 5 * time.Minute,
+					ExpectContinueTimeout: 1 * time.Second,
+				},
 		},
 	}
 }

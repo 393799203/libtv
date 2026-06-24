@@ -12,10 +12,6 @@ import { ScriptSteps } from './ScriptSteps';
 interface ScriptCardProps {
   data: Pick<ScriptNodeData, 'label' | 'currentStep' | 'shots' | 'scriptContent'>;
   status: NodeExecutionStatus;
-  /** 轮询进度（0-100），仅 status=running 时有效 */
-  progress?: number;
-  /** 进度提示文案 */
-  progressMessage?: string;
   onOpen: () => void;
 }
 
@@ -32,8 +28,6 @@ function isGenerating(status: NodeExecutionStatus): boolean {
 export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
   data,
   status,
-  progress = 0,
-  progressMessage,
   onOpen,
 }) {
   const handleOpenClick = useCallback(
@@ -62,20 +56,6 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
           <span className="text-xs font-medium text-gray-700">
             {status === 'pending' ? '等待生成中...' : '正在生成分镜...'}
           </span>
-
-          {/* 进度条 */}
-          <div className="w-full max-w-[180px] space-y-1">
-            <div className="w-full h-1.5 bg-amber-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 rounded-full transition-all duration-500 ease-out"
-                style={{ width: `${Math.min(progress, 100)}%` }}
-              />
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] text-amber-600">{progressMessage || `${progress}%`}</span>
-              <span className="text-[10px] text-gray-400">{progress}%</span>
-            </div>
-          </div>
 
           {/* 打开按钮（可查看实时进度） */}
           <button
@@ -143,7 +123,7 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
 
       {/* 底部：步骤条 + 打开按钮 */}
       <div className="w-full space-y-3 pt-2 border-t border-gray-100">
-        <ScriptSteps currentStep={data.currentStep} shotCount={data.shots.length} />
+        <ScriptSteps currentStep={data.currentStep} />
 
         <button
           onClick={handleOpenClick}

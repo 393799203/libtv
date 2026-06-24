@@ -1,10 +1,8 @@
 import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
-import { useExecutionStream } from '@/hooks/useExecutionStream';
-import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
-import { workflowApi } from '@/services/workflowApi';
-import { canvasApi } from '@/services/canvasApi';
+import { useNodeGeneration } from '@/hooks/useNodeGeneration';
+import { nodeRegistry } from '@/plugins/registry';
 import type {
   UpstreamInput,
   MentionMarker,
@@ -14,6 +12,7 @@ import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canv
 import { PromptUpstreamBar } from './PromptUpstreamBar';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
+import { DownstreamConfirmBar } from './DownstreamConfirmBar';
 import { VideoModeSelector } from './VideoPromptControls';
 import { AudioPromptControls, type AudioTagInsert } from './AudioPromptControls';
 import type { VideoMode } from '@/types/canvas';
@@ -104,7 +103,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   onUpdate,
 }) {
   const [isFullscreen] = useState(false);
-  const [activeExecutionId, setActiveExecutionId] = useState<string | number | null>(null);
 
   // 编辑器 ref，用于插入停顿/语气词
   const editorRef = useRef<PromptEditorHandle>(null);
@@ -114,13 +112,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const projectId = useCanvasStore((s) => s.projectId);
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
-  // 订阅当前执行的 SSE 流
-  useExecutionStream(projectId, activeExecutionId);
+  // 节点生成 hook — 统一入口（处理单点生成 + 下游 stale 标记 + SSE 订阅）
+  const {
+    downstreamIds,
+    isGenerating: hookIsGenerating,
+    error: hookError,
+    generate,
+    regenerateDownstream,
+  } = useNodeGeneration({ nodeId });
 
-  // 当前节点类型的配置
-  const config = PROMPT_PANEL_CONFIGS[nodeType];
+  // 从 plugin registry 读配置（统一来源，后续加节点类型无需改 PromptPanel）
+  const config = nodeRegistry.get(nodeType).promptConfig;
 
   // 上游输入列表（useMemo 稳定引用，避免子组件无效重渲染）
   const upstreamInputs = useMemo(
@@ -128,16 +131,30 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     [nodeId, nodes, edges]
   );
 
-  // 本地状态：提示词文本、@引用、模型、分辨率、比例
-  // 从节点数据中读取初始值（只取 prompt 字段，不 fallback 到 content）
-  const [promptText, setPromptText] = useState(
-    ('prompt' in data ? (data as { prompt?: string }).prompt : '') || ''
-  );
-  const [mentions, setMentions] = useState<MentionMarker[]>([]);
+  // 从节点 data 恢复 prompt + mentions（只取 prompt 字段，不 fallback 到 content）
+  // mentions 是 @ 引用的元数据列表，存到 data.mentions 里，与 prompt 中的 [[m:ID]] 占位符一一对应
+  const initialPrompt = ('prompt' in data ? (data as { prompt?: string }).prompt : '') || '';
+  const initialMentions = ('mentions' in data && Array.isArray((data as { mentions?: unknown }).mentions)
+    ? ((data as { mentions: MentionMarker[] }).mentions || [])
+    : []);
+  const [promptText, setPromptText] = useState(initialPrompt);
+  const [mentions, setMentions] = useState<MentionMarker[]>(initialMentions);
+
+  // 切换节点时重置本地状态为新节点的数据（useState 只初始化一次，不会随 nodeId 变化重新执行）
+  useEffect(() => {
+    const newPrompt = ('prompt' in data ? (data as { prompt?: string }).prompt : '') || '';
+    const newMentions = ('mentions' in data && Array.isArray((data as { mentions?: unknown }).mentions)
+      ? ((data as { mentions: MentionMarker[] }).mentions || [])
+      : []);
+    setPromptText(newPrompt);
+    setMentions(newMentions);
+  }, [nodeId]);
   const [selectedModel, setSelectedModel] = useState(config.defaultModel);
-  const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>(config.defaultResolution);
+  const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>((config.defaultResolution as ResolutionOption) || '1K');
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);
   const [isGenerating, setIsGenerating] = useState(false);
+  // 下游确认条：执行完后弹出
+  const [showDownstreamConfirm, setShowDownstreamConfirm] = useState(false);
 
   // 图片节点专属：摄像机/全景模式
   const [cameraMode, setCameraMode] = useState<'normal' | 'camera' | 'panorama'>('normal');
@@ -184,70 +201,54 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     []
   );
 
-  // 发送生成
+  // 发送生成 — 通过 useNodeGeneration 统一入口
   const handleGenerate = useCallback(async () => {
     if (!projectId) {
       console.error('projectId 不存在，无法执行工作流');
       return;
     }
 
-    setIsGenerating(true);
-    // 标记正在生成的节点（TextNode 会读这个来显示骨架屏）
-    useExecutionStore.getState().setGeneratingNodeId(nodeId);
-    try {
-      // 1) 把用户在提示词框输入的文案持久化到节点 data.prompt
-      //    （下次打开节点/重看历史，都能知道这个内容是怎么生成的）
-      if (nodeType === 'text' || nodeType === 'image' || nodeType === 'video' || nodeType === 'audio') {
-        updateNodeData(nodeId, { prompt: promptText, model: selectedModel } as Partial<LibTVNodeData>);
-      } else if (nodeType === 'script') {
-        updateNodeData(nodeId, { scriptPrompt: promptText, model: selectedModel } as Partial<LibTVNodeData>);
-      }
-
-      // 2) 把当前画布持久化到后端（让后端能读到最新的 prompt 字段）
-      try {
-        await canvasApi.saveCanvas(projectId, { nodes, edges, viewport: { x: 0, y: 0, zoom: 1 } });
-      } catch (e) {
-        console.warn('保存画布失败（继续执行）:', e);
-      }
-
-      // 3) 调用后端执行工作流，返回 executionId
-      const resp = await workflowApi.execute(projectId, { startNodeId: nodeId });
-      if (resp?.executionId) {
-        // 4) 触发 useExecutionStream 订阅该 execution 的 SSE 事件流
-        //    - node_completed 时 useExecutionStream 会自动把 output.content 写回 canvas store
-        //    - execution_completed/failed 时 useExecutionStream 会自动 close
-        setActiveExecutionId(resp.executionId);
-      } else {
-        setIsGenerating(false);
-      }
-    } catch (error) {
-      console.error('生成失败:', error);
-      setIsGenerating(false);
+    // 1) 同步本地状态到节点 data（通过 onUpdate 传出来）
+    //    mentions 跟 prompt 一起持久化，避免 reload 后 [[m:ID]] 找不到对应元数据
+    if (nodeType === 'text' || nodeType === 'image' || nodeType === 'video' || nodeType === 'audio' || nodeType === 'script') {
+      onUpdate({
+        prompt: promptText,
+        mentions,
+        model: selectedModel,
+      } as Partial<LibTVNodeData>);
     }
-  }, [
-    projectId,
-    nodeId,
-    nodeType,
-    promptText,
-    selectedModel,
-    nodes,
-    edges,
-    updateNodeData,
-  ]);
 
-  // 监听执行状态：终态时关掉 loading
+    setIsGenerating(true);
+
+    // 2) 调统一入口（自动：写下游 stale → 存盘 → 调后端 → 订阅 SSE）
+    await generate({ mode: 'single' });
+    // isGenerating 由下面 useEffect 在终态时清掉
+  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, onUpdate, generate]);
+
+  // 监听执行状态：终态时关掉 loading + 弹下游确认条
   const executionStatus = useExecutionStore((s) => s.status);
   const lastError = useExecutionStore((s) => s.lastError);
   useEffect(() => {
     if (executionStatus === 'completed' || executionStatus === 'failed') {
       setIsGenerating(false);
-      // 关闭骨架屏
       useExecutionStore.getState().setGeneratingNodeId(null);
-      // 给 node_completed 一点时间更新 store，再清掉 activeExecutionId（触发 SSE close）
-      const t = setTimeout(() => setActiveExecutionId(null), 500);
-      return () => clearTimeout(t);
+      // 仅当有下游且执行成功时弹确认条
+      if (executionStatus === 'completed' && downstreamIds.length > 0) {
+        setShowDownstreamConfirm(true);
+      }
     }
-  }, [executionStatus]);
+  }, [executionStatus, downstreamIds.length]);
+
+  // 点击"重新生成下游"
+  const handleRegenerateDownstream = useCallback(() => {
+    setShowDownstreamConfirm(false);
+    regenerateDownstream();
+  }, [regenerateDownstream]);
+
+  // 关闭下游确认条
+  const handleDismissConfirm = useCallback(() => {
+    setShowDownstreamConfirm(false);
+  }, []);
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
@@ -257,7 +258,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     <div className={panelClass}>
 
       {/* 错误提示条（lastError 有值时显示） */}
-      {executionStatus === 'failed' && lastError && (
+      {lastError && (
         <div className="mb-2 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
           <span className="flex-1 break-all">{lastError}</span>
@@ -269,6 +270,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
             ✕
           </button>
         </div>
+      )}
+
+      {/* 下游确认条：执行完当前节点后，提示下游可能被影响 */}
+      {showDownstreamConfirm && downstreamIds.length > 0 && (
+        <DownstreamConfirmBar
+          count={downstreamIds.length}
+          onRegenerate={handleRegenerateDownstream}
+          onDismiss={handleDismissConfirm}
+        />
       )}
 
       {/* 视频节点：模式选择器（根据上游图片数量自动过滤可选模式） */}
@@ -313,7 +323,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onResolutionChange={setSelectedResolution}
         selectedAspectRatio={selectedAspectRatio}
         onAspectRatioChange={setSelectedAspectRatio}
-        isGenerating={isGenerating}
+        isGenerating={isGenerating || hookIsGenerating}
         onGenerate={handleGenerate}
         nodeType={nodeType}
         cameraMode={cameraMode}

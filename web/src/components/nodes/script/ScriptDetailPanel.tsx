@@ -1,6 +1,6 @@
 import { memo, useCallback, useState, useRef } from 'react';
-import { Drawer, Button } from 'antd';
-import { PlusOutlined, RightOutlined, LoadingOutlined } from '@ant-design/icons';
+import { Drawer } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
 import type { ScriptNodeData, ScriptShot } from '@/types/canvas';
 import { ShotHeader } from './ShotHeader';
 import { ShotTable } from './ShotTable';
@@ -8,10 +8,6 @@ import { ShotTable } from './ShotTable';
 interface ScriptDetailPanelProps {
   open: boolean;
   data: ScriptNodeData;
-  /** 轮询进度 */
-  progress?: number;
-  /** 进度文案 */
-  progressMessage?: string;
   onClose: () => void;
   onUpdate: (data: Partial<ScriptNodeData>) => void;
 }
@@ -35,31 +31,19 @@ function SkeletonRow() {
 
 /** 生成中骨架屏 */
 const GeneratingSkeleton = memo(function GeneratingSkeleton({
-  progress = 0,
   message,
 }: {
-  progress?: number;
   message?: string;
 }) {
   const rows = 6;
 
   return (
     <div className="flex flex-col h-full">
-      {/* 进度条 */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-amber-50/50 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-amber-700">正在生成分镜数据...</span>
-          <span className="text-xs text-amber-600">{progress}%</span>
-        </div>
-        <div className="w-full h-1.5 bg-amber-100 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-amber-500 rounded-full transition-all duration-500 ease-out"
-            style={{ width: `${Math.min(progress, 100)}%` }}
-          />
-        </div>
-        {message && (
-          <span className="text-[10px] text-amber-500">{message}</span>
-        )}
+      {/* 进度提示 */}
+      <div className="px-4 py-3 border-b border-gray-100 bg-amber-50/50">
+        <span className="text-xs font-medium text-amber-700">
+          {message || '正在生成分镜数据...'}
+        </span>
       </div>
 
       {/* 表头骨架 */}
@@ -68,8 +52,8 @@ const GeneratingSkeleton = memo(function GeneratingSkeleton({
         <span className="w-10 text-center">时长</span>
         <span className="flex-1">画面提示词</span>
         <span className="w-14">镜别</span>
-        <span className="w-16">拍摄角度</span>
-        <span className="w-20">对白/旁白</span>
+        <span className="w-16">角度</span>
+        <span className="w-32">对白/旁白</span>
         <span className="w-16">音效</span>
         <span className="w-12">运镜</span>
         <span className="w-20">基调提示方式</span>
@@ -95,8 +79,6 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
   function ScriptDetailPanel({
     open,
     data,
-    progress,
-    progressMessage,
     onClose,
     onUpdate,
   }) {
@@ -161,11 +143,27 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
 
     return (
       <Drawer
-        title={<ShotHeader data={data} onExport={handleExport} />}
+        title={
+          <ShotHeader
+            data={data}
+            onExport={handleExport}
+            onAddShot={handleAddShot}
+            nextStepLabel={nextStepLabel}
+            onNextStep={nextStepLabel ? handleNextStep : undefined}
+            nextLoading={nextLoading}
+          />
+        }
         open={open}
         onClose={onClose}
         styles={{
-          body: { padding: 0, display: 'flex', flexDirection: 'column' },
+          body: {
+            padding: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            // 显式声明高度，让 flex-1 / min-h-0 在子节点里能正确计算
+            height: '100%',
+            minHeight: 0,
+          },
           mask: { backgroundColor: 'rgba(0,0,0,0.3)' },
           wrapper: { width: '90vw', maxWidth: '90vw' },
         }}
@@ -173,44 +171,17 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
         {/* 生成中 → 显示骨架屏 */}
         {isGenerating ? (
           <GeneratingSkeleton
-            progress={progress}
-            message={progressMessage}
+            message={data.progressMessage as string | undefined}
           />
         ) : (
-          <>
-            {/* 分镜表格 */}
-            <div className="flex-1 overflow-hidden">
-              <ShotTable
-                shots={data.shots}
-                onChange={handleShotsChange}
-                readOnly={false}
-              />
-            </div>
-
-            {/* 底部操作栏 */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-              <Button
-                type="dashed"
-                icon={<PlusOutlined />}
-                onClick={handleAddShot}
-                size="small"
-              >
-                添加镜头
-              </Button>
-
-              {nextStepLabel && (
-                <Button
-                  type="primary"
-                  onClick={handleNextStep}
-                  loading={nextLoading}
-                  icon={<RightOutlined />}
-                  size="small"
-                >
-                  {nextStepLabel}
-                </Button>
-              )}
-            </div>
-          </>
+          // 用原生 overflow-auto：整个表格（含表头）一起滚动
+          <div className="flex-1 min-h-0 overflow-auto">
+            <ShotTable
+              shots={data.shots}
+              onChange={handleShotsChange}
+              readOnly={false}
+            />
+          </div>
         )}
       </Drawer>
     );

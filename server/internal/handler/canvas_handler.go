@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"libtv/internal/service"
@@ -51,6 +52,9 @@ func (h *CanvasHandler) Save(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid body"})
 		return
 	}
+
+	// DEBUG: 打印保存的画布内容，定位 @ 引用/prompt 存储问题
+	log.Printf("[Canvas] save projectID=%s bytes=%d body=%s", projectID, len(content), string(content))
 
 	if err := h.canvasService.Save(c.Request.Context(), projectID, content); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})

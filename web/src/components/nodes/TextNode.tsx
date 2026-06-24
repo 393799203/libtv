@@ -83,9 +83,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
   const [content, setContent] = useState(data.content || '');
   const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 0 });
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const generatingNodeId = useExecutionStore((s) => s.generatingNodeId);
   const nodeError = useExecutionStore((s) => s.nodeErrors[id]);
-  const isLoading = generatingNodeId === id;
   const { getNode, flowToScreenPosition } = useReactFlow();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -191,25 +189,15 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
           onDoubleClick={handleDoubleClick}
         >
           {isEditing ? (
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={(e) => handleContentChange(e.target.value)}
-              onBlur={handleBlur}
-              placeholder="输入内容，支持 Markdown 格式..."
-              className="w-full h-full text-sm text-gray-700 border-0 outline-none resize-none bg-transparent"
-            />
-          ) : isLoading ? (
-            // 骨架屏：6 行占满整个节点
-            <div className="flex flex-col gap-3 h-full justify-center">
-              <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse w-full" />
-              <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse w-full" style={{ animationDelay: '100ms' }} />
-              <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse w-full" style={{ animationDelay: '200ms' }} />
-              <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse w-full" style={{ animationDelay: '300ms' }} />
-              <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse w-full" style={{ animationDelay: '400ms' }} />
-              <div className="h-10 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse w-full" style={{ animationDelay: '500ms' }} />
-            </div>
-          ) : nodeError ? (
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => handleContentChange(e.target.value)}
+            onBlur={handleBlur}
+            placeholder="输入内容，支持 Markdown 格式..."
+            className="w-full h-full text-sm text-gray-700 border-0 outline-none resize-none bg-transparent"
+          />
+        ) : nodeError ? (
             // 节点失败：在节点内显示红色错误
             <div className="h-full flex flex-col items-center justify-center text-red-500 px-3">
               <ExclamationCircleOutlined className="text-3xl mb-2" />

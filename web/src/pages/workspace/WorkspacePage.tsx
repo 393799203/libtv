@@ -5,14 +5,11 @@ import { Button, Tooltip, App } from 'antd';
 import {
   ArrowLeftOutlined,
   SaveOutlined,
-  PlayCircleOutlined,
-  StopOutlined,
   GlobalOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { useExecutionStore } from '@/stores/executionStore';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 
@@ -50,7 +47,6 @@ function WorkspaceInner() {
   const setProjectId = useCanvasStore((s) => s.setProjectId);
   const isDirty = useCanvasStore((s) => s.isDirty);
   const isSaving = useCanvasStore((s) => s.isSaving);
-  const isExecuting = useExecutionStore((s) => s.isExecuting);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
 
   // 执行事件 SSE 订阅已下沉到各 PromptPanel（useExecutionStream）
@@ -179,15 +175,6 @@ function WorkspaceInner() {
             onClick={() => useCanvasStore.getState().toggleMiniMap()}
           />
         </Tooltip>
-        {isExecuting ? (
-          <Tooltip title="停止执行">
-            <Button type="text" size="small" danger icon={<StopOutlined />} />
-          </Tooltip>
-        ) : (
-          <Tooltip title="执行工作流">
-            <Button type="text" size="small" icon={<PlayCircleOutlined />} className="text-green-500" />
-          </Tooltip>
-        )}
         <Tooltip title="保存 (Ctrl+S)">
           <Button
             type="text"

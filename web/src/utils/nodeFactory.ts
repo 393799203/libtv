@@ -3,11 +3,11 @@ import type { XYPosition } from '@xyflow/react';
 
 // 各类型节点的默认尺寸
 const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
-  text: { width: 320, height: 360 },
+  text: { width: 360, height: 300 },
   image: { width: 320 },
-  video: { width: 480, height: 270 },
-  audio: { width: 320, height: 140 },
-  script: { width: 320, height: 220 },
+  video: { width: 480 },
+  audio: { width: 320 },
+  script: { width: 320 },
 };
 
 /**
@@ -97,6 +97,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         ...baseData,
         type: 'script',
         label: '脚本节点',
+        prompt: '',
         scriptContent: '',
         shots: [],
         currentStep: 1,

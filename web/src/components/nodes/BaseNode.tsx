@@ -1,7 +1,7 @@
 import { memo, useState, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Badge } from 'antd';
+import { Badge, Tooltip } from 'antd';
 import type { NodeExecutionStatus, LibTVNodeData } from '@/types/canvas';
 import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -61,10 +61,12 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
 
   return (
     <div
+      data-stale={data.stale ? 'true' : undefined}
       className={`
         min-w-[200px] w-full min-h-[120px] rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
         transition-all duration-150 relative flex flex-col
         ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
+        ${data.stale ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
         ${className || ''}
       `}
     >
@@ -98,22 +100,45 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         <div className="flex items-center gap-2 flex-shrink-0">
           {headerRight}
           {status !== 'idle' && (
-            <Badge status={statusColorMap[status] as 'default' | 'processing' | 'success' | 'error'} />
+            <Tooltip title={data.error || undefined} placement="bottom">
+              <Badge status={statusColorMap[status] as 'default' | 'processing' | 'success' | 'error'} />
+            </Tooltip>
           )}
         </div>
       </div>
 
-      {/* 节点内容（flex-1 填充剩余空间，relative 供子节点绝对定位） */}
-      <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 min-h-0 relative`}>
-        {children}
-      </div>
-
-      {/* 错误信息 */}
-      {data.error && (
-        <div className="px-3 pb-2 text-xs text-red-500 truncate">
-          {data.error}
+      {/* stale 角标：上游重新生成时提示 */}
+      {data.stale && (
+        <div
+          className="absolute -top-2 -right-2 z-10 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-medium shadow animate-pulse pointer-events-none"
+          title="上游节点已重新生成，本节点输出可能已过期"
+        >
+          待更新
         </div>
       )}
+
+      {/* 节点内容（flex-1 填充剩余空间，relative 供子组件绝对定位） */}
+      <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 min-h-0 relative`}>
+        {(status === 'running' || status === 'pending') ? (
+          // 统一骨架屏：所有节点 running/pending 时展示（左右两列 + 中间耗时，高度与原始内容一致）
+          <div className="flex flex-col h-full w-full justify-center gap-2 px-4 py-3">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2 flex-1">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="min-h-[18px] bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse"
+                  style={{ animationDelay: `${i * 60}ms` }}
+                />
+              ))}
+            </div>
+            <div className="text-xs text-gray-400 text-center animate-pulse flex-shrink-0">
+              {(data.progressMessage as string | undefined) || '正在执行...'}
+            </div>
+          </div>
+        ) : (
+          children
+        )}
+      </div>
 
       {/* 输入 Handle */}
       <Handle

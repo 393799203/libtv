@@ -46,8 +46,13 @@ func NewWorkflowHandler(
 }
 
 type ExecuteRequest struct {
-	ProjectID  string `json:"projectId"`
+	ProjectID   string `json:"projectId"`
 	StartNodeID string `json:"startNodeId"`
+	// Mode 控制执行粒度：
+	//   ""          → 全图执行（默认）
+	//   "single"    → 只跑 StartNodeID 一个节点（用于节点内"生成"按钮）
+	//   "downstream"→ 跑 StartNodeID + 所有 BFS 后代（"重新生成下游"按钮）
+	Mode string `json:"mode"`
 }
 
 func (h *WorkflowHandler) Execute(c *gin.Context) {
@@ -76,6 +81,10 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 	if startNodeID == "" {
 		startNodeID = req.StartNodeID
 	}
+	mode := req.Mode
+	if mode == "" {
+		mode = c.Query("mode")
+	}
 
 	// 从 CanvasRepo 加载最新画布
 	canvas, err := h.canvasRepo.FindByProjectID(c.Request.Context(), projectID)
@@ -103,9 +112,17 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		return
 	}
 
-	// 如果指定了 startNodeID，裁剪 plan：只跑该节点 + 上游依赖
+	// 按 mode 裁剪 plan
+	// 注意：当前 MVP 的 executor 不消费上游输出，所以"单节点"和"上游节点重跑"语义重合。
+	// 保留 single / downstream 两个粒度足以覆盖所有用户操作（节点内生成 / 重新生成下游）。
 	if startNodeID != "" {
-		plan, err = engine.FilterFromStart(plan, startNodeID)
+		switch mode {
+		case "downstream":
+			plan, err = engine.FilterDownstream(plan, startNodeID)
+		default:
+			// 不传 mode / 传 "single" / 传未知值：都按"只跑这一个节点"处理
+			plan, err = engine.FilterSingle(plan, startNodeID)
+		}
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "filter plan failed: " + err.Error()})
 			return
@@ -168,7 +185,40 @@ func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "execution not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": exec})
+
+	// 基础响应：执行状态
+	resp := gin.H{
+		"id":          exec.ID,
+		"project_id":  exec.ProjectID,
+		"status":      exec.Status,
+		"error_msg":   exec.ErrorMsg,
+		"started_at":  exec.StartedAt,
+		"finished_at": exec.FinishedAt,
+	}
+
+	// 如果传了 nodeId，额外返回该节点的最新数据（从画布中提取）
+	if nodeID := c.Query("nodeId"); nodeID != "" {
+		canvas, err := h.canvasRepo.FindByProjectID(c.Request.Context(), exec.ProjectID)
+		if err == nil && canvas.Content != nil {
+			var canvasData struct {
+				Nodes []json.RawMessage `json:"nodes"`
+			}
+			if json.Unmarshal(canvas.Content, &canvasData) == nil {
+				for _, n := range canvasData.Nodes {
+					var node struct {
+						ID   string          `json:"id"`
+						Data json.RawMessage `json:"data"`
+					}
+					if json.Unmarshal(n, &node) == nil && node.ID == nodeID {
+						resp["node_data"] = node.Data
+						break
+					}
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": resp})
 }
 
 // StreamExecution SSE 流式订阅工作流执行事件

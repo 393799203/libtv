@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,11 +25,20 @@ type NodeOutput struct {
 type ExecutionContext struct {
 	mu      sync.RWMutex
 	outputs map[string]*NodeOutput
+	// upstreamByTarget target 节点 ID -> 上游 source 节点 ID 列表
+	// 节点执行器可借此从 execCtx.GetUpstreamSources(n.ID) 拿到所有上游节点 ID，
+	// 再配合 execCtx.GetNodeData(...) 拿到上游节点的原始 data。
+	upstreamByTarget map[string][]string
+	// nodeDataByID 全图所有节点的原始 data（来自 plan.Schema.Nodes），
+	// 即便是 single / downstream 模式被裁掉的节点，data 也保留在此供执行器参考。
+	nodeDataByID map[string]json.RawMessage
 }
 
 func NewExecutionContext() *ExecutionContext {
 	return &ExecutionContext{
-		outputs: make(map[string]*NodeOutput),
+		outputs:          make(map[string]*NodeOutput),
+		upstreamByTarget: make(map[string][]string),
+		nodeDataByID:     make(map[string]json.RawMessage),
 	}
 }
 
@@ -42,6 +53,40 @@ func (ec *ExecutionContext) GetOutput(nodeID string) (*NodeOutput, bool) {
 	defer ec.mu.RUnlock()
 	out, ok := ec.outputs[nodeID]
 	return out, ok
+}
+
+// SetUpstreamMap 设置全图的上游关系（target -> [source, ...]）。
+// 由调度器在执行前一次性写入，节点执行器通过 GetUpstreamSources 查自己节点的上游。
+func (ec *ExecutionContext) SetUpstreamMap(m map[string][]string) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.upstreamByTarget = m
+}
+
+// GetUpstreamSources 拿指定节点的所有上游 source 节点 ID（按 connections 顺序）。
+func (ec *ExecutionContext) GetUpstreamSources(targetNodeID string) []string {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	src := ec.upstreamByTarget[targetNodeID]
+	out := make([]string, len(src))
+	copy(out, src)
+	return out
+}
+
+// SetNodeDataMap 一次性写入全图所有节点的原始 data，让执行器可以读到上游节点 data。
+func (ec *ExecutionContext) SetNodeDataMap(m map[string]json.RawMessage) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.nodeDataByID = m
+}
+
+// GetNodeData 拿指定节点的原始 data（json.RawMessage）。single / downstream 模式下，
+// 节点本身不一定被执行，但其 data 已保存在此，可供其他节点作为输入参考。
+func (ec *ExecutionContext) GetNodeData(nodeID string) (json.RawMessage, bool) {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	d, ok := ec.nodeDataByID[nodeID]
+	return d, ok
 }
 
 // NodeExecutor 节点执行器接口
@@ -134,6 +179,21 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 	log.Printf("[Engine] Execute start: executionID=%d, plan levels=%d, totalNodes=%d", executionID, len(plan.Levels), len(plan.Schema.Nodes))
 	execCtx := NewExecutionContext()
 
+	// 构造上游映射表（target -> [source, ...]），供 ScriptExecutor 等需要读上游的节点使用
+	upstreamByTarget := make(map[string][]string, len(plan.Schema.Connections))
+	for _, c := range plan.Schema.Connections {
+		upstreamByTarget[c.Target] = append(upstreamByTarget[c.Target], c.Source)
+	}
+	execCtx.SetUpstreamMap(upstreamByTarget)
+
+	// 把全图所有节点的原始 data 写进 execCtx（即便被 single / downstream 模式裁掉）
+	// 让执行器可以读到上游节点的最新 data（来自画布，已包含上一次执行结果）
+	nodeDataByID := make(map[string]json.RawMessage, len(plan.Schema.Nodes))
+	for _, n := range plan.Schema.Nodes {
+		nodeDataByID[n.ID] = n.Data
+	}
+	execCtx.SetNodeDataMap(nodeDataByID)
+
 	e.emit(WorkflowEvent{
 		ExecutionID: executionID,
 		EventType:   EventExecutionStart,
@@ -142,6 +202,15 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 
 	// 收集本次执行的所有输出，供外部回写画布
 	outputs := make(map[string]*NodeOutput)
+
+	// 打印 plan 概览，方便排查"是不是在重跑上游"
+	for levelIdx, level := range plan.Levels {
+		ids := make([]string, 0, len(level))
+		for _, n := range level {
+			ids = append(ids, n.ID+":"+n.Type)
+		}
+		log.Printf("[Engine] plan: levels=%d, level[%d] nodes=%v", len(plan.Levels), levelIdx, ids)
+	}
 
 	for levelIdx, level := range plan.Levels {
 		var wg sync.WaitGroup
@@ -152,6 +221,37 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 			wg.Add(1)
 			go func(n WorkflowNode) {
 				defer wg.Done()
+
+				execStart := time.Now()
+				// 进度心跳：每 10s 推送一次 node_progress，让前端显示耗时
+				// 节点真正完成 / 失败时 cancel 掉
+				heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+				defer stopHeartbeat()
+				go func() {
+					t := time.NewTicker(10 * time.Second)
+					defer t.Stop()
+					for {
+						select {
+						case <-heartbeatCtx.Done():
+							return
+						case <-t.C:
+							elapsed := time.Since(execStart)
+							log.Printf("[Engine] node %s (%s) still running, elapsed=%v", n.ID, n.Type, elapsed.Round(time.Second))
+							e.emit(WorkflowEvent{
+								ExecutionID: executionID,
+								EventType:   EventNodeProgress,
+								NodeID:      n.ID,
+								NodeName:    n.Type,
+								Data: map[string]interface{}{
+									"elapsed":   elapsed.Seconds(),
+									"elapsedMs": elapsed.Milliseconds(),
+									"message":   fmt.Sprintf("已运行 %s", elapsed.Round(time.Second)),
+								},
+								Timestamp: time.Now().UnixMilli(),
+							})
+						}
+					}
+				}()
 
 				e.emit(WorkflowEvent{
 					ExecutionID: executionID,
@@ -355,7 +455,7 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	}
 
 	// 优先使用 prompt（用户输入的提示词），如果为空则用 content
-	userInput := data.Prompt
+	userInput := stripMentionMarkers(data.Prompt)
 	if userInput == "" {
 		userInput = data.Content
 	}
@@ -382,26 +482,139 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	}, nil
 }
 
-// ScriptExecutor 脚本节点执行器（MVP: 透传，后续接入 LLM 生成分镜）
-type ScriptExecutor struct{}
+// ScriptExecutor 脚本节点执行器：用户输入 prompt + 上游文本 → LLM 生成分镜剧本
+type ScriptExecutor struct {
+	llmClient *llm.Client
+}
+
+// NewScriptExecutor 创建脚本执行器
+func NewScriptExecutor(client *llm.Client) *ScriptExecutor {
+	return &ScriptExecutor{llmClient: client}
+}
 
 func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
+		Prompt        string `json:"prompt"`
 		ScriptContent string `json:"scriptContent"`
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse script node data: %w", err)
 	}
-	// TODO: 后续接入 LLM，基于上游文本内容生成分镜剧本
+
+	// 收集上游节点已保存的 data（来自画布，不依赖上游是否在本轮被执行）
+	// 优先读上游的 data.content（持久化结果），其次尝试读本轮 execCtx.output（罕见）
+	var upstreamText strings.Builder
+	for _, srcID := range execCtx.GetUpstreamSources(node.ID) {
+		// 1) 优先：从已保存的画布 data 读 content（即便上游没跑也能拿到上次结果）
+		if raw, ok := execCtx.GetNodeData(srcID); ok && len(raw) > 0 {
+			var nd struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(raw, &nd); err == nil && nd.Content != "" {
+				if upstreamText.Len() > 0 {
+					upstreamText.WriteString("\n\n")
+				}
+				upstreamText.WriteString(nd.Content)
+				continue
+			}
+		}
+		// 2) 兜底：读本轮执行输出
+		if out, ok := execCtx.GetOutput(srcID); ok && out != nil {
+			if content, ok := out.Data["content"].(string); ok && content != "" {
+				if upstreamText.Len() > 0 {
+					upstreamText.WriteString("\n\n")
+				}
+				upstreamText.WriteString(content)
+			}
+		}
+	}
+	material := truncateStr(upstreamText.String(), 3000)
+
+	// 既没有上游文本也没有用户 prompt：透传保留的 scriptContent
+	if material == "" && data.Prompt == "" {
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "success",
+			Data: map[string]interface{}{
+				"scriptContent": data.ScriptContent,
+				"characters":    []interface{}{},
+				"shots":         []interface{}{},
+			},
+		}, nil
+	}
+
+	// 没有 LLM client 时（MVP）：把上游文本当作剧本正文兜底
+	if s.llmClient == nil {
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "success",
+			Data: map[string]interface{}{
+				"scriptContent": material,
+				"characters":    []interface{}{},
+				"shots":         []interface{}{},
+			},
+		}, nil
+	}
+
+	// 清理 prompt 文本里的 [[m:ID]] 占位符（前端 @ 引用渲染标记，LLM 看了会困惑）
+	cleanedPrompt := stripMentionMarkers(data.Prompt)
+
+	// 把用户 prompt 作为创作方向附加在素材末尾
+	fullInput := material
+	if cleanedPrompt != "" {
+		if fullInput != "" {
+			fullInput += "\n\n[创作方向]\n" + cleanedPrompt
+		} else {
+			fullInput = cleanedPrompt
+		}
+	}
+
+	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d", node.ID, len(material), len(cleanedPrompt), len(fullInput))
+	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput)
+	if err != nil {
+		return nil, fmt.Errorf("generate script: %w", err)
+	}
+
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"scriptContent": data.ScriptContent,
-			"characters":    []interface{}{},
-			"shots":         []interface{}{},
+			"scriptContent": result.ScriptContent,
+			"characters":    toAnySlice(result.Characters),
+			"shots":         toAnySlice(result.Shots),
 		},
 	}, nil
+}
+
+// toAnySlice 把结构体切片转成 interface{} 切片，方便写进 map[string]interface{}
+func toAnySlice[T any](s []T) []interface{} {
+	out := make([]interface{}, len(s))
+	for i, v := range s {
+		out[i] = v
+	}
+	return out
+}
+
+// truncateStr 把字符串截断到 max 字符（按 rune 计，避免切到中文中间）。
+// 超过 max 会在末尾追加 "...[truncated]"，方便 LLM 知道这是被截断的素材。
+func truncateStr(s string, max int) string {
+	if max <= 0 || len([]rune(s)) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max]) + "\n...[truncated]"
+}
+
+// mentionMarkerRe 匹配前端 @ 引用占位符 [[m:<id>]]，id 是字母数字随机串
+var mentionMarkerRe = regexp.MustCompile(`\[\[m:[A-Za-z0-9_]+\]\]`)
+
+// stripMentionMarkers 把 prompt 文本里的 [[m:ID]] 占位符去掉（它们是前端渲染标记，
+// LLM 看了会当成垃圾文本）。
+func stripMentionMarkers(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.TrimSpace(mentionMarkerRe.ReplaceAllString(s, ""))
 }
 
 // ImageExecutor 图像节点执行器（MVP: 透传，后续接入 SD API）
@@ -477,7 +690,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 func NewDefaultRegistry(llmClient *llm.Client) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient))
-	registry.Register("script", &ScriptExecutor{})
+	registry.Register("script", NewScriptExecutor(llmClient))
 	registry.Register("image", &ImageExecutor{})
 	registry.Register("video", &VideoExecutor{})
 	registry.Register("audio", &AudioExecutor{})

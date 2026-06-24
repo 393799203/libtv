@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useRef } from 'react';
-import { Table, Tag, Input, Select, InputNumber, Dropdown } from 'antd';
+import { Table, Tag, Input, Select, Dropdown } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   MoreOutlined,
@@ -89,13 +89,19 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
 
   if (component === 'number') {
     return (
-      <InputNumber
+      <Input
         size="small"
+        type="number"
         value={value as number}
-        onChange={(v) => onChange(v ?? 0)}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          if (!Number.isNaN(n)) onChange(n);
+        }}
         min={1}
         max={60}
-        className="w-14"
+        variant="borderless"
+        // 时长输入框：紧凑 + 居中，与列宽对齐
+        className="!w-10 text-center text-xs !px-1"
       />
     );
   }
@@ -221,9 +227,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       render: (v: number) => <span className="text-xs text-gray-500 font-mono">{v}</span>,
     },
     {
-      title: '时长',
+      title: '时长(s)',
       dataIndex: 'duration',
-      width: 60,
+      width: 40,
       align: 'center',
       render: (v: number, record) =>
         !readOnly ? (
@@ -270,9 +276,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       ),
     },
     {
-      title: '拍摄角度',
+      title: '角度',
       dataIndex: 'cameraAngle',
-      width: 110,
+      width: 80,
       render: (v: string, record) => (
         <EditableCell
           value={v}
@@ -284,55 +290,74 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
     {
       title: '对白/旁白',
       dataIndex: 'dialogue',
-      width: 150,
+      width: 220,
       render: (v: string, record) =>
         !readOnly ? (
-          <Input
+          <Input.TextArea
             size="small"
             value={v}
             onChange={(e) => handleCellChange(record.id, 'dialogue', e.target.value)}
             variant="borderless"
             className="w-full text-xs"
+            autoSize={{ minRows: 1, maxRows: 4 }}
           />
         ) : (
-          <span className="text-xs">{v || '-'}</span>
+          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
         ),
     },
     {
       title: '音效',
       dataIndex: 'soundEffect',
       width: 120,
-      render: (v: string, record) => (
-        <EditableCell
-          value={v}
-          onChange={(val) => handleCellChange(record.id, 'soundEffect', val)}
-          editable={!readOnly}
-        />
-      ),
+      render: (v: string, record) =>
+        !readOnly ? (
+          <Input.TextArea
+            size="small"
+            value={v}
+            onChange={(e) => handleCellChange(record.id, 'soundEffect', e.target.value)}
+            variant="borderless"
+            className="w-full text-xs"
+            autoSize={{ minRows: 1, maxRows: 3 }}
+          />
+        ) : (
+          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+        ),
     },
     {
       title: '运镜',
       dataIndex: 'cameraMovement',
       width: 100,
-      render: (v: string, record) => (
-        <EditableCell
-          value={v}
-          onChange={(val) => handleCellChange(record.id, 'cameraMovement', val)}
-          editable={!readOnly}
-        />
-      ),
+      render: (v: string, record) =>
+        !readOnly ? (
+          <Input.TextArea
+            size="small"
+            value={v}
+            onChange={(e) => handleCellChange(record.id, 'cameraMovement', e.target.value)}
+            variant="borderless"
+            className="w-full text-xs"
+            autoSize={{ minRows: 1, maxRows: 3 }}
+          />
+        ) : (
+          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+        ),
     },
     {
       title: '基调提示方式',
       dataIndex: 'toneHint',
       width: 140,
-      render: (v: string, record) => (
-        <EditableCell
-          value={v}
-          onChange={(val) => handleCellChange(record.id, 'toneHint', val)}
-          editable={!readOnly}
-        />
-      ),
+      render: (v: string, record) =>
+        !readOnly ? (
+          <Input.TextArea
+            size="small"
+            value={v}
+            onChange={(e) => handleCellChange(record.id, 'toneHint', e.target.value)}
+            variant="borderless"
+            className="w-full text-xs"
+            autoSize={{ minRows: 1, maxRows: 3 }}
+          />
+        ) : (
+          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+        ),
     },
     {
       title: '操作',
@@ -355,7 +380,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       rowKey="id"
       pagination={false}
       size="small"
-      scroll={{ x: 1100, y: 'calc(100vh - 320px)' }}
+      // 不设 scroll.y：让外层 wrapper 用原生 overflow-auto 滚动整个表格
+      // 保留 scroll.x 处理列宽超过 1100px 时的横向滚动
+      scroll={{ x: 1100 }}
       bordered
       className="[&_.ant-table-cell]:!p-2 [&_.ant-table-thead>tr>th]:!bg-gray-50 [&_.ant-table-thead>tr>th]:!font-medium [&_.ant-table-thead>tr>th]:!text-xs"
       locale={{ emptyText: '暂无分镜数据，请从上游文本节点生成或手动添加' }}
