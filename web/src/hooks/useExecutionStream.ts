@@ -141,6 +141,9 @@ export function useExecutionStream(
             content?: string;
             scriptContent?: string;
             shots?: unknown[];
+            characters?: unknown[];
+            scenes?: unknown[];
+            props?: unknown[];
             imageUrl?: string;
             videoUrl?: string;
             audioUrl?: string;
@@ -152,6 +155,9 @@ export function useExecutionStream(
             updates.shots = data.shots;
             updates.currentStep = 1;
           }
+          if (data.characters !== undefined) updates.characters = data.characters;
+          if (data.scenes !== undefined) updates.scenes = data.scenes;
+          if (data.props !== undefined) updates.props = data.props;
           if (data.imageUrl !== undefined) updates.imageUrl = data.imageUrl;
           if (data.videoUrl !== undefined) updates.videoUrl = data.videoUrl;
           if (data.audioUrl !== undefined) updates.audioUrl = data.audioUrl;

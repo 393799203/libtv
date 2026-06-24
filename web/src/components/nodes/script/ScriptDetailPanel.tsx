@@ -4,6 +4,7 @@ import { LoadingOutlined } from '@ant-design/icons';
 import type { ScriptNodeData, ScriptShot } from '@/types/canvas';
 import { ShotHeader } from './ShotHeader';
 import { ShotTable } from './ShotTable';
+import { AssetPreparationPanel } from './AssetPreparationPanel';
 
 interface ScriptDetailPanelProps {
   open: boolean;
@@ -173,8 +174,20 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
           <GeneratingSkeleton
             message={data.progressMessage as string | undefined}
           />
+        ) : data.currentStep === 2 ? (
+          // Step 2：准备资产
+          <AssetPreparationPanel
+            data={{
+              characters: (data.characters as ScriptNodeData['characters']) || [],
+              scenes: (data.scenes as ScriptNodeData['scenes']) || [],
+              props: (data.props as ScriptNodeData['props']) || [],
+            }}
+            onUpdate={(updates) => {
+              onUpdateRef.current(updates);
+            }}
+          />
         ) : (
-          // 用原生 overflow-auto：整个表格（含表头）一起滚动
+          // Step 1/3：分镜表格
           <div className="flex-1 min-h-0 overflow-auto">
             <ShotTable
               shots={data.shots}

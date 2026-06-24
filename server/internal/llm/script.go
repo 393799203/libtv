@@ -11,35 +11,58 @@ import (
 
 // ScriptShot LLM 返回的分镜结构
 type ScriptShot struct {
-	ID            string `json:"id"`
-	ShotNumber    int    `json:"shotNumber"`
-	Duration      int    `json:"duration"`
-	VisualPrompt  string `json:"visualPrompt"`
-	ShotSize      string `json:"shotSize"`
-	CameraAngle   string `json:"cameraAngle"`
-	Dialogue      string `json:"dialogue"`
-	SoundEffect   string `json:"soundEffect"`
+	ID             string `json:"id"`
+	ShotNumber     int    `json:"shotNumber"`
+	Duration       int    `json:"duration"`
+	VisualPrompt   string `json:"visualPrompt"`
+	ShotSize       string `json:"shotSize"`
+	CameraAngle    string `json:"cameraAngle"`
+	Dialogue       string `json:"dialogue"`
+	SoundEffect    string `json:"soundEffect"`
 	CameraMovement string `json:"cameraMovement"`
-	ToneHint      string `json:"toneHint"`
+	ToneHint       string `json:"toneHint"`
 }
 
 // Character 角色信息
 type Character struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	ImageURL    string `json:"imageUrl,omitempty"` // 用户上传的角色参考图
+}
+
+// Scene 场景信息
+type Scene struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	TimeOfDay   string `json:"timeOfDay"`   // 早晨/上午/中午/下午/傍晚/夜晚/深夜
+	Location    string `json:"location"`     // 具体地点
+	Mood        string `json:"mood"`         // 氛围/情绪
+	ImageURL    string `json:"imageUrl,omitempty"` // 用户上传的场景参考图
+}
+
+// Prop 道具信息
+type Prop struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"` // 服装/武器/交通工具/日常用品/电子设备/其他
+	ImageURL    string `json:"imageUrl,omitempty"` // 用户上传的道具参考图
 }
 
 // ScriptResult 剧本生成结果
 type ScriptResult struct {
-	ScriptContent string       `json:"scriptContent"`
-	Characters    []Character  `json:"characters"`
+	ScriptContent string      `json:"scriptContent"`
+	Characters    []Character `json:"characters"`
+	Scenes        []Scene     `json:"scenes"`
+	Props         []Prop      `json:"props"`
 	Shots         []ScriptShot `json:"shots"`
 }
 
 // scriptResponse LLM 原始响应结构
 type scriptResponse struct {
-	ScriptContent string       `json:"scriptContent"`
-	Characters    []Character  `json:"characters"`
+	ScriptContent string      `json:"scriptContent"`
+	Characters    []Character `json:"characters"`
+	Scenes        []Scene     `json:"scenes"`
+	Props         []Prop      `json:"props"`
 	Shots         []ScriptShot `json:"shots"`
 }
 
@@ -106,6 +129,8 @@ func GenerateScript(ctx context.Context, client *Client, textContent string) (*S
 	return &ScriptResult{
 		ScriptContent: result.ScriptContent,
 		Characters:    result.Characters,
+		Scenes:        result.Scenes,
+		Props:         result.Props,
 		Shots:         result.Shots,
 	}, nil
 }

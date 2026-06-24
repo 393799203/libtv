@@ -37,7 +37,9 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
 你必须严格以 JSON 格式输出，包含以下字段：
 
 - scriptContent: 完整的剧本文本（Markdown格式，包含场景描述和对白）
-- characters: 角色列表，每个角色有 name（名字）和 description（描述）
+- characters: 角色列表，每个角色有 name（名字）、description（外貌/性格描述）、imageUrl（空字符串，用户后续上传参考图）
+- scenes: 场景列表，每个场景有 name（场景名称）、description（环境描述）、timeOfDay（时段：早晨/上午/中午/下午/傍晚/夜晚/深夜）、location（具体地点）、mood（氛围情绪）、imageUrl（空字符串）
+- props: 道具列表，每个道具有 name（名称）、description（外观描述）、category（分类：服装/武器/交通工具/日常用品/电子设备/其他）、imageUrl（空字符串）
 - shots: 分镜列表，每个分镜包含：
   - id: 唯一标识，如 "shot-1"
   - shotNumber: 镜头序号（从1开始递增）
@@ -53,7 +55,9 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
 ## 字段说明
 
 - **scriptContent**: 完整的 Markdown 格式剧本，包含场景标题、动作描述、对白
-- **characters**: 出现的角色列表，每个角色包含名字和描述
+- **characters**: 剧本中出现的所有角色（2-6个），每个角色需要详细的外貌和性格描述，方便后续AI生图时保持角色一致性
+- **scenes**: 剧本涉及的所有主要场景（1-5个），包含时间、地点、氛围信息
+- **props**: 剧本中出现的关键道具（1-8个），按类别分组
 - **shots**: 分镜列表，每个分镜包含：
   - shotNumber: 镜头序号（从1开始递增）
   - duration: 时长（秒），建议2-8秒
@@ -69,16 +73,20 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
 
 1. 根据文本内容自动拆分为合理的镜头数量（一般5-15个镜头）
 2. 每个镜头的 visualPrompt 要足够详细，包含：主体、环境、光线、色彩、构图、氛围
-3. 镜别和运镜要多样化，避免单调
-4. 对白自然，符合角色性格
-5. 整体节奏要有起伏，开头吸引人，中间有冲突，结尾有余韵
+3. 角色描述要具体到：年龄、性别、发型、服装风格、体型特征、性格特点——这些是后续AI生图的关键输入
+4. 场景要覆盖剧本所有主要发生地，描述包含：空间布局、光线条件、色调倾向
+5. 道具只收录对剧情或视觉有意义的物品，排除普通背景物
+6. 镜别和运镜要多样化，避免单调
+7. 对白自然，符合角色性格
+8. 整体节奏要有起伏，开头吸引人，中间有冲突，结尾有余韵
 
 ## 注意事项
 
 - 只输出 JSON，不要输出任何其他文字
 - 确保 JSON 格式合法，可以被 JSON 解析器正确解析
 - visualPrompt 使用中文描述，因为后续图像生成模型对中文理解更好
-- 如果原文信息不足，可以合理发挥创作，保持故事连贯性`
+- 如果原文信息不足，可以合理发挥创作，保持故事连贯性
+- characters/scenes/props 的 imageUrl 统一设为空字符串 ""`
 
 // BuildScriptUserPrompt 构建剧本生成的用户 Prompt
 func BuildScriptUserPrompt(textContent string) string {

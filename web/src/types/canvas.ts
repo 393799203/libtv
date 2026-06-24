@@ -78,9 +78,36 @@ export interface ScriptNodeData extends BaseNodeFields, Record<string, unknown> 
   prompt: string;         // 用户输入的提示词（用于生成剧本）
   scriptContent: string;  // 生成的剧本正文
   shots: ScriptShot[];    // 生成的分镜列表
+  characters: ScriptCharacter[]; // 角色列表
+  scenes: ScriptScene[];         // 场景列表
+  props: ScriptProp[];           // 道具列表
   currentStep: 1 | 2 | 3;
   author?: string;
   createdAt?: string;
+}
+
+// 角色/场景/道具资产项（用于准备资产步骤上传参考图）
+export interface ScriptAssetItem {
+  name: string;
+  description: string;
+  imageUrl?: string;      // 用户上传的参考图 URL
+}
+
+export interface ScriptCharacter extends ScriptAssetItem {
+  /** 角色外貌/性格描述 */
+  description: string;
+}
+
+export interface ScriptScene extends ScriptAssetItem {
+  description: string;
+  timeOfDay: string;   // 早晨/上午/中午/下午/傍晚/夜晚/深夜
+  location: string;    // 具体地点
+  mood: string;        // 氛围情绪
+}
+
+export interface ScriptProp extends ScriptAssetItem {
+  description: string;
+  category: string;    // 服装/武器/交通工具/日常用品/电子设备/其他
 }
 
 // 分镜数据（扩展版，匹配截图中的表格列）

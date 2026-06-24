@@ -538,6 +538,8 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 			Data: map[string]interface{}{
 				"scriptContent": data.ScriptContent,
 				"characters":    []interface{}{},
+				"scenes":        []interface{}{},
+				"props":         []interface{}{},
 				"shots":         []interface{}{},
 			},
 		}, nil
@@ -551,6 +553,8 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 			Data: map[string]interface{}{
 				"scriptContent": material,
 				"characters":    []interface{}{},
+				"scenes":        []interface{}{},
+				"props":         []interface{}{},
 				"shots":         []interface{}{},
 			},
 		}, nil
@@ -581,6 +585,8 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 		Data: map[string]interface{}{
 			"scriptContent": result.ScriptContent,
 			"characters":    toAnySlice(result.Characters),
+			"scenes":        toAnySlice(result.Scenes),
+			"props":         toAnySlice(result.Props),
 			"shots":         toAnySlice(result.Shots),
 		},
 	}, nil
