@@ -8,28 +8,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Banner 资源位模型（首页轮播图）
-type Banner struct {
-	ID        string    `gorm:"primaryKey;size:36" json:"id"`
-	Title     string    `gorm:"size:255;not null" json:"title"`         // 标题
-	ImageURL  string    `gorm:"size:500;not null" json:"image_url"`     // 图片地址
-	LinkURL   string    `gorm:"size:500" json:"link_url"`               // 跳转链接
-	SortOrder int       `gorm:"default:0;index" json:"sort_order"`      // 排序顺序
-	IsActive  bool      `gorm:"default:true" json:"is_active"`          // 是否启用
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (Banner) TableName() string { return "banners" }
-
-// BeforeCreate 生成 UUID
-func (b *Banner) BeforeCreate(tx *gorm.DB) error {
-	if b.ID == "" {
-		b.ID = uuid.New().String()
-	}
-	return nil
-}
-
 // User 用户模型
 type User struct {
 	ID           string         `gorm:"primaryKey;size:36" json:"id"`
@@ -228,6 +206,27 @@ func (Show) TableName() string { return "shows" }
 func (s *Show) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// Banner 首页轮播资源位
+type Banner struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	Title     string    `gorm:"size:255;not null" json:"title"`         // 标题
+	ImageURL  string    `gorm:"size:500;not null" json:"image_url"`     // 图片地址
+	LinkURL   string    `gorm:"size:500" json:"link_url"`               // 跳转链接
+	SortOrder int       `gorm:"default:0;index" json:"sort_order"`      // 排序顺序
+	IsActive  bool      `gorm:"default:true" json:"is_active"`          // 是否启用
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (Banner) TableName() string { return "banners" }
+
+func (b *Banner) BeforeCreate(tx *gorm.DB) error {
+	if b.ID == "" {
+		b.ID = uuid.New().String()
 	}
 	return nil
 }
