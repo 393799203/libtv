@@ -117,8 +117,26 @@ func (h *UserHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// 删除用户关联的数据（按外键顺序）
+	// 删除用户关联的数据（按外键依赖顺序级联删除）
+	// 1) 先查出该用户的所有 project ID
+	var projectIDs []string
+	h.db.Model(&model.Project{}).Where("user_id = ?", user.ID).Pluck("id", &projectIDs)
+
+	if len(projectIDs) > 0 {
+		// 2) 删除 ai_tasks（通过 workflow_executions 的 execution_id）
+		var execIDs []int64
+		h.db.Model(&model.WorkflowExecution{}).Where("project_id IN ?", projectIDs).Pluck("id", &execIDs)
+		if len(execIDs) > 0 {
+			h.db.Where("execution_id IN ?", execIDs).Delete(&model.AITask{})
+		}
+		// 3) 删除 workflow_executions
+		h.db.Where("project_id IN ?", projectIDs).Delete(&model.WorkflowExecution{})
+		// 4) 删除 canvases
+		h.db.Where("project_id IN ?", projectIDs).Delete(&model.Canvas{})
+	}
+	// 5) 删除 projects
 	h.db.Where("user_id = ?", user.ID).Delete(&model.Project{})
+	// 6) 删除风格收藏
 	h.db.Where("user_id = ?", user.ID).Delete(&model.StyleFavorite{})
 
 	// 最后删除用户

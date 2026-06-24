@@ -121,7 +121,7 @@ func main() {
 	}
 
 	// 自动迁移
-if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.Banner{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -157,6 +157,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	uploadHandler := handler.NewUploadHandler(appStorage) // 使用新存储
 	styleHandler := handler.NewStyleHandler(db, appStorage) // 使用新存储
 	showHandler := handler.NewShowHandler(showService, appStorage, db) // 使用新存储
+	bannerHandler := handler.NewBannerHandler(db)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -286,6 +287,16 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			shows.POST("/:id/video", showHandler.UploadVideo)
 			shows.PUT("/:id", showHandler.UpdateShow)
 			shows.DELETE("/:id", showHandler.DeleteShow)
+		}
+
+		// 资源位管理（需登录）
+		banners := api.Group("/banners")
+		{
+			banners.GET("", bannerHandler.List)
+			banners.GET("/:id", bannerHandler.Get)
+			banners.POST("", bannerHandler.Create)
+			banners.PUT("/:id", bannerHandler.Update)
+			banners.DELETE("/:id", bannerHandler.Delete)
 		}
 	}
 
