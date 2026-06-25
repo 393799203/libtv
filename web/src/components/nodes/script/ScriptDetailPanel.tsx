@@ -84,6 +84,7 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
     onUpdate,
   }) {
     const [nextLoading, setNextLoading] = useState(false);
+    const [prevLoading, setPrevLoading] = useState(false);
 
     // 用 ref 存储 data/onUpdate 的最新值，让回调保持稳定引用
     const dataRef = useRef(data);
@@ -134,12 +135,31 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
       }
     }, []);
 
+    const handlePrevStep = useCallback(async () => {
+      setPrevLoading(true);
+      try {
+        const step = dataRef.current.currentStep;
+        const prevStep = step === 3 ? 2 : step === 2 ? 1 : 1;
+        onUpdateRef.current({ currentStep: prevStep });
+      } finally {
+        setPrevLoading(false);
+      }
+    }, []);
+
     // nextStepLabel 是纯计算派生值
     const nextStepLabel =
       data.currentStep === 1
         ? '下一个：准备资产'
         : data.currentStep === 2
           ? '下一个：合成提示词'
+          : null;
+
+    // prevStepLabel：步骤 2 和 3 时显示
+    const prevStepLabel =
+      data.currentStep === 2
+        ? '上一步：分镜'
+        : data.currentStep === 3
+          ? '上一步：准备资产'
           : null;
 
     // 只有第一个阶段（分镜表格）才显示"添加镜头"按钮
@@ -158,6 +178,9 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
             nextStepLabel={nextStepLabel}
             onNextStep={nextStepLabel ? handleNextStep : undefined}
             nextLoading={nextLoading}
+            prevStepLabel={prevStepLabel}
+            onPrevStep={prevStepLabel ? handlePrevStep : undefined}
+            prevLoading={prevLoading}
           />
         }
         open={open}

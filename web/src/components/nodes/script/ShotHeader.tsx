@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Button, Typography } from 'antd';
-import { ExportOutlined, CalendarOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
+import { ExportOutlined, CalendarOutlined, PlusOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScriptNodeData } from '@/types/canvas';
 
@@ -14,6 +14,10 @@ interface ShotHeaderProps {
   nextStepLabel?: string | null;
   onNextStep?: () => void;
   nextLoading?: boolean;
+  /** 上一步按钮文案，null 时不显示 */
+  prevStepLabel?: string | null;
+  onPrevStep?: () => void;
+  prevLoading?: boolean;
 }
 
 export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
@@ -23,6 +27,9 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
   nextStepLabel,
   onNextStep,
   nextLoading,
+  prevStepLabel,
+  onPrevStep,
+  prevLoading,
 }) {
   return (
     <div className="flex items-center justify-between">
@@ -53,6 +60,20 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
             className="text-xs"
           >
             添加镜头
+          </Button>
+        )}
+        {prevStepLabel && onPrevStep && (
+          <Button
+            size="small"
+            icon={<LeftOutlined />}
+            loading={prevLoading}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrevStep();
+            }}
+            className="text-xs"
+          >
+            {prevStepLabel}
           </Button>
         )}
         {nextStepLabel && onNextStep && (
