@@ -7,6 +7,7 @@ import type {
   ScriptProp,
 } from '@/types/canvas';
 import { uploadImage } from '@/services/uploadApi';
+import { CharacterEditDrawer } from './CharacterEditDrawer';
 
 // ---- 单个资产卡片（角色/场景/道具通用）----
 interface AssetCardProps<T extends { name: string; description: string; imageUrl?: string }> {
@@ -15,6 +16,8 @@ interface AssetCardProps<T extends { name: string; description: string; imageUrl
   onUpload: (index: string, url: string) => void;
   onAdd?: () => void; // 仅最后一个卡片显示"添加"
   showAdd?: boolean;
+  /** 卡片点击回调（用于弹出编辑侧屏） */
+  onClick?: () => void;
 }
 
 function AssetCard<T extends { name: string; description: string; imageUrl?: string }>({
@@ -22,6 +25,7 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
   onUpload,
   onAdd,
   showAdd,
+  onClick,
 }: AssetCardProps<T>) {
   const [uploading, setUploading] = useState(false);
 
@@ -42,8 +46,24 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
     [item.name, onUpload]
   );
 
+  const handleCardClick = useCallback(
+    (e: React.MouseEvent) => {
+      // 阻止事件冒泡到 Upload 内部按钮
+      e.stopPropagation();
+      if (showAdd && onAdd) {
+        onAdd();
+        return;
+      }
+      onClick?.();
+    },
+    [onClick, onAdd, showAdd]
+  );
+
   return (
-    <div className="relative w-[160px] h-[120px] rounded-lg border border-gray-200 bg-white overflow-hidden group hover:border-blue-400 transition-colors">
+    <div
+      className="relative w-[160px] h-[120px] rounded-lg border border-gray-200 bg-white overflow-hidden group hover:border-blue-400 transition-colors cursor-pointer"
+      onClick={handleCardClick}
+    >
       {/* 图片区域 */}
       {item.imageUrl ? (
         <div className="w-full h-full relative">
@@ -53,14 +73,17 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
             className="w-full h-full object-cover"
           />
           {/* 悬浮替换按钮 */}
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
             <Upload
               accept="image/*"
               showUploadList={false}
               beforeUpload={handleUpload}
               disabled={uploading}
             >
-              <button className="px-3 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50">
+              <button
+                className="px-3 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50 pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 替换图片
               </button>
             </Upload>
@@ -70,32 +93,22 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
         <div className="w-full h-full flex flex-col items-center justify-center gap-1">
           {showAdd && onAdd ? (
             /* "添加"占位 */
-            <button
-              onClick={onAdd}
-              className="flex flex-col items-center gap-0.5 text-gray-400 hover:text-blue-500 transition-colors cursor-pointer"
-            >
+            <div className="flex flex-col items-center gap-0.5 text-gray-400 group-hover:text-blue-500 transition-colors">
               <PlusOutlined className="text-lg" />
               <span className="text-[10px]">添加</span>
-            </button>
+            </div>
           ) : (
             /* 上传占位 */
-            <Upload
-              accept="image/*"
-              showUploadList={false}
-              beforeUpload={handleUpload}
-              disabled={uploading}
-            >
-              <div className="flex flex-col items-center gap-1 text-gray-400 hover:text-blue-500 transition-colors cursor-pointer">
-                {uploading ? (
-                  <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <UploadOutlined className="text-base" />
-                    <span className="text-[10px]">点击上传参考图</span>
-                  </>
-                )}
-              </div>
-            </Upload>
+            <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-blue-500 transition-colors">
+              {uploading ? (
+                <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <UploadOutlined className="text-base" />
+                  <span className="text-[10px]">生成或上传参考图</span>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -116,6 +129,8 @@ interface AssetSectionProps<
   items: T[];
   onUpload: (itemName: string, url: string) => void;
   onAdd?: () => void;
+  /** 卡片点击回调（用于角色编辑等场景） */
+  onCardClick?: (item: T) => void;
 }
 
 function AssetSection<
@@ -125,6 +140,7 @@ function AssetSection<
   items,
   onUpload,
   onAdd,
+  onCardClick,
 }: AssetSectionProps<T>) {
   return (
     <div className="mb-8">
@@ -139,6 +155,7 @@ function AssetSection<
             item={item}
             index={idx}
             onUpload={(name, url) => onUpload(name, url)}
+            onClick={onCardClick ? () => onCardClick(item) : undefined}
           />
         ))}
         {/* 添加按钮（作为最后一个空卡片） */}
@@ -187,6 +204,10 @@ interface AssetPreparationPanelProps {
 
 export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
   function AssetPreparationPanel({ data, onUpdate }) {
+    // 当前编辑中的角色
+    const [editingCharacter, setEditingCharacter] =
+      useState<ScriptCharacter | null>(null);
+
     // 角色图片上传
     const handleCharacterUpload = useCallback(
       (name: string, url: string) => {
@@ -194,6 +215,25 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           c.name === name ? { ...c, imageUrl: url } : c
         );
         onUpdate({ characters: updated });
+        // 同步更新编辑中的角色（侧屏打开时实时刷新）
+        setEditingCharacter((prev) =>
+          prev && prev.name === name ? { ...prev, imageUrl: url } : prev
+        );
+      },
+      [data.characters, onUpdate]
+    );
+
+    // 角色描述变更（失焦时自动保存）
+    const handleCharacterDescriptionChange = useCallback(
+      (name: string, description: string) => {
+        const updated = data.characters.map((c) =>
+          c.name === name ? { ...c, description } : c
+        );
+        onUpdate({ characters: updated });
+        // 同步更新编辑中的角色（侧屏打开时实时刷新）
+        setEditingCharacter((prev) =>
+          prev && prev.name === name ? { ...prev, description } : prev
+        );
       },
       [data.characters, onUpdate]
     );
@@ -227,6 +267,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           title="角色"
           items={data.characters || []}
           onUpload={handleCharacterUpload}
+          onCardClick={(item) => setEditingCharacter(item as ScriptCharacter)}
         />
 
         {/* 场景 */}
@@ -280,6 +321,15 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
             </div>
           );
         })()}
+
+        {/* 角色编辑侧屏 */}
+        <CharacterEditDrawer
+          open={!!editingCharacter}
+          character={editingCharacter}
+          onClose={() => setEditingCharacter(null)}
+          onUpload={handleCharacterUpload}
+          onDescriptionChange={handleCharacterDescriptionChange}
+        />
       </div>
     );
   }
