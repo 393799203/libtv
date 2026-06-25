@@ -142,13 +142,19 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
           ? '下一个：合成提示词'
           : null;
 
+    // 只有第一个阶段（分镜表格）才显示"添加镜头"按钮
+    const showAddShot = data.currentStep === 1;
+
+    // 只有最后一个阶段（合成提示词）才显示"导出"按钮
+    const showExport = data.currentStep === 3;
+
     return (
       <Drawer
         title={
           <ShotHeader
             data={data}
-            onExport={handleExport}
-            onAddShot={handleAddShot}
+            onExport={showExport ? handleExport : undefined}
+            onAddShot={showAddShot ? handleAddShot : undefined}
             nextStepLabel={nextStepLabel}
             onNextStep={nextStepLabel ? handleNextStep : undefined}
             nextLoading={nextLoading}

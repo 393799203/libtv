@@ -109,16 +109,12 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
     <div className="flex flex-col items-center justify-between h-full py-4 px-3 min-h-[200px]">
       {/* 中央预览区 */}
       <div className="flex-1 flex items-center justify-center w-full min-h-0">
-        <button
-          onClick={handleOpenClick}
-          className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer group w-full"
-          title="打开脚本详情"
-        >
-          <MenuOutlined className="text-xl text-gray-300 group-hover:text-gray-500 transition-colors" />
-          <span className="text-[10px] text-gray-400 group-hover:text-gray-500 text-center leading-relaxed">
+        <div className="flex flex-col items-center gap-2 p-3 w-full select-none">
+          <MenuOutlined className="text-xl text-gray-300" />
+          <span className="text-[10px] text-gray-400 text-center leading-relaxed">
             共 {data.shots.length} 个分镜
           </span>
-        </button>
+        </div>
       </div>
 
       {/* 底部：步骤条 + 打开按钮 */}
