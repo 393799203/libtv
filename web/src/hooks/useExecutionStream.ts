@@ -6,6 +6,11 @@ import { workflowApi } from '@/services/workflowApi';
 import { canvasApi } from '@/services/canvasApi';
 import type { WSEvent } from '@/types/workflow';
 
+// 静默超时：超过这个时长没收到任何 SSE 消息（心跳/progress/事件），认为连接已死，切 polling
+const SSE_SILENT_TIMEOUT_MS = 45_000;
+// polling 间隔
+const POLL_INTERVAL_MS = 5_000;
+
 export interface UseExecutionStreamResult {
   /** 主动关闭当前 SSE（执行完成时由调用方调用） */
   close: () => void;
@@ -48,11 +53,17 @@ export function useExecutionStream(
     let pollingStarted = false;
     let closedIntentionally = false; // 主动关闭标志：正常完成时不启动轮询
 
-    const ensurePolling = () => {
+    // 静默超时熔断：任何消息都会刷新这个时间戳；超时则视为连接死了，切 polling
+    let lastMessageAt = Date.now();
+    const noteMessage = () => {
+      lastMessageAt = Date.now();
+    };
+
+    const ensurePolling = (reason: string) => {
       if (closedIntentionally) return; // 主动关闭（正常完成），不启动轮询
       if (!pollingStarted) {
         pollingStarted = true;
-        console.warn('[SSE] connection lost, starting polling fallback');
+        console.warn(`[SSE] fallback to polling (${reason})`);
         useExecutionStore.getState().setLastError('SSE 连接已断开，正在轮询检查状态…');
         startPollingFallback();
       }
@@ -64,9 +75,20 @@ export function useExecutionStream(
       // CONNECTING：浏览器正在自动重连 → 启动 polling 兜底
       // CLOSED：多次重连失败 → 启动 polling 兜底
       if (state === EventSource.CLOSED || state === EventSource.CONNECTING) {
-        ensurePolling();
+        ensurePolling('onerror');
       }
     };
+
+    // 静默超时巡检：每 5s 一次，超过阈值且没主动关闭就切 polling
+    const silentTimer = setInterval(() => {
+      if (closedIntentionally) return;
+      if (pollingStarted) return;
+      const silent = Date.now() - lastMessageAt;
+      if (silent >= SSE_SILENT_TIMEOUT_MS) {
+        console.warn(`[SSE] silent for ${Math.round(silent / 1000)}s, switching to polling`);
+        ensurePolling('silent-timeout');
+      }
+    }, 5_000);
 
     // ---- 轮询兜底 ----
     let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -75,23 +97,31 @@ export function useExecutionStream(
       if (pollTimer) return;
       // polling 接管后主动关闭 SSE，避免浏览器空转重连
       close();
+      // 切 polling 时立即把超时熔断器停掉
+      clearInterval(silentTimer);
 
       const poll = async () => {
         if (!projectId || !executionId) return;
         try {
           const resp = await workflowApi.getStatus(projectId, String(executionId), nodeId);
           const exec = (resp?.data as unknown) as
-            | { status?: string; error_msg?: string; node_data?: Record<string, unknown> }
+            | {
+                status?: string;
+                error_msg?: string;
+                node_data?: Record<string, unknown>;
+              }
             | undefined;
           if (!exec) return;
 
           console.log('[SSE] poll result:', exec.status);
 
+          const store = useCanvasStore.getState();
+
+          // 终态：写入最终数据并收尾
           if (exec.status === 'done' || exec.status === 'failed') {
-            const store = useCanvasStore.getState();
             const finalStatus = exec.status === 'done' ? ('success' as const) : ('failed' as const);
 
-            // 如果后端返回了节点数据，直接更新该节点（无需加载整个画布）
+            // 如果后端返回了节点数据，直接更新该节点
             if (nodeId && exec.node_data) {
               store.updateNodeData(nodeId, {
                 ...exec.node_data,
@@ -112,6 +142,22 @@ export function useExecutionStream(
             });
             useExecutionStore.getState().setLastError(null);
             stopPolling();
+            return;
+          }
+
+          // running 期间：把后端节点的最新 data 同步到画布
+          // - 这样即使 SSE 断了，用户也能看到脚本/分镜内容陆续刷出来
+          // - 不会清掉 progressMessage，保持显示
+          if (exec.status === 'running' && nodeId && exec.node_data) {
+            // node_data 里可能已经包含 scriptContent/shots/characters 等，
+            // 合并到当前节点上，但不覆盖 status（保持 running）
+            const { status: _ignored, progressMessage: _pm, ...rest } = exec.node_data as Record<string, unknown> & {
+              status?: unknown;
+              progressMessage?: unknown;
+            };
+            void _ignored;
+            void _pm;
+            store.updateNodeData(nodeId, rest as never);
           }
         } catch (e) {
           console.warn('[SSE] polling getStatus failed:', e);
@@ -120,7 +166,7 @@ export function useExecutionStream(
 
       // 立刻跑一次，再每 5s 跑
       void poll();
-      pollTimer = setInterval(poll, 5000);
+      pollTimer = setInterval(poll, POLL_INTERVAL_MS);
     };
 
     const stopPolling = () => {
@@ -132,6 +178,7 @@ export function useExecutionStream(
 
     // ---- 事件处理 ----
     const handleEvent = (raw: MessageEvent) => {
+      noteMessage();
       try {
         const event: WSEvent = JSON.parse(raw.data);
         useExecutionStore.getState().handleWSEvent(event);
@@ -201,6 +248,7 @@ export function useExecutionStream(
       'node_failed',
       'execution_completed',
       'execution_failed',
+      'heartbeat', // 后端 15s 心跳事件，用于刷新前端超时熔断器
     ];
     eventTypes.forEach((t) => es.addEventListener(t, handleEvent as EventListener));
 
@@ -230,6 +278,7 @@ export function useExecutionStream(
       eventTypes.forEach((t) => es.removeEventListener(t, handleEvent as EventListener));
       es.removeEventListener('execution_completed', onFinal as EventListener);
       es.removeEventListener('execution_failed', onFinal as EventListener);
+      clearInterval(silentTimer);
       stopPolling();
       close();
     };

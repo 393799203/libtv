@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -289,7 +288,10 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 			log.Printf("[SSE] client disconnected: execID=%d", execID)
 			return
 		case <-heartbeat.C:
-			if _, err := io.WriteString(c.Writer, ": keep-alive\n\n"); err != nil {
+			// 用真实 event 而不是 SSE 注释行：
+			// - 注释行只有部分代理会识别为"活动"
+			// - 真实 event 客户端 EventSource 一定会触发 message，更新前端超时熔断器
+			if _, err := fmt.Fprintf(c.Writer, "event: heartbeat\ndata: {\"ts\":%d}\n\n", time.Now().UnixMilli()); err != nil {
 				return
 			}
 			flusher.Flush()

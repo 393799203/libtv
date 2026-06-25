@@ -35,7 +35,7 @@ const HighlightedPrompt = memo(function HighlightedPrompt({ text }: { text: stri
   if (!text) return <span className="text-gray-300">-</span>;
   const parts = text.split(/(·[^·]+·)/g);
   return (
-    <span className="text-xs leading-relaxed">
+    <span className="text-[11px] leading-relaxed">
       {parts.map((part, i) =>
         part.startsWith('·') && part.endsWith('·') ? (
           <mark key={i} className="bg-cyan-100 text-cyan-700 px-0.5 rounded">
@@ -68,9 +68,9 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
   if (!editable) {
     if (component === 'select' && options) {
       const opt = options.find((o) => o.value === value);
-      return opt ? <Tag color="blue">{opt.label}</Tag> : <span>{value || '-'}</span>;
+      return opt ? <Tag color="blue" style={{ fontSize: 12, margin: 0 }}>{opt.label}</Tag> : <span style={{ fontSize: 12 }}>{value || '-'}</span>;
     }
-    return <span className="text-xs">{value || '-'}</span>;
+    return <span style={{ fontSize: 12 }}>{value || '-'}</span>;
   }
 
   if (component === 'select') {
@@ -83,6 +83,7 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
         variant="borderless"
         className="w-full"
         popupMatchSelectWidth={false}
+        style={{ fontSize: 11 }}
       />
     );
   }
@@ -101,7 +102,9 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
         max={60}
         variant="borderless"
         // 时长输入框：紧凑 + 居中，与列宽对齐
-        className="!w-10 text-center text-xs !px-1"
+        // 强制覆盖 antd Input 内部的 14px 默认字号
+        className="!w-10 text-center !px-1"
+        style={{ fontSize: 11 }}
       />
     );
   }
@@ -112,7 +115,8 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
       value={value as string}
       onChange={(e) => onChange(e.target.value)}
       variant="borderless"
-      className="w-full text-xs"
+      className="w-full"
+      style={{ fontSize: 11 }}
     />
   );
 });
@@ -224,7 +228,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       dataIndex: 'shotNumber',
       width: 50,
       align: 'center',
-      render: (v: number) => <span className="text-xs text-gray-500 font-mono">{v}</span>,
+      render: (v: number) => <span className="text-[11px] text-gray-500 font-mono">{v}</span>,
     },
     {
       title: '时长(s)',
@@ -240,7 +244,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             component="number"
           />
         ) : (
-          <span className="text-xs">{v}s</span>
+          <span className="text-[11px]">{v}s</span>
         ),
     },
     {
@@ -254,7 +258,8 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             value={text}
             onChange={(e) => handleCellChange(record.id, 'visualPrompt', e.target.value)}
             variant="borderless"
-            className="w-full text-xs"
+            className="w-full"
+            style={{ fontSize: 11 }}
             autoSize={{ maxRows: 3 }}
           />
         ) : (
@@ -298,11 +303,12 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             value={v}
             onChange={(e) => handleCellChange(record.id, 'dialogue', e.target.value)}
             variant="borderless"
-            className="w-full text-xs"
+            className="w-full"
+            style={{ fontSize: 11 }}
             autoSize={{ minRows: 1, maxRows: 4 }}
           />
         ) : (
-          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+          <span className="text-[11px] whitespace-pre-wrap">{v || '-'}</span>
         ),
     },
     {
@@ -316,11 +322,12 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             value={v}
             onChange={(e) => handleCellChange(record.id, 'soundEffect', e.target.value)}
             variant="borderless"
-            className="w-full text-xs"
+            className="w-full"
+            style={{ fontSize: 11 }}
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         ) : (
-          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+          <span className="text-[11px] whitespace-pre-wrap">{v || '-'}</span>
         ),
     },
     {
@@ -334,11 +341,12 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             value={v}
             onChange={(e) => handleCellChange(record.id, 'cameraMovement', e.target.value)}
             variant="borderless"
-            className="w-full text-xs"
+            className="w-full"
+            style={{ fontSize: 11 }}
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         ) : (
-          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+          <span className="text-[11px] whitespace-pre-wrap">{v || '-'}</span>
         ),
     },
     {
@@ -352,11 +360,12 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             value={v}
             onChange={(e) => handleCellChange(record.id, 'toneHint', e.target.value)}
             variant="borderless"
-            className="w-full text-xs"
+            className="w-full"
+            style={{ fontSize: 11 }}
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         ) : (
-          <span className="text-xs whitespace-pre-wrap">{v || '-'}</span>
+          <span className="text-[11px] whitespace-pre-wrap">{v || '-'}</span>
         ),
     },
     {
@@ -367,7 +376,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       render: (_: unknown, record) =>
         !readOnly ? (
           <Dropdown menu={{ items: getRowMenuItems(record) }} trigger={['click']}>
-            <MoreOutlined className="text-gray-400 hover:text-gray-600 cursor-pointer text-xs" />
+            <MoreOutlined className="text-gray-400 hover:text-gray-600 cursor-pointer text-[11px]" />
           </Dropdown>
         ) : null,
     },
@@ -384,7 +393,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       // 保留 scroll.x 处理列宽超过 1100px 时的横向滚动
       scroll={{ x: 1100 }}
       bordered
-      className="[&_.ant-table-cell]:!p-2 [&_.ant-table-thead>tr>th]:!bg-gray-50 [&_.ant-table-thead>tr>th]:!font-medium [&_.ant-table-thead>tr>th]:!text-xs"
+      // [!] 字号缩到 11px + padding 收紧
+      // 深度选择器覆盖 antd Input/TextArea/Select 内部 14px 硬编码
+      className="[&_.ant-table-cell]:!p-1.5 [&_.ant-table-thead>tr>th]:!bg-gray-50 [&_.ant-table-thead>tr>th]:!font-medium [&_.ant-table-thead>tr>th]:!text-[11px] [&_.ant-table-cell]:!text-[11px] [&_.ant-table-cell_input]:!text-[11px] [&_.ant-table-cell_input>_input]:!text-[11px] [&_.ant-table-cell_textarea]:!text-[11px] [&_.ant-table-cell_textarea>_textarea]:!text-[11px]"
       locale={{ emptyText: '暂无分镜数据，请从上游文本节点生成或手动添加' }}
     />
   );

@@ -245,7 +245,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 								Data: map[string]interface{}{
 									"elapsed":   elapsed.Seconds(),
 									"elapsedMs": elapsed.Milliseconds(),
-									"message":   fmt.Sprintf("已运行 %s", elapsed.Round(time.Second)),
+									"message":   fmt.Sprintf("已运行 %ds", int(elapsed.Seconds())),
 								},
 								Timestamp: time.Now().UnixMilli(),
 							})
@@ -280,7 +280,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 						EventType:   EventNodeFailed,
 						NodeID:      n.ID,
 						NodeName:    n.Type,
-						Data:        err.Error(),
+						Data:        map[string]interface{}{"error": err.Error()},
 						Timestamp:   time.Now().UnixMilli(),
 					})
 					return
@@ -304,7 +304,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 						EventType:   EventNodeFailed,
 						NodeID:      n.ID,
 						NodeName:    n.Type,
-						Data:        err.Error(),
+						Data:        map[string]interface{}{"error": err.Error()},
 						Timestamp:   time.Now().UnixMilli(),
 					})
 					return
@@ -334,7 +334,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 			e.emit(WorkflowEvent{
 				ExecutionID: executionID,
 				EventType:   EventExecutionFailed,
-				Data:        fmt.Sprintf("level %d failed: %v", levelIdx, levelErrors),
+				Data:        map[string]interface{}{"error": fmt.Sprintf("level %d failed: %v", levelIdx, levelErrors)},
 				Timestamp:   time.Now().UnixMilli(),
 			})
 			// 即使失败也保存已收集的输出
