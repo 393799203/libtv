@@ -18,9 +18,10 @@ import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
 import { uploadVideo } from '@/services/uploadApi';
+import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 
-type AdminTab = 'shows' | 'styles' | 'users' | 'settings';
+type AdminTab = 'shows' | 'banners' | 'styles' | 'users' | 'settings';
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -133,6 +134,25 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
 
+  // ========== 资源位管理状态 ==========
+  const [banners, setBanners] = useState<BannerItem[]>([]);
+  const [bannersLoading, setBannersLoading] = useState(false);
+  const [showAddBannerDialog, setShowAddBannerDialog] = useState(false);
+  const [addBannerForm, setAddBannerForm] = useState({ 
+    title: '', 
+    description: '', 
+    link_url: '', 
+    sort_order: 0, 
+    is_active: true 
+  });
+  const [addBannerFile, setAddBannerFile] = useState<File | null>(null);
+  const [addBannerPreviewUrl, setAddBannerPreviewUrl] = useState('');
+  const [addingBanner, setAddingBanner] = useState(false);
+  const [editingBanner, setEditingBanner] = useState<BannerItem | null>(null);
+  const [bannerImageUploading, setBannerImageUploading] = useState(false);
+  const [bannerImageUploadedUrl, setBannerImageUploadedUrl] = useState('');
+  const addBannerFileRef = useRef<HTMLInputElement>(null);
+
   // ========== 首页管理状态 ==========
   const [showCategories, setShowCategories] = useState<ShowCategoryItem[]>([]);
   const [shows, setShows] = useState<ShowItem[]>([]);
@@ -210,6 +230,7 @@ export default function AdminPage() {
   // 强制刷新当前列表（用于外部操作后同步数据）
   const refreshCurrentList = () => {
     if (activeTab === 'users') loadUsers();
+    else if (activeTab === 'banners') loadBanners();
     else if (activeTab === 'shows' && activeShowCategory) loadShows(activeShowCategory);
     else if (activeTab === 'styles' && activeCategory) loadStyles(activeCategory);
   };
@@ -223,6 +244,185 @@ export default function AdminPage() {
       })
       .catch(() => {})
       .finally(() => setUserLoading(false));
+  };
+
+  // ========== 资源位管理函数 ==========
+  const loadBanners = () => {
+    setBannersLoading(true);
+    bannerApi.list()
+      .then((res) => setBanners(res || []))
+      .catch(() => {})
+      .finally(() => setBannersLoading(false));
+  };
+
+  const openAddBannerDialog = () => {
+    setEditingBanner(null);
+    setAddBannerForm({ title: '', description: '', link_url: '', sort_order: 0, is_active: true });
+    setAddBannerFile(null);
+    setAddBannerPreviewUrl('');
+    setBannerImageUploadedUrl('');
+    setBannerImageUploading(false);
+    setShowAddBannerDialog(true);
+  };
+
+  const openEditBannerDialog = (banner: BannerItem) => {
+    setEditingBanner(banner);
+    setAddBannerForm({
+      title: banner.title,
+      description: banner.description || '',
+      link_url: banner.link_url || '',
+      sort_order: banner.sort_order,
+      is_active: banner.is_active,
+    });
+    setAddBannerFile(null);
+    setAddBannerPreviewUrl(banner.image_url);
+    setBannerImageUploadedUrl(banner.image_url); // 编辑模式下，已有图片URL
+    setBannerImageUploading(false);
+    setShowAddBannerDialog(true);
+  };
+
+  const handleSelectBannerFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      console.log('没有选择文件');
+      return;
+    }
+
+    console.log('选择了文件:', file.name, '大小:', file.size, '类型:', file.type);
+    console.log('文件大小(MB):', (file.size / 1024 / 1024).toFixed(2));
+
+    // 检查文件大小（前端提前提示）
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+      console.error('❌ 文件大小超出限制:', fileSizeMB, 'MB > 50MB');
+      message.error(`图片大小 ${fileSizeMB}MB 超过限制，最大支持50MB，请选择更小的图片或压缩后再上传`);
+      return;
+    }
+
+    console.log('✅ 文件大小检查通过');
+
+    // 检查文件类型
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      console.error('❌ 文件类型不支持:', file.type);
+      message.error(`不支持 ${file.type} 格式，只支持 jpg/jpeg/png/webp/gif 格式的图片`);
+      return;
+    }
+
+    console.log('✅ 文件类型检查通过');
+
+    // 设置本地预览
+    setAddBannerFile(file);
+    const localPreviewUrl = URL.createObjectURL(file);
+    setAddBannerPreviewUrl(localPreviewUrl);
+    console.log('✅ 本地预览已设置:', localPreviewUrl);
+
+    // 立即上传图片到服务器（不创建Banner）
+    setBannerImageUploading(true);
+    try {
+      console.log('开始上传Banner图片...');
+      const uploadRes = await bannerApi.uploadImage(file);
+      console.log('✅ 图片上传成功，URL:', uploadRes.url);
+      setBannerImageUploadedUrl(uploadRes.url);
+      setAddBannerPreviewUrl(uploadRes.url); // 使用服务器返回的URL
+      message.success('图片上传成功，请填写标题等信息后点击"创建"按钮');
+    } catch (err: any) {
+      console.error('❌ 上传失败:', err);
+      console.error('错误详情:', err?.response?.data);
+      message.error(err?.response?.data?.msg || '图片上传失败');
+      // 上传失败，清除预览
+      setAddBannerFile(null);
+      setAddBannerPreviewUrl('');
+      setBannerImageUploadedUrl('');
+    }
+    setBannerImageUploading(false);
+  };
+
+  const handleAddBannerSubmit = async () => {
+    if (!addBannerForm.title.trim()) {
+      message.error('请填写标题');
+      return;
+    }
+    
+    setAddingBanner(true);
+    try {
+      if (editingBanner) {
+        // 编辑模式：更新Banner信息
+        console.log('编辑模式：更新Banner信息');
+        const updateData: any = {
+          title: addBannerForm.title.trim(),
+          description: addBannerForm.description.trim() || undefined,
+          link_url: addBannerForm.link_url.trim() || undefined,
+          sort_order: addBannerForm.sort_order,
+          is_active: addBannerForm.is_active,
+        };
+        // 如果有新上传的图片URL，更新图片
+        if (bannerImageUploadedUrl) {
+          updateData.image_url = bannerImageUploadedUrl;
+        }
+        await bannerApi.update(editingBanner.id, updateData);
+        message.success('Banner更新成功');
+      } else {
+        // 新建模式：创建Banner（传入已上传的图片URL）
+        console.log('新建模式：创建Banner');
+        const res = await bannerApi.create({
+          title: addBannerForm.title.trim(),
+          description: addBannerForm.description.trim() || undefined,
+          image_url: bannerImageUploadedUrl || undefined, // 传入已上传的图片URL
+          link_url: addBannerForm.link_url.trim() || undefined,
+          sort_order: addBannerForm.sort_order,
+          is_active: addBannerForm.is_active,
+        });
+        console.log('Banner创建成功，ID:', res.id);
+        message.success('Banner创建成功');
+      }
+      
+      setShowAddBannerDialog(false);
+      if (addBannerPreviewUrl && addBannerPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(addBannerPreviewUrl);
+      }
+      loadBanners();
+    } catch (err: any) {
+      console.error('操作失败:', err);
+      message.error(err?.response?.data?.msg || '操作失败');
+    }
+    setAddingBanner(false);
+  };
+
+  const handleDeleteBanner = async (id: string) => {
+    const banner = banners.find(b => b.id === id);
+    if (!banner) return;
+
+    const { Modal } = await import('antd');
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除Banner「${banner.title}」吗？此操作不可恢复。`,
+      okText: '确定删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await bannerApi.delete(id);
+          message.success('删除成功');
+          loadBanners();
+        } catch (err) {
+          message.error('删除失败');
+          console.error(err);
+        }
+      },
+    });
+  };
+
+  const handleToggleBannerActive = async (banner: BannerItem) => {
+    try {
+      await bannerApi.update(banner.id, { is_active: !banner.is_active });
+      message.success(banner.is_active ? '已禁用' : '已启用');
+      loadBanners();
+    } catch (err) {
+      message.error('操作失败');
+      console.error(err);
+    }
   };
 
   // ========== 首页管理函数 ==========
@@ -456,6 +656,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (activeTab === 'users') loadUsers();
+    else if (activeTab === 'banners') loadBanners();
     else if (activeTab === 'shows') {
       let cancelled = false;
       setShowsLoading(true);
@@ -628,7 +829,8 @@ export default function AdminPage() {
 
   // 侧边栏菜单
   const menuItems: { key: AdminTab; icon: React.ReactNode; label: string }[] = [
-    { key: 'shows', icon: <VideoCameraOutlined />, label: '首页管理' },
+    { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
+    { key: 'banners', icon: <TagOutlined />, label: '资源位管理' },
     { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
     { key: 'users', icon: <UserOutlined />, label: '用户管理' },
     { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
@@ -1030,6 +1232,105 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* ========== 资源位管理 Tab ========== */}
+        {activeTab === 'banners' && (
+          <>
+            {/* 工具栏 */}
+            <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 shrink-0">
+              <span className="text-[13px] text-gray-500">共 {banners?.length || 0} 个Banner</span>
+              <div className="flex-1" />
+              <button onClick={openAddBannerDialog} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
+                <PlusOutlined /> 添加Banner
+              </button>
+            </div>
+
+            {/* Banner列表 */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {bannersLoading ? (
+                <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
+              ) : (banners?.length || 0) === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                  <UploadOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
+                  <div className="text-[14px] mb-2">暂无Banner资源位</div>
+                  <button onClick={openAddBannerDialog} className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
+                    <PlusOutlined /> 添加第一个Banner
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {banners.map(banner => (
+                      <div key={banner.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                        {/* Banner图片 */}
+                        <div className="relative aspect-[16/9] bg-gray-100">
+                          {banner.image_url ? (
+                            <img src={banner.image_url} alt={banner.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-400">
+                              <UploadOutlined style={{ fontSize: 24 }} />
+                            </div>
+                          )}
+                          {/* 状态标签 */}
+                          <div className={`absolute top-2 right-2 px-2 py-1 rounded text-[11px] font-medium ${
+                            banner.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {banner.is_active ? '启用' : '禁用'}
+                          </div>
+                        </div>
+                        
+                        {/* Banner信息 */}
+                        <div className="p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-[14px] font-medium text-gray-800 truncate">{banner.title}</h3>
+                            <span className="text-[11px] text-gray-400">排序: {banner.sort_order}</span>
+                          </div>
+                          {banner.description && (
+                            <p className="text-[12px] text-gray-500 mb-2 line-clamp-2">{banner.description}</p>
+                          )}
+                          {banner.link_url && (
+                            <p className="text-[11px] text-blue-600 truncate mb-3">{banner.link_url}</p>
+                          )}
+                          
+                          {/* 操作按钮 */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleToggleBannerActive(banner)}
+                              className={`flex-1 px-3 py-1.5 text-[12px] rounded-lg transition-colors cursor-pointer ${
+                                banner.is_active 
+                                  ? 'text-gray-600 hover:bg-gray-100' 
+                                  : 'text-green-600 hover:bg-green-50'
+                              }`}
+                            >
+                              {banner.is_active ? '禁用' : '启用'}
+                            </button>
+                            <button
+                              onClick={() => openEditBannerDialog(banner)}
+                              className="flex-1 px-3 py-1.5 text-[12px] text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBanner(banner.id)}
+                              className="flex-1 px-3 py-1.5 text-[12px] text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="px-6 py-2.5 border-t border-gray-100 shrink-0 flex items-center justify-between text-[12px] text-gray-400 bg-white">
+              <span>共 {banners?.length || 0} 个Banner</span>
+              <span>点击卡片可编辑或删除</span>
+            </div>
+          </>
+        )}
+
         {/* ========== 系统设置 Tab（占位）========== */}
         {activeTab === 'settings' && (
           <div className="flex-1 overflow-y-auto p-6 flex items-center justify-center text-gray-400">
@@ -1398,6 +1699,132 @@ export default function AdminPage() {
               <button onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
               <button onClick={handleAddSubmit} disabled={(!editingStyle && !addFile) || !addForm.name.trim() || adding} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
                 {adding ? (editingStyle ? '保存中...' : '添加中...') : (editingStyle ? '保存修改' : '确认添加')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========== 资源位管理：添加/编辑Banner弹窗 ========== */}
+      {showAddBannerDialog && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddBannerDialog(false)} />
+          <div className="relative w-[500px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
+            <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">
+              {editingBanner ? '编辑Banner' : '添加Banner'}
+            </h3>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {/* Banner图片上传 */}
+              <div>
+                <label className="block text-[12px] text-gray-500 mb-1.5">
+                  Banner图片 {!editingBanner && <span className="text-red-400">*</span>}
+                </label>
+                <div 
+                  onClick={() => !bannerImageUploading && addBannerFileRef.current?.click()} 
+                  className={`w-full aspect-[16/9] border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-300 transition-colors overflow-hidden relative ${bannerImageUploading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  {bannerImageUploading ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                        <div className="text-[12px] text-blue-600">正在上传图片...</div>
+                      </div>
+                    </div>
+                  ) : addBannerPreviewUrl ? (
+                    <img src={addBannerPreviewUrl} alt="preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-center text-gray-400">
+                      <UploadOutlined style={{ fontSize: 24 }} className="mb-2" />
+                      <div className="text-[12px]">点击上传Banner图片</div>
+                      <div className="text-[11px] text-gray-400 mt-1">推荐尺寸: 1920x1080 或 16:9比例，最大50MB</div>
+                    </div>
+                  )}
+                </div>
+                <input 
+                  ref={addBannerFileRef} 
+                  type="file" 
+                  accept=".jpg,.jpeg,.png,.webp,.gif" 
+                  className="hidden" 
+                  onChange={handleSelectBannerFile} 
+                />
+              </div>
+
+              {/* 标题 */}
+              <div>
+                <label className="block text-[12px] text-gray-500 mb-1.5">
+                  标题 <span className="text-red-400">*</span>
+                </label>
+                <input
+                  value={addBannerForm.title}
+                  onChange={e => setAddBannerForm(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="输入Banner标题"
+                  className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
+                />
+              </div>
+
+              {/* 描述 */}
+              <div>
+                <label className="block text-[12px] text-gray-500 mb-1.5">描述</label>
+                <textarea
+                  value={addBannerForm.description}
+                  onChange={e => setAddBannerForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="输入Banner描述（可选）"
+                  rows={3}
+                  className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none resize-none"
+                />
+              </div>
+
+              {/* 链接地址 */}
+              <div>
+                <label className="block text-[12px] text-gray-500 mb-1.5">跳转链接</label>
+                <input
+                  value={addBannerForm.link_url}
+                  onChange={e => setAddBannerForm(prev => ({ ...prev, link_url: e.target.value }))}
+                  placeholder="输入点击后跳转的URL（可选）"
+                  className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
+                />
+              </div>
+
+              {/* 排序和状态 */}
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-[12px] text-gray-500 mb-1.5">排序</label>
+                  <input
+                    type="number"
+                    value={addBannerForm.sort_order}
+                    onChange={e => setAddBannerForm(prev => ({ ...prev, sort_order: parseInt(e.target.value) || 0 }))}
+                    placeholder="数字越小越靠前"
+                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[12px] text-gray-500 mb-1.5">状态</label>
+                  <Select
+                    value={addBannerForm.is_active ? 'active' : 'inactive'}
+                    onChange={(value) => setAddBannerForm(prev => ({ ...prev, is_active: value === 'active' }))}
+                    options={[
+                      { value: 'active', label: '启用' },
+                      { value: 'inactive', label: '禁用' },
+                    ]}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 shrink-0">
+              <button 
+                onClick={() => { setShowAddBannerDialog(false); URL.revokeObjectURL(addBannerPreviewUrl); }} 
+                className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer"
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleAddBannerSubmit} 
+                disabled={addingBanner || (!editingBanner && !addBannerFile) || !addBannerForm.title.trim()} 
+                className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+              >
+                {addingBanner ? '提交中...' : (editingBanner ? '保存' : '创建')}
               </button>
             </div>
           </div>

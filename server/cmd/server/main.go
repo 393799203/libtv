@@ -121,7 +121,7 @@ func main() {
 	}
 
 	// 自动迁移
-if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}); err != nil {
+if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.Banner{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -132,12 +132,14 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	execRepo := repository.NewExecutionRepo(db)
 	aiTaskRepo := repository.NewAITaskRepo(db)
 	showRepo := repository.NewShowRepo(db)
+	bannerRepo := repository.NewBannerRepo(db)
 
 	// 初始化 Service
 	userService := service.NewUserService(userRepo)
 	projectService := service.NewProjectService(projectRepo, canvasRepo)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo)
+	bannerService := service.NewBannerService(bannerRepo)
 
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
@@ -157,6 +159,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	uploadHandler := handler.NewUploadHandler(appStorage) // 使用新存储
 	styleHandler := handler.NewStyleHandler(db, appStorage) // 使用新存储
 	showHandler := handler.NewShowHandler(showService, appStorage, db) // 使用新存储
+	bannerHandler := handler.NewBannerHandler(bannerService, appStorage, db) // 使用新存储
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -190,6 +193,13 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		publicShows.GET("/categories", showHandler.ListCategories)
 		publicShows.GET("", showHandler.ListShows)
 		publicShows.GET("/:id", showHandler.GetShow)
+	}
+
+	// 公开Banner接口（无需登录）
+	publicBanners := r.Group("/api/banners")
+	{
+		publicBanners.GET("", bannerHandler.ListBanners)
+		publicBanners.GET("/:id", bannerHandler.GetBanner)
 	}
 
 	// 公开上传接口
@@ -286,6 +296,15 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			shows.POST("/:id/video", showHandler.UploadVideo)
 			shows.PUT("/:id", showHandler.UpdateShow)
 			shows.DELETE("/:id", showHandler.DeleteShow)
+		}
+
+		// Banner资源位管理（需登录）
+		banners := api.Group("/banners")
+		{
+			banners.POST("", bannerHandler.CreateBanner)
+			banners.POST("/images", bannerHandler.UploadImage) // 上传Banner图片
+			banners.PUT("/:id", bannerHandler.UpdateBanner)
+			banners.DELETE("/:id", bannerHandler.DeleteBanner)
 		}
 	}
 

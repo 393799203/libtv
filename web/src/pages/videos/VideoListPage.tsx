@@ -18,28 +18,15 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { Swiper, SwiperSlide } from 'swiper/react';
-import { EffectCoverflow, Pagination, Autoplay } from 'swiper/modules';
-import 'swiper/css';
-import 'swiper/css/effect-coverflow';
-import 'swiper/css/pagination';
 import { projectApi } from '@/services/projectApi';
 import { deleteCanvasDir } from '@/services/uploadApi';
 import { showApi } from '@/services/showApi';
+import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
 
 const { Title, Text } = Typography;
-
-// 轮播图数据
-const carouselItems = [
-  { id: '1', title: 'SD2 买多少送多少', subtitle: 'SD6 在电商做图上，真是包打天下', buttonText: '立即下单', imageColor: 'from-blue-600 to-purple-700' },
-  { id: '2', title: 'LibTV 大乱斗 Vol.2', subtitle: '5.18 - 6.4 精彩呈现', buttonText: 'AI，想象和尖叫', imageColor: 'from-cyan-500 to-blue-600' },
-  { id: '3', title: '团队协作 正式上线', subtitle: '邀请你的小伙伴，一起做视频！', buttonText: '了解更多', imageColor: 'from-gray-800 to-gray-900' },
-  { id: '4', title: '全新 AI 引擎', subtitle: '更快、更强、更智能', buttonText: '体验新功能', imageColor: 'from-orange-500 to-red-600' },
-  { id: '5', title: '海量素材库', subtitle: '百万级素材，轻松创作', buttonText: '查看素材', imageColor: 'from-green-500 to-teal-600' },
-];
 
 // TV Show 分类（从 API 加载，初始含"全部"选项）
 const ALL_CATEGORY = { key: 'all', label: '全部' };
@@ -59,10 +46,76 @@ export default function VideoListPage() {
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [tvShowVideos, setTvShowVideos] = useState<VideoListItem[]>([]);
   const [showCategories, setShowCategories] = useState<{ key: string; label: string }[]>([ALL_CATEGORY]);
+  const [banners, setBanners] = useState<BannerItem[]>([]);
+  const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+  const [loadingBanners, setLoadingBanners] = useState<Set<string>>(new Set()); // 跟踪正在加载的Banner
+  const [isDragging, setIsDragging] = useState(false); // 是否正在拖拽
+  const [dragStartX, setDragStartX] = useState(0); // 拖拽起始X坐标
+  const hasDraggedRef = useRef(false); // 是否发生了拖拽（用于区分点击和拖拽）
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Banner图片加载处理
+  const handleBannerImageLoadStart = useCallback((bannerId: string) => {
+    setLoadingBanners(prev => new Set(prev).add(bannerId));
+  }, []);
+
+  const handleBannerImageLoad = useCallback((bannerId: string) => {
+    setLoadingBanners(prev => {
+      const next = new Set(prev);
+      next.delete(bannerId);
+      return next;
+    });
+  }, []);
+
+  const handleBannerImageError = useCallback((bannerId: string) => {
+    setLoadingBanners(prev => {
+      const next = new Set(prev);
+      next.delete(bannerId);
+      return next;
+    });
+  }, []);
+
+  // 鼠标拖拽处理
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStartX(e.clientX);
+    hasDraggedRef.current = false; // 重置拖拽标记
+  }, []);
+
+  const handleDragMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging) return;
+    // 可以在这里添加实时拖拽效果
+  }, [isDragging]);
+
+  const handleDragEnd = useCallback((e: React.MouseEvent) => {
+    if (!isDragging) return;
+    
+    const dragEndX = e.clientX;
+    const dragDistance = dragEndX - dragStartX;
+    
+    // 拖拽距离超过50px才触发切换
+    if (Math.abs(dragDistance) > 50) {
+      hasDraggedRef.current = true; // 标记发生了拖拽
+      if (dragDistance > 0) {
+        // 向右拖拽，显示上一个
+        setCurrentBannerIndex((prev) =>
+          prev === 0 ? banners.length - 1 : prev - 1
+        );
+      } else {
+        // 向左拖拽，显示下一个
+        setCurrentBannerIndex((prev) =>
+          prev === banners.length - 1 ? 0 : prev + 1
+        );
+      }
+    }
+    
+    setIsDragging(false);
+    setDragStartX(0);
+  }, [isDragging, dragStartX, banners.length]);
 
   // 加载项目列表：仅依赖登录状态
   const loadProjects = useCallback(async () => {
@@ -77,6 +130,22 @@ export default function VideoListPage() {
       setProjects([]);
     }
   }, [isAuthenticated]);
+
+  // 加载Banner列表
+  const loadBanners = useCallback(async () => {
+    try {
+      const data = await bannerApi.list({ is_active: true });
+      setBanners(data || []);
+      // 初始化所有banner为loading状态
+      if (data && data.length > 0) {
+        const initialLoading = new Set<string>();
+        data.forEach(banner => initialLoading.add(banner.id));
+        setLoadingBanners(initialLoading);
+      }
+    } catch {
+      // 后端未启动时为空列表
+    }
+  }, []);
 
   // 加载 TV Show 分类标签
   const loadShowCategories = useCallback(async () => {
@@ -128,6 +197,37 @@ export default function VideoListPage() {
   useEffect(() => { loadProjects(); }, [loadProjects]);
   useEffect(() => { loadShowCategories(); }, [loadShowCategories]);
   useEffect(() => { loadVideos(); }, [loadVideos]);
+  useEffect(() => { loadBanners(); }, [loadBanners]);
+
+  // Banner自动播放
+  useEffect(() => {
+    if (banners.length > 1) {
+      bannerTimerRef.current = setInterval(() => {
+        setCurrentBannerIndex((prev) => (prev + 1) % banners.length);
+      }, 5000);
+    }
+    return () => {
+      if (bannerTimerRef.current) {
+        clearInterval(bannerTimerRef.current);
+      }
+    };
+  }, [banners.length]);
+
+  // 鼠标悬停暂停/恢复轮播
+  const handleBannerMouseEnter = () => {
+    if (bannerTimerRef.current) {
+      clearInterval(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+  };
+
+  const handleBannerMouseLeave = () => {
+    if (banners.length > 1 && !bannerTimerRef.current) {
+      bannerTimerRef.current = setInterval(() => {
+        setCurrentBannerIndex((prev) => (prev + 1) % banners.length);
+      }, 5000);
+    }
+  };
 
   const getVideoMenuItems = (_id: string): MenuProps['items'] => [
     { key: 'download', label: '下载' },
@@ -175,45 +275,162 @@ export default function VideoListPage() {
 
   return (
     <div className="min-h-screen bg-white pb-20">
-      {/* 3D 轮播图 */}
-      <div className="relative w-full h-80 overflow-hidden mb-10 bg-gradient-to-b from-gray-900 to-gray-800">
-        <Swiper
-          loop={true}
-          effect={'coverflow'}
-          grabCursor={true}
-          centeredSlides={true}
-          slidesPerView={'auto'}
-          coverflowEffect={{
-            rotate: 30,
-            stretch: 0,
-            depth: 200,
-            modifier: 1,
-            slideShadows: true,
-          }}
-          pagination={{ clickable: true }}
-          autoplay={{
-            delay: 3000,
-            disableOnInteraction: false,
-          }}
-          modules={[EffectCoverflow, Pagination, Autoplay]}
-          className="w-full h-full"
-          style={{ padding: '60px 0' }}
-        >
-          {carouselItems.map((item) => (
-            <SwiperSlide key={item.id} style={{ width: '700px', height: '320px' }}>
-              <div className={`w-full h-full rounded-2xl bg-gradient-to-r ${item.imageColor} flex items-center justify-center shadow-2xl`}>
-                <div className="absolute inset-0 bg-black/30 rounded-2xl" />
-                <div className="relative z-10 text-center px-8 max-w-lg">
-                  <Title level={2} className="!text-white !mb-3">{item.title}</Title>
-                  <Text className="text-white/80 text-lg block mb-6">{item.subtitle}</Text>
-                  <Button type="primary" size="large" ghost className="!border-white !text-white hover:!bg-white hover:!text-gray-900">
-                    {item.buttonText}
-                  </Button>
+      {/* Banner 3D轮播图 */}
+      <div 
+        className="relative w-full h-96 overflow-hidden mb-8 bg-gradient-to-b from-gray-900 to-gray-800 select-none"
+        onMouseEnter={handleBannerMouseEnter}
+        onMouseLeave={handleBannerMouseLeave}
+        onMouseDown={handleDragStart}
+        onMouseMove={handleDragMove}
+        onMouseUp={handleDragEnd}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
+        {banners.length > 0 ? (
+          <div className="relative w-full h-full flex items-center justify-center" style={{ perspective: '1200px' }}>
+            {/* Banner 图片容器 */}
+            {banners.map((banner, index) => {
+              // 计算每个Banner的位置和3D效果
+              let offset = index - currentBannerIndex;
+              
+              // 处理loop循环：当当前是最后一个，下一个是第一个
+              if (currentBannerIndex === banners.length - 1 && index === 0) {
+                offset = 1;
+              }
+              // 处理loop循环：当当前是第一个，上一个是最后一个
+              if (currentBannerIndex === 0 && index === banners.length - 1) {
+                offset = -1;
+              }
+              
+              // 只显示当前、前一个、后一个Banner
+              if (offset < -1 || offset > 1) return null;
+              
+              // 3D变换参数
+              const rotateY = -offset * 20; // 左右旋转角度（减小到30度）
+              const translateX = offset * 450; // 左右平移距离（减小到320px）
+              const translateZ = offset === 0 ? 0 : -150; // 深度偏移
+              const scale = offset === 0 ? 1 : 0.9; // 缩放比例
+              const opacity = offset === 0 ? 1 : 0.75; // 透明度
+              
+              return (
+                <div
+                  key={banner.id}
+                  className="absolute transition-all duration-700 ease-out"
+                  style={{
+                    width: '520px',
+                    height: '292px',
+                    transform: `translateX(${translateX}px) rotateY(${rotateY}deg) translateZ(${translateZ}px) scale(${scale})`,
+                    opacity: opacity,
+                    zIndex: offset === 0 ? 10 : 5,
+                  }}
+                >
+                  <div 
+                    className="w-full h-full rounded-xl overflow-hidden shadow-xl cursor-pointer relative bg-gradient-to-r from-blue-600 to-purple-700"
+                    onClick={(e) => {
+                      // 如果发生了拖拽，不触发点击
+                      if (hasDraggedRef.current) {
+                        hasDraggedRef.current = false;
+                        return;
+                      }
+                      if (banner.link_url) {
+                        window.open(banner.link_url, '_blank');
+                      }
+                    }}
+                  >
+                    {banner.image_url ? (
+                      <>
+                        {/* Loading骨架屏 */}
+                        {loadingBanners.has(banner.id) && (
+                          <div className="absolute inset-0 bg-gradient-to-r from-gray-800 to-gray-700 animate-pulse flex items-center justify-center">
+                            <Spin size="large" />
+                          </div>
+                        )}
+                        <img 
+                          src={banner.image_url} 
+                          alt={banner.title}
+                          className={`w-full h-full object-cover transition-opacity duration-300 ${
+                            loadingBanners.has(banner.id) ? 'opacity-0' : 'opacity-100'
+                          }`}
+                          onLoad={() => handleBannerImageLoad(banner.id)}
+                          onError={() => handleBannerImageError(banner.id)}
+                        />
+                      </>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <div className="text-center px-6">
+                          <Title level={4} className="!text-white !mb-2">{banner.title}</Title>
+                          {banner.description && (
+                            <Text className="text-white/80 text-sm block">{banner.description}</Text>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {banner.image_url && !loadingBanners.has(banner.id) && (
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent">
+                        <div className="absolute bottom-3 left-3 right-3">
+                          <Title level={5} className="!text-white !mb-1 !text-sm">{banner.title}</Title>
+                          {banner.description && (
+                            <Text className="text-white/80 text-xs">{banner.description}</Text>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
+              );
+            })}
+
+            {/* 左右箭头按钮 */}
+            {banners.length > 1 && (
+              <>
+                <button
+                  className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
+                  onClick={() => {
+                    setCurrentBannerIndex((prev) =>
+                      prev === 0 ? banners.length - 1 : prev - 1
+                    );
+                  }}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
+                  onClick={() => {
+                    setCurrentBannerIndex((prev) =>
+                      prev === banners.length - 1 ? 0 : prev + 1
+                    );
+                  }}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </>
+            )}
+
+            {/* 指示器 */}
+            {banners.length > 1 && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
+                {banners.map((_, index) => (
+                  <button
+                    key={index}
+                    className={`rounded-full transition-all ${
+                      index === currentBannerIndex
+                        ? 'w-2 h-2 bg-white'
+                        : 'w-1.5 h-1.5 bg-white/50 hover:bg-white/70'
+                    }`}
+                    onClick={() => setCurrentBannerIndex(index)}
+                  />
+                ))}
               </div>
-            </SwiperSlide>
-          ))}
-        </Swiper>
+            )}
+          </div>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <Text className="text-white/60">暂无Banner</Text>
+          </div>
+        )}
       </div>
 
       {/* 最近项目 */}

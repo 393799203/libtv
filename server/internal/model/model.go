@@ -209,3 +209,29 @@ func (s *Show) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// ========== Banner 资源位管理 ==========
+
+// Banner 首页轮播Banner资源位
+type Banner struct {
+	ID          string     `gorm:"primaryKey;size:36" json:"id"`
+	Title       string     `gorm:"size:255;not null" json:"title"`
+	Description string     `gorm:"size:1000" json:"description"`
+	ImageURL    string     `gorm:"size:500;not null" json:"image_url"`
+	LinkURL     string     `gorm:"size:500" json:"link_url"`
+	SortOrder   int        `gorm:"default:0" json:"sort_order"`
+	IsActive    bool       `gorm:"default:true" json:"is_active"`
+	StartTime   *time.Time `json:"start_time"`
+	EndTime     *time.Time `json:"end_time"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+func (Banner) TableName() string { return "banners" }
+
+func (b *Banner) BeforeCreate(tx *gorm.DB) error {
+	if b.ID == "" {
+		b.ID = uuid.New().String()
+	}
+	return nil
+}
