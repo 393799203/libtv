@@ -376,7 +376,7 @@ export default function VideoListPage() {
                         <div className="absolute bottom-3 left-3 right-3">
                           <Title level={5} className="!text-white !mb-1 !text-sm">{banner.title}</Title>
                           {banner.description && (
-                            <Text className="text-white/80 text-xs">{banner.description}</Text>
+                            <span className="text-gray-300 text-[11px]">{banner.description}</span>
                           )}
                         </div>
                       </div>
