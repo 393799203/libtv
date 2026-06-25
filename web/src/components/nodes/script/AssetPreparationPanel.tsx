@@ -1,5 +1,5 @@
 import { memo, useCallback, useState } from 'react';
-import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { message, Upload } from 'antd';
 import type {
   ScriptCharacter,
@@ -103,10 +103,7 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
               {uploading ? (
                 <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
               ) : (
-                <>
-                  <UploadOutlined className="text-base" />
-                  <span className="text-[10px]">生成或上传参考图</span>
-                </>
+                <span className="text-[10px]">生成或上传参考图</span>
               )}
             </div>
           )}

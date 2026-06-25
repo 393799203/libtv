@@ -1,6 +1,6 @@
 import { memo, useState, useRef, useCallback, useEffect } from 'react';
 import { Drawer, message } from 'antd';
-import { PlusOutlined, LoadingOutlined } from '@ant-design/icons';
+import { LoadingOutlined } from '@ant-design/icons';
 import type { ScriptCharacter } from '@/types/canvas';
 import { uploadImage } from '@/services/uploadApi';
 
@@ -149,10 +149,7 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
                     {uploading || generating ? (
                       <LoadingOutlined className="text-2xl animate-spin" />
                     ) : (
-                      <>
-                        <PlusOutlined className="text-2xl" />
-                        <span className="text-xs">生成或上传角色图</span>
-                      </>
+                      <span className="text-xs">生成或上传角色图</span>
                     )}
                   </div>
                 )}
