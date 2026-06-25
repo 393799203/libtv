@@ -48,7 +48,7 @@ export default function VideoListPage() {
   const [showCategories, setShowCategories] = useState<{ key: string; label: string }[]>([ALL_CATEGORY]);
   const [banners, setBanners] = useState<BannerItem[]>([]);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
-  const [loadingBanners, setLoadingBanners] = useState<Set<string>>(new Set()); // 跟踪正在加载的Banner
+  const loadingBannersRef = useRef<Set<string>>(new Set()); // 用ref跟踪loading状态，不触发重渲染
   const [isDragging, setIsDragging] = useState(false); // 是否正在拖拽
   const [dragStartX, setDragStartX] = useState(0); // 拖拽起始X坐标
   const hasDraggedRef = useRef(false); // 是否发生了拖拽（用于区分点击和拖拽）
@@ -58,25 +58,23 @@ export default function VideoListPage() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Banner图片加载处理
+  // 获取当前loading状态（用于骨架屏渲染，不常更新）
+  const [loadingVersion, setLoadingVersion] = useState(0); // 用于触发骨架屏更新
+
+  // Banner图片加载处理（使用ref，不触发重渲染）
   const handleBannerImageLoadStart = useCallback((bannerId: string) => {
-    setLoadingBanners(prev => new Set(prev).add(bannerId));
+    loadingBannersRef.current.add(bannerId);
+    setLoadingVersion(v => v + 1);
   }, []);
 
   const handleBannerImageLoad = useCallback((bannerId: string) => {
-    setLoadingBanners(prev => {
-      const next = new Set(prev);
-      next.delete(bannerId);
-      return next;
-    });
+    loadingBannersRef.current.delete(bannerId);
+    setLoadingVersion(v => v + 1);
   }, []);
 
   const handleBannerImageError = useCallback((bannerId: string) => {
-    setLoadingBanners(prev => {
-      const next = new Set(prev);
-      next.delete(bannerId);
-      return next;
-    });
+    loadingBannersRef.current.delete(bannerId);
+    setLoadingVersion(v => v + 1);
   }, []);
 
   // 鼠标拖拽处理
@@ -138,9 +136,8 @@ export default function VideoListPage() {
       setBanners(data || []);
       // 初始化所有banner为loading状态
       if (data && data.length > 0) {
-        const initialLoading = new Set<string>();
-        data.forEach(banner => initialLoading.add(banner.id));
-        setLoadingBanners(initialLoading);
+        loadingBannersRef.current = new Set(data.map(banner => banner.id));
+        setLoadingVersion(v => v + 1);
       }
     } catch {
       // 后端未启动时为空列表
@@ -199,11 +196,16 @@ export default function VideoListPage() {
   useEffect(() => { loadVideos(); }, [loadVideos]);
   useEffect(() => { loadBanners(); }, [loadBanners]);
 
-  // Banner自动播放
+  // Banner自动播放（使用ref保存banners.length避免重复创建interval）
+  const bannersLengthRef = useRef(banners.length);
+  useEffect(() => {
+    bannersLengthRef.current = banners.length;
+  }, [banners.length]);
+
   useEffect(() => {
     if (banners.length > 1) {
       bannerTimerRef.current = setInterval(() => {
-        setCurrentBannerIndex((prev) => (prev + 1) % banners.length);
+        setCurrentBannerIndex((prev) => (prev + 1) % bannersLengthRef.current);
       }, 5000);
     }
     return () => {
@@ -211,7 +213,7 @@ export default function VideoListPage() {
         clearInterval(bannerTimerRef.current);
       }
     };
-  }, [banners.length]);
+  }, []); // 依赖数组为空，只在挂载/卸载时执行
 
   // 鼠标悬停暂停/恢复轮播
   const handleBannerMouseEnter = () => {
@@ -221,13 +223,13 @@ export default function VideoListPage() {
     }
   };
 
-  const handleBannerMouseLeave = () => {
+  const handleBannerMouseLeave = useCallback(() => {
     if (banners.length > 1 && !bannerTimerRef.current) {
       bannerTimerRef.current = setInterval(() => {
-        setCurrentBannerIndex((prev) => (prev + 1) % banners.length);
+        setCurrentBannerIndex((prev) => (prev + 1) % bannersLengthRef.current);
       }, 5000);
     }
-  };
+  }, [banners.length]);
 
   const getVideoMenuItems = (_id: string): MenuProps['items'] => [
     { key: 'download', label: '下载' },
@@ -285,6 +287,8 @@ export default function VideoListPage() {
         onMouseUp={handleDragEnd}
         style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
+        {/* 通过key属性触发loading状态更新（loadingVersion变化时重新渲染） */}
+        <div key={loadingVersion} className="sr-only" aria-hidden="true" />
         {banners.length > 0 ? (
           <div className="relative w-full h-full flex items-center justify-center" style={{ perspective: '1200px' }}>
             {/* Banner 图片容器 */}
@@ -292,13 +296,16 @@ export default function VideoListPage() {
               // 计算每个Banner的位置和3D效果
               let offset = index - currentBannerIndex;
               
-              // 处理loop循环：当当前是最后一个，下一个是第一个
-              if (currentBannerIndex === banners.length - 1 && index === 0) {
-                offset = 1;
-              }
-              // 处理loop循环：当当前是第一个，上一个是最后一个
-              if (currentBannerIndex === 0 && index === banners.length - 1) {
-                offset = -1;
+              // 处理loop循环（仅当有多个banner时）
+              if (banners.length > 1) {
+                // 当当前是最后一个，下一个是第一个
+                if (currentBannerIndex === banners.length - 1 && index === 0) {
+                  offset = 1;
+                }
+                // 当当前是第一个，上一个是最后一个
+                if (currentBannerIndex === 0 && index === banners.length - 1) {
+                  offset = -1;
+                }
               }
               
               // 只显示当前、前一个、后一个Banner
@@ -339,7 +346,7 @@ export default function VideoListPage() {
                     {banner.image_url ? (
                       <>
                         {/* Loading骨架屏 */}
-                        {loadingBanners.has(banner.id) && (
+                        {loadingBannersRef.current.has(banner.id) && (
                           <div className="absolute inset-0 bg-gradient-to-r from-gray-800 to-gray-700 animate-pulse flex items-center justify-center">
                             <Spin size="large" />
                           </div>
@@ -348,7 +355,7 @@ export default function VideoListPage() {
                           src={banner.image_url} 
                           alt={banner.title}
                           className={`w-full h-full object-cover transition-opacity duration-300 ${
-                            loadingBanners.has(banner.id) ? 'opacity-0' : 'opacity-100'
+                            loadingBannersRef.current.has(banner.id) ? 'opacity-0' : 'opacity-100'
                           }`}
                           onLoad={() => handleBannerImageLoad(banner.id)}
                           onError={() => handleBannerImageError(banner.id)}
@@ -364,7 +371,7 @@ export default function VideoListPage() {
                         </div>
                       </div>
                     )}
-                    {banner.image_url && !loadingBanners.has(banner.id) && (
+                    {banner.image_url && !loadingBannersRef.current.has(banner.id) && (
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent">
                         <div className="absolute bottom-3 left-3 right-3">
                           <Title level={5} className="!text-white !mb-1 !text-sm">{banner.title}</Title>
@@ -421,6 +428,7 @@ export default function VideoListPage() {
                         : 'w-1.5 h-1.5 bg-white/50 hover:bg-white/70'
                     }`}
                     onClick={() => setCurrentBannerIndex(index)}
+                    style={{ minWidth: '12px', minHeight: '12px' }}
                   />
                 ))}
               </div>
