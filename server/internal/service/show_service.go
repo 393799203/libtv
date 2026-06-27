@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"libtv/internal/model"
 	"libtv/internal/repository"
@@ -79,10 +77,11 @@ func (s *ShowService) UpdateThumbnail(ctx context.Context, showID string, imageU
 	if err != nil {
 		return err
 	}
-	// 删除旧封面（仅当与旧值不同且在本服务管辖目录下）
-	if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL && strings.HasPrefix(show.ThumbnailURL, "/media/shows/") {
-		objectName := "shows/" + filepath.Base(show.ThumbnailURL)
-		_ = s.storage.DeleteObject(objectName)
+	// 删除旧封面（仅当与旧值不同且属于本存储管辖）
+	if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL {
+		if objectName, ok := s.storage.ParseObjectName(show.ThumbnailURL); ok {
+			_ = s.storage.DeleteObject(objectName)
+		}
 	}
 	show.ThumbnailURL = imageURL
 	return s.showRepo.UpdateShow(ctx, show)
@@ -100,17 +99,19 @@ func (s *ShowService) DeleteShow(ctx context.Context, id string) error {
 	}
 
 	// 清理缩略图
-	if show.ThumbnailURL != "" && strings.HasPrefix(show.ThumbnailURL, "/media/shows/") {
-		objectName := "shows/" + filepath.Base(show.ThumbnailURL)
-		_ = s.storage.DeleteObject(objectName)
+	if show.ThumbnailURL != "" {
+		if objectName, ok := s.storage.ParseObjectName(show.ThumbnailURL); ok {
+			_ = s.storage.DeleteObject(objectName)
+		}
 	}
 
 	// 清理视频文件（仅当无其他 show 引用时）
-	if show.VideoURL != "" && strings.HasPrefix(show.VideoURL, "/media/videos/") {
+	if show.VideoURL != "" {
 		count, _ := s.showRepo.CountOtherShowsByVideoURL(ctx, show.VideoURL, id)
 		if count == 0 {
-			objectName := "videos/" + filepath.Base(show.VideoURL)
-			_ = s.storage.DeleteObject(objectName)
+			if objectName, ok := s.storage.ParseObjectName(show.VideoURL); ok {
+				_ = s.storage.DeleteObject(objectName)
+			}
 		}
 	}
 	return nil

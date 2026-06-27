@@ -252,3 +252,13 @@ func (m *MinIOStorage) GetURL(objectName string) string {
 	// 否则返回相对路径，由代理路由处理
 	return "/media/" + objectName
 }
+
+// ParseObjectName 从访问 URL 反解出 objectName
+// 复用包级公共函数，仅传入 MinIO 自己的绝对 URL 前缀
+func (m *MinIOStorage) ParseObjectName(url string) (string, bool) {
+	prefix := ""
+	if m.publicEndpoint != "" {
+		prefix = m.publicEndpoint + "/" + m.bucket + "/"
+	}
+	return parseObjectNameFromURL(url, prefix)
+}

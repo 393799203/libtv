@@ -2,8 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"path/filepath"
-	"strings"
 
 	"libtv/internal/model"
 	"libtv/internal/service"
@@ -188,10 +186,11 @@ func (h *BannerHandler) DeleteBanner(c *gin.Context) {
 		return
 	}
 
-	// 清理图片文件
-	if imageURL != "" && strings.HasPrefix(imageURL, "/media/banners/") {
-		objectName := "banners/" + filepath.Base(imageURL)
-		h.storage.DeleteObject(objectName)
+	// 清理图片文件（用 storage 解析 URL → objectName，兼容绝对/相对 URL）
+	if imageURL != "" {
+		if objectName, ok := h.storage.ParseObjectName(imageURL); ok {
+			_ = h.storage.DeleteObject(objectName)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})

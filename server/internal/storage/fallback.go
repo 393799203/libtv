@@ -197,6 +197,16 @@ func (f *FallbackStorage) GetURL(objectName string) string {
 	return f.Fallback.GetURL(objectName)
 }
 
+// ParseObjectName 从访问 URL 反解出 objectName
+// 同时尝试 Primary 与 Fallback 的格式，任一匹配即返回
+func (f *FallbackStorage) ParseObjectName(url string) (string, bool) {
+	// 优先用 Primary 解析（实际生成的 URL 通常由 Primary 决定）
+	if name, ok := f.Primary.ParseObjectName(url); ok {
+		return name, true
+	}
+	return f.Fallback.ParseObjectName(url)
+}
+
 // addToSyncQueue 添加到同步队列
 func (f *FallbackStorage) addToSyncQueue(objectName string) {
 	f.mu.Lock()

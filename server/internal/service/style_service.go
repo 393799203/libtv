@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"libtv/internal/model"
 	"libtv/internal/repository"
@@ -112,9 +111,10 @@ func (s *StyleService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("风格不存在: %w", err)
 	}
 	// 删除图片文件
-	if style.ImageURL != "" && strings.HasPrefix(style.ImageURL, "/media/styles/") {
-		objectName := "styles/" + strings.TrimPrefix(style.ImageURL, "/media/styles/")
-		_ = s.storage.DeleteObject(objectName)
+	if style.ImageURL != "" {
+		if objectName, ok := s.storage.ParseObjectName(style.ImageURL); ok {
+			_ = s.storage.DeleteObject(objectName)
+		}
 	}
 	if err := s.styleRepo.Delete(ctx, id); err != nil {
 		return err

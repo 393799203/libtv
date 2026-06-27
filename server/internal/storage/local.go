@@ -173,6 +173,12 @@ func (l *LocalStorage) GetURL(objectName string) string {
 	return "/media/" + objectName
 }
 
+// ParseObjectName 从访问 URL 反解出 objectName
+// LocalStorage 只产生 /media/<objectName> 格式，absolutePrefix 为空
+func (l *LocalStorage) ParseObjectName(url string) (string, bool) {
+	return parseObjectNameFromURL(url, "")
+}
+
 // ListObjects 列出所有文件（用于同步）
 func (l *LocalStorage) ListObjects(prefix string) ([]string, error) {
 	var objects []string
