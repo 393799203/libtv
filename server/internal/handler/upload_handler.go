@@ -1,17 +1,10 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
 	"libtv/internal/service"
 	"libtv/internal/storage"
@@ -23,92 +16,17 @@ import (
 type UploadHandler struct {
 	storage           storage.Storage
 	fileUploadService *service.FileUploadService
+	transcodeService  *service.TranscodeService
 }
 
 // NewUploadHandler 创建上传处理器
-func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService) *UploadHandler {
-	return &UploadHandler{storage: s, fileUploadService: fileUploadService}
-}
-
-// ========== 视频异步转码任务管理 ==========
-
-type VideoTaskStatus string
-
-const (
-	TaskStatusProcessing VideoTaskStatus = "processing" // 转码中
-	TaskStatusDone       VideoTaskStatus = "done"       // 完成
-	TaskStatusFailed     VideoTaskStatus = "failed"     // 失败
-)
-
-type VideoTask struct {
-	Status     VideoTaskStatus `json:"status"`
-	URL        string          `json:"url,omitempty"`
-	Compressed bool            `json:"compressed"`
-	Error      string          `json:"error,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
-}
-
-var (
-	videoTasks   = make(map[string]*VideoTask)
-	videoTasksMu sync.RWMutex
-)
-
-// ========== 视频格式转换（独立函数） ==========
-
-// findFFmpeg 返回 ffmpeg 路径
-// 本地开发环境使用 Homebrew 完整版，线上 Docker 使用系统自带
-func findFFmpeg() string {
-	localPath := "/usr/local/Cellar/ffmpeg/8.1.1/bin/ffmpeg"
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath
-	}
-	return "ffmpeg"
-}
-
-// ConvertVideoConfig 视频转码配置
-type ConvertVideoConfig struct {
-	InputPath  string            // 输入文件路径
-	OutputPath string            // 输出文件路径
-	Format     string            // 输出格式，如 "mp4"
-	VideoCodec string            // 视频编码，如 "libx264"
-	AudioCodec string            // 音频编码，如 "aac"
-	ExtraArgs  []string          // 额外 ffmpeg 参数
-	OnProgress func(percent int) // 进度回调（可选）
-}
-
-// ConvertVideo 使用 ffmpeg 将视频文件转换为指定格式
-// 这是一个纯函数，不涉及存储/网络，只负责本地文件转换
-func ConvertVideo(cfg ConvertVideoConfig) error {
-	args := []string{"-y", "-i", cfg.InputPath}
-	if cfg.VideoCodec != "" {
-		args = append(args, "-c:v", cfg.VideoCodec)
-	}
-	if cfg.AudioCodec != "" {
-		args = append(args, "-c:a", cfg.AudioCodec)
-	}
-	if len(cfg.ExtraArgs) > 0 {
-		args = append(args, cfg.ExtraArgs...)
-	}
-	args = append(args, cfg.OutputPath)
-
-	cmd := exec.Command(findFFmpeg(), args...)
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// NeedConvert 判断扩展名是否需要转码为 MP4
-func NeedConvert(ext string) bool {
-	switch ext {
-	case ".ts", ".flv", ".m3u8", ".mkv", ".avi", ".wmv":
-		return true
-	default:
-		return false
-	}
+func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService, transcodeService *service.TranscodeService) *UploadHandler {
+	return &UploadHandler{storage: s, fileUploadService: fileUploadService, transcodeService: transcodeService}
 }
 
 // UploadVideo 上传视频（哈希去重，按项目ID分文件夹，TS自动转MP4）
 func (h *UploadHandler) UploadVideo(c *gin.Context) {
-	file, header, err := c.Request.FormFile("file")
+	_, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
 		return
@@ -116,161 +34,50 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 
 	projectID := c.PostForm("project_id")
 
-	// 第一步：计算哈希用于去重
-	hasher := sha256.New()
-	io.Copy(hasher, file)
-	file.Close()
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	ext := filepath.Ext(header.Filename)
-	if ext == "" {
-		ext = ".mp4"
-	}
-	filename := fileHash[:12] + ext
-
-	var objectName string
+	// 目录选择：有项目ID存到 canvas/<projectID>/，否则存到 videos/
+	dir := "videos"
 	if projectID != "" {
-		objectName = "canvas/" + projectID + "/" + filename
-	} else {
-		objectName = "videos/" + filename
+		dir = "canvas"
 	}
 
-	// 检查文件是否已存在（含已转码的 MP4 版本）
-	mp4ObjectName := strings.TrimSuffix(objectName, filepath.Ext(objectName)) + ".mp4"
-	_, err = h.storage.StatObject(mp4ObjectName)
-	if err == nil {
-		url := h.storage.GetURL(mp4ObjectName)
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"msg":  "上传成功（已存在）",
-			"data": gin.H{
-				"url":          url,
-				"storage_type": h.storage.GetType(),
-				"filename":     mp4ObjectName,
-				"cached":       true,
-			},
-		})
-		return
-	}
-
-	// 重新打开文件
-	src2, err := header.Open()
+	result, err := h.fileUploadService.UploadVideoWithTranscode(header, service.UploadOptions{
+		Dir:       dir,
+		ProjectID: projectID,
+	}, h.transcodeService)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
-	defer src2.Close()
 
-	// 判断是否需要转码
-	if !NeedConvert(ext) {
-		// === 不需要转码：直接存储原文件 ===
-		err = h.storage.PutObject(objectName, src2, header.Size, "video/mp4")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败"})
-			return
+	// 同步完成（含命中去重）
+	if !result.AsyncTranscode {
+		msg := "上传成功"
+		if result.Cached {
+			msg = "上传成功（已存在）"
 		}
-		url := h.storage.GetURL(objectName)
 		c.JSON(http.StatusOK, gin.H{
 			"code": 0,
-			"msg":  "上传成功",
+			"msg":  msg,
 			"data": gin.H{
-				"url":          url,
-				"storage_type": h.storage.GetType(),
-				"filename":     objectName,
+				"url":          result.URL,
+				"storage_type": result.StorageType,
+				"filename":     result.ObjectName,
+				"cached":       result.Cached,
 			},
 		})
 		return
 	}
 
-	// === 需要转码：保存到临时目录，异步 ffmpeg 转 MP4 ===
-	tmpDir := "/tmp/libtv_convert"
-	os.MkdirAll(tmpDir, 0755)
-	tmpPath := tmpDir + "/" + filename
-
-	tmpFile, err := os.Create(tmpPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建临时文件失败"})
-		return
-	}
-	io.Copy(tmpFile, src2)
-	tmpFile.Close()
-
-	taskID := fileHash[:16]
-	videoTasksMu.Lock()
-	videoTasks[taskID] = &VideoTask{Status: TaskStatusProcessing}
-	videoTasksMu.Unlock()
-
-	go h.convertAndUpload(taskID, tmpPath, mp4ObjectName)
-
+	// 异步转码中
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "上传成功，正在转码",
 		"data": gin.H{
 			"url":      "",
-			"task_id":  taskID,
-			"filename": mp4ObjectName,
+			"task_id":  result.TaskID,
+			"filename": result.ObjectName,
 		},
 	})
-}
-
-// convertAndUpload 异步转码并上传到存储
-// 职责：调用 ConvertVideo（纯转换）→ 上传结果 → 更新任务状态
-func (h *UploadHandler) convertAndUpload(taskID, inputPath, outputObjectName string) {
-	outputPath := inputPath + ".mp4"
-
-	// 1. 调用独立转换函数
-	err := ConvertVideo(ConvertVideoConfig{
-		InputPath:  inputPath,
-		OutputPath: outputPath,
-		Format:     "mp4",
-		VideoCodec: "libx264",
-		AudioCodec: "aac",
-		ExtraArgs:  []string{"-crf", "23", "-preset", "ultrafast", "-b:a", "128k", "-movflags", "+faststart"},
-	})
-
-	// 清理输入文件
-	os.Remove(inputPath)
-
-	if err != nil {
-		setTaskFailed(taskID, fmt.Sprintf("ffmpeg 转码失败: %v", err))
-		return
-	}
-
-	// 2. 上传到存储
-	f, err := os.Open(outputPath)
-	if err != nil {
-		os.Remove(outputPath)
-		setTaskFailed(taskID, fmt.Sprintf("打开转码后文件失败: %v", err))
-		return
-	}
-	fi, _ := f.Stat()
-	err = h.storage.PutObject(outputObjectName, f, fi.Size(), "video/mp4")
-	f.Close()
-	os.Remove(outputPath) // 清理输出文件
-
-	if err != nil {
-		setTaskFailed(taskID, fmt.Sprintf("上传转码后文件失败: %v", err))
-		return
-	}
-
-	// 3. 完成
-	url := h.storage.GetURL(outputObjectName)
-	videoTasksMu.Lock()
-	if task, ok := videoTasks[taskID]; ok {
-		task.Status = TaskStatusDone
-		task.URL = url
-		task.Compressed = false
-	}
-	videoTasksMu.Unlock()
-}
-
-func setTaskFailed(taskID string, errMsg string) {
-	videoTasksMu.Lock()
-	defer videoTasksMu.Unlock()
-	if task, ok := videoTasks[taskID]; ok {
-		task.Status = TaskStatusFailed
-		task.Error = errMsg
-	}
 }
 
 // UploadCanvas 上传画布图片（哈希去重，按项目ID分文件夹）
@@ -535,10 +342,7 @@ func (h *UploadHandler) GetVideoStatus(c *gin.Context) {
 		return
 	}
 
-	videoTasksMu.RLock()
-	task, ok := videoTasks[taskID]
-	videoTasksMu.RUnlock()
-
+	task, ok := h.transcodeService.GetTask(taskID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "任务不存在或已过期"})
 		return

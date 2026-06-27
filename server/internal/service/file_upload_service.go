@@ -117,6 +117,117 @@ func (s *FileUploadService) Upload(file multipart.File, header *multipart.FileHe
 	}, nil
 }
 
+// VideoUploadResult 视频上传结果（可能同步完成，也可能异步转码中）
+type VideoUploadResult struct {
+	URL        string `json:"url,omitempty"`        // 同步完成时有值
+	TaskID     string `json:"task_id,omitempty"`     // 异步转码时有值
+	ObjectName string `json:"filename"`             // 最终对象名（含 .mp4）
+	Cached     bool   `json:"cached"`                // 是否命中去重
+	StorageType string `json:"storage_type"`
+	AsyncTranscode bool `json:"async_transcode"`     // 是否进入异步转码
+}
+
+// UploadVideoWithTranscode 视频上传 Template Method：
+//   不需转码 → 走标准 Upload 流程
+//   需转码   → 哈希去重 → 落盘临时文件 → 注册任务 → goroutine 异步转码并上传
+// 调用方传入 transcodeSvc 用于异步转码分支，nil 时遇到需转码文件直接返回错误。
+func (s *FileUploadService) UploadVideoWithTranscode(
+	header *multipart.FileHeader,
+	opts UploadOptions,
+	transcodeSvc *TranscodeService,
+) (*VideoUploadResult, error) {
+	// 1. 校验扩展名
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext == "" {
+		ext = ".mp4"
+	}
+
+	// 2. 计算哈希（用一次 Read 满足去重 + 后续落盘/上传）
+	file, err := header.Open()
+	if err != nil {
+		return nil, fmt.Errorf("读取文件失败: %w", err)
+	}
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("读取文件失败: %w", err)
+	}
+	fileHash := hex.EncodeToString(hasher.Sum(nil))
+	_ = file.Close()
+
+	filename := fileHash[:12] + ext
+	objectName := s.buildObjectName(opts, filename)
+	// 转码后的统一目标为 .mp4
+	mp4ObjectName := strings.TrimSuffix(objectName, filepath.Ext(objectName)) + ".mp4"
+
+	// 3. 去重检查（命中已转码的 mp4）
+	if _, err := s.storage.StatObject(mp4ObjectName); err == nil {
+		return &VideoUploadResult{
+			URL:         s.urlFor(mp4ObjectName, opts),
+			ObjectName:  mp4ObjectName,
+			Cached:      true,
+			StorageType: s.storage.GetType(),
+		}, nil
+	}
+
+	// 4. 不需要转码：直接上传为 .mp4
+	if !NeedConvert(ext) {
+		result, err := s.reupload(header, mp4ObjectName, "video/mp4")
+		if err != nil {
+			return nil, err
+		}
+		return &VideoUploadResult{
+			URL:         result.URL,
+			ObjectName:  result.ObjectName,
+			StorageType: result.StorageType,
+		}, nil
+	}
+
+	// 5. 需要转码
+	if transcodeSvc == nil {
+		return nil, fmt.Errorf("需要转码但未提供 TranscodeService")
+	}
+
+	// 落盘到临时目录
+	src, err := header.Open()
+	if err != nil {
+		return nil, fmt.Errorf("读取文件失败: %w", err)
+	}
+	tmpPath, err := transcodeSvc.PrepareTranscode(filename, src)
+	_ = src.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	taskID := fileHash[:16]
+	transcodeSvc.RegisterTask(taskID)
+	go transcodeSvc.ConvertAndUpload(taskID, tmpPath, mp4ObjectName)
+
+	return &VideoUploadResult{
+		TaskID:        taskID,
+		ObjectName:    mp4ObjectName,
+		StorageType:   s.storage.GetType(),
+		AsyncTranscode: true,
+	}, nil
+}
+
+// reupload 重新打开文件并上传到指定 objectName（内部复用工具）
+func (s *FileUploadService) reupload(header *multipart.FileHeader, objectName, contentType string) (*UploadResult, error) {
+	src, err := header.Open()
+	if err != nil {
+		return nil, fmt.Errorf("读取文件失败: %w", err)
+	}
+	defer src.Close()
+	if err := s.storage.PutObject(objectName, src, header.Size, contentType); err != nil {
+		return nil, fmt.Errorf("上传失败: %w", err)
+	}
+	return &UploadResult{
+		URL:         s.storage.GetURL(objectName),
+		ObjectName:  objectName,
+		StorageType: s.storage.GetType(),
+	}, nil
+}
+
 // buildObjectName 按选项构造存储对象名
 func (s *FileUploadService) buildObjectName(opts UploadOptions, filename string) string {
 	if opts.ProjectID != "" {

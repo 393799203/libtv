@@ -91,6 +91,9 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)
 
+	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
+	transcodeService := service.NewTranscodeService(appStorage)
+
 	// 风格相关 Service
 	styleService := service.NewStyleService(styleRepo, appStorage)
 	categoryService := service.NewCategoryService(categoryRepo)
@@ -101,10 +104,10 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, eng, registry)
-	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService)                       // 使用新存储
+	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService)
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
-	showHandler := handler.NewShowHandler(showService, fileUploadService)         // 使用新存储
-	bannerHandler := handler.NewBannerHandler(bannerService, appStorage, fileUploadService)   // 使用新存储
+	showHandler := handler.NewShowHandler(showService, fileUploadService)
+	bannerHandler := handler.NewBannerHandler(bannerService, appStorage, fileUploadService)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
