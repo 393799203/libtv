@@ -23,7 +23,7 @@ jwt:
 storage:
   type: local  # fallback / minio / local (本地开发使用local)
   local:
-    base_path: ./uploads
+    base_path: ../public  # 与 getPublicDir 一致，匹配历史文件位置
   minio:
     endpoint: 192.168.110.207:9000  # 内网地址
     access_key: admin

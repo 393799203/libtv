@@ -1,31 +1,24 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"io"
+	"errors"
 	"net/http"
-	"path/filepath"
 	"strconv"
-	"strings"
 
 	"libtv/internal/model"
 	"libtv/internal/service"
-	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type ShowHandler struct {
-	showService *service.ShowService
-	storage     storage.Storage
-	db          *gorm.DB
+	showService      *service.ShowService
+	fileUploadService *service.FileUploadService
 }
 
-func NewShowHandler(showService *service.ShowService, storage storage.Storage, db *gorm.DB) *ShowHandler {
-	return &ShowHandler{showService: showService, storage: storage, db: db}
+func NewShowHandler(showService *service.ShowService, fileUploadService *service.FileUploadService) *ShowHandler {
+	return &ShowHandler{showService: showService, fileUploadService: fileUploadService}
 }
 
 // ========== 公开接口：首页展示 ==========
@@ -89,7 +82,11 @@ func (h *ShowHandler) GetShow(c *gin.Context) {
 	id := c.Param("id")
 	show, err := h.showService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
+		if errors.Is(err, service.ErrShowNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": show})
@@ -98,42 +95,25 @@ func (h *ShowHandler) GetShow(c *gin.Context) {
 // ========== 需登录接口：管理操作 ==========
 
 type CreateShowRequest struct {
-	CategoryID string   `json:"category_id" binding:"required"`
-	Title      string   `json:"title" binding:"required"`
-	Description string  `json:"description"`
-	VideoURL   string   `json:"video_url"`
-	Duration   int      `json:"duration"`
-	AuthorID   string   `json:"author_id"`
-	Tags       []string `json:"tags"`
-	SortOrder  int      `json:"sort_order"`
+	CategoryID  string   `json:"category_id" binding:"required"`
+	Title       string   `json:"title" binding:"required"`
+	Description string   `json:"description"`
+	VideoURL    string   `json:"video_url"`
+	Duration    int      `json:"duration"`
+	AuthorID    string   `json:"author_id"`
+	Tags        []string `json:"tags"`
+	SortOrder   int      `json:"sort_order"`
 }
 
 type UpdateShowRequest struct {
-	Title      *string  `json:"title"`
-	Description *string `json:"description"`
-	VideoURL   *string  `json:"video_url"`
-	Duration   *int     `json:"duration"`
-	AuthorID   *string  `json:"author_id"`
-	Tags       []string `json:"tags"`
-	SortOrder  *int     `json:"sort_order"`
-	CategoryID *string  `json:"category_id"`
-}
-
-// resolveAuthor 根据 author_id 查询用户，填充 author 和 author_avatar
-func (h *ShowHandler) resolveAuthor(show *model.Show, authorID string) {
-	if authorID == "" {
-		return
-	}
-	var user model.User
-	if err := h.db.Where("id = ?", authorID).First(&user).Error; err != nil {
-		return
-	}
-	show.AuthorID = user.ID
-	if user.Nickname != "" {
-		show.Author = user.Nickname
-	} else {
-		show.Author = user.Email
-	}
+	Title       *string  `json:"title"`
+	Description *string  `json:"description"`
+	VideoURL    *string  `json:"video_url"`
+	Duration    *int     `json:"duration"`
+	AuthorID    *string  `json:"author_id"`
+	Tags        []string `json:"tags"`
+	SortOrder   *int     `json:"sort_order"`
+	CategoryID  *string  `json:"category_id"`
 }
 
 // CreateShow 创建视频条目（需登录）
@@ -154,7 +134,7 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 		Tags:        tagsJSON,
 		SortOrder:   req.SortOrder,
 	}
-	h.resolveAuthor(show, req.AuthorID)
+	h.showService.ResolveAuthor(c.Request.Context(), show, req.AuthorID)
 
 	if err := h.showService.CreateShow(c.Request.Context(), show); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建失败"})
@@ -167,153 +147,71 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 // UploadThumbnail 上传封面图并关联到视频记录
 func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	id := c.Param("id")
-
-	show, err := h.showService.GetByID(c.Request.Context(), id)
-	if err != nil {
+	if _, err := h.showService.GetByID(c.Request.Context(), id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
 		return
 	}
 
-	file, err := c.FormFile("file")
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
 		return
 	}
 
-	ext := file.Filename[strings.LastIndex(file.Filename, "."):]
-	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
-	if !allowedExts[ext] {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的图片格式"})
-		return
-	}
-	if file.Size > 10*1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "图片大小不能超过 10MB"})
-		return
-	}
-
-	src, err := file.Open()
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            "shows",
+		AllowedExts:    service.ImageExts(),
+		MaxSize:        10 * 1024 * 1024,
+		ContentTypeFor: service.ContentTypeForImage,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
-		return
-	}
-	defer src.Close()
-
-	hasher := sha256.New()
-	io.Copy(hasher, src)
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	filename := fileHash[:12] + ext
-	objectName := "shows/" + filename
-
-	// 检查文件是否已存在
-	_, err = h.storage.StatObject(objectName)
-	if err == nil {
-		imageURL := h.storage.GetURL(objectName)
-
-		// 删除旧封面文件（如果不同）
-		if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL {
-			oldObjectName := "shows/" + filepath.Base(show.ThumbnailURL)
-			h.storage.DeleteObject(oldObjectName)
-		}
-
-		show.ThumbnailURL = imageURL
-		h.showService.UpdateShow(c.Request.Context(), show)
-
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
 
-	src2, _ := file.Open()
-	defer src2.Close()
-
-	// 上传到存储（MinIO优先，降级本地）
-	contentType := "image/" + strings.TrimPrefix(ext, ".")
-	if err := h.storage.PutObject(objectName, src2, file.Size, contentType); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败: " + err.Error()})
+	if err := h.showService.UpdateThumbnail(c.Request.Context(), id, result.URL); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
 
-	imageURL := h.storage.GetURL(objectName)
-
-	// 删除旧封面文件（如果不同）
-	if show.ThumbnailURL != "" && show.ThumbnailURL != imageURL {
-		oldObjectName := "shows/" + filepath.Base(show.ThumbnailURL)
-		h.storage.DeleteObject(oldObjectName)
-	}
-
-	show.ThumbnailURL = imageURL
-	h.showService.UpdateShow(c.Request.Context(), show)
-
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
 }
 
 // UploadVideo 上传视频文件到MinIO
 func (h *ShowHandler) UploadVideo(c *gin.Context) {
 	id := c.Param("id")
-
 	show, err := h.showService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
 		return
 	}
 
-	file, err := c.FormFile("file")
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(file.Filename))
-	allowedExts := map[string]bool{".mp4": true, ".webm": true, ".mov": true, ".avi": true, ".mkv": true}
-	if !allowedExts[ext] {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的视频格式，支持 mp4/webm/mov/avi/mkv"})
-		return
-	}
-	// 视频最大 1GB
-	if file.Size > 1024*1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "视频大小不能超过 1GB"})
-		return
-	}
-
-	src, err := file.Open()
+	// URL 走代理路由 /media/videos/<filename>（与历史路径兼容）
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            "videos",
+		AllowedExts:    service.VideoExts(),
+		MaxSize:        1024 * 1024 * 1024,
+		ContentTypeFor: service.ContentTypeForVideo,
+		URLFor: func(objectName string) string {
+			// objectName 形如 "videos/<hash>.mp4"
+			return "/media/" + objectName
+		},
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
-		return
-	}
-	defer src.Close()
-
-	hasher := sha256.New()
-	io.Copy(hasher, src)
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	filename := fileHash[:12] + ext
-	objectName := "videos/" + filename
-
-	// 检查文件是否已存在
-	_, err = h.storage.StatObject(objectName)
-	if err == nil {
-		videoURL := "/media/videos/" + filename
-		show.VideoURL = videoURL
-		h.showService.UpdateShow(c.Request.Context(), show)
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": videoURL}})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
 
-	src2, _ := file.Open()
-	defer src2.Close()
-
-	// 上传到存储（MinIO优先，降级本地）
-	contentType := "video/" + strings.TrimPrefix(ext, ".")
-	if err := h.storage.PutObject(objectName, src2, file.Size, contentType); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败: " + err.Error()})
-		return
-	}
-
-	videoURL := "/media/videos/" + filename
-	show.VideoURL = videoURL
+	show.VideoURL = result.URL
 	h.showService.UpdateShow(c.Request.Context(), show)
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": videoURL}})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
 }
 
 // UpdateShow 更新视频信息（需登录）
@@ -345,7 +243,7 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 		show.Duration = *req.Duration
 	}
 	if req.AuthorID != nil {
-		h.resolveAuthor(show, *req.AuthorID)
+		h.showService.ResolveAuthor(c.Request.Context(), show, *req.AuthorID)
 	}
 	if req.Tags != nil {
 		tagsJSON, _ := json.Marshal(req.Tags)
@@ -371,38 +269,14 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 // DeleteShow 删除视频（需登录），同时清理关联的缩略图和视频文件
 func (h *ShowHandler) DeleteShow(c *gin.Context) {
 	id := c.Param("id")
-
-	// 先获取记录，拿到文件路径再删除
-	show, err := h.showService.GetByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "记录不存在"})
-		return
-	}
-
-	thumbnailURL := show.ThumbnailURL
-	videoURL := show.VideoURL
-
 	if err := h.showService.DeleteShow(c.Request.Context(), id); err != nil {
+		if errors.Is(err, service.ErrShowNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "记录不存在"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
-
-	// 清理缩略图文件（存储在MinIO）
-	if thumbnailURL != "" && strings.HasPrefix(thumbnailURL, "/media/shows/") {
-		objectName := "shows/" + filepath.Base(thumbnailURL)
-		h.storage.DeleteObject(objectName)
-	}
-
-	// 清理视频文件（检查是否还有其他 show 引用）
-	if videoURL != "" && strings.HasPrefix(videoURL, "/media/videos/") {
-		objectName := "videos/" + filepath.Base(videoURL)
-		var count int64
-		h.db.Model(&model.Show{}).Where("video_url = ? AND id != ?", videoURL, id).Count(&count)
-		if count == 0 {
-			h.storage.DeleteObject(objectName)
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
 }
 
@@ -431,8 +305,7 @@ func (h *ShowHandler) CreateCategory(c *gin.Context) {
 		SortOrder: req.SortOrder,
 	}
 	if err := h.showService.CreateCategory(c.Request.Context(), cat); err != nil {
-		// 检查是否是唯一约束冲突
-		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+		if errors.Is(err, service.ErrCategoryNameConflict) {
 			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "分类名已存在"})
 			return
 		}
@@ -452,40 +325,32 @@ func (h *ShowHandler) UpdateCategory(c *gin.Context) {
 		return
 	}
 
-	cat, err := h.showService.ListCategories(c.Request.Context())
+	cat, err := h.showService.GetCategoryByID(c.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, service.ErrCategoryNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "分类不存在"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
 		return
 	}
 
-	var target *model.ShowCategory
-	for _, c := range cat {
-		if c.ID == id {
-			target = c
-			break
-		}
-	}
-	if target == nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "分类不存在"})
-		return
-	}
-
 	if req.Name != nil {
-		target.Name = *req.Name
+		cat.Name = *req.Name
 	}
 	if req.SortOrder != nil {
-		target.SortOrder = *req.SortOrder
+		cat.SortOrder = *req.SortOrder
 	}
 
-	if err := h.showService.UpdateCategory(c.Request.Context(), target); err != nil {
-		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+	if err := h.showService.UpdateCategory(c.Request.Context(), cat); err != nil {
+		if errors.Is(err, service.ErrCategoryNameConflict) {
 			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "分类名已存在"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": target})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": cat})
 }
 
 // DeleteCategory 删除分类（需登录）

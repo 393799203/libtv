@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"libtv/internal/config"
 	"libtv/internal/engine"
@@ -33,79 +32,14 @@ func getPublicDir(subdir string) string {
 	return filepath.Join("..", "public", subdir)
 }
 
-// initStorage 初始化存储（支持MinIO降级）
+// initStorage 通过 storage.Create 工厂创建存储实例；
+// 各存储类型（minio/local/fallback）在 storage 包内 init() 自注册
 func initStorage() storage.Storage {
-	cfg := config.C.Storage
-
-	switch cfg.Type {
-	case "minio":
-		// 只使用MinIO
-		checkInterval, _ := time.ParseDuration(cfg.MinIO.CheckInterval)
-		if checkInterval == 0 {
-			checkInterval = 30 * time.Second
-		}
-
-		minioStorage, err := storage.NewMinIOStorage(&storage.MinIOConfig{
-			Endpoint:       cfg.MinIO.Endpoint,
-			AccessKey:      cfg.MinIO.AccessKey,
-			SecretKey:      cfg.MinIO.SecretKey,
-			Bucket:         cfg.MinIO.Bucket,
-			UseSSL:         cfg.MinIO.UseSSL,
-			PublicEndpoint: cfg.MinIO.PublicEndpoint,
-			CheckInterval:  checkInterval,
-		})
-		if err != nil {
-			log.Printf("⚠️ MinIO初始化失败，降级到本地存储: %v", err)
-			localStorage, _ := storage.NewLocalStorage(getPublicDir(""))
-			return localStorage
-		}
-		return minioStorage
-
-	case "local":
-		// 只使用本地存储
-		localStorage, err := storage.NewLocalStorage(getPublicDir(""))
-		if err != nil {
-			log.Fatalf("本地存储初始化失败: %v", err)
-		}
-		return localStorage
-
-	case "fallback":
-		// MinIO优先，本地降级
-		checkInterval, _ := time.ParseDuration(cfg.MinIO.CheckInterval)
-		if checkInterval == 0 {
-			checkInterval = 30 * time.Second
-		}
-
-		minioStorage, err := storage.NewMinIOStorage(&storage.MinIOConfig{
-			Endpoint:       cfg.MinIO.Endpoint,
-			AccessKey:      cfg.MinIO.AccessKey,
-			SecretKey:      cfg.MinIO.SecretKey,
-			Bucket:         cfg.MinIO.Bucket,
-			UseSSL:         cfg.MinIO.UseSSL,
-			PublicEndpoint: cfg.MinIO.PublicEndpoint,
-			CheckInterval:  checkInterval,
-		})
-
-		localStorage, err2 := storage.NewLocalStorage(getPublicDir(""))
-		if err2 != nil {
-			log.Fatalf("本地存储初始化失败: %v", err2)
-		}
-
-		if err != nil {
-			log.Printf("⚠️ MinIO初始化失败，只使用本地存储: %v", err)
-			return localStorage
-		}
-
-		return storage.NewFallbackStorage(minioStorage, localStorage)
-
-	default:
-		// 默认使用本地存储
-		localStorage, err := storage.NewLocalStorage(getPublicDir(""))
-		if err != nil {
-			log.Fatalf("本地存储初始化失败: %v", err)
-		}
-		return localStorage
+	s, err := storage.Create(config.C.Storage, getPublicDir(""))
+	if err != nil {
+		log.Fatalf("存储初始化失败: %v", err)
 	}
+	return s
 }
 
 func main() {
@@ -133,12 +67,18 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	aiTaskRepo := repository.NewAITaskRepo(db)
 	showRepo := repository.NewShowRepo(db)
 	bannerRepo := repository.NewBannerRepo(db)
+	styleRepo := repository.NewStyleRepo(db)
+	categoryRepo := repository.NewCategoryRepo(db)
+	styleFavoriteRepo := repository.NewStyleFavoriteRepo(db)
+
+	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
+	appStorage := initStorage()
 
 	// 初始化 Service
 	userService := service.NewUserService(userRepo)
 	projectService := service.NewProjectService(projectRepo, canvasRepo)
 	canvasService := service.NewCanvasService(canvasRepo)
-	showService := service.NewShowService(showRepo)
+	showService := service.NewShowService(showRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo)
 
 	// 初始化 LLM 客户端
@@ -148,18 +88,23 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	registry := engine.NewDefaultRegistry(llmClient)
 	eng := engine.NewWorkflowEngine(registry)
 
-	// 初始化存储
-	appStorage := initStorage()
+	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
+	fileUploadService := service.NewFileUploadService(appStorage)
+
+	// 风格相关 Service
+	styleService := service.NewStyleService(styleRepo, appStorage)
+	categoryService := service.NewCategoryService(categoryRepo)
+	styleFavoriteService := service.NewStyleFavoriteService(styleFavoriteRepo, styleRepo)
 
 	// 初始化 Handler
-	userHandler := handler.NewUserHandler(userService, db)
+	userHandler := handler.NewUserHandler(userService)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, eng, registry)
-	uploadHandler := handler.NewUploadHandler(appStorage) // 使用新存储
-	styleHandler := handler.NewStyleHandler(db, appStorage) // 使用新存储
-	showHandler := handler.NewShowHandler(showService, appStorage, db) // 使用新存储
-	bannerHandler := handler.NewBannerHandler(bannerService, appStorage, db) // 使用新存储
+	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService)                       // 使用新存储
+	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
+	showHandler := handler.NewShowHandler(showService, fileUploadService)         // 使用新存储
+	bannerHandler := handler.NewBannerHandler(bannerService, appStorage, fileUploadService)   // 使用新存储
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {

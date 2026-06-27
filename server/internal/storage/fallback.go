@@ -7,6 +7,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"libtv/internal/config"
 )
 
 // FallbackStorage 降级存储（MinIO优先，本地降级）
@@ -31,6 +33,40 @@ func NewFallbackStorage(primary, fallback Storage) *FallbackStorage {
 		primary.GetType(), fallback.GetType())
 
 	return fs
+}
+
+func init() {
+	Register("fallback", func(cfg config.StorageConfig, publicDir string) (Storage, error) {
+		// MinIO 优先
+		minioStorage, err := NewMinIOStorage(&MinIOConfig{
+			Endpoint:       cfg.MinIO.Endpoint,
+			AccessKey:      cfg.MinIO.AccessKey,
+			SecretKey:      cfg.MinIO.SecretKey,
+			Bucket:         cfg.MinIO.Bucket,
+			UseSSL:          cfg.MinIO.UseSSL,
+			PublicEndpoint: cfg.MinIO.PublicEndpoint,
+			CheckInterval:  parseCheckInterval(cfg.MinIO.CheckInterval),
+		})
+
+		// 本地存储作为兜底（必须成功）
+		basePath := cfg.Local.BasePath
+		if basePath == "" {
+			basePath = publicDir
+		}
+		localStorage, err2 := NewLocalStorage(basePath)
+		if err2 != nil {
+			return nil, fmt.Errorf("本地存储初始化失败: %w", err2)
+		}
+
+		// MinIO 失败：只使用本地
+		if err != nil {
+			log.Printf("⚠️ MinIO初始化失败，只使用本地存储: %v", err)
+			return localStorage, nil
+		}
+
+		// MinIO 成功：使用降级存储
+		return NewFallbackStorage(minioStorage, localStorage), nil
+	})
 }
 
 // IsAvailable 检查存储是否可用

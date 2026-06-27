@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"libtv/internal/config"
 )
 
 // LocalStorage 本地存储实现
@@ -24,6 +26,16 @@ func NewLocalStorage(basePath string) (*LocalStorage, error) {
 
 	log.Printf("✅ 本地存储初始化成功: %s", basePath)
 	return &LocalStorage{basePath: basePath}, nil
+}
+
+func init() {
+	Register("local", func(cfg config.StorageConfig, publicDir string) (Storage, error) {
+		basePath := cfg.Local.BasePath
+		if basePath == "" {
+			basePath = publicDir
+		}
+		return NewLocalStorage(basePath)
+	})
 }
 
 // IsAvailable 检查存储是否可用

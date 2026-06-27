@@ -26,10 +26,6 @@ func (s *BannerService) GetByID(ctx context.Context, id string) (*model.Banner, 
 	return s.bannerRepo.FindByID(ctx, id)
 }
 
-func (s *BannerService) ListBanners(ctx context.Context) ([]*model.Banner, error) {
-	return s.bannerRepo.ListBanners(ctx)
-}
-
 // ListBannersByStatus 根据状态返回Banner
 func (s *BannerService) ListBannersByStatus(ctx context.Context, isActive bool) ([]*model.Banner, error) {
 	return s.bannerRepo.ListBannersByStatus(ctx, isActive)

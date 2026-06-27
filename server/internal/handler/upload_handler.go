@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"libtv/internal/service"
 	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
@@ -20,12 +21,13 @@ import (
 
 // UploadHandler 上传处理器（支持MinIO降级）
 type UploadHandler struct {
-	storage storage.Storage
+	storage           storage.Storage
+	fileUploadService *service.FileUploadService
 }
 
 // NewUploadHandler 创建上传处理器
-func NewUploadHandler(s storage.Storage) *UploadHandler {
-	return &UploadHandler{storage: s}
+func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService) *UploadHandler {
+	return &UploadHandler{storage: s, fileUploadService: fileUploadService}
 }
 
 // ========== 视频异步转码任务管理 ==========
@@ -279,80 +281,28 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 		return
 	}
 
-	// 获取项目ID（可选参数，用于分文件夹）
 	projectID := c.PostForm("project_id")
 
-	// 第一步：计算哈希用于去重
-	hasher := sha256.New()
-	io.Copy(hasher, file)
-	file.Close()
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	// 用哈希前12位 + 扩展名作为文件名
-	ext := filepath.Ext(header.Filename)
-	if ext == "" {
-		ext = ".png"
-	}
-	filename := fileHash[:12] + ext
-
-	// 根据项目ID确定存储路径
-	var objectName string
-	if projectID != "" {
-		objectName = "canvas/" + projectID + "/" + filename
-	} else {
-		objectName = "canvas/" + filename
-	}
-
-	// 检查文件是否已存在（通过StatObject）
-	_, err = h.storage.StatObject(objectName)
-	if err == nil {
-		// 文件已存在，直接返回已有路径
-		url := h.storage.GetURL(objectName)
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"msg":  "上传成功（已存在）",
-			"data": gin.H{
-				"url":          url,
-				"storage_type": h.storage.GetType(),
-				"filename":     objectName,
-				"cached":       true,
-			},
-		})
-		return
-	}
-
-	// 第二步：重新打开文件进行上传
-	src2, err := header.Open()
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            "canvas",
+		ProjectID:      projectID,
+		DefaultExt:     ".png",
+		AllowedExts:    service.ImageExts(),
+		ContentTypeFor: service.ContentTypeForImage,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
-	defer src2.Close()
-
-	// 判断Content-Type
-	contentType := "image/png"
-	if strings.ToLower(ext) == ".jpg" || strings.ToLower(ext) == ".jpeg" {
-		contentType = "image/jpeg"
-	}
-
-	// 上传到存储（自动降级）
-	err = h.storage.PutObject(objectName, src2, header.Size, contentType)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败"})
-		return
-	}
-
-	// 返回URL（标准响应格式）
-	url := h.storage.GetURL(objectName)
-	storageType := h.storage.GetType()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "上传成功",
 		"data": gin.H{
-			"url":          url,
-			"storage_type": storageType,
-			"filename":     objectName,
+			"url":          result.URL,
+			"storage_type": result.StorageType,
+			"filename":     result.ObjectName,
+			"cached":       result.Cached,
 		},
 	})
 }
@@ -367,83 +317,33 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	// 获取项目ID（可选参数，用于画布上传）
 	projectID := c.PostForm("project_id")
 
-	// 第一步：计算哈希用于去重
-	hasher := sha256.New()
-	io.Copy(hasher, file)
-	file.Close()
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	// 用哈希前12位 + 扩展名作为文件名
-	ext := filepath.Ext(header.Filename)
-	filename := fileHash[:12] + ext
-
-	// 根据项目ID确定存储路径
-	var objectName string
+	// 没有项目ID时存到 images/，有项目ID时存到 canvas/项目ID/
+	dir := "images"
 	if projectID != "" {
-		// 有项目ID：存储到 canvas/项目ID/ 目录（画布上传）
-		objectName = "canvas/" + projectID + "/" + filename
-	} else {
-		// 无项目ID：存储到 images/ 目录（通用图片上传）
-		objectName = "images/" + filename
+		dir = "canvas"
 	}
 
-	// 检查文件是否已存在（通过StatObject）
-	_, err = h.storage.StatObject(objectName)
-	if err == nil {
-		// 文件已存在，直接返回已有路径
-		url := h.storage.GetURL(objectName)
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"msg":  "上传成功（已存在）",
-			"data": gin.H{
-				"url":          url,
-				"storage_type": h.storage.GetType(),
-				"filename":     objectName,
-				"cached":       true,
-			},
-		})
-		return
-	}
-
-	// 第二步：重新打开文件进行上传
-	src2, err := header.Open()
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            dir,
+		ProjectID:      projectID,
+		AllowedExts:    service.ImageExts(),
+		ContentTypeFor: service.ContentTypeForImage,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
-	defer src2.Close()
-
-	// 判断Content-Type
-	contentType := "image/png"
-	if strings.ToLower(ext) == ".jpg" || strings.ToLower(ext) == ".jpeg" {
-		contentType = "image/jpeg"
-	} else if strings.ToLower(ext) == ".gif" {
-		contentType = "image/gif"
-	} else if strings.ToLower(ext) == ".webp" {
-		contentType = "image/webp"
-	}
-
-	// 上传到存储（自动降级）
-	err = h.storage.PutObject(objectName, src2, header.Size, contentType)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败"})
-		return
-	}
-
-	// 返回URL（标准响应格式）
-	url := h.storage.GetURL(objectName)
-	storageType := h.storage.GetType()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "上传成功",
 		"data": gin.H{
-			"url":          url,
-			"storage_type": storageType,
-			"filename":     objectName,
+			"url":          result.URL,
+			"storage_type": result.StorageType,
+			"filename":     result.ObjectName,
+			"cached":       result.Cached,
 		},
 	})
 }
@@ -458,75 +358,34 @@ func (h *UploadHandler) UploadAudio(c *gin.Context) {
 
 	projectID := c.PostForm("project_id")
 
-	hasher := sha256.New()
-	io.Copy(hasher, file)
-	file.Close()
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	ext := filepath.Ext(header.Filename)
-	if ext == "" {
-		ext = ".mp3"
-	}
-	filename := fileHash[:12] + ext
-
-	var objectName string
+	// 有项目ID时存到 canvas/项目ID/，否则存到 audio/
+	dir := "audio"
 	if projectID != "" {
-		objectName = "canvas/" + projectID + "/" + filename
-	} else {
-		objectName = "audio/" + filename
+		dir = "canvas"
 	}
 
-	_, err = h.storage.StatObject(objectName)
-	if err == nil {
-		url := h.storage.GetURL(objectName)
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"msg":  "上传成功（已存在）",
-			"data": gin.H{
-				"url":          url,
-				"storage_type": h.storage.GetType(),
-				"filename":     objectName,
-				"cached":       true,
-			},
-		})
-		return
-	}
-
-	src2, err := header.Open()
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            dir,
+		ProjectID:      projectID,
+		DefaultExt:     ".mp3",
+		AllowedExts: map[string]bool{
+			".mp3": true, ".wav": true, ".ogg": true, ".m4a": true, ".flac": true,
+		},
+		ContentTypeFor: service.ContentTypeForAudio,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
-	defer src2.Close()
-
-	contentType := "audio/mpeg"
-	switch strings.ToLower(ext) {
-	case ".wav":
-		contentType = "audio/wav"
-	case ".ogg":
-		contentType = "audio/ogg"
-	case ".m4a":
-		contentType = "audio/mp4"
-	case ".flac":
-		contentType = "audio/flac"
-	}
-
-	err = h.storage.PutObject(objectName, src2, header.Size, contentType)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败"})
-		return
-	}
-
-	url := h.storage.GetURL(objectName)
-	storageType := h.storage.GetType()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "上传成功",
 		"data": gin.H{
-			"url":          url,
-			"storage_type": storageType,
-			"filename":     objectName,
+			"url":          result.URL,
+			"storage_type": result.StorageType,
+			"filename":     result.ObjectName,
+			"cached":       result.Cached,
 		},
 	})
 }

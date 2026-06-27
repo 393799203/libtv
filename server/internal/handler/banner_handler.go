@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -13,17 +10,16 @@ import (
 	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 type BannerHandler struct {
-	bannerService *service.BannerService
-	storage       storage.Storage
-	db            *gorm.DB
+	bannerService     *service.BannerService
+	storage           storage.Storage
+	fileUploadService *service.FileUploadService
 }
 
-func NewBannerHandler(bannerService *service.BannerService, storage storage.Storage, db *gorm.DB) *BannerHandler {
-	return &BannerHandler{bannerService: bannerService, storage: storage, db: db}
+func NewBannerHandler(bannerService *service.BannerService, storage storage.Storage, fileUploadService *service.FileUploadService) *BannerHandler {
+	return &BannerHandler{bannerService: bannerService, storage: storage, fileUploadService: fileUploadService}
 }
 
 // ========== 公开接口 ==========
@@ -111,53 +107,24 @@ func (h *BannerHandler) CreateBanner(c *gin.Context) {
 
 // UploadImage 上传Banner图片（不需要Banner ID）
 func (h *BannerHandler) UploadImage(c *gin.Context) {
-	file, err := c.FormFile("file")
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(file.Filename))
-	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
-	if !allowedExts[ext] {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不支持的图片格式，支持 jpg/jpeg/png/webp/gif"})
-		return
-	}
-
-	if file.Size > 50*1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "图片大小不能超过 50MB"})
-		return
-	}
-
-	src, err := file.Open()
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            "banners",
+		AllowedExts:    service.ImageExts(),
+		MaxSize:        50 * 1024 * 1024,
+		ContentTypeFor: service.ContentTypeForImage,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "读取文件失败"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
 		return
 	}
-	defer src.Close()
 
-	// 计算哈希用于去重
-	hasher := sha256.New()
-	io.Copy(hasher, src)
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-
-	filename := fileHash[:12] + ext
-	objectName := "banners/" + filename
-
-	// 检查文件是否已存在
-	_, err = h.storage.StatObject(objectName)
-	if err != nil {
-		// 文件不存在，上传新文件
-		src.Seek(0, 0)
-		contentType := "image/" + strings.TrimPrefix(ext, ".")
-		if err := h.storage.PutObject(objectName, src, file.Size, contentType); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "上传失败: " + err.Error()})
-			return
-		}
-	}
-
-	imageURL := h.storage.GetURL(objectName)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": imageURL}})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
 }
 
 // UpdateBanner 更新Banner信息（需登录）

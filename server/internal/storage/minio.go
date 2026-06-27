@@ -5,20 +5,25 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"libtv/internal/config"
 )
 
 // MinIOStorage MinIO存储实现
+//
+// 可用性检测采用后台 ticker goroutine 定时刷新 available（atomic.Bool），
+// IsAvailable() 只读，避免并发读写 data race。
 type MinIOStorage struct {
 	client         *minio.Client
 	bucket         string
 	publicEndpoint string
-	available      bool
-	lastCheckTime  time.Time
-	checkInterval  time.Duration
+	available      atomic.Bool
+	stop           chan struct{}
 }
 
 // MinIOConfig MinIO配置
@@ -53,8 +58,7 @@ func NewMinIOStorage(cfg *MinIOConfig) (*MinIOStorage, error) {
 		client:         client,
 		bucket:         cfg.Bucket,
 		publicEndpoint: cfg.PublicEndpoint,
-		checkInterval:  checkInterval,
-		available:      false,
+		stop:           make(chan struct{}),
 	}
 
 	// 确保bucket存在
@@ -74,37 +78,64 @@ func NewMinIOStorage(cfg *MinIOConfig) (*MinIOStorage, error) {
 		log.Printf("✅ MinIO bucket创建成功: %s", cfg.Bucket)
 	}
 
-	// 初始检查可用性
-	storage.checkAvailability()
+	// 立即执行一次可用性检查，再启动后台 ticker 定时刷新
+	storage.refreshAvailability()
+	go storage.startAvailabilityChecker(checkInterval)
 
 	return storage, nil
 }
 
-// checkAvailability 检查MinIO可用性
-func (m *MinIOStorage) checkAvailability() {
-	// 如果距离上次检查时间小于检查间隔，直接返回
-	if time.Since(m.lastCheckTime) < m.checkInterval && m.lastCheckTime != (time.Time{}) {
-		return
+// startAvailabilityChecker 后台定时刷新 available 字段
+func (m *MinIOStorage) startAvailabilityChecker(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+			m.refreshAvailability()
+		}
 	}
+}
 
+// refreshAvailability 执行一次 MinIO 可用性探测并更新 available
+func (m *MinIOStorage) refreshAvailability() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	_, err := m.client.ListBuckets(ctx)
-	m.available = (err == nil)
-	m.lastCheckTime = time.Now()
+	m.available.Store(err == nil)
 
-	if m.available {
+	if err == nil {
 		log.Printf("✅ MinIO可用: %s", m.client.EndpointURL())
 	} else {
 		log.Printf("⚠️ MinIO不可用: %v", err)
 	}
 }
 
-// IsAvailable 检查存储是否可用
+// Close 停止后台可用性检查 goroutine
+func (m *MinIOStorage) Close() {
+	close(m.stop)
+}
+
+func init() {
+	Register("minio", func(cfg config.StorageConfig, publicDir string) (Storage, error) {
+		return NewMinIOStorage(&MinIOConfig{
+			Endpoint:       cfg.MinIO.Endpoint,
+			AccessKey:      cfg.MinIO.AccessKey,
+			SecretKey:      cfg.MinIO.SecretKey,
+			Bucket:         cfg.MinIO.Bucket,
+			UseSSL:         cfg.MinIO.UseSSL,
+			PublicEndpoint: cfg.MinIO.PublicEndpoint,
+			CheckInterval:  parseCheckInterval(cfg.MinIO.CheckInterval),
+		})
+	})
+}
+
+// IsAvailable 检查存储是否可用（只读 atomic.Bool，避免 data race）
 func (m *MinIOStorage) IsAvailable() bool {
-	m.checkAvailability()
-	return m.available
+	return m.available.Load()
 }
 
 // GetType 获取存储类型

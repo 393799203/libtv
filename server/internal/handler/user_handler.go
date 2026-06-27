@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"libtv/internal/middleware"
@@ -8,16 +9,16 @@ import (
 	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
+// UserHandler 处理用户相关 HTTP 请求
+// 仅做参数解析与协议转换，业务逻辑全部下放到 UserService
 type UserHandler struct {
 	userService *service.UserService
-	db          *gorm.DB
 }
 
-func NewUserHandler(userService *service.UserService, db *gorm.DB) *UserHandler {
-	return &UserHandler{userService: userService, db: db}
+func NewUserHandler(userService *service.UserService) *UserHandler {
+	return &UserHandler{userService: userService}
 }
 
 type RegisterRequest struct {
@@ -32,8 +33,8 @@ type LoginRequest struct {
 }
 
 type AuthResponse struct {
-	Token string      `json:"token"`
-	User  model.User  `json:"user"`
+	Token string     `json:"token"`
+	User  model.User `json:"user"`
 }
 
 func (h *UserHandler) Register(c *gin.Context) {
@@ -80,16 +81,11 @@ func (h *UserHandler) Me(c *gin.Context) {
 
 // List 获取所有用户列表（管理员）
 func (h *UserHandler) List(c *gin.Context) {
-	keyword := c.Query("keyword")
-
-	query := h.db.Order("created_at DESC")
-	if keyword != "" {
-		query = query.Where("nickname LIKE ? OR email LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	users, err := h.userService.List(c.Request.Context(), c.Query("keyword"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		return
 	}
-
-	var users []model.User
-	query.Find(&users)
-
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
@@ -102,56 +98,26 @@ func (h *UserHandler) List(c *gin.Context) {
 // Delete 删除用户（管理员）
 func (h *UserHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
-
-	// 检查是否存在
-	var user model.User
-	if result := h.db.Where("id = ?", id).First(&user); result.Error != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
-		return
-	}
-
-	// 不允许删除自己（通过 context 获取当前用户）
 	currentUserID := middleware.GetUserID(c)
-	if user.ID == currentUserID {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能删除自己的账号"})
-		return
-	}
 
-	// 删除用户关联的数据（按外键依赖顺序级联删除）
-	// 1) 先查出该用户的所有 project ID
-	var projectIDs []string
-	h.db.Model(&model.Project{}).Where("user_id = ?", user.ID).Pluck("id", &projectIDs)
-
-	if len(projectIDs) > 0 {
-		// 2) 删除 ai_tasks（通过 workflow_executions 的 execution_id）
-		var execIDs []int64
-		h.db.Model(&model.WorkflowExecution{}).Where("project_id IN ?", projectIDs).Pluck("id", &execIDs)
-		if len(execIDs) > 0 {
-			h.db.Where("execution_id IN ?", execIDs).Delete(&model.AITask{})
+	err := h.userService.Delete(c.Request.Context(), id, currentUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrCannotDeleteSelf):
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能删除自己的账号"})
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除失败：" + err.Error()})
 		}
-		// 3) 删除 workflow_executions
-		h.db.Where("project_id IN ?", projectIDs).Delete(&model.WorkflowExecution{})
-		// 4) 删除 canvases
-		h.db.Where("project_id IN ?", projectIDs).Delete(&model.Canvas{})
-	}
-	// 5) 删除 projects
-	h.db.Where("user_id = ?", user.ID).Delete(&model.Project{})
-	// 6) 删除风格收藏
-	h.db.Where("user_id = ?", user.ID).Delete(&model.StyleFavorite{})
-
-	// 最后删除用户
-	if err := h.db.Delete(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除失败：" + err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
 }
 
 // UpdateRole 更新用户角色（管理员）
 func (h *UserHandler) UpdateRole(c *gin.Context) {
 	id := c.Param("id")
-
 	var req struct {
 		Role string `json:"role" binding:"required,oneof=user admin"`
 	}
@@ -160,25 +126,20 @@ func (h *UserHandler) UpdateRole(c *gin.Context) {
 		return
 	}
 
-	// 检查用户是否存在
-	var user model.User
-	if result := h.db.Where("id = ?", id).First(&user); result.Error != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
-		return
-	}
-
-	// 不允许修改自己的角色
 	currentUserID := middleware.GetUserID(c)
-	if user.ID == currentUserID {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能修改自己的角色"})
+	user, err := h.userService.UpdateRole(c.Request.Context(), id, req.Role, currentUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrCannotModifySelf):
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能修改自己的角色"})
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
+		case errors.Is(err, service.ErrInvalidRole):
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "角色必须是 user 或 admin"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败：" + err.Error()})
+		}
 		return
 	}
-
-	// 更新角色
-	if err := h.db.Model(&user).Update("role", req.Role).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败：" + err.Error()})
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": user})
 }
