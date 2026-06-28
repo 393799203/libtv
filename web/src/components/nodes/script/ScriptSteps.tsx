@@ -55,7 +55,7 @@ export const ScriptSteps = memo<ScriptStepsProps>(function ScriptSteps({ current
             {/* 连接线 */}
             {idx < STEPS.length - 1 && (
               <div
-                className={`w-8 h-px ${
+                className={`w-8 h-px pb-4 ${
                   step.key < currentStep ? 'bg-green-400' : 'bg-gray-200'
                 }`}
               />
