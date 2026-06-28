@@ -127,9 +127,10 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
 
       {/* 节点内容 */}
       <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 relative`}>
-        {(status === 'running' || status === 'pending') ? (
-          // 统一骨架屏：所有节点 running/pending 时展示
-          <div className={`flex flex-col h-full w-full justify-center gap-2 ${noContentPadding ? 'px-3 py-2' : 'px-4 py-3'}`}>
+        {/* 脚本节点使用自己的 ScriptCard 处理 generating 状态，其他节点使用通用骨架屏 */}
+        {(status === 'running' || status === 'pending') && nodeType !== 'script' ? (
+          // 统一骨架屏：非脚本节点 running/pending 时展示（不额外设置 padding，继承外层）
+          <div className="flex flex-col h-full w-full justify-center gap-2">
             <div className="grid grid-cols-2 gap-x-3 gap-y-2 flex-1">
               {Array.from({ length: 10 }).map((_, i) => (
                 <div

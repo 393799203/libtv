@@ -423,8 +423,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         </div>
       )}
 
-      {/* 分辨率/比例（仅图片/视频节点，非文本和音频） */}
-      {nodeType !== 'text' && !isAudio && (
+      {/* 分辨率/比例（仅图片/视频节点） */}
+      {(nodeType === 'image' || nodeType === 'video') && (
         <AspectRatioSelector
           resolution={selectedResolution}
           aspectRatio={selectedAspectRatio}
@@ -434,7 +434,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       )}
 
       {/* 分隔（仅图片/视频节点） */}
-      {nodeType !== 'text' && !isAudio && (
+      {(nodeType === 'image' || nodeType === 'video') && (
         <span className="w-px h-4 bg-gray-200 mx-0.5" />
       )}
 
@@ -467,7 +467,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       {/* 右侧区域 */}
       <div className="flex items-center gap-0.5 ml-auto">
         {/* 生成数量（仅图片/视频节点） */}
-        {!isAudio && nodeType !== 'text' && (
+        {(nodeType === 'image' || nodeType === 'video') && (
         <div className="relative">
           <button
             onClick={() => setCountOpen(!countOpen)}
