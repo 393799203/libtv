@@ -1,15 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Dropdown, Avatar, Space, Button, App } from 'antd';
 import {
   VideoCameraOutlined,
- UserOutlined,
+  UserOutlined,
   LogoutOutlined,
   ControlOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
-import { LoginModal } from '@/components/auth/LoginModal';
 
 const { Header: AntHeader, Content } = Layout;
 
@@ -22,11 +21,6 @@ export function AppLayout() {
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
   const navigate = useNavigate();
   const location = useLocation();
-
-  // 应用启动时初始化认证状态
-  useEffect(() => {
-    useAuthStore.getState().initialize();
-  }, []);
 
   const handleLogout = () => {
     logout();
@@ -47,7 +41,6 @@ export function AppLayout() {
         <Content className="relative overflow-hidden">
           <Outlet />
         </Content>
-        <LoginModal />
       </Layout>
     );
   }
@@ -57,7 +50,6 @@ export function AppLayout() {
     return (
       <Layout className="h-screen flex items-center justify-center">
         <div className="text-gray-400">加载中...</div>
-        <LoginModal />
       </Layout>
     );
   }
@@ -117,8 +109,6 @@ export function AppLayout() {
       <Content className="bg-white overflow-auto">
         <Outlet />
       </Content>
-
-      <LoginModal />
     </Layout>
   );
 }

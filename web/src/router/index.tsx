@@ -2,11 +2,13 @@ import { lazy, Suspense } from 'react';
 import {
   createBrowserRouter,
   Navigate,
+  Outlet,
   type RouteObject,
 } from 'react-router-dom';
 import { Spin } from 'antd';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { GlobalComponents } from '@/components/GlobalComponents';
 
 // 懒加载页面
 const WorkspacePage = lazy(() => import('@/pages/workspace/WorkspacePage'));
@@ -26,63 +28,73 @@ const LazyLoad = ({ children }: { children: React.ReactNode }) => (
 );
 
 export const routes: RouteObject[] = [
-  // 视频详情页（全屏，公开，无需登录）
   {
-    path: 'videos/:id',
     element: (
-      <LazyLoad>
-        <VideoDetailPage />
-      </LazyLoad>
+      <>
+        <GlobalComponents />
+        <Outlet />
+      </>
     ),
-  },
-  {
-    path: '/',
-    element: <AppLayout />,
     children: [
+      // 视频详情页（全屏，公开，无需登录）
       {
-        index: true,
+        path: 'videos/:id',
         element: (
           <LazyLoad>
-            <VideoListPage />
+            <VideoDetailPage />
           </LazyLoad>
         ),
       },
-      // 需要认证的页面：用 AuthGuard 包裹
       {
-        path: 'project/:projectId',
-        element: (
-          <AuthGuard>
-            <LazyLoad>
-              <WorkspacePage />
-            </LazyLoad>
-          </AuthGuard>
-        ),
+        path: '/',
+        element: <AppLayout />,
+        children: [
+          {
+            index: true,
+            element: (
+              <LazyLoad>
+                <VideoListPage />
+              </LazyLoad>
+            ),
+          },
+          // 需要认证的页面：用 AuthGuard 包裹
+          {
+            path: 'project/:projectId',
+            element: (
+              <AuthGuard>
+                <LazyLoad>
+                  <WorkspacePage />
+                </LazyLoad>
+              </AuthGuard>
+            ),
+          },
+          {
+            path: 'ai-models',
+            element: (
+              <AuthGuard>
+                <LazyLoad>
+                  <AIModelsPage />
+                </LazyLoad>
+              </AuthGuard>
+            ),
+          },
+          {
+            path: 'admin/:tab?',
+            element: (
+              <AuthGuard>
+                <LazyLoad>
+                  <AdminPage />
+                </LazyLoad>
+              </AuthGuard>
+            ),
+          },
+        ],
       },
       {
-        path: 'ai-models',
-        element: (
-          <AuthGuard>
-            <LazyLoad>
-              <AIModelsPage />
-            </LazyLoad>
-          </AuthGuard>
-        ),
-      },
-      {
-        path: 'admin/:tab?',
-        element: (
-          <AuthGuard>
-            <LazyLoad>
-              <AdminPage />
-            </LazyLoad>
-          </AuthGuard>
-        ),
+        path: '*',
+        element: <Navigate to="/" replace />,
       },
     ],
-  },
-  {
-    path: '*',
-    element: <Navigate to="/" replace />,
   },
 ];
 
