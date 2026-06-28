@@ -116,10 +116,12 @@ export function useExecutionStream(
           console.log('[SSE] poll result:', exec.status);
 
           const store = useCanvasStore.getState();
+          // normalize status（后端可能返回不同大小写）
+          const status = (exec.status || '').toLowerCase();
 
           // 终态：写入最终数据并收尾
-          if (exec.status === 'done' || exec.status === 'failed') {
-            const finalStatus = exec.status === 'done' ? ('success' as const) : ('failed' as const);
+          if (status === 'done' || status === 'failed') {
+            const finalStatus = status === 'done' ? ('success' as const) : ('failed' as const);
 
             // 如果后端返回了节点数据，直接更新该节点
             if (nodeId && exec.node_data) {
@@ -147,8 +149,8 @@ export function useExecutionStream(
 
           // running 期间：把后端节点的最新 data 同步到画布
           // - 这样即使 SSE 断了，用户也能看到脚本/分镜内容陆续刷出来
-          // - 不会清掉 progressMessage，保持显示
-          if (exec.status === 'running' && nodeId && exec.node_data) {
+          // - 设置 progressMessage 为"继续运行中"
+          if (status === 'running' && nodeId && exec.node_data) {
             // node_data 里可能已经包含 scriptContent/shots/characters 等，
             // 合并到当前节点上，但不覆盖 status（保持 running）
             const { status: _ignored, progressMessage: _pm, ...rest } = exec.node_data as Record<string, unknown> & {
@@ -157,7 +159,15 @@ export function useExecutionStream(
             };
             void _ignored;
             void _pm;
-            store.updateNodeData(nodeId, rest as never);
+            store.updateNodeData(nodeId, {
+              ...rest,
+              progressMessage: '继续运行中',
+            } as never);
+          } else if (status === 'running' && nodeId) {
+            // 没有 node_data 时，只更新 progressMessage
+            store.updateNodeData(nodeId, {
+              progressMessage: '继续运行中',
+            } as never);
           }
         } catch (e) {
           console.warn('[SSE] polling getStatus failed:', e);

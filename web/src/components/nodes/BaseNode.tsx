@@ -100,9 +100,17 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         <div className="flex items-center gap-2 flex-shrink-0">
           {headerRight}
           {status !== 'idle' && (
-            <Tooltip title={data.error || undefined} placement="bottom">
+            status === 'failed' && data.error ? (
+              <Tooltip
+                title={data.error}
+                placement="bottom"
+                overlayInnerStyle={{ maxWidth: 400, width: 'auto' }}
+              >
+                <Badge status="error" />
+              </Tooltip>
+            ) : (
               <Badge status={statusColorMap[status] as 'default' | 'processing' | 'success' | 'error'} />
-            </Tooltip>
+            )
           )}
         </div>
       </div>
@@ -120,8 +128,8 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       {/* 节点内容 */}
       <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 relative`}>
         {(status === 'running' || status === 'pending') ? (
-          // 统一骨架屏：所有节点 running/pending 时展示（左右两列 + 中间耗时，高度与原始内容一致）
-          <div className="flex flex-col h-full w-full justify-center gap-2 px-4 py-3">
+          // 统一骨架屏：所有节点 running/pending 时展示
+          <div className={`flex flex-col h-full w-full justify-center gap-2 ${noContentPadding ? 'px-3 py-2' : 'px-4 py-3'}`}>
             <div className="grid grid-cols-2 gap-x-3 gap-y-2 flex-1">
               {Array.from({ length: 10 }).map((_, i) => (
                 <div
