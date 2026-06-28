@@ -7,7 +7,7 @@ import type {
   ScriptProp,
 } from '@/types/canvas';
 import { uploadImage } from '@/services/uploadApi';
-import { CharacterEditDrawer } from './CharacterEditDrawer';
+import { AssetEditDrawer } from './AssetEditDrawer';
 
 // ---- 单个资产卡片（角色/场景/道具通用）----
 interface AssetCardProps<T extends { name: string; description: string; imageUrl?: string }> {
@@ -178,7 +178,12 @@ function AssetSection<
         <p className="text-xs text-gray-500 leading-relaxed">
           {items.map((item) => (
             <span key={item.name}>
-              <strong>{item.name}</strong>：{item.description}{' '}
+              <strong>{item.name}</strong>：
+              {item.description
+                .replace(/【三视图要求】[^\n]*/g, '')
+                .replace(/【四视图要求】[^\n]*/g, '')
+                .replace(/【六视图要求】[^\n]*/g, '')
+                .trim()}{' '}
             </span>
           ))}
         </p>
@@ -201,9 +206,11 @@ interface AssetPreparationPanelProps {
 
 export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
   function AssetPreparationPanel({ data, onUpdate }) {
-    // 当前编辑中的角色
+    // 当前编辑中的资产（角色/场景/道具）
     const [editingCharacter, setEditingCharacter] =
       useState<ScriptCharacter | null>(null);
+    const [editingScene, setEditingScene] = useState<ScriptScene | null>(null);
+    const [editingProp, setEditingProp] = useState<ScriptProp | null>(null);
 
     // 角色图片上传
     const handleCharacterUpload = useCallback(
@@ -242,6 +249,25 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           s.name === name ? { ...s, imageUrl: url } : s
         );
         onUpdate({ scenes: updated });
+        // 同步更新编辑中的场景（侧屏打开时实时刷新）
+        setEditingScene((prev) =>
+          prev && prev.name === name ? { ...prev, imageUrl: url } : prev
+        );
+      },
+      [data.scenes, onUpdate]
+    );
+
+    // 场景描述变更（失焦时自动保存）
+    const handleSceneDescriptionChange = useCallback(
+      (name: string, description: string) => {
+        const updated = data.scenes.map((s) =>
+          s.name === name ? { ...s, description } : s
+        );
+        onUpdate({ scenes: updated });
+        // 同步更新编辑中的场景（侧屏打开时实时刷新）
+        setEditingScene((prev) =>
+          prev && prev.name === name ? { ...prev, description } : prev
+        );
       },
       [data.scenes, onUpdate]
     );
@@ -253,6 +279,25 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           p.name === name ? { ...p, imageUrl: url } : p
         );
         onUpdate({ props: updated });
+        // 同步更新编辑中的道具（侧屏打开时实时刷新）
+        setEditingProp((prev) =>
+          prev && prev.name === name ? { ...prev, imageUrl: url } : prev
+        );
+      },
+      [data.props, onUpdate]
+    );
+
+    // 道具描述变更（失焦时自动保存）
+    const handlePropDescriptionChange = useCallback(
+      (name: string, description: string) => {
+        const updated = data.props.map((p) =>
+          p.name === name ? { ...p, description } : p
+        );
+        onUpdate({ props: updated });
+        // 同步更新编辑中的道具（侧屏打开时实时刷新）
+        setEditingProp((prev) =>
+          prev && prev.name === name ? { ...prev, description } : prev
+        );
       },
       [data.props, onUpdate]
     );
@@ -272,6 +317,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           title="场景"
           items={data.scenes || []}
           onUpload={handleSceneUpload}
+          onCardClick={(item) => setEditingScene(item as ScriptScene)}
         />
 
         {/* 道具 */}
@@ -279,6 +325,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           title="道具"
           items={data.props || []}
           onUpload={handlePropUpload}
+          onCardClick={(item) => setEditingProp(item as ScriptProp)}
         />
 
         {/* 底部提示 */}
@@ -290,42 +337,34 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           </div>
         )}
 
-        {/* 校验提示 */}
-        {(() => {
-          const missingChars =
-            (data.characters || []).filter((c) => !c.imageUrl).length;
-          const missingScenes =
-            (data.scenes || []).filter((s) => !s.imageUrl).length;
-          const missingProps =
-            (data.props || []).filter((p) => !p.imageUrl).length;
-
-          if (!missingChars && !missingScenes && !missingProps) return null;
-
-          const parts: string[] = [];
-          if (missingChars > 0)
-            parts.push(`${missingChars} 个人物角色`);
-          if (missingScenes > 0)
-            parts.push(`${missingScenes} 个场景`);
-          if (missingProps > 0)
-            parts.push(`${missingProps} 个道具`);
-
-          return (
-            <div className="mt-4 pt-3 border-t border-orange-100 flex items-start gap-1.5">
-              <span className="text-orange-400 mt-0.5">⚠</span>
-              <p className="text-xs text-orange-600 leading-relaxed">
-                检测到有{parts.join('和')}没有设定图，您可以手动上传或让AI批量生成
-              </p>
-            </div>
-          );
-        })()}
-
         {/* 角色编辑侧屏 */}
-        <CharacterEditDrawer
+        <AssetEditDrawer
           open={!!editingCharacter}
-          character={editingCharacter}
+          assetType="character"
+          asset={editingCharacter}
           onClose={() => setEditingCharacter(null)}
           onUpload={handleCharacterUpload}
           onDescriptionChange={handleCharacterDescriptionChange}
+        />
+
+        {/* 场景编辑侧屏 */}
+        <AssetEditDrawer
+          open={!!editingScene}
+          assetType="scene"
+          asset={editingScene}
+          onClose={() => setEditingScene(null)}
+          onUpload={handleSceneUpload}
+          onDescriptionChange={handleSceneDescriptionChange}
+        />
+
+        {/* 道具编辑侧屏 */}
+        <AssetEditDrawer
+          open={!!editingProp}
+          assetType="prop"
+          asset={editingProp}
+          onClose={() => setEditingProp(null)}
+          onUpload={handlePropUpload}
+          onDescriptionChange={handlePropDescriptionChange}
         />
       </div>
     );

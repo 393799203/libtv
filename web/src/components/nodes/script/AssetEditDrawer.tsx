@@ -1,28 +1,38 @@
 import { memo, useState, useRef, useCallback, useEffect } from 'react';
 import { Drawer, message } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
-import type { ScriptCharacter } from '@/types/canvas';
+import type {
+  ScriptCharacter,
+  ScriptScene,
+  ScriptProp,
+} from '@/types/canvas';
 import { uploadImage } from '@/services/uploadApi';
 
-interface CharacterEditDrawerProps {
+type AssetType = 'character' | 'scene' | 'prop';
+type Asset = ScriptCharacter | ScriptScene | ScriptProp;
+
+interface AssetEditDrawerProps {
   open: boolean;
-  character: ScriptCharacter | null;
+  assetType: AssetType;
+  asset: Asset | null;
   onClose: () => void;
-  /** 图片上传后更新角色 */
+  /** 图片上传后更新资产 */
   onUpload: (name: string, url: string) => void;
-  /** 角色描述变更（失焦时自动保存） */
+  /** 资产描述变更（失焦时自动保存） */
   onDescriptionChange: (name: string, description: string) => void;
 }
 
 /**
- * 角色编辑侧屏
- * - 顶部大图区域，可点击上传 / 右上角按钮基于描述生成三视图
- * - 角色名称只读、角色描述可编辑（失焦自动保存）
+ * 通用资产编辑侧屏（角色/场景/道具）
+ * - 顶部大图区域，可点击上传 / 右上角按钮基于描述生成视图
+ * - 资产名称只读、资产描述可编辑（失焦自动保存）
+ * - 根据资产类型显示不同的额外属性
  */
-export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
-  function CharacterEditDrawer({
+export const AssetEditDrawer = memo<AssetEditDrawerProps>(
+  function AssetEditDrawer({
     open,
-    character,
+    assetType,
+    asset,
     onClose,
     onUpload,
     onDescriptionChange,
@@ -35,13 +45,13 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
     const [descriptionDraft, setDescriptionDraft] = useState('');
     const [savedDescription, setSavedDescription] = useState('');
 
-    // 切换角色时同步本地草稿
+    // 切换资产时同步本地草稿
     useEffect(() => {
-      if (character) {
-        setDescriptionDraft(character.description || '');
-        setSavedDescription(character.description || '');
+      if (asset) {
+        setDescriptionDraft(asset.description || '');
+        setSavedDescription(asset.description || '');
       }
-    }, [character?.name, character?.description, character]);
+    }, [asset?.name, asset?.description, asset]);
 
     // 关闭时重置状态
     useEffect(() => {
@@ -61,11 +71,11 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
     const handleFileChange = useCallback(
       async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file || !character) return;
+        if (!file || !asset) return;
         setUploading(true);
         try {
           const url = await uploadImage(file);
-          onUpload(character.name, url);
+          onUpload(asset.name, url);
           message.success('上传成功');
         } catch {
           message.error('上传失败');
@@ -74,24 +84,34 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
           if (fileInputRef.current) fileInputRef.current.value = '';
         }
       },
-      [character, onUpload]
+      [asset, onUpload]
     );
 
     /**
-     * 基于角色描述生成三视图
+     * 基于资产描述生成视图
      * 目前为占位：使用 description 作为 prompt 提示给用户，后续接入真实生图 API
      */
     const handleGenerate = useCallback(() => {
-      if (!character) return;
+      if (!asset) return;
       setGenerating(true);
-      // TODO: 接入后端生图接口（image executor），传入 character.description 作为 prompt
-      message.loading({ content: '正在生成三视图…', key: 'gen', duration: 0 });
+      // TODO: 接入后端生图接口（image executor），传入 asset.description 作为 prompt
+      const viewText =
+        assetType === 'character'
+          ? '三视图'
+          : assetType === 'scene'
+            ? '四视图'
+            : '六视图';
+      message.loading({
+        content: `正在生成${viewText}…`,
+        key: 'gen',
+        duration: 0,
+      });
       setTimeout(() => {
         message.destroy('gen');
         message.info('生图接口待接入，当前仅作演示');
         setGenerating(false);
       }, 2000);
-    }, [character]);
+    }, [asset, assetType]);
 
     /** 描述输入 */
     const handleDescriptionChange = useCallback(
@@ -103,15 +123,104 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
 
     /** 描述失焦：与上次保存值不同则保存 */
     const handleDescriptionBlur = useCallback(() => {
-      if (!character) return;
+      if (!asset) return;
       if (descriptionDraft === savedDescription) return;
-      onDescriptionChange(character.name, descriptionDraft);
+      onDescriptionChange(asset.name, descriptionDraft);
       setSavedDescription(descriptionDraft);
-    }, [character, descriptionDraft, savedDescription, onDescriptionChange]);
+    }, [asset, descriptionDraft, savedDescription, onDescriptionChange]);
+
+    /** 获取资产类型的标题 */
+    const getTitle = () => {
+      switch (assetType) {
+        case 'character':
+          return '编辑角色';
+        case 'scene':
+          return '编辑场景';
+        case 'prop':
+          return '编辑道具';
+      }
+    };
+
+    /** 获取图片区域的标签 */
+    const getImageLabel = () => {
+      switch (assetType) {
+        case 'character':
+          return '角色形象';
+        case 'scene':
+          return '场景图';
+        case 'prop':
+          return '道具图';
+      }
+    };
+
+    /** 获取描述占位符 */
+    const getDescriptionPlaceholder = () => {
+      switch (assetType) {
+        case 'character':
+          return '请输入角色描述，例如：年龄、性别、发型、服装、性格、三视图要求等';
+        case 'scene':
+          return '请输入场景描述，包含：空间布局、环境氛围、主要元素、风格特征、四视图要求等';
+        case 'prop':
+          return '请输入道具描述，包含：基本外观、细节特征、功能提示、风格调性、六视图要求等';
+      }
+    };
+
+    /** 渲染资产特定属性 */
+    const renderExtraFields = () => {
+      if (!asset) return null;
+
+      if (assetType === 'scene') {
+        const scene = asset as ScriptScene;
+        return (
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <div className="text-xs font-medium text-gray-700 mb-1">
+                时段
+              </div>
+              <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
+                {scene.timeOfDay}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-gray-700 mb-1">
+                地点
+              </div>
+              <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
+                {scene.location}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-gray-700 mb-1">
+                氛围
+              </div>
+              <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
+                {scene.mood}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      if (assetType === 'prop') {
+        const prop = asset as ScriptProp;
+        return (
+          <div>
+            <div className="text-xs font-medium text-gray-700 mb-2">
+              分类
+            </div>
+            <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
+              {prop.category}
+            </div>
+          </div>
+        );
+      }
+
+      return null;
+    };
 
     return (
       <Drawer
-        title="编辑角色"
+        title={getTitle()}
         placement="right"
         open={open}
         onClose={onClose}
@@ -119,22 +228,22 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
         destroyOnClose
         styles={{ body: { padding: '16px 20px' } }}
       >
-        {character ? (
+        {asset ? (
           <div className="flex flex-col gap-4">
-            {/* 角色形象区 */}
+            {/* 图片区域 */}
             <div>
               <div className="text-xs font-medium text-gray-700 mb-2">
-                角色形象
+                {getImageLabel()}
               </div>
               <div
                 className="relative w-full h-[320px] rounded-lg border border-gray-200 bg-gray-50 overflow-hidden group"
                 onClick={handleImageClick}
               >
-                {character.imageUrl ? (
+                {asset.imageUrl ? (
                   <>
                     <img
-                      src={character.imageUrl}
-                      alt={character.name}
+                      src={asset.imageUrl}
+                      alt={asset.name}
                       className="w-full h-full object-contain bg-white"
                     />
                     {/* 悬浮遮罩 */}
@@ -149,13 +258,13 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
                     {uploading || generating ? (
                       <LoadingOutlined className="text-2xl animate-spin" />
                     ) : (
-                      <span className="text-xs">生成或上传角色图</span>
+                      <span className="text-xs">生成或上传参考图</span>
                     )}
                   </div>
                 )}
 
                 {/* 右上角生成按钮 */}
-                {character.description && (
+                {asset.description && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -163,7 +272,7 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
                     }}
                     disabled={generating || uploading}
                     className="absolute top-2 right-2 px-3 h-8 rounded-md bg-gray-800/80 hover:bg-gray-900 text-white text-xs font-medium flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
-                    title="基于描述生成三视图"
+                    title={`基于描述生成${assetType === 'character' ? '三视图' : assetType === 'scene' ? '四视图' : '六视图'}`}
                   >
                     {generating ? (
                       <LoadingOutlined className="text-xs animate-spin" />
@@ -184,21 +293,21 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
               </div>
             </div>
 
-            {/* 角色名称 */}
+            {/* 资产名称 */}
             <div>
               <div className="text-xs font-medium text-gray-700 mb-2">
-                角色名称
+                名称
               </div>
               <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
-                {character.name}
+                {asset.name}
               </div>
             </div>
 
-            {/* 角色描述 — 可编辑 textarea，失焦自动保存 */}
+            {/* 资产描述 — 可编辑 textarea，失焦自动保存 */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-700">
-                  角色描述
+                  描述
                 </span>
                 {descriptionDraft !== savedDescription && (
                   <span className="text-[10px] text-amber-500">
@@ -210,11 +319,14 @@ export const CharacterEditDrawer = memo<CharacterEditDrawerProps>(
                 value={descriptionDraft}
                 onChange={handleDescriptionChange}
                 onBlur={handleDescriptionBlur}
-                placeholder="请输入角色描述，例如：年龄、性别、发型、服装、性格等"
+                placeholder={getDescriptionPlaceholder()}
                 className="w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-xs text-gray-700 leading-relaxed min-h-[280px] max-h-[340px] resize-y focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
                 style={{ whiteSpace: 'pre-wrap' }}
               />
             </div>
+
+            {/* 资产特定属性 */}
+            {renderExtraFields()}
           </div>
         ) : null}
       </Drawer>
