@@ -10,6 +10,7 @@ import {
   EditOutlined,
   UploadOutlined,
   HeartFilled,
+  HeartOutlined,
   UserOutlined,
   VideoCameraOutlined,
   CaretRightOutlined,
@@ -977,7 +978,13 @@ export default function AdminPage() {
 
                               {/* 底部信息遮罩（播放时隐藏） */}
                               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
-                                <p className="text-white text-[13px] font-medium truncate drop-shadow">{show.title}</p>
+                                <div className="flex items-center justify-between">
+                                  <p className="text-white text-[13px] font-medium truncate drop-shadow flex-1">{show.title}</p>
+                                  <div className="flex items-center gap-1 ml-2">
+                                    <HeartOutlined style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }} />
+                                    <span className="text-white/70 text-[10px]">{show.likes || 0}</span>
+                                  </div>
+                                </div>
                                 <div className="flex items-center justify-between mt-1">
                                   {show.author ? <span className="text-white/70 text-[11px] truncate mr-2">{show.author}</span> : <span />}
                                   <span className="text-white/70 text-[10px]">{show.duration > 0 ? `${Math.floor(show.duration / 60)}:${String(show.duration % 60).padStart(2, '0')}` : ''}</span>
