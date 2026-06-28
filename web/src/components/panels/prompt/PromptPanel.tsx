@@ -73,14 +73,14 @@ function getUpstreamInputs(
             nodeId: sourceNode.id,
             nodeType: 'text',
             label: d.label || `文本${num}`,
-            textSnippet: d.content?.slice(0, 500),
+            textSnippet: d.content && d.content.length > 500 ? d.content.slice(0, 500) + '…' : d.content?.slice(0, 500),
           };
         case 'script':
           return {
             nodeId: sourceNode.id,
             nodeType: 'script',
             label: '脚本',
-            textSnippet: d.scriptContent?.slice(0, 500),
+            textSnippet: d.scriptContent && d.scriptContent.length > 500 ? d.scriptContent.slice(0, 500) + '…' : d.scriptContent?.slice(0, 500),
           };
         case 'audio':
           return {
