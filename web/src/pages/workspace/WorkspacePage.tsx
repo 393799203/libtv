@@ -10,10 +10,17 @@ import {
 import { Canvas } from '@/components/canvas/Canvas';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { useExecutionStore } from '@/stores/executionStore';
+import { useExecutionStore, type ActiveStream } from '@/stores/executionStore';
 import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
+
+// 单个 SSE 订阅实例（按 executionId 建立独立 EventSource）
+// 不渲染任何 UI，仅用于 hooks 内部订阅
+function StreamSubscriber({ stream }: { stream: ActiveStream }) {
+  useExecutionStream(stream.projectId, stream.executionId, stream.nodeId);
+  return null;
+}
 
 function CanvasWithDrop({ urlProjectId }: { urlProjectId: string }) {
   const { createNodeFromDrop, loadCanvasFromServer } = useCanvas();
@@ -53,12 +60,8 @@ function WorkspaceInner() {
 
   // SSE 订阅提升到 WorkspacePage 顶层：与节点选中状态解耦
   // 节点失焦/切换面板不会卸载 SSE，避免运行中被关闭
-  const activeStream = useExecutionStore((s) => s.activeStream);
-  useExecutionStream(
-    activeStream?.projectId ?? null,
-    activeStream?.executionId ?? null,
-    activeStream?.nodeId,
-  );
+  // 支持多节点并行执行：每个 executionId 一个独立 StreamSubscriber
+  const activeStreams = useExecutionStore((s) => s.activeStreams);
 
   const [projectName, setProjectName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
@@ -142,6 +145,11 @@ function WorkspaceInner() {
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
+      {/* SSE 订阅实例：每个 activeStream 一个独立 EventSource */}
+      {activeStreams.map((s) => (
+        <StreamSubscriber key={s.executionId} stream={s} />
+      ))}
+
       {/* 顶部栏 */}
       <div className="h-10 bg-white border-b border-gray-200 flex items-center px-3 gap-2 shrink-0 overflow-hidden">
         <Tooltip title="返回项目列表">

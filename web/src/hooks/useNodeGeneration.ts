@@ -55,11 +55,12 @@ export function useNodeGeneration(
   const nodeExec = currentExecution?.nodes?.find((n) => n.nodeId === nodeId);
   const setGeneratingNodeId = useExecutionStore((s) => s.setGeneratingNodeId);
   const lastError = useExecutionStore((s) => s.lastError);
-  const activeStream = useExecutionStore((s) => s.activeStream);
-  const setActiveStream = useExecutionStore((s) => s.setActiveStream);
+  const activeStreams = useExecutionStore((s) => s.activeStreams);
+  const addActiveStream = useExecutionStore((s) => s.addActiveStream);
 
-  // 当前节点是否正在执行：activeStream 指向本节点且节点状态为 running/pending
-  const executionId = activeStream?.nodeId === nodeId ? activeStream.executionId : null;
+  // 查找当前节点的活跃流（支持多节点并行执行）
+  const myStream = activeStreams.find((s) => s.nodeId === nodeId);
+  const executionId = myStream?.executionId ?? null;
 
   const downstreamIds = useMemo(
     () => getDownstreamOf(nodeId, nodes, edges),
@@ -126,7 +127,8 @@ export function useNodeGeneration(
         if (resp?.executionId != null) {
           // 写入全局 store，由 WorkspacePage 顶层订阅 SSE
           // （与节点选中状态解耦：节点失焦不会卸载 SSE 订阅）
-          setActiveStream({ projectId, executionId: resp.executionId, nodeId });
+          // 支持多节点并行：每个 executionId 独立订阅
+          addActiveStream({ projectId, executionId: resp.executionId, nodeId });
         } else {
           // 启动失败：先设 failed，再保存（确保不保存 running）
           updateNodeStatus(nodeId, 'failed');
@@ -141,7 +143,7 @@ export function useNodeGeneration(
         await persistCanvas();
       }
     },
-    [projectId, nodeId, nodes, edges, updateNodeData, updateNodeStatus, setGeneratingNodeId, persistCanvas, setActiveStream],
+    [projectId, nodeId, nodes, edges, updateNodeData, updateNodeStatus, setGeneratingNodeId, persistCanvas, addActiveStream],
   );
 
   const regenerateDownstream: UseNodeGenerationResult['regenerateDownstream'] =

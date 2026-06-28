@@ -22,8 +22,8 @@ interface ExecutionState {
   // 节点级错误映射：nodeId -> 错误信息
   nodeErrors: Record<string, string>;
 
-  // 活跃 SSE 订阅（WorkspacePage 顶层读取，订阅 /stream）
-  activeStream: ActiveStream | null;
+  // 活跃 SSE 订阅列表（支持多执行并行，每个 executionId 一个订阅）
+  activeStreams: ActiveStream[];
 
   // Actions
   setCurrentExecution: (execution: WorkflowExecution | null) => void;
@@ -34,7 +34,8 @@ interface ExecutionState {
   setLastError: (msg: string | null) => void;
   setNodeError: (nodeId: string, msg: string | null) => void;
   resetExecution: () => void;
-  setActiveStream: (stream: ActiveStream | null) => void;
+  addActiveStream: (stream: ActiveStream) => void;
+  removeActiveStream: (executionId: string | number) => void;
 }
 
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
@@ -44,7 +45,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   generatingNodeId: null,
   lastError: null,
   nodeErrors: {},
-  activeStream: null,
+  activeStreams: [],
 
   setCurrentExecution: (execution) =>
     set({
@@ -130,7 +131,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       generatingNodeId: null,
       lastError: null,
       nodeErrors: {},
-      activeStream: null,
+      activeStreams: [],
     }),
 
   setGeneratingNodeId: (id) => set({ generatingNodeId: id }),
@@ -142,5 +143,16 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       else delete next[nodeId];
       return { nodeErrors: next };
     }),
-  setActiveStream: (stream) => set({ activeStream: stream }),
+  addActiveStream: (stream) =>
+    set((s) => {
+      // 同 executionId 不重复添加
+      if (s.activeStreams.some((x) => x.executionId === stream.executionId)) {
+        return s;
+      }
+      return { activeStreams: [...s.activeStreams, stream] };
+    }),
+  removeActiveStream: (executionId) =>
+    set((s) => ({
+      activeStreams: s.activeStreams.filter((x) => x.executionId !== executionId),
+    })),
 }));
