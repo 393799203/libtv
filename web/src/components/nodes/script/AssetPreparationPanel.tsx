@@ -175,18 +175,18 @@ function AssetSection<
 
       {/* 描述文本 */}
       {items.length > 0 && items[0].description && (
-        <p className="text-xs text-gray-500 leading-relaxed">
+        <div className="text-xs text-gray-500 leading-relaxed space-y-1">
           {items.map((item) => (
-            <span key={item.name}>
+            <div key={item.name}>
               <strong>{item.name}</strong>：
               {item.description
                 .replace(/【三视图要求】[^\n]*/g, '')
                 .replace(/【四视图要求】[^\n]*/g, '')
                 .replace(/【六视图要求】[^\n]*/g, '')
-                .trim()}{' '}
-            </span>
+                .trim()}
+            </div>
           ))}
-        </p>
+        </div>
       )}
     </div>
   );
