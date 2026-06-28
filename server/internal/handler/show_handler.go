@@ -85,6 +85,60 @@ func (h *ShowHandler) GetShow(c *gin.Context) {
 	response.OK(c, show)
 }
 
+// LikeShow 点赞视频（需登录）
+func (h *ShowHandler) LikeShow(c *gin.Context) {
+	id := c.Param("id")
+	// 从 JWT 获取用户 ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		response.Fail(c, 401, "请先登录")
+		return
+	}
+
+	likes, isLiked, err := h.showService.LikeShow(c.Request.Context(), userID.(string), id)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OK(c, gin.H{"likes": likes, "is_liked": isLiked})
+}
+
+// UnlikeShow 取消点赞（需登录）
+func (h *ShowHandler) UnlikeShow(c *gin.Context) {
+	id := c.Param("id")
+	// 从 JWT 获取用户 ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		response.Fail(c, 401, "请先登录")
+		return
+	}
+
+	likes, isLiked, err := h.showService.UnlikeShow(c.Request.Context(), userID.(string), id)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OK(c, gin.H{"likes": likes, "is_liked": isLiked})
+}
+
+// CheckShowLiked 检查用户是否已点赞（需登录）
+func (h *ShowHandler) CheckShowLiked(c *gin.Context) {
+	id := c.Param("id")
+	// 从 JWT 获取用户 ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		response.Fail(c, 401, "请先登录")
+		return
+	}
+
+	isLiked, err := h.showService.IsShowLiked(c.Request.Context(), userID.(string), id)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OK(c, gin.H{"is_liked": isLiked})
+}
+
 // ========== 需登录接口：管理操作 ==========
 
 type CreateShowRequest struct {

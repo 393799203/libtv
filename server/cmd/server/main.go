@@ -55,7 +55,7 @@ func main() {
 	}
 
 	// 自动迁移
-if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.Banner{}); err != nil {
+if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -244,6 +244,10 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			shows.POST("/:id/video", showHandler.UploadVideo)
 			shows.PUT("/:id", showHandler.UpdateShow)
 			shows.DELETE("/:id", showHandler.DeleteShow)
+			// 点赞相关
+			shows.POST("/:id/like", showHandler.LikeShow)
+			shows.DELETE("/:id/like", showHandler.UnlikeShow)
+			shows.GET("/:id/liked", showHandler.CheckShowLiked)
 		}
 
 		// Banner资源位管理（需登录）

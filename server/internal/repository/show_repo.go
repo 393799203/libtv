@@ -21,6 +21,12 @@ type ShowRepo interface {
 	// CountOtherShowsByVideoURL 统计除 excludeID 外引用同一 videoURL 的记录数
 	CountOtherShowsByVideoURL(ctx context.Context, videoURL string, excludeID string) (int64, error)
 
+	// 点赞相关
+	CreateShowLike(ctx context.Context, like *model.ShowLike) error
+	DeleteShowLike(ctx context.Context, userID, showID string) error
+	FindShowLike(ctx context.Context, userID, showID string) (*model.ShowLike, error)
+	CountShowLikes(ctx context.Context, showID string) (int64, error)
+
 	CreateCategory(ctx context.Context, cat *model.ShowCategory) error
 	FindCategoryByID(ctx context.Context, id string) (*model.ShowCategory, error)
 	FindCategoryByName(ctx context.Context, name string, excludeID string) (*model.ShowCategory, error)
@@ -177,4 +183,28 @@ func (r *showRepo) CategoryHasShows(ctx context.Context, categoryID string) (int
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Show{}).Where("category_id = ?", categoryID).Count(&count).Error
 	return count, err
+}
+
+// ========== 点赞 ==========
+
+func (r *showRepo) CreateShowLike(ctx context.Context, like *model.ShowLike) error {
+	return r.db.WithContext(ctx).Create(like).Error
+}
+
+func (r *showRepo) DeleteShowLike(ctx context.Context, userID, showID string) error {
+	return r.db.WithContext(ctx).Where("user_id = ? AND show_id = ?", userID, showID).Delete(&model.ShowLike{}).Error
+}
+
+func (r *showRepo) FindShowLike(ctx context.Context, userID, showID string) (*model.ShowLike, error) {
+	var like model.ShowLike
+	err := r.db.WithContext(ctx).Where("user_id = ? AND show_id = ?", userID, showID).First(&like).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &like, err
+}
+
+func (r *showRepo) CountShowLikes(ctx context.Context, showID string) (int64, error) {
+	var count int64
+	return count, r.db.WithContext(ctx).Model(&model.ShowLike{}).Where("show_id = ?", showID).Count(&count).Error
 }

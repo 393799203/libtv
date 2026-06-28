@@ -210,6 +210,23 @@ func (s *Show) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// ShowLike 视频点赞记录
+type ShowLike struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	UserID    string    `gorm:"size:36;not null;uniqueIndex:idx_user_show" json:"user_id"`
+	ShowID    string    `gorm:"size:36;not null;uniqueIndex:idx_user_show" json:"show_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (ShowLike) TableName() string { return "show_likes" }
+
+func (s *ShowLike) BeforeCreate(tx *gorm.DB) error {
+	if s.ID == "" {
+		s.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // ========== Banner 资源位管理 ==========
 
 // Banner 首页轮播Banner资源位

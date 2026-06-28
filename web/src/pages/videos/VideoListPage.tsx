@@ -4,7 +4,6 @@ import {
   Card,
   Typography,
   Button,
-  Dropdown,
   Tag,
   App,
   Spin,
@@ -12,12 +11,11 @@ import {
 import {
   PlusOutlined,
   PlayCircleOutlined,
-  MoreOutlined,
   SearchOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
+  HeartOutlined,
 } from '@ant-design/icons';
-import type { MenuProps } from 'antd';
 import { projectApi } from '@/services/projectApi';
 import { deleteCanvasDir } from '@/services/uploadApi';
 import { showApi } from '@/services/showApi';
@@ -173,6 +171,7 @@ export default function VideoListPage() {
         duration: item.duration,
         author: item.author || 'LibTV',
         tags: item.tags || undefined,
+        likes: item.likes || 0,
       }));
       setTvShowVideos(list);
     } catch {
@@ -230,11 +229,6 @@ export default function VideoListPage() {
       }, 5000);
     }
   }, [banners.length]);
-
-  const getVideoMenuItems = (_id: string): MenuProps['items'] => [
-    { key: 'download', label: '下载' },
-    { key: 'share', label: '分享' },
-  ];
 
   // 删除项目
   const handleDeleteProject = async (project: ProjectListItem) => {
@@ -568,18 +562,13 @@ export default function VideoListPage() {
                 </div>
                 <div className="p-3">
                   <div className="flex items-start justify-between">
-                    <p className="!text-sm font-medium truncate">
+                    <p className="!text-sm font-medium truncate flex-1">
                       {item.title}
                     </p>
-                    <Dropdown menu={{ items: getVideoMenuItems(item.id) }} placement="bottomRight" trigger={['click']}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<MoreOutlined />}
-                        className="!-mt-1 flex-shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </Dropdown>
+                    <span className="flex items-center gap-0.5 text-gray-500 text-xs flex-shrink-0 ml-2">
+                      <HeartOutlined className="text-[12px]" />
+                      {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
+                    </span>
                   </div>
                 </div>
               </Card>

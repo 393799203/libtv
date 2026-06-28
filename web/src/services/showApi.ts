@@ -48,6 +48,18 @@ export const showApi = {
   get: (id: string) =>
     api.get<ShowItem>(`/shows/${id}`),
 
+  /** 点赞视频（需登录） */
+  like: (id: string) =>
+    api.post<{ likes: number; is_liked: boolean }>(`/shows/${id}/like`),
+
+  /** 取消点赞（需登录） */
+  unlike: (id: string) =>
+    api.delete<{ likes: number; is_liked: boolean }>(`/shows/${id}/like`),
+
+  /** 检查是否已点赞（需登录） */
+  checkLiked: (id: string) =>
+    api.get<{ is_liked: boolean }>(`/shows/${id}/liked`),
+
   // ========== 需登录接口 ==========
 
   /** 创建分类（需登录） */

@@ -11,6 +11,7 @@ import {
   PauseCircleOutlined,
   MoreOutlined,
   HeartOutlined,
+  HeartFilled,
   MessageOutlined,
   ShareAltOutlined,
   FullscreenOutlined,
@@ -20,6 +21,7 @@ import {
   MutedOutlined,
 } from '@ant-design/icons';
 import { showApi } from '@/services/showApi';
+import { useAuthStore } from '@/stores/authStore';
 import type { Video } from '@/types/video';
 
 const { Text } = Typography;
@@ -43,8 +45,12 @@ export default function VideoDetailPage() {
   const [buffered, setBuffered] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [videoInfo, setVideoInfo] = useState<Video | null>(null);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
   const hideControlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPlayingRef = useRef(false);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const openLoginModal = useAuthStore((s) => s.openLoginModal);
 
   // 从 Show API 获取视频详情
   useEffect(() => {
@@ -71,7 +77,15 @@ export default function VideoDetailPage() {
         });
       }
     });
-  }, [id]);
+    // 检查用户是否已点赞（需登录）
+    if (isAuthenticated) {
+      showApi.checkLiked(id).then((res) => {
+        setIsLiked(res.is_liked);
+      }).catch(() => {
+        // 接口失败时忽略
+      });
+    }
+  }, [id, isAuthenticated]);
 
   const togglePlay = () => {
     if (videoRef.current) {
@@ -190,6 +204,31 @@ export default function VideoDetailPage() {
     };
   }, []);
 
+  // 点赞/取消点赞
+  const handleLike = async () => {
+    if (!id || !videoInfo || likeLoading) return;
+    if (!isAuthenticated) {
+      openLoginModal();
+      return;
+    }
+    setLikeLoading(true);
+    try {
+      if (isLiked) {
+        const res = await showApi.unlike(id);
+        setIsLiked(res.is_liked);
+        setVideoInfo(prev => prev ? { ...prev, stats: { ...prev.stats, likes: res.likes } } : null);
+      } else {
+        const res = await showApi.like(id);
+        setIsLiked(res.is_liked);
+        setVideoInfo(prev => prev ? { ...prev, stats: { ...prev.stats, likes: res.likes } } : null);
+      }
+    } catch {
+      // API 失败时静默处理
+    } finally {
+      setLikeLoading(false);
+    }
+  };
+
   if (!videoInfo) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -279,8 +318,9 @@ export default function VideoDetailPage() {
         <div className="flex flex-col items-center">
           <Button
             type="text"
-            icon={<HeartOutlined style={{ fontSize: '32px', color: 'white' }} />}
-            style={{ color: 'white', border: 'none', padding: 0 }}
+            icon={isLiked ? <HeartFilled style={{ fontSize: '32px', color: '#ff2d55' }} /> : <HeartOutlined style={{ fontSize: '32px', color: 'white' }} />}
+            onClick={handleLike}
+            style={{ color: isLiked ? '#ff2d55' : 'white', border: 'none', padding: 0 }}
           />
           <Text style={{ color: 'white', fontSize: '12px', marginTop: '4px' }}>{videoInfo.stats.likes}</Text>
         </div>

@@ -119,6 +119,83 @@ func (s *ShowService) DeleteShow(ctx context.Context, id string) error {
 	return nil
 }
 
+// LikeShow 点赞视频，返回新的点赞数和是否已点赞
+func (s *ShowService) LikeShow(ctx context.Context, userID, showID string) (int, bool, error) {
+	// 检查是否已点赞
+	existing, err := s.showRepo.FindShowLike(ctx, userID, showID)
+	if err != nil {
+		return 0, false, err
+	}
+	if existing != nil {
+		// 已点赞，返回当前状态
+		count, _ := s.showRepo.CountShowLikes(ctx, showID)
+		return int(count), true, nil
+	}
+
+	// 创建点赞记录
+	like := &model.ShowLike{
+		UserID: userID,
+		ShowID: showID,
+	}
+	if err := s.showRepo.CreateShowLike(ctx, like); err != nil {
+		return 0, false, err
+	}
+
+	// 更新 Show 表的 likes 字段
+	show, err := s.GetByID(ctx, showID)
+	if err != nil {
+		return 0, false, err
+	}
+	show.Likes++
+	if err := s.showRepo.UpdateShow(ctx, show); err != nil {
+		return 0, false, err
+	}
+
+	return show.Likes, true, nil
+}
+
+// UnlikeShow 取消点赞，返回新的点赞数和是否已点赞
+func (s *ShowService) UnlikeShow(ctx context.Context, userID, showID string) (int, bool, error) {
+	// 检查是否已点赞
+	existing, err := s.showRepo.FindShowLike(ctx, userID, showID)
+	if err != nil {
+		return 0, false, err
+	}
+	if existing == nil {
+		// 未点赞，返回当前状态
+		count, _ := s.showRepo.CountShowLikes(ctx, showID)
+		return int(count), false, nil
+	}
+
+	// 删除点赞记录
+	if err := s.showRepo.DeleteShowLike(ctx, userID, showID); err != nil {
+		return 0, false, err
+	}
+
+	// 更新 Show 表的 likes 字段
+	show, err := s.GetByID(ctx, showID)
+	if err != nil {
+		return 0, false, err
+	}
+	if show.Likes > 0 {
+		show.Likes--
+	}
+	if err := s.showRepo.UpdateShow(ctx, show); err != nil {
+		return 0, false, err
+	}
+
+	return show.Likes, false, nil
+}
+
+// IsShowLiked 检查用户是否已点赞
+func (s *ShowService) IsShowLiked(ctx context.Context, userID, showID string) (bool, error) {
+	like, err := s.showRepo.FindShowLike(ctx, userID, showID)
+	if err != nil {
+		return false, err
+	}
+	return like != nil, nil
+}
+
 // ========== Category CRUD ==========
 
 func (s *ShowService) CreateCategory(ctx context.Context, cat *model.ShowCategory) error {
