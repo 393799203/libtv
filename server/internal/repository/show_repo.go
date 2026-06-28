@@ -7,6 +7,7 @@ import (
 
 	"libtv/internal/model"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -142,8 +143,14 @@ func (r *showRepo) FindCategoryByName(ctx context.Context, name string, excludeI
 	return &cat, nil
 }
 
-// isDuplicateKeyErr 判断是否唯一约束冲突（兼容 SQLite/Postgres）
+// isDuplicateKeyErr 判断是否唯一约束冲突（优先用 pgconn.PgError.Code，降级字符串匹配兼容 SQLite）
 func isDuplicateKeyErr(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		// 23505 = unique_violation
+		return pgErr.Code == "23505"
+	}
+	// 降级：SQLite 等不返回 PgError 的驱动
 	msg := err.Error()
 	return strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate") || strings.Contains(msg, "Duplicate")
 }

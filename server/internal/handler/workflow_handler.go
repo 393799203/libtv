@@ -13,6 +13,7 @@ import (
 	"libtv/internal/config"
 	"libtv/internal/engine"
 	"libtv/internal/model"
+	"libtv/internal/pkg/response"
 	"libtv/internal/repository"
 
 	"github.com/gin-gonic/gin"
@@ -71,7 +72,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		projectID = req.ProjectID
 	}
 	if projectID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "projectId is required"})
+		response.Fail(c, http.StatusBadRequest, "projectId is required")
 		return
 	}
 
@@ -88,7 +89,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 	// 从 CanvasRepo 加载最新画布
 	canvas, err := h.canvasRepo.FindByProjectID(c.Request.Context(), projectID)
 	if err != nil || canvas == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "canvas not found for project: " + projectID})
+		response.Fail(c, http.StatusBadRequest, "canvas not found for project: "+projectID)
 		return
 	}
 	canvasData := []byte(canvas.Content)
@@ -96,18 +97,18 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 	// 解析 → 校验 → 拓扑排序
 	schema, err := engine.Parse(canvasData)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "parse canvas failed: " + err.Error()})
+		response.Fail(c, http.StatusBadRequest, "parse canvas failed: "+err.Error())
 		return
 	}
 
 	if err := engine.Validate(schema); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "validate failed: " + err.Error()})
+		response.Fail(c, http.StatusBadRequest, "validate failed: "+err.Error())
 		return
 	}
 
 	plan, err := engine.TopologicalSort(schema)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "topological sort failed: " + err.Error()})
+		response.Fail(c, http.StatusBadRequest, "topological sort failed: "+err.Error())
 		return
 	}
 
@@ -123,7 +124,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 			plan, err = engine.FilterSingle(plan, startNodeID)
 		}
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "filter plan failed: " + err.Error()})
+			response.Fail(c, http.StatusBadRequest, "filter plan failed: "+err.Error())
 			return
 		}
 	}
@@ -137,7 +138,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		StartedAt:      &now,
 	}
 	if err := h.execRepo.Create(c.Request.Context(), exec); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
@@ -171,17 +172,14 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		log.Printf("[Handler] execution %d final status=%s", exec.ID, status)
 	}()
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{"executionId": exec.ID},
-	})
+	response.OK(c, gin.H{"executionId": exec.ID})
 }
 
 func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("execId"), 10, 64)
 	exec, err := h.execRepo.FindByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "execution not found"})
+		response.Fail(c, http.StatusNotFound, "execution not found")
 		return
 	}
 
@@ -217,7 +215,7 @@ func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": resp})
+	response.OK(c, resp)
 }
 
 // StreamExecution SSE 流式订阅工作流执行事件
@@ -232,26 +230,26 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
 	}
 	if tokenStr == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "missing token"})
+		response.Fail(c, http.StatusUnauthorized, "missing token")
 		return
 	}
 	if _, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
 		return []byte(config.C.JWT.Secret), nil
 	}); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid token"})
+		response.Fail(c, http.StatusUnauthorized, "invalid token")
 		return
 	}
 
 	execIDStr := c.Param("execId")
 	execID, err := strconv.ParseInt(execIDStr, 10, 64)
 	if err != nil || execID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid execId"})
+		response.Fail(c, http.StatusBadRequest, "invalid execId")
 		return
 	}
 
 	// 确认执行存在（避免订阅一个不存在的 execution）
 	if _, err := h.execRepo.FindByID(c.Request.Context(), execID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "execution not found"})
+		response.Fail(c, http.StatusNotFound, "execution not found")
 		return
 	}
 
@@ -263,7 +261,7 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	c.Writer.WriteHeader(http.StatusOK)
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "streaming not supported"})
+		response.Fail(c, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 

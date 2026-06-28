@@ -119,12 +119,13 @@ func (s *FileUploadService) Upload(file multipart.File, header *multipart.FileHe
 
 // VideoUploadResult 视频上传结果（可能同步完成，也可能异步转码中）
 type VideoUploadResult struct {
-	URL        string `json:"url,omitempty"`        // 同步完成时有值
-	TaskID     string `json:"task_id,omitempty"`     // 异步转码时有值
-	ObjectName string `json:"filename"`             // 最终对象名（含 .mp4）
-	Cached     bool   `json:"cached"`                // 是否命中去重
-	StorageType string `json:"storage_type"`
-	AsyncTranscode bool `json:"async_transcode"`     // 是否进入异步转码
+	URL            string `json:"url,omitempty"`    // 同步完成时有值
+	TaskID         string `json:"task_id,omitempty"` // 异步转码时有值
+	ObjectName     string `json:"filename"`         // 最终对象名（含 .mp4）
+	Cached         bool   `json:"cached"`            // 是否命中去重
+	Compressed     bool   `json:"compressed"`        // 是否经过转码压缩
+	StorageType    string `json:"storage_type"`
+	AsyncTranscode bool   `json:"async_transcode"`  // 是否进入异步转码
 }
 
 // UploadVideoWithTranscode 视频上传 Template Method：

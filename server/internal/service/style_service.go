@@ -3,19 +3,28 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"net/http"
 
 	"libtv/internal/model"
+	"libtv/internal/pkg/apperror"
 	"libtv/internal/repository"
 	"libtv/internal/storage"
+
+	"gorm.io/gorm"
 )
 
 // ============ Style 服务 ============
 
+// sentinel errors
+var (
+	ErrStyleNotFound = apperror.New(5001, http.StatusNotFound, "风格不存在")
+)
+
 // StyleService 风格业务逻辑
 type StyleService struct {
-	styleRepo   repository.StyleRepo
-	storage     storage.Storage
+	styleRepo repository.StyleRepo
+	storage   storage.Storage
 }
 
 // NewStyleService 创建风格服务
@@ -25,10 +34,10 @@ func NewStyleService(styleRepo repository.StyleRepo, storage storage.Storage) *S
 
 // ListResult 列表查询结果
 type ListResult struct {
-	Items     []model.Style
-	Total     int64
-	Page      int
-	PageSize  int
+	Items    []model.Style
+	Total    int64
+	Page     int
+	PageSize int
 }
 
 // List 风格列表
@@ -64,7 +73,14 @@ func (s *StyleService) Create(ctx context.Context, name, author, categoryID stri
 
 // GetByID 获取风格详情
 func (s *StyleService) GetByID(ctx context.Context, id string) (*model.Style, error) {
-	return s.styleRepo.FindByID(ctx, id)
+	style, err := s.styleRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrStyleNotFound
+		}
+		return nil, err
+	}
+	return style, nil
 }
 
 // UpdateImage 更新风格图片地址
@@ -78,6 +94,9 @@ func (s *StyleService) UpdateStyle(ctx context.Context, id string,
 ) (*model.Style, error) {
 	style, err := s.styleRepo.FindByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrStyleNotFound
+		}
 		return nil, err
 	}
 	updates := map[string]interface{}{}
@@ -108,7 +127,10 @@ func (s *StyleService) UpdateStyle(ctx context.Context, id string,
 func (s *StyleService) Delete(ctx context.Context, id string) error {
 	style, err := s.styleRepo.FindByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("风格不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrStyleNotFound
+		}
+		return err
 	}
 	// 删除图片文件
 	if style.ImageURL != "" {

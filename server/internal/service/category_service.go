@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"libtv/internal/model"
+	"libtv/internal/pkg/apperror"
 	"libtv/internal/repository"
 
 	"gorm.io/gorm"
@@ -44,10 +46,11 @@ func (s *CategoryService) ListWithStyleCount(ctx context.Context) ([]CategoryWit
 	return result, nil
 }
 
-// Create 创建分类（名称冲突返回 ErrConflict）
+// sentinel errors（携带 HTTP 状态码）
 var (
-	ErrConflict         = errors.New("conflict")
-	ErrCategoryNotEmpty = errors.New("category not empty")
+	ErrConflict         = apperror.New(3001, http.StatusConflict, "分类名已存在")
+	ErrCategoryNotEmpty = apperror.New(3002, http.StatusBadRequest, "分类下还有风格，无法删除")
+	ErrCategoryNotFound = apperror.New(3003, http.StatusNotFound, "分类不存在")
 )
 
 func (s *CategoryService) Create(ctx context.Context, name string, sortOrder int) (*model.Category, error) {
@@ -65,7 +68,10 @@ func (s *CategoryService) Create(ctx context.Context, name string, sortOrder int
 func (s *CategoryService) Update(ctx context.Context, id string, name *string, sortOrder *int) (*model.Category, error) {
 	category, err := s.categoryRepo.FindByID(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("分类不存在: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrCategoryNotFound
+		}
+		return nil, err
 	}
 	updates := map[string]interface{}{}
 	if name != nil {
@@ -101,7 +107,7 @@ func (s *CategoryService) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if rowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+		return ErrCategoryNotFound
 	}
 	return nil
 }

@@ -2,11 +2,11 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 
 	"libtv/internal/model"
+	"libtv/internal/pkg/response"
 	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -27,7 +27,7 @@ func NewShowHandler(showService *service.ShowService, fileUploadService *service
 func (h *ShowHandler) ListCategories(c *gin.Context) {
 	cats, err := h.showService.ListCategories(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
@@ -47,7 +47,7 @@ func (h *ShowHandler) ListCategories(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result})
+	response.OK(c, result)
 }
 
 // ListShows 获取视频列表（公开，支持按分类筛选 + 关键词搜索）
@@ -62,18 +62,15 @@ func (h *ShowHandler) ListShows(c *gin.Context) {
 
 	shows, total, err := h.showService.ListShows(c.Request.Context(), categoryID, keyword, page, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items":     shows,
-			"total":     total,
-			"page":      page,
-			"page_size": pageSize,
-		},
+	response.OK(c, gin.H{
+		"items":     shows,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
 	})
 }
 
@@ -82,14 +79,10 @@ func (h *ShowHandler) GetShow(c *gin.Context) {
 	id := c.Param("id")
 	show, err := h.showService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, service.ErrShowNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": show})
+	response.OK(c, show)
 }
 
 // ========== 需登录接口：管理操作 ==========
@@ -120,7 +113,7 @@ type UpdateShowRequest struct {
 func (h *ShowHandler) CreateShow(c *gin.Context) {
 	var req CreateShowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -137,24 +130,24 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 	h.showService.ResolveAuthor(c.Request.Context(), show, req.AuthorID)
 
 	if err := h.showService.CreateShow(c.Request.Context(), show); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建失败"})
+		response.FailWith(c, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"code": 0, "data": show})
+	response.Created(c, show)
 }
 
 // UploadThumbnail 上传封面图并关联到视频记录
 func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	id := c.Param("id")
 	if _, err := h.showService.GetByID(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
+		response.FailWith(c, err)
 		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
+		response.Fail(c, http.StatusBadRequest, "请选择文件")
 		return
 	}
 
@@ -165,16 +158,16 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := h.showService.UpdateThumbnail(c.Request.Context(), id, result.URL); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
+	response.OK(c, gin.H{"url": result.URL})
 }
 
 // UploadVideo 上传视频文件到MinIO
@@ -182,13 +175,13 @@ func (h *ShowHandler) UploadVideo(c *gin.Context) {
 	id := c.Param("id")
 	show, err := h.showService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
+		response.FailWith(c, err)
 		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
+		response.Fail(c, http.StatusBadRequest, "请选择文件")
 		return
 	}
 
@@ -204,14 +197,18 @@ func (h *ShowHandler) UploadVideo(c *gin.Context) {
 		},
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	show.VideoURL = result.URL
-	h.showService.UpdateShow(c.Request.Context(), show)
+	if err := h.showService.UpdateShow(c.Request.Context(), show); err != nil {
+		// P2-17 修复：原代码漏掉了 UpdateShow 的错误检查
+		response.FailWith(c, err)
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
+	response.OK(c, gin.H{"url": result.URL})
 }
 
 // UpdateShow 更新视频信息（需登录）
@@ -220,13 +217,13 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 
 	show, err := h.showService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "视频不存在"})
+		response.FailWith(c, err)
 		return
 	}
 
 	var req UpdateShowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -257,27 +254,23 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 	}
 
 	if err := h.showService.UpdateShow(c.Request.Context(), show); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败"})
+		response.FailWith(c, err)
 		return
 	}
 
 	// 刷新关联数据
 	show, _ = h.showService.GetByID(c.Request.Context(), id)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": show})
+	response.OK(c, show)
 }
 
 // DeleteShow 删除视频（需登录），同时清理关联的缩略图和视频文件
 func (h *ShowHandler) DeleteShow(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.showService.DeleteShow(c.Request.Context(), id); err != nil {
-		if errors.Is(err, service.ErrShowNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "记录不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, "deleted", nil)
 }
 
 // ========== 分类管理（需登录）==========
@@ -296,7 +289,7 @@ type UpdateShowCategoryRequest struct {
 func (h *ShowHandler) CreateCategory(c *gin.Context) {
 	var req CreateShowCategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -305,14 +298,10 @@ func (h *ShowHandler) CreateCategory(c *gin.Context) {
 		SortOrder: req.SortOrder,
 	}
 	if err := h.showService.CreateCategory(c.Request.Context(), cat); err != nil {
-		if errors.Is(err, service.ErrCategoryNameConflict) {
-			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "分类名已存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建失败"})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"code": 0, "data": cat})
+	response.Created(c, cat)
 }
 
 // UpdateCategory 更新分类（需登录）
@@ -321,17 +310,13 @@ func (h *ShowHandler) UpdateCategory(c *gin.Context) {
 
 	var req UpdateShowCategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	cat, err := h.showService.GetCategoryByID(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, service.ErrCategoryNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "分类不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
@@ -343,22 +328,18 @@ func (h *ShowHandler) UpdateCategory(c *gin.Context) {
 	}
 
 	if err := h.showService.UpdateCategory(c.Request.Context(), cat); err != nil {
-		if errors.Is(err, service.ErrCategoryNameConflict) {
-			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "分类名已存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败"})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": cat})
+	response.OK(c, cat)
 }
 
 // DeleteCategory 删除分类（需登录）
 func (h *ShowHandler) DeleteCategory(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.showService.DeleteCategory(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, "deleted", nil)
 }

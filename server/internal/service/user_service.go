@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
 	"libtv/internal/config"
 	"libtv/internal/model"
+	"libtv/internal/pkg/apperror"
 	"libtv/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -14,12 +16,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// 用户管理相关业务错误
+// 用户管理相关业务错误（携带 HTTP 状态码）
 var (
-	ErrUserNotFound        = errors.New("user not found")
-	ErrCannotDeleteSelf    = errors.New("cannot delete self")
-	ErrCannotModifySelf    = errors.New("cannot modify self role")
-	ErrInvalidRole         = errors.New("invalid role")
+	ErrUserNotFound     = apperror.New(2001, http.StatusNotFound, "用户不存在")
+	ErrCannotDeleteSelf = apperror.New(2002, http.StatusBadRequest, "不能删除自己的账号")
+	ErrCannotModifySelf = apperror.New(2003, http.StatusBadRequest, "不能修改自己的角色")
+	ErrInvalidRole      = apperror.New(2004, http.StatusBadRequest, "角色必须是 user 或 admin")
 )
 
 type UserService struct {

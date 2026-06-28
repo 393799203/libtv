@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,11 +15,17 @@ type Config struct {
 	JWT      JWTConfig      `yaml:"jwt"`
 	Storage  StorageConfig  `yaml:"storage"`
 	AI       AIConfig       `yaml:"ai"`
+	CORS     CORSConfig     `yaml:"cors"`
 }
 
 type ServerConfig struct {
 	Port int    `yaml:"port"`
 	Mode string `yaml:"mode"`
+}
+
+// CORSConfig 跨域配置；Origins 为空时表示允许所有来源（便于本地开发）
+type CORSConfig struct {
+	Origins []string `yaml:"origins"`
 }
 
 type DatabaseConfig struct {
@@ -146,5 +153,22 @@ func Load(path string) error {
 		C.Storage.Type = storageType
 	}
 
+	// CORS 白名单环境变量覆盖（逗号分隔，CORS_ORIGINS=http://a,http://b）
+	if corsOrigins := os.Getenv("CORS_ORIGINS"); corsOrigins != "" {
+		C.CORS.Origins = splitCSV(corsOrigins)
+	}
+
 	return nil
+}
+
+// splitCSV 将逗号分隔的字符串切分为切片（忽略空白项）
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

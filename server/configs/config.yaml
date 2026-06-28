@@ -2,6 +2,16 @@ server:
   port: 8080
   mode: debug  # debug / release
 
+# CORS 允许来源白名单；为空时使用内置默认（localhost:5173/3000 等）
+# 生产环境推荐通过环境变量 CORS_ORIGINS=http://a,http://b 覆盖
+cors:
+  origins:
+    - http://localhost:5173
+    - http://localhost:3000
+    - http://192.168.110.115:8880
+    - http://39.171.58.10:38880
+    - http://yunqueai.cloud:38880
+
 database:
   host: localhost
   port: 5432

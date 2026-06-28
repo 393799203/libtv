@@ -2,11 +2,13 @@ package handler
 
 import (
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"libtv/internal/pkg/response"
 	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
@@ -17,27 +19,21 @@ func (h *UploadHandler) SyncStorage(c *gin.Context) {
 	// 只对降级存储有效
 	fallback, ok := h.storage.(*storage.FallbackStorage)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "当前存储不支持同步（非降级模式）",
-		})
+		response.Fail(c, http.StatusBadRequest, "当前存储不支持同步（非降级模式）")
 		return
 	}
 
 	// 获取本地存储实例
 	localStorage, ok := fallback.Fallback.(*storage.LocalStorage)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "降级存储的Fallback不是LocalStorage",
-		})
+		response.Fail(c, http.StatusBadRequest, "降级存储的Fallback不是LocalStorage")
 		return
 	}
 
 	// 扫描本地文件
 	files, err := localStorage.ListObjects("")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "扫描本地文件失败: " + err.Error(),
-		})
+		response.Fail(c, http.StatusInternalServerError, "扫描本地文件失败: "+err.Error())
 		return
 	}
 
@@ -107,7 +103,7 @@ func (h *UploadHandler) SyncStorage(c *gin.Context) {
 	log.Printf("🔄 同步完成: 成功 %d, 失败 %d, 跳过 %d",
 		successCount, failCount, len(files)-successCount-failCount)
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"total_files":   len(files),
 		"success_count": successCount,
 		"fail_count":    failCount,
@@ -125,9 +121,7 @@ func (h *UploadHandler) SyncFromVolume(c *gin.Context) {
 
 	// 检查目录是否存在
 	if _, err := os.Stat(volumePath); os.IsNotExist(err) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "volume目录不存在: " + volumePath,
-		})
+		response.Fail(c, http.StatusBadRequest, "volume目录不存在: "+volumePath)
 		return
 	}
 
@@ -149,9 +143,7 @@ func (h *UploadHandler) SyncFromVolume(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "扫描volume失败: " + err.Error(),
-		})
+		response.Fail(c, http.StatusInternalServerError, "扫描volume失败: "+err.Error())
 		return
 	}
 
@@ -184,17 +176,10 @@ func (h *UploadHandler) SyncFromVolume(c *gin.Context) {
 			continue
 		}
 
-		// 判断Content-Type
-		contentType := "application/octet-stream"
-		ext := filepath.Ext(objectName)
-		if strings.Contains(ext, "jpg") || strings.Contains(ext, "jpeg") {
-			contentType = "image/jpeg"
-		} else if strings.Contains(ext, "png") {
-			contentType = "image/png"
-		} else if strings.Contains(ext, "webp") {
-			contentType = "image/webp"
-		} else if strings.Contains(ext, "mp4") {
-			contentType = "video/mp4"
+		// 用 mime 标准库按扩展名推断 Content-Type
+		contentType := mime.TypeByExtension(filepath.Ext(objectName))
+		if contentType == "" {
+			contentType = "application/octet-stream"
 		}
 
 		// 上传到存储
@@ -222,7 +207,7 @@ func (h *UploadHandler) SyncFromVolume(c *gin.Context) {
 
 	log.Printf("🔄 同步完成: 成功 %d, 失败 %d", successCount, failCount)
 
-	c.JSON(http.StatusOK, gin.H{
+	response.OK(c, gin.H{
 		"volume_path":   volumePath,
 		"total_files":   len(files),
 		"success_count": successCount,

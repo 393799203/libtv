@@ -1,16 +1,15 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
 	"libtv/internal/middleware"
+	"libtv/internal/pkg/response"
 	"libtv/internal/repository"
 	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // StyleHandler 处理风格相关的 HTTP 请求
@@ -47,10 +46,10 @@ type CreateStyleRequest struct {
 }
 
 type UpdateStyleRequest struct {
-	Name       *string  `json:"name"`
-	Author     *string  `json:"author"`
-	CategoryID *string  `json:"category_id"`
-	Tags       []string `json:"tags"`
+	Name        *string  `json:"name"`
+	Author      *string  `json:"author"`
+	CategoryID  *string  `json:"category_id"`
+	Tags        []string `json:"tags"`
 }
 
 type CreateCategoryRequest struct {
@@ -77,17 +76,14 @@ func (h *StyleHandler) List(c *gin.Context) {
 		PageSize:   pageSize,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items":     result.Items,
-			"total":     result.Total,
-			"page":      result.Page,
-			"page_size": result.PageSize,
-		},
+	response.OK(c, gin.H{
+		"items":     result.Items,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
 	})
 }
 
@@ -95,28 +91,28 @@ func (h *StyleHandler) List(c *gin.Context) {
 func (h *StyleHandler) Create(c *gin.Context) {
 	var req CreateStyleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	style, err := h.styleService.Create(c.Request.Context(), req.Name, req.Author, req.CategoryID, req.Tags)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"code": 0, "data": style})
+	response.Created(c, style)
 }
 
 // UploadImage 上传风格图片并关联到风格记录
 func (h *StyleHandler) UploadImage(c *gin.Context) {
 	id := c.Param("id")
 	if _, err := h.styleService.GetByID(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "风格不存在"})
+		response.FailWith(c, err)
 		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
+		response.Fail(c, http.StatusBadRequest, "请选择文件")
 		return
 	}
 
@@ -127,15 +123,15 @@ func (h *StyleHandler) UploadImage(c *gin.Context) {
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := h.styleService.UpdateImage(c.Request.Context(), id, result.URL); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
+	response.OK(c, gin.H{"url": result.URL})
 }
 
 // Update 更新风格（PATCH 语义：tags 为 nil 表示不更新，tags 非 nil 包括空数组表示清空）
@@ -143,35 +139,27 @@ func (h *StyleHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 	var req UpdateStyleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	style, err := h.styleService.UpdateStyle(c.Request.Context(), id,
 		req.Name, req.Author, req.CategoryID, req.Tags, req.Tags != nil)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "风格不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": style})
+	response.OK(c, style)
 }
 
 // Delete 删除风格（同时清理图片文件）
 func (h *StyleHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.styleService.Delete(c.Request.Context(), id); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "风格不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, "deleted", nil)
 }
 
 // ========== Category ==========
@@ -180,29 +168,25 @@ func (h *StyleHandler) Delete(c *gin.Context) {
 func (h *StyleHandler) Categories(c *gin.Context) {
 	cats, err := h.categoryService.ListWithStyleCount(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": cats})
+	response.OK(c, cats)
 }
 
 // CreateCategory 创建分类
 func (h *StyleHandler) CreateCategory(c *gin.Context) {
 	var req CreateCategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	category, err := h.categoryService.Create(c.Request.Context(), req.Name, req.SortOrder)
 	if err != nil {
-		if errors.Is(err, service.ErrConflict) {
-			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "分类名已存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"code": 0, "data": category})
+	response.Created(c, category)
 }
 
 // UpdateCategory 更新分类
@@ -210,42 +194,25 @@ func (h *StyleHandler) UpdateCategory(c *gin.Context) {
 	id := c.Param("id")
 	var req UpdateCategoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	category, err := h.categoryService.Update(c.Request.Context(), id, req.Name, req.SortOrder)
 	if err != nil {
-		if errors.Is(err, service.ErrConflict) {
-			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "分类名已存在"})
-			return
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "分类不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": category})
+	response.OK(c, category)
 }
 
 // DeleteCategory 删除分类（有风格时拒绝）
 func (h *StyleHandler) DeleteCategory(c *gin.Context) {
 	id := c.Param("id")
-	err := h.categoryService.Delete(c.Request.Context(), id)
-	if err != nil {
-		if errors.Is(err, service.ErrCategoryNotEmpty) {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
-			return
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "分类不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+	if err := h.categoryService.Delete(c.Request.Context(), id); err != nil {
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, "deleted", nil)
 }
 
 // ========== Favorites ==========
@@ -257,10 +224,10 @@ func (h *StyleHandler) ToggleFavorite(c *gin.Context) {
 
 	favorited, err := h.favoriteService.Toggle(c.Request.Context(), userID, styleID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"favorited": favorited}})
+	response.OK(c, gin.H{"favorited": favorited})
 }
 
 // ListFavorites 我的收藏列表
@@ -268,16 +235,13 @@ func (h *StyleHandler) ListFavorites(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	styles, err := h.favoriteService.ListByUser(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items": styles,
-			"total": len(styles),
-			"page":  1,
-		},
+	response.OK(c, gin.H{
+		"items": styles,
+		"total": len(styles),
+		"page":  1,
 	})
 }
 
@@ -285,18 +249,18 @@ func (h *StyleHandler) ListFavorites(c *gin.Context) {
 func (h *StyleHandler) CheckFavorited(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	if userID == "" {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{}})
+		response.OK(c, gin.H{})
 		return
 	}
 	var ids []string
 	if err := c.ShouldBindJSON(&ids); err != nil || len(ids) == 0 {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{}})
+		response.OK(c, gin.H{})
 		return
 	}
 	result, err := h.favoriteService.CheckFavorited(c.Request.Context(), userID, ids)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": result})
+	response.OK(c, result)
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"libtv/internal/model"
+	"libtv/internal/pkg/apperror"
 	"libtv/internal/repository"
 	"libtv/internal/storage"
 )
@@ -17,11 +19,11 @@ type ShowService struct {
 	storage  storage.Storage
 }
 
-// sentinel errors
+// sentinel errors（携带 HTTP 状态码，便于 handler 统一映射）
 var (
-	ErrShowNotFound          = errors.New("show not found")
-	ErrCategoryNotFound     = errors.New("category not found")
-	ErrCategoryNameConflict = errors.New("category name already exists")
+	ErrShowNotFound          = apperror.New(1001, http.StatusNotFound, "视频不存在")
+	ErrShowCategoryNotFound = apperror.New(1002, http.StatusNotFound, "分类不存在")
+	ErrCategoryNameConflict = apperror.New(1003, http.StatusConflict, "分类名已存在")
 )
 
 func NewShowService(showRepo repository.ShowRepo, userRepo repository.UserRepo, storage storage.Storage) *ShowService {
@@ -127,7 +129,7 @@ func (s *ShowService) GetCategoryByID(ctx context.Context, id string) (*model.Sh
 	cat, err := s.showRepo.FindCategoryByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrCategoryNotFound) {
-			return nil, ErrCategoryNotFound
+			return nil, ErrShowCategoryNotFound
 		}
 		return nil, err
 	}

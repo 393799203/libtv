@@ -4,20 +4,19 @@ import (
 	"net/http"
 
 	"libtv/internal/model"
+	"libtv/internal/pkg/response"
 	"libtv/internal/service"
-	"libtv/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
 
 type BannerHandler struct {
 	bannerService     *service.BannerService
-	storage           storage.Storage
 	fileUploadService *service.FileUploadService
 }
 
-func NewBannerHandler(bannerService *service.BannerService, storage storage.Storage, fileUploadService *service.FileUploadService) *BannerHandler {
-	return &BannerHandler{bannerService: bannerService, storage: storage, fileUploadService: fileUploadService}
+func NewBannerHandler(bannerService *service.BannerService, fileUploadService *service.FileUploadService) *BannerHandler {
+	return &BannerHandler{bannerService: bannerService, fileUploadService: fileUploadService}
 }
 
 // ========== 公开接口 ==========
@@ -26,10 +25,10 @@ func NewBannerHandler(bannerService *service.BannerService, storage storage.Stor
 func (h *BannerHandler) ListBanners(c *gin.Context) {
 	// 获取查询参数
 	isActiveStr := c.Query("is_active")
-	
+
 	var banners []*model.Banner
 	var err error
-	
+
 	// 如果指定了is_active参数，只返回对应状态的Banner
 	if isActiveStr != "" {
 		isActive := isActiveStr == "true"
@@ -38,13 +37,13 @@ func (h *BannerHandler) ListBanners(c *gin.Context) {
 		// 后台管理：返回所有Banner，禁用的排在后面
 		banners, err = h.bannerService.ListAllBanners(c.Request.Context())
 	}
-	
+
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": banners})
+	response.OK(c, banners)
 }
 
 // GetBanner 获取单个Banner详情（公开）
@@ -52,10 +51,10 @@ func (h *BannerHandler) GetBanner(c *gin.Context) {
 	id := c.Param("id")
 	banner, err := h.bannerService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "Banner不存在"})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": banner})
+	response.OK(c, banner)
 }
 
 // ========== 需登录接口：管理操作 ==========
@@ -82,7 +81,7 @@ type UpdateBannerRequest struct {
 func (h *BannerHandler) CreateBanner(c *gin.Context) {
 	var req CreateBannerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -96,18 +95,18 @@ func (h *BannerHandler) CreateBanner(c *gin.Context) {
 	}
 
 	if err := h.bannerService.CreateBanner(c.Request.Context(), banner); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "创建失败"})
+		response.FailWith(c, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"code": 0, "data": banner})
+	response.Created(c, banner)
 }
 
 // UploadImage 上传Banner图片（不需要Banner ID）
 func (h *BannerHandler) UploadImage(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "请选择文件"})
+		response.Fail(c, http.StatusBadRequest, "请选择文件")
 		return
 	}
 
@@ -118,11 +117,11 @@ func (h *BannerHandler) UploadImage(c *gin.Context) {
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": result.URL}})
+	response.OK(c, gin.H{"url": result.URL})
 }
 
 // UpdateBanner 更新Banner信息（需登录）
@@ -131,13 +130,13 @@ func (h *BannerHandler) UpdateBanner(c *gin.Context) {
 
 	banner, err := h.bannerService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "Banner不存在"})
+		response.FailWith(c, err)
 		return
 	}
 
 	var req UpdateBannerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -161,37 +160,19 @@ func (h *BannerHandler) UpdateBanner(c *gin.Context) {
 	}
 
 	if err := h.bannerService.UpdateBanner(c.Request.Context(), banner); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败"})
+		response.FailWith(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": banner})
+	response.OK(c, banner)
 }
 
 // DeleteBanner 删除Banner（需登录）
 func (h *BannerHandler) DeleteBanner(c *gin.Context) {
 	id := c.Param("id")
-
-	// 先获取记录，拿到图片路径再删除
-	banner, err := h.bannerService.GetByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "Banner不存在"})
-		return
-	}
-
-	imageURL := banner.ImageURL
-
 	if err := h.bannerService.DeleteBanner(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-
-	// 清理图片文件（用 storage 解析 URL → objectName，兼容绝对/相对 URL）
-	if imageURL != "" {
-		if objectName, ok := h.storage.ParseObjectName(imageURL); ok {
-			_ = h.storage.DeleteObject(objectName)
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, "deleted", nil)
 }

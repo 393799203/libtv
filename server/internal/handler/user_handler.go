@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 
 	"libtv/internal/middleware"
 	"libtv/internal/model"
+	"libtv/internal/pkg/response"
 	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -40,58 +40,55 @@ type AuthResponse struct {
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	user, err := h.userService.Register(c.Request.Context(), req.Email, req.Password, req.Nickname)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"code": 0, "data": user})
+	response.Created(c, user)
 }
 
 func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	token, user, err := h.userService.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": err.Error()})
+		response.Fail(c, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": AuthResponse{Token: token, User: *user}})
+	response.OK(c, AuthResponse{Token: token, User: *user})
 }
 
 func (h *UserHandler) Me(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	user, err := h.userService.GetByID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "user not found"})
+		response.Fail(c, http.StatusNotFound, "user not found")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": user})
+	response.OK(c, user)
 }
 
 // List 获取所有用户列表（管理员）
 func (h *UserHandler) List(c *gin.Context) {
 	users, err := h.userService.List(c.Request.Context(), c.Query("keyword"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items": users,
-			"total": len(users),
-		},
+	response.OK(c, gin.H{
+		"items": users,
+		"total": len(users),
 	})
 }
 
@@ -100,19 +97,11 @@ func (h *UserHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	currentUserID := middleware.GetUserID(c)
 
-	err := h.userService.Delete(c.Request.Context(), id, currentUserID)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrCannotDeleteSelf):
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能删除自己的账号"})
-		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "删除失败：" + err.Error()})
-		}
+	if err := h.userService.Delete(c.Request.Context(), id, currentUserID); err != nil {
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "deleted"})
+	response.OKWithMsg(c, "deleted", nil)
 }
 
 // UpdateRole 更新用户角色（管理员）
@@ -122,24 +111,15 @@ func (h *UserHandler) UpdateRole(c *gin.Context) {
 		Role string `json:"role" binding:"required,oneof=user admin"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "角色必须是 user 或 admin"})
+		response.Fail(c, http.StatusBadRequest, "角色必须是 user 或 admin")
 		return
 	}
 
 	currentUserID := middleware.GetUserID(c)
 	user, err := h.userService.UpdateRole(c.Request.Context(), id, req.Role, currentUserID)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrCannotModifySelf):
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "不能修改自己的角色"})
-		case errors.Is(err, service.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "用户不存在"})
-		case errors.Is(err, service.ErrInvalidRole):
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "角色必须是 user 或 admin"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "更新失败：" + err.Error()})
-		}
+		response.FailWith(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": user})
+	response.OK(c, user)
 }

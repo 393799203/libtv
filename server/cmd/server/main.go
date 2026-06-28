@@ -79,7 +79,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	projectService := service.NewProjectService(projectRepo, canvasRepo)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
-	bannerService := service.NewBannerService(bannerRepo)
+	bannerService := service.NewBannerService(bannerRepo, appStorage)
 
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
@@ -107,7 +107,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService)
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
 	showHandler := handler.NewShowHandler(showService, fileUploadService)
-	bannerHandler := handler.NewBannerHandler(bannerService, appStorage, fileUploadService)
+	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {

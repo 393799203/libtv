@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"libtv/internal/pkg/response"
 	"libtv/internal/service"
 	"libtv/internal/storage"
 
@@ -28,7 +30,7 @@ func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadSe
 func (h *UploadHandler) UploadVideo(c *gin.Context) {
 	_, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
+		response.Fail(c, http.StatusBadRequest, "获取文件失败")
 		return
 	}
 
@@ -45,7 +47,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		ProjectID: projectID,
 	}, h.transcodeService)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": err.Error()})
+		response.FailWith(c, err)
 		return
 	}
 
@@ -55,28 +57,22 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 		if result.Cached {
 			msg = "上传成功（已存在）"
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"msg":  msg,
-			"data": gin.H{
-				"url":          result.URL,
-				"storage_type": result.StorageType,
-				"filename":     result.ObjectName,
-				"cached":       result.Cached,
-			},
+		response.OKWithMsg(c, msg, gin.H{
+			"url":          result.URL,
+			"storage_type": result.StorageType,
+			"filename":     result.ObjectName,
+			"cached":       result.Cached,
+			"compressed":   result.Compressed,
 		})
 		return
 	}
 
 	// 异步转码中
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "上传成功，正在转码",
-		"data": gin.H{
-			"url":      "",
-			"task_id":  result.TaskID,
-			"filename": result.ObjectName,
-		},
+	response.OKWithMsg(c, "上传成功，正在转码", gin.H{
+		"url":        "",
+		"task_id":    result.TaskID,
+		"filename":   result.ObjectName,
+		"compressed": false,
 	})
 }
 
@@ -84,7 +80,7 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
+		response.Fail(c, http.StatusBadRequest, "获取文件失败")
 		return
 	}
 
@@ -98,19 +94,15 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "上传成功",
-		"data": gin.H{
-			"url":          result.URL,
-			"storage_type": result.StorageType,
-			"filename":     result.ObjectName,
-			"cached":       result.Cached,
-		},
+	response.OKWithMsg(c, "上传成功", gin.H{
+		"url":          result.URL,
+		"storage_type": result.StorageType,
+		"filename":     result.ObjectName,
+		"cached":       result.Cached,
 	})
 }
 
@@ -120,7 +112,7 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 func (h *UploadHandler) UploadImage(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
+		response.Fail(c, http.StatusBadRequest, "获取文件失败")
 		return
 	}
 
@@ -139,19 +131,15 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "上传成功",
-		"data": gin.H{
-			"url":          result.URL,
-			"storage_type": result.StorageType,
-			"filename":     result.ObjectName,
-			"cached":       result.Cached,
-		},
+	response.OKWithMsg(c, "上传成功", gin.H{
+		"url":          result.URL,
+		"storage_type": result.StorageType,
+		"filename":     result.ObjectName,
+		"cached":       result.Cached,
 	})
 }
 
@@ -159,7 +147,7 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 func (h *UploadHandler) UploadAudio(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "获取文件失败"})
+		response.Fail(c, http.StatusBadRequest, "获取文件失败")
 		return
 	}
 
@@ -181,19 +169,15 @@ func (h *UploadHandler) UploadAudio(c *gin.Context) {
 		ContentTypeFor: service.ContentTypeForAudio,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"msg":  "上传成功",
-		"data": gin.H{
-			"url":          result.URL,
-			"storage_type": result.StorageType,
-			"filename":     result.ObjectName,
-			"cached":       result.Cached,
-		},
+	response.OKWithMsg(c, "上传成功", gin.H{
+		"url":          result.URL,
+		"storage_type": result.StorageType,
+		"filename":     result.ObjectName,
+		"cached":       result.Cached,
 	})
 }
 
@@ -234,7 +218,7 @@ func (h *UploadHandler) GetFile(c *gin.Context) {
 		defer reader.Close()
 
 		buf := make([]byte, 32*1024)
-		io.CopyBuffer(c.Writer, reader, buf)
+		_, _ = io.CopyBuffer(c.Writer, reader, buf)
 	} else {
 		// 完整文件请求
 		c.Header("Content-Length", fmt.Sprintf("%d", info.Size))
@@ -248,7 +232,7 @@ func (h *UploadHandler) GetFile(c *gin.Context) {
 		defer reader.Close()
 
 		buf := make([]byte, 32*1024)
-		io.CopyBuffer(c.Writer, reader, buf)
+		_, _ = io.CopyBuffer(c.Writer, reader, buf)
 	}
 }
 
@@ -269,14 +253,19 @@ func parseRange(rangeHeader string, fileSize int64) (start, end int64) {
 	if parts[0] == "" {
 		start = 0
 	} else {
-		start = parseInt64(parts[0])
+		// P2-14 改用 strconv.ParseInt 替代自造 parseInt64
+		if v, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+			start = v
+		}
 	}
 
 	// 解析结束位置
 	if parts[1] == "" {
 		end = fileSize - 1
 	} else {
-		end = parseInt64(parts[1])
+		if v, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+			end = v
+		}
 	}
 
 	// 确保范围有效
@@ -294,29 +283,17 @@ func parseRange(rangeHeader string, fileSize int64) (start, end int64) {
 	return start, end
 }
 
-// parseInt64 解析整数
-func parseInt64(s string) int64 {
-	var result int64
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			result = result * 10 + int64(c-'0')
-		}
-	}
-	return result
-}
-
 // DeleteFile 删除文件
 func (h *UploadHandler) DeleteFile(c *gin.Context) {
 	filePath := c.Param("filepath")
 	filePath = strings.TrimPrefix(filePath, "/")
 
-	err := h.storage.DeleteObject(filePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败"})
+	if err := h.storage.DeleteObject(filePath); err != nil {
+		response.Fail(c, http.StatusInternalServerError, "删除失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	response.OKWithMsg(c, "删除成功", nil)
 }
 
 // GetStorageStatus 获取存储状态
@@ -331,34 +308,31 @@ func (h *UploadHandler) GetStorageStatus(c *gin.Context) {
 		status = fallback.GetStatus()
 	}
 
-	c.JSON(http.StatusOK, status)
+	response.OK(c, status)
 }
 
 // GetVideoStatus 获取视频转码任务状态
 func (h *UploadHandler) GetVideoStatus(c *gin.Context) {
 	taskID := c.Param("taskId")
 	if taskID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "缺少 task_id"})
+		response.Fail(c, http.StatusBadRequest, "缺少 task_id")
 		return
 	}
 
 	task, ok := h.transcodeService.GetTask(taskID)
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "msg": "任务不存在或已过期"})
+		response.Fail(c, http.StatusNotFound, "任务不存在或已过期")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": task,
-	})
+	response.OK(c, task)
 }
 
 // DeleteCanvasDir 删除画布目录
 func (h *UploadHandler) DeleteCanvasDir(c *gin.Context) {
 	projectID := c.Param("projectId")
 	if projectID == "" || projectID == "." || projectID == ".." {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "无效的项目 ID"})
+		response.Fail(c, http.StatusBadRequest, "无效的项目 ID")
 		return
 	}
 
@@ -366,5 +340,5 @@ func (h *UploadHandler) DeleteCanvasDir(c *gin.Context) {
 	// 注意：MinIO不支持目录删除，这里简化处理
 	// 实际应用中可能需要遍历删除所有文件
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "已删除（注意：MinIO环境下可能需要手动清理文件）"})
+	response.OKWithMsg(c, "已删除（注意：MinIO环境下可能需要手动清理文件）", nil)
 }

@@ -50,12 +50,13 @@ func (r *videoTaskRegistry) Get(taskID string) (*VideoTask, bool) {
 	return t, ok
 }
 
-func (r *videoTaskRegistry) MarkDone(taskID, url string) {
+func (r *videoTaskRegistry) MarkDone(taskID, url string, compressed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if t, ok := r.tasks[taskID]; ok {
 		t.Status = TaskStatusDone
 		t.URL = url
+		t.Compressed = compressed
 	}
 }
 
@@ -185,9 +186,9 @@ func (s *TranscodeService) ConvertAndUpload(taskID, inputPath, outputObjectName 
 		return
 	}
 
-	// 3. 完成
+	// 3. 完成（转码后的 mp4 视为已压缩）
 	url := s.storage.GetURL(outputObjectName)
-	videoTasks.MarkDone(taskID, url)
+	videoTasks.MarkDone(taskID, url, true)
 }
 
 // PrepareTranscode 把上传的文件落盘到临时目录，返回临时路径
