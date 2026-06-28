@@ -181,6 +181,7 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
             prevStepLabel={prevStepLabel}
             onPrevStep={prevStepLabel ? handlePrevStep : undefined}
             prevLoading={prevLoading}
+            showMissingAssetsWarning={data.currentStep === 2}
           />
         }
         open={open}

@@ -63,16 +63,16 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
     <div
       data-stale={data.stale ? 'true' : undefined}
       className={`
-        min-w-[200px] w-full min-h-[120px] rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
-        transition-all duration-150 relative flex flex-col
+        min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
+        transition-all duration-150 relative flex flex-col pt-8
         ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
         ${data.stale ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
         ${className || ''}
       `}
     >
-      {/* 节点头部 — 绝对定位在节点上方，不占用节点高度 */}
+      {/* 节点头部 — 负 margin 使其视觉上在节点上方 */}
       <div
-        className="absolute -top-8 left-0 right-0 flex items-center justify-between py-1 rounded-t-lg text-sm font-medium text-gray-700"
+        className={`-mt-8 flex items-center justify-between py-1 px-3 text-sm font-medium text-gray-700`}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsRenaming(true);
@@ -110,15 +110,15 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       {/* stale 角标：上游重新生成时提示 */}
       {data.stale && (
         <div
-          className="absolute -top-2 -right-2 z-10 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-medium shadow animate-pulse pointer-events-none"
+          className="absolute top-1 right-1 z-10 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-medium shadow animate-pulse pointer-events-none"
           title="上游节点已重新生成，本节点输出可能已过期"
         >
           待更新
         </div>
       )}
 
-      {/* 节点内容（flex-1 填充剩余空间，relative 供子组件绝对定位） */}
-      <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 min-h-0 relative`}>
+      {/* 节点内容 */}
+      <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 relative`}>
         {(status === 'running' || status === 'pending') ? (
           // 统一骨架屏：所有节点 running/pending 时展示（左右两列 + 中间耗时，高度与原始内容一致）
           <div className="flex flex-col h-full w-full justify-center gap-2 px-4 py-3">

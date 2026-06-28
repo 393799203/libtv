@@ -52,7 +52,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'text',
-        label: '文本节点',
+        label: '剧本',
         content: '',
         prompt: '',
       };
@@ -60,7 +60,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'image',
-        label: '图像节点',
+        label: '图片',
         prompt: '',
         negativePrompt: '',
         model: 'stable-diffusion',
@@ -72,7 +72,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'video',
-        label: '视频节点',
+        label: '视频',
         prompt: '',
         model: 'kling',
         duration: 5,
@@ -83,7 +83,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'audio',
-        label: '音频节点',
+        label: '音频',
         prompt: '',
         text: '',
         voice: 'default',
@@ -96,7 +96,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'script',
-        label: '脚本节点',
+        label: '分镜脚本',
         prompt: '',
         scriptContent: '',
         shots: [],

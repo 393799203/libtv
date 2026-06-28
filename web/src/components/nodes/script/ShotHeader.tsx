@@ -18,6 +18,8 @@ interface ShotHeaderProps {
   prevStepLabel?: string | null;
   onPrevStep?: () => void;
   prevLoading?: boolean;
+  /** 是否显示缺少设定图的警告，仅在准备资产阶段显示 */
+  showMissingAssetsWarning?: boolean;
 }
 
 export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
@@ -30,6 +32,7 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
   prevStepLabel,
   onPrevStep,
   prevLoading,
+  showMissingAssetsWarning,
 }) {
   // 计算缺少设定图的数量
   const missingChars = (data.characters || []).filter((c: ScriptCharacter) => !c.imageUrl).length;
@@ -58,7 +61,7 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               </span>
             )}
           </Text>
-          {hasMissingAssets && (
+          {showMissingAssetsWarning && hasMissingAssets && (
             <Text className="text-[11px] text-orange-600">
               <span className="text-orange-400 mr-1">⚠</span>
               检测到有{parts.join('和')}没有设定图，您可以手动上传或让AI批量生成
