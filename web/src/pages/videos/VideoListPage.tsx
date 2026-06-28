@@ -170,6 +170,7 @@ export default function VideoListPage() {
         videoUrl: item.video_url,
         duration: item.duration,
         author: item.author || 'LibTV',
+        authorId: item.author_id || '',
         tags: item.tags || undefined,
         likes: item.likes || 0,
       }));
@@ -556,7 +557,7 @@ export default function VideoListPage() {
                   )}
                   {/* 头像 + 作者名，叠加在图片上 */}
                   <div className="absolute bottom-2 left-2 flex items-center gap-1 z-20">
-                    <img src={`https://picsum.photos/16/16?random=${item.author}`} alt="" className="w-4 h-4 rounded-full border border-white/50" />
+                    <img src={`https://picsum.photos/32/32?random=${item.authorId}`} alt="" className="w-4 h-4 rounded-full border border-white/50" />
                     <span className="text-white text-[11px] drop-shadow-sm truncate max-w-[100px]">{item.author}</span>
                   </div>
                 </div>

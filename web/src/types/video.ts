@@ -26,6 +26,7 @@ export interface VideoListItem {
   videoUrl: string;
   duration: number;
   author: string;
+  authorId: string;
   tags?: string[];
   likes: number;
 }

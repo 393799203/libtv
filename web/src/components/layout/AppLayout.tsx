@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Dropdown, Avatar, Space, Button, App } from 'antd';
+import { Layout, Dropdown, Space, Button, App } from 'antd';
 import {
   VideoCameraOutlined,
-  UserOutlined,
   LogoutOutlined,
   ControlOutlined,
 } from '@ant-design/icons';
@@ -86,7 +85,11 @@ export function AppLayout() {
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <Button type="text" size="small">
                 <Space>
-                  <Avatar size={24} icon={<UserOutlined />} src={user?.avatarUrl || undefined} />
+                  <img 
+                    src={`https://picsum.photos/32/32?random=${user?.id || user?.nickname || 'user'}`} 
+                    alt="" 
+                    className="w-6 h-6 rounded-full border border-gray-200" 
+                  />
                   <span className="text-sm">{user?.nickname ?? '用户'}</span>
                 </Space>
               </Button>
