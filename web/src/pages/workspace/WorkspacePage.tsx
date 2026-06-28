@@ -10,6 +10,8 @@ import {
 import { Canvas } from '@/components/canvas/Canvas';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useExecutionStore } from '@/stores/executionStore';
+import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 
@@ -49,8 +51,14 @@ function WorkspaceInner() {
   const isSaving = useCanvasStore((s) => s.isSaving);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
 
-  // 执行事件 SSE 订阅已下沉到各 PromptPanel（useExecutionStream）
-  // 每个节点面板在用户点"生成"时单独订阅自己触发的 executionId
+  // SSE 订阅提升到 WorkspacePage 顶层：与节点选中状态解耦
+  // 节点失焦/切换面板不会卸载 SSE，避免运行中被关闭
+  const activeStream = useExecutionStore((s) => s.activeStream);
+  useExecutionStream(
+    activeStream?.projectId ?? null,
+    activeStream?.executionId ?? null,
+    activeStream?.nodeId,
+  );
 
   const [projectName, setProjectName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);

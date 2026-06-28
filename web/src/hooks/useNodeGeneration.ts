@@ -1,7 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
-import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { workflowApi } from '@/services/workflowApi';
 import { canvasApi } from '@/services/canvasApi';
 import { getDownstreamOf, clearAllStale } from '@/utils/topology';
@@ -56,11 +55,11 @@ export function useNodeGeneration(
   const nodeExec = currentExecution?.nodes?.find((n) => n.nodeId === nodeId);
   const setGeneratingNodeId = useExecutionStore((s) => s.setGeneratingNodeId);
   const lastError = useExecutionStore((s) => s.lastError);
+  const activeStream = useExecutionStore((s) => s.activeStream);
+  const setActiveStream = useExecutionStore((s) => s.setActiveStream);
 
-  const [localExecId, setLocalExecId] = useState<string | number | null>(null);
-  const executionId = localExecId;
-  // 订阅当前 execution 的 SSE（传入 nodeId 用于轮询时获取该节点数据）
-  useExecutionStream(projectId, executionId, nodeId);
+  // 当前节点是否正在执行：activeStream 指向本节点且节点状态为 running/pending
+  const executionId = activeStream?.nodeId === nodeId ? activeStream.executionId : null;
 
   const downstreamIds = useMemo(
     () => getDownstreamOf(nodeId, nodes, edges),
@@ -125,7 +124,9 @@ export function useNodeGeneration(
           mode,
         });
         if (resp?.executionId != null) {
-          setLocalExecId(resp.executionId);
+          // 写入全局 store，由 WorkspacePage 顶层订阅 SSE
+          // （与节点选中状态解耦：节点失焦不会卸载 SSE 订阅）
+          setActiveStream({ projectId, executionId: resp.executionId, nodeId });
         } else {
           // 启动失败：先设 failed，再保存（确保不保存 running）
           updateNodeStatus(nodeId, 'failed');
@@ -140,7 +141,7 @@ export function useNodeGeneration(
         await persistCanvas();
       }
     },
-    [projectId, nodeId, nodes, edges, updateNodeData, updateNodeStatus, setGeneratingNodeId, persistCanvas],
+    [projectId, nodeId, nodes, edges, updateNodeData, updateNodeStatus, setGeneratingNodeId, persistCanvas, setActiveStream],
   );
 
   const regenerateDownstream: UseNodeGenerationResult['regenerateDownstream'] =

@@ -256,6 +256,9 @@ export function useExecutionStream(
     const onFinal = () => {
       closedIntentionally = true; // 标记为主动关闭，防止 onerror 误启动轮询
 
+      // 清掉 activeStream（让下次同节点再生成能重新订阅）
+      useExecutionStore.getState().setActiveStream(null);
+
       // 执行完成后自动保存画布
       const store = useCanvasStore.getState();
       const pid = store.projectId;

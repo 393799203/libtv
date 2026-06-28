@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import type { WorkflowExecution, NodeExecution, WSEvent, WorkflowStatus } from '@/types/workflow';
 
+// 活跃 SSE 订阅信息（与组件生命周期解耦，避免节点失焦导致 SSE 被关闭）
+export interface ActiveStream {
+  projectId: string;
+  executionId: string | number;
+  nodeId?: string;
+}
+
 interface ExecutionState {
   // 当前执行
   currentExecution: WorkflowExecution | null;
@@ -15,6 +22,9 @@ interface ExecutionState {
   // 节点级错误映射：nodeId -> 错误信息
   nodeErrors: Record<string, string>;
 
+  // 活跃 SSE 订阅（WorkspacePage 顶层读取，订阅 /stream）
+  activeStream: ActiveStream | null;
+
   // Actions
   setCurrentExecution: (execution: WorkflowExecution | null) => void;
   setExecutionStatus: (status: WorkflowStatus) => void;
@@ -24,6 +34,7 @@ interface ExecutionState {
   setLastError: (msg: string | null) => void;
   setNodeError: (nodeId: string, msg: string | null) => void;
   resetExecution: () => void;
+  setActiveStream: (stream: ActiveStream | null) => void;
 }
 
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
@@ -33,6 +44,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   generatingNodeId: null,
   lastError: null,
   nodeErrors: {},
+  activeStream: null,
 
   setCurrentExecution: (execution) =>
     set({
@@ -118,6 +130,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       generatingNodeId: null,
       lastError: null,
       nodeErrors: {},
+      activeStream: null,
     }),
 
   setGeneratingNodeId: (id) => set({ generatingNodeId: id }),
@@ -129,4 +142,5 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       else delete next[nodeId];
       return { nodeErrors: next };
     }),
+  setActiveStream: (stream) => set({ activeStream: stream }),
 }));
