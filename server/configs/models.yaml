@@ -25,6 +25,7 @@ models:
       usage: [text]
       max_tokens: 4096
       temperature: 0.7
+      description: "硅基流动 DeepSeek-V4-Flash，适合文本生成"
 
     # 图像提示词优化（预留）
     - id: prompt-refine
@@ -34,14 +35,65 @@ models:
       usage: [image_prompt, video_prompt]
       max_tokens: 2048
       temperature: 0.5
+      description: "硅基流动 DeepSeek-V4-Flash，适合图像/视频提示词优化"
 
-  # ---------- 图像生成（预留）----------
+  # ---------- 图像生成 ----------
   image:
-    - id: image-default
-      name: "Lib Navo 2"
-      provider: lib_image
-      model_id: "lib-navo-2"
-      usage: [image]
+    - id: kolors-default
+      name: "Kwai-Kolors/Kolors"
+      provider: siliconflow
+      model_id: "Kwai-Kolors/Kolors"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "硅基流动 Kwai-Kolors/Kolors 图像生成模型，适合角色/场景/道具图生成"
+      parameters:
+        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
+        height: 720
+        steps: 25
+        guidance_scale: 7.5
+
+    - id: seedream-5.0-lite
+      name: "Doubao-Seedream-5.0-lite"
+      provider: siliconflow
+      model_id: "doubao/seedream-5.0-lite"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "字节豆包图像生成模型，适合角色/场景/道具图生成"
+      parameters:
+        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
+        height: 720
+        steps: 25
+        guidance_scale: 7.5
+
+    - id: qwen-image
+      name: "Qwen/Qwen-Image"
+      provider: siliconflow
+      model_id: "Qwen/Qwen-Image"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "通义千问图像生成模型，适合角色/场景/道具图生成"
+      parameters:
+        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
+        height: 720
+        steps: 25
+        guidance_scale: 7.5
+
+    - id: z-image-turbo
+      name: "Tongyi-MAI/Z-Image-Turbo"
+      provider: siliconflow
+      model_id: "Tongyi-MAI/Z-Image-Turbo"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "阿里通义图像生成模型，适合角色/场景/道具图生成"
+      parameters:
+        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
+        height: 720
+        steps: 25
+        guidance_scale: 7.5
 
   # ---------- 视频生成（预留）----------
   video:

@@ -118,11 +118,6 @@ const ModelSelector = memo(function ModelSelector({
                     </div>
                   )}
                 </div>
-
-                {/* 右侧耗时 */}
-                {model.duration !== undefined && (
-                  <span className="text-[13px] text-gray-400 flex-shrink-0">{model.duration}s</span>
-                )}
               </button>
             ))}
           </div>

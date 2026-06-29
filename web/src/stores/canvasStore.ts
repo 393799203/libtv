@@ -344,6 +344,81 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   // --- React Flow 回调 ---
   onNodesChange: (changes: NodeChange<LibTVNode>[]) => {
+    // ✅ 处理节点删除：使用 ID 映射机制同步清空脚本节点资产
+    const removeChanges = changes.filter(c => c.type === 'remove');
+    if (removeChanges.length > 0) {
+      const state = get();
+      const nodes = state.nodes;
+
+      for (const change of removeChanges) {
+        const deletedNode = nodes.find(n => n.id === (change as any).id);
+        if (deletedNode && deletedNode.type === 'image') {
+          // ✅ 从节点 ID 中提取资产信息（格式：{type}-{name}-{scriptNodeId}）
+          const nodeId = deletedNode.id;
+          const parts = nodeId.split('-');
+
+          // 解析节点 ID 格式："角色-南方-script-123" -> ["角色", "南方", "script-123"]
+          if (parts.length >= 3) {
+            const assetType = parts[0]; // "角色" / "场景" / "道具"
+            const assetName = parts[1]; // "南方" / "办公室" / "公文包"
+            const scriptNodeId = parts.slice(2).join('-'); // "script-123"
+
+            // 找到脚本节点
+            const scriptNode = nodes.find(n => n.id === scriptNodeId && n.type === 'script');
+            if (scriptNode) {
+              const scriptData = scriptNode.data as any;
+
+              // ✅ 清空资产的 imageUrl
+              const typeMap = {
+                '角色': 'characters',
+                '场景': 'scenes',
+                '道具': 'props',
+              };
+
+              const dataType = typeMap[assetType as '角色' | '场景' | '道具'];
+              if (dataType && scriptData[dataType]) {
+                const assets = scriptData[dataType];
+                const asset = assets.find((a: any) => a.name === assetName);
+                if (asset) {
+                  asset.imageUrl = '';
+                  console.log('[CanvasStore] 清空资产 imageUrl:', {
+                    assetType,
+                    assetName,
+                    scriptNodeId,
+                  });
+                }
+              }
+
+              // ✅ 清理脚本节点的 assetImageMapping
+              if (scriptData.assetImageMapping) {
+                const mappingType = typeMap[assetType as '角色' | '场景' | '道具'];
+                if (mappingType && scriptData.assetImageMapping[mappingType]) {
+                  const updatedMapping = {
+                    ...scriptData.assetImageMapping,
+                    [mappingType]: {
+                      ...scriptData.assetImageMapping[mappingType],
+                    },
+                  };
+                  delete updatedMapping[mappingType][assetName];
+
+                  // 更新脚本节点数据
+                  state.updateNodeData(scriptNodeId, {
+                    assetImageMapping: updatedMapping,
+                  } as any);
+
+                  console.log('[CanvasStore] 清理映射关系:', {
+                    mappingType,
+                    assetName,
+                    scriptNodeId,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     nodeChangeQueue.push(...changes);
     scheduleFlush(get, set);
   },

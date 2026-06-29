@@ -1,54 +1,47 @@
 import { memo, useCallback, useState } from 'react';
 import { PlusOutlined } from '@ant-design/icons';
-import { message, Upload } from 'antd';
 import type {
   ScriptCharacter,
   ScriptScene,
   ScriptProp,
 } from '@/types/canvas';
-import { uploadImage } from '@/services/uploadApi';
 import { AssetEditDrawer } from './AssetEditDrawer';
+import { useCanvasStore } from '@/stores/canvasStore';
+import { canvasApi } from '@/services/canvasApi';
+import {
+  updateAssetImageNodeUrl,
+  createAssetImageNode,
+  getAssetImageNodeId,
+} from '@/utils/assetImageSync';
 
 // ---- 单个资产卡片（角色/场景/道具通用）----
-interface AssetCardProps<T extends { name: string; description: string; imageUrl?: string }> {
+interface AssetCardProps<T extends { name: string; description: string }> {
   item: T;
   index: number;
-  onUpload: (index: string, url: string) => void;
+  scriptNodeId: string;
+  assetType: 'character' | 'scene' | 'prop';
   onAdd?: () => void; // 仅最后一个卡片显示"添加"
   showAdd?: boolean;
   /** 卡片点击回调（用于弹出编辑侧屏） */
   onClick?: () => void;
 }
 
-function AssetCard<T extends { name: string; description: string; imageUrl?: string }>({
+function AssetCard<T extends { name: string; description: string }>({
   item,
-  onUpload,
+  scriptNodeId,
+  assetType,
   onAdd,
   showAdd,
   onClick,
 }: AssetCardProps<T>) {
-  const [uploading, setUploading] = useState(false);
-
-  const handleUpload = useCallback(
-    async (file: File) => {
-      setUploading(true);
-      try {
-        const url = await uploadImage(file);
-        onUpload(item.name, url);
-        message.success('上传成功');
-      } catch {
-        message.error('上传失败');
-      } finally {
-        setUploading(false);
-      }
-      return false; // 阻止默认上传行为
-    },
-    [item.name, onUpload]
-  );
+  // ✅ 从画布图片节点实时读取 imageUrl（不再依赖脚本节点 data）
+  const nodes = useCanvasStore((s) => s.nodes);
+  const imageNodeId = getAssetImageNodeId(scriptNodeId, assetType, item.name);
+  const imageNode = nodes.find(n => n.id === imageNodeId);
+  const imageUrl = (imageNode?.data as any)?.imageUrl as string | undefined;
 
   const handleCardClick = useCallback(
     (e: React.MouseEvent) => {
-      // 阻止事件冒泡到 Upload 内部按钮
       e.stopPropagation();
       if (showAdd && onAdd) {
         onAdd();
@@ -65,28 +58,21 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
       onClick={handleCardClick}
     >
       {/* 图片区域 */}
-      {item.imageUrl ? (
+      {imageUrl ? (
         <div className="w-full h-full relative">
           <img
-            src={item.imageUrl}
+            src={imageUrl}
             alt={item.name}
             className="w-full h-full object-cover"
           />
           {/* 悬浮替换按钮 */}
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-            <Upload
-              accept="image/*"
-              showUploadList={false}
-              beforeUpload={handleUpload}
-              disabled={uploading}
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <button
+              className="px-3 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
+              onClick={handleCardClick}
             >
-              <button
-                className="px-3 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50 pointer-events-auto"
-                onClick={(e) => e.stopPropagation()}
-              >
-                替换图片
-              </button>
-            </Upload>
+              替换图片
+            </button>
           </div>
         </div>
       ) : (
@@ -100,11 +86,7 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
           ) : (
             /* 上传占位 */
             <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-blue-500 transition-colors">
-              {uploading ? (
-                <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <span className="text-[10px]">生成或上传参考图</span>
-              )}
+              <span className="text-[10px]">生成或上传参考图</span>
             </div>
           )}
         </div>
@@ -120,22 +102,24 @@ function AssetCard<T extends { name: string; description: string; imageUrl?: str
 
 // ---- 资产分组标题 + 描述 + 卡片列表 ----
 interface AssetSectionProps<
-  T extends { name: string; description: string; imageUrl?: string }
+  T extends { name: string; description: string }
 > {
   title: string;
   items: T[];
-  onUpload: (itemName: string, url: string) => void;
+  scriptNodeId: string;
+  assetType: 'character' | 'scene' | 'prop';
   onAdd?: () => void;
   /** 卡片点击回调（用于角色编辑等场景） */
   onCardClick?: (item: T) => void;
 }
 
 function AssetSection<
-  T extends { name: string; description: string; imageUrl?: string }
+  T extends { name: string; description: string }
 >({
   title,
   items,
-  onUpload,
+  scriptNodeId,
+  assetType,
   onAdd,
   onCardClick,
 }: AssetSectionProps<T>) {
@@ -151,22 +135,18 @@ function AssetSection<
             key={`${item.name}-${idx}`}
             item={item}
             index={idx}
-            onUpload={(name, url) => onUpload(name, url)}
+            scriptNodeId={scriptNodeId}
+            assetType={assetType}
             onClick={onCardClick ? () => onCardClick(item) : undefined}
           />
         ))}
         {/* 添加按钮（作为最后一个空卡片） */}
         {onAdd && (
           <AssetCard
-            item={
-              { name: '', description: '', imageUrl: undefined } as T & {
-                name: '';
-                description: '';
-                imageUrl?: string;
-              }
-            }
+            item={{ name: '', description: '' } as T}
             index={items.length}
-            onUpload={() => {}}
+            scriptNodeId={scriptNodeId}
+            assetType={assetType}
             onAdd={onAdd}
             showAdd
           />
@@ -200,21 +180,40 @@ export interface AssetPreparationData {
 }
 
 interface AssetPreparationPanelProps {
+  scriptNodeId: string;
   data: AssetPreparationData;
   onUpdate: (updates: Partial<AssetPreparationData>) => void;
 }
 
 export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
-  function AssetPreparationPanel({ data, onUpdate }) {
+  function AssetPreparationPanel({ scriptNodeId, data, onUpdate }) {
     // 当前编辑中的资产（角色/场景/道具）
-    const [editingCharacter, setEditingCharacter] =
-      useState<ScriptCharacter | null>(null);
+    const [editingCharacter, setEditingCharacter] = useState<ScriptCharacter | null>(null);
     const [editingScene, setEditingScene] = useState<ScriptScene | null>(null);
     const [editingProp, setEditingProp] = useState<ScriptProp | null>(null);
 
+    // ✅ 通用的画布实时保存函数（避免代码重复）
+    const saveCanvasRealtime = useCallback(async () => {
+      const store = useCanvasStore.getState();
+      const projectId = store.projectId;
+      if (!projectId) return;
+
+      const viewport = store._cache.get(projectId)?.savedViewport || { x: 0, y: 0, zoom: 1 };
+      try {
+        await canvasApi.saveCanvas(projectId, {
+          nodes: store.nodes,
+          edges: store.edges,
+          viewport,
+        });
+        console.log('[AssetPreparationPanel] 画布已实时保存');
+      } catch (error) {
+        console.error('[AssetPreparationPanel] 画布保存失败:', error);
+      }
+    }, []);
+
     // 角色图片上传
     const handleCharacterUpload = useCallback(
-      (name: string, url: string) => {
+      async (name: string, url: string) => {
         const updated = data.characters.map((c) =>
           c.name === name ? { ...c, imageUrl: url } : c
         );
@@ -223,8 +222,28 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         setEditingCharacter((prev) =>
           prev && prev.name === name ? { ...prev, imageUrl: url } : prev
         );
+
+        // ✅ 使用新的同步工具：直接通过 ID 映射更新图片节点
+        const updatedNode = updateAssetImageNodeUrl(scriptNodeId, 'character', name, url);
+        if (!updatedNode) {
+          // 如果没有图片节点，创建新节点并建立映射
+          const character = data.characters.find(c => c.name === name);
+          if (character) {
+            createAssetImageNode(
+              scriptNodeId,
+              'character',
+              name,
+              url,
+              character.description,
+              undefined
+            );
+          }
+        }
+
+        // ✅ 实时保存画布（确保不丢失更改）
+        await saveCanvasRealtime();
       },
-      [data.characters, onUpdate]
+      [data.characters, onUpdate, scriptNodeId, saveCanvasRealtime]
     );
 
     // 角色描述变更（失焦时自动保存）
@@ -244,7 +263,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
 
     // 场景图片上传
     const handleSceneUpload = useCallback(
-      (name: string, url: string) => {
+      async (name: string, url: string) => {
         const updated = data.scenes.map((s) =>
           s.name === name ? { ...s, imageUrl: url } : s
         );
@@ -253,8 +272,28 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         setEditingScene((prev) =>
           prev && prev.name === name ? { ...prev, imageUrl: url } : prev
         );
+
+        // ✅ 使用新的同步工具：直接通过 ID 映射更新图片节点
+        const updatedNode = updateAssetImageNodeUrl(scriptNodeId, 'scene', name, url);
+        if (!updatedNode) {
+          // 如果没有图片节点，创建新节点并建立映射
+          const scene = data.scenes.find(s => s.name === name);
+          if (scene) {
+            createAssetImageNode(
+              scriptNodeId,
+              'scene',
+              name,
+              url,
+              scene.description,
+              undefined
+            );
+          }
+        }
+
+        // ✅ 实时保存画布（确保不丢失更改）
+        await saveCanvasRealtime();
       },
-      [data.scenes, onUpdate]
+      [data.scenes, onUpdate, scriptNodeId, saveCanvasRealtime]
     );
 
     // 场景描述变更（失焦时自动保存）
@@ -274,7 +313,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
 
     // 道具图片上传
     const handlePropUpload = useCallback(
-      (name: string, url: string) => {
+      async (name: string, url: string) => {
         const updated = data.props.map((p) =>
           p.name === name ? { ...p, imageUrl: url } : p
         );
@@ -283,8 +322,28 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         setEditingProp((prev) =>
           prev && prev.name === name ? { ...prev, imageUrl: url } : prev
         );
+
+        // ✅ 使用新的同步工具：直接通过 ID 映射更新图片节点
+        const updatedNode = updateAssetImageNodeUrl(scriptNodeId, 'prop', name, url);
+        if (!updatedNode) {
+          // 如果没有图片节点，创建新节点并建立映射
+          const prop = data.props.find(p => p.name === name);
+          if (prop) {
+            createAssetImageNode(
+              scriptNodeId,
+              'prop',
+              name,
+              url,
+              prop.description,
+              undefined
+            );
+          }
+        }
+
+        // ✅ 实时保存画布（确保不丢失更改）
+        await saveCanvasRealtime();
       },
-      [data.props, onUpdate]
+      [data.props, onUpdate, scriptNodeId, saveCanvasRealtime]
     );
 
     // 道具描述变更（失焦时自动保存）
@@ -308,7 +367,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         <AssetSection
           title="角色"
           items={data.characters || []}
-          onUpload={handleCharacterUpload}
+          scriptNodeId={scriptNodeId}
+          assetType="character"
           onCardClick={(item) => setEditingCharacter(item as ScriptCharacter)}
         />
 
@@ -316,7 +376,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         <AssetSection
           title="场景"
           items={data.scenes || []}
-          onUpload={handleSceneUpload}
+          scriptNodeId={scriptNodeId}
+          assetType="scene"
           onCardClick={(item) => setEditingScene(item as ScriptScene)}
         />
 
@@ -324,7 +385,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         <AssetSection
           title="道具"
           items={data.props || []}
-          onUpload={handlePropUpload}
+          scriptNodeId={scriptNodeId}
+          assetType="prop"
           onCardClick={(item) => setEditingProp(item as ScriptProp)}
         />
 
@@ -340,6 +402,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         {/* 角色编辑侧屏 */}
         <AssetEditDrawer
           open={!!editingCharacter}
+          scriptNodeId={scriptNodeId}
           assetType="character"
           asset={editingCharacter}
           onClose={() => setEditingCharacter(null)}
@@ -350,6 +413,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         {/* 场景编辑侧屏 */}
         <AssetEditDrawer
           open={!!editingScene}
+          scriptNodeId={scriptNodeId}
           assetType="scene"
           asset={editingScene}
           onClose={() => setEditingScene(null)}
@@ -360,6 +424,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         {/* 道具编辑侧屏 */}
         <AssetEditDrawer
           open={!!editingProp}
+          scriptNodeId={scriptNodeId}
           assetType="prop"
           asset={editingProp}
           onClose={() => setEditingProp(null)}

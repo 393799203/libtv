@@ -2,6 +2,7 @@ import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
 import { useNodeGeneration } from '@/hooks/useNodeGeneration';
+import { useModels } from '@/hooks/useModels';
 import { nodeRegistry } from '@/plugins/registry';
 import type {
   UpstreamInput,
@@ -56,7 +57,8 @@ function getUpstreamInputs(
           return {
             nodeId: sourceNode.id,
             nodeType: 'image',
-            label: `图片${num}`,
+            // ✅ 优先使用真实名字（如"角色-南方"、"场景-办公室"），没有名字才使用编号
+            label: d.label || `图片${num}`,
             thumbnail: d.imageUrl,
             previewUrl: d.imageUrl,
           };
@@ -125,6 +127,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 从 plugin registry 读配置（统一来源，后续加节点类型无需改 PromptPanel）
   const config = nodeRegistry.get(nodeType).promptConfig;
 
+  // 从后端 API 动态获取模型列表
+  const availableModels = useModels(nodeType);
+
   // 上游输入列表（useMemo 稳定引用，避免子组件无效重渲染）
   const upstreamInputs = useMemo(
     () => getUpstreamInputs(nodeId, nodes, edges),
@@ -149,7 +154,17 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     setPromptText(newPrompt);
     setMentions(newMentions);
   }, [nodeId]);
+
+  // 模型选择状态（使用动态模型列表）
   const [selectedModel, setSelectedModel] = useState(config.defaultModel);
+  
+  // 当模型列表加载完成且当前模型不在列表中时，自动切换到第一个模型
+  useEffect(() => {
+    if (availableModels.length > 0 && !availableModels.find(m => m.value === selectedModel)) {
+      setSelectedModel(availableModels[0].value);
+    }
+  }, [availableModels, selectedModel]);
+  
   const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>((config.defaultResolution as ResolutionOption) || '1K');
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -252,7 +267,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[580px] flex flex-col px-2 py-2';
+    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[700px] flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>
@@ -272,14 +287,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         </div>
       )}
 
-      {/* 下游确认条：执行完当前节点后，提示下游可能被影响 */}
-      {showDownstreamConfirm && downstreamIds.length > 0 && (
+      {/* ✅ 移除下游确认条：下游节点标红已经足够提示，不需要额外的文字提示 */}
+      {/* {showDownstreamConfirm && downstreamIds.length > 0 && (
         <DownstreamConfirmBar
           count={downstreamIds.length}
           onRegenerate={handleRegenerateDownstream}
           onDismiss={handleDismissConfirm}
         />
-      )}
+      )} */}
 
       {/* 视频节点：模式选择器（根据上游图片数量自动过滤可选模式） */}
       {nodeType === 'video' && (
@@ -316,7 +331,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
       {/* 第三层：底部工具栏 */}
       <PromptToolbar
-        models={config.availableModels}
+        models={availableModels}
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
         selectedResolution={selectedResolution}

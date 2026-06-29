@@ -265,6 +265,30 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 		return
 	}
 
+	// 获取执行记录并立即推送当前状态
+	exec, err := h.execRepo.FindByID(c.Request.Context(), execID)
+	if err == nil {
+		statusEvent := map[string]interface{}{
+			"executionId": execID,
+			"status":      exec.Status,
+			"errorMsg":    exec.ErrorMsg,
+		}
+		if exec.Status == "failed" || exec.Status == "done" {
+			// 如果执行已经结束，立即推送终态事件
+			var eventType string
+			if exec.Status == "failed" {
+				eventType = "execution_failed"
+			} else {
+				eventType = "execution_completed"
+			}
+			payload, _ := json.Marshal(statusEvent)
+			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, string(payload))
+			flusher.Flush()
+			log.Printf("[SSE] pushed final status: execID=%d status=%s", execID, exec.Status)
+			return // 执行已结束，直接返回，不再订阅后续事件
+		}
+	}
+
 	// 订阅引擎事件
 	eventCh := h.engine.Subscribe(execID)
 	defer h.engine.Unsubscribe(execID, eventCh)

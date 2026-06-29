@@ -2,10 +2,6 @@ import type { NodeType, LibTVNodeData } from '@/types/canvas';
 import type { NodeTypePlugin, OutputKind } from './types';
 import {
   PROMPT_PANEL_CONFIGS,
-  IMAGE_MODELS,
-  VIDEO_MODELS,
-  TEXT_MODELS,
-  AUDIO_MODELS,
   ASPECT_RATIO_ROWS,
   RESOLUTION_OPTIONS,
 } from '@/configs/promptConfig';
@@ -70,12 +66,8 @@ class NodeTypeRegistry {
 // 单例：组件中 import { nodeRegistry } from '@/plugins/registry'
 export const nodeRegistry = new NodeTypeRegistry();
 
-// 模型集合（保持与旧 configs/promptConfig.ts 导出同名，避免破坏现有 import）
+// 导出其他配置（保持兼容性）
 export {
-  IMAGE_MODELS,
-  VIDEO_MODELS,
-  TEXT_MODELS,
-  AUDIO_MODELS,
   ASPECT_RATIO_ROWS,
   RESOLUTION_OPTIONS,
 };

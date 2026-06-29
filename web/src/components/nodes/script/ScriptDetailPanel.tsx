@@ -8,6 +8,7 @@ import { AssetPreparationPanel } from './AssetPreparationPanel';
 
 interface ScriptDetailPanelProps {
   open: boolean;
+  scriptNodeId: string;
   data: ScriptNodeData;
   onClose: () => void;
   onUpdate: (data: Partial<ScriptNodeData>) => void;
@@ -79,6 +80,7 @@ const GeneratingSkeleton = memo(function GeneratingSkeleton({
 export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
   function ScriptDetailPanel({
     open,
+    scriptNodeId,
     data,
     onClose,
     onUpdate,
@@ -207,6 +209,7 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
         ) : data.currentStep === 2 ? (
           // Step 2：准备资产
           <AssetPreparationPanel
+            scriptNodeId={scriptNodeId}
             data={{
               characters: (data.characters as ScriptNodeData['characters']) || [],
               scenes: (data.scenes as ScriptNodeData['scenes']) || [],

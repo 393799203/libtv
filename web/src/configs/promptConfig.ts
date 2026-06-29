@@ -4,86 +4,6 @@ import type {
 } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
 
-// ==================== 模型数据 ====================
-
-export const IMAGE_MODELS: ModelOption[] = [
-  {
-    value: 'lib-image',
-    label: 'Lib Image',
-    icon: 'link',
-    duration: 60,
-  },
-  {
-    value: 'lib-navo-pro',
-    label: 'Lib Navo Pro',
-    icon: 'close',
-    duration: 50,
-  },
-  {
-    value: 'lib-navo-2',
-    label: 'Lib Navo 2',
-    icon: 'close',
-    duration: 25,
-    description: '支持联网搜索、文字准确、速度更快',
-  },
-  {
-    value: 'seedream-4.6',
-    label: 'Seedream 4.6',
-    icon: 'bar-chart',
-    duration: 20,
-  },
-  {
-    value: 'seedream-5.0-lite',
-    label: 'Seedream 5.0 Lite',
-    icon: 'bar-chart',
-    duration: 20,
-  },
-  {
-    value: 'seedream-4.5',
-    label: 'Seedream 4.5',
-    icon: 'bar-chart',
-    duration: 15,
-    tag: '限时5折',
-    tagColor: '#f59e0b',
-  },
-  {
-    value: 'midjourney-v7',
-    label: 'Midjourney V7',
-    icon: 'robot',
-    duration: 50,
-  },
-];
-
-export const VIDEO_MODELS: ModelOption[] = [
-  {
-    value: 'kling-2.0',
-    label: 'Kling 2.0',
-    icon: 'video-camera',
-    duration: 60,
-  },
-  {
-    value: 'runway-gen3',
-    label: 'Runway Gen3',
-    icon: 'thunderbolt',
-    duration: 45,
-  },
-  {
-    value: 'sora',
-    label: 'Sora',
-    icon: 'cloud',
-    duration: 120,
-  },
-];
-
-export const TEXT_MODELS: ModelOption[] = [
-  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', icon: 'robot', description: '响应快、性价比高，中文创作能力强' },
-];
-
-export const AUDIO_MODELS: ModelOption[] = [
-  { value: 'tts-1', label: 'TTS Pro', icon: 'audio' },
-  { value: 'cosyvoice', label: 'CosyVoice', icon: 'sound' },
-];
-
 // ==================== 分辨率选项 ====================
 
 export const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const;
@@ -126,20 +46,20 @@ export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> =
 export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   image: {
     acceptedInputs: ['image', 'text', 'script'],
-    defaultModel: 'lib-navo-2',
+    defaultModel: 'kolors-default',  // 默认模型 ID
     defaultResolution: '1K',
-    defaultAspectRatio: '1:1',
-    availableModels: IMAGE_MODELS,
+    defaultAspectRatio: '16:9',
+    availableModels: [],  // 空数组，由组件从 Store 动态获取
     toolbarControls: ['model', 'aspectRatio', 'negativePrompt', 'count', 'tokenCount'],
     placeholder: '描述你想生成的图像，可 @ 引用上游图片或文本...',
     maxLength: 2000,
   },
   video: {
     acceptedInputs: ['image', 'video', 'text', 'script', 'audio'],
-    defaultModel: 'kling-2.0',
+    defaultModel: 'video-default',
     defaultResolution: '1K',
     defaultAspectRatio: '9:16',
-    availableModels: VIDEO_MODELS,
+    availableModels: [],
     toolbarControls: ['model', 'aspectRatio', 'camera', 'viewMode', 'duration', 'count', 'tokenCount'],
     placeholder: '描述视频内容、运镜方式、风格，可 @ 引用上游素材...',
     maxLength: 2000,
@@ -149,17 +69,17 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     defaultModel: 'deepseek-v4-flash',
     defaultResolution: '1K',
     defaultAspectRatio: 'free',
-    availableModels: TEXT_MODELS,
+    availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
     placeholder: '写下你想讲的故事、场景或角色设定...',
     maxLength: 4000,
   },
   audio: {
     acceptedInputs: ['text', 'script'],
-    defaultModel: 'tts-1',
+    defaultModel: 'audio-default',
     defaultResolution: '1K',
     defaultAspectRatio: 'free',
-    availableModels: AUDIO_MODELS,
+    availableModels: [],
     toolbarControls: ['model', 'voice', 'speed'],
     placeholder: '输入要转换为语音的文本...',
     maxLength: 5000,
@@ -169,7 +89,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     defaultModel: 'deepseek-v4-flash',
     defaultResolution: '1K',
     defaultAspectRatio: 'free',
-    availableModels: TEXT_MODELS,
+    availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
     placeholder: '连接上游文本节点后，点击生成剧本分镜...',
     maxLength: 8000,

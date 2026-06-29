@@ -623,25 +623,117 @@ func stripMentionMarkers(s string) string {
 	return strings.TrimSpace(mentionMarkerRe.ReplaceAllString(s, ""))
 }
 
-// ImageExecutor 图像节点执行器（MVP: 透传，后续接入 SD API）
-type ImageExecutor struct{}
+// ImageExecutor 图像节点执行器(调用硅基流动 Kolors API)
+type ImageExecutor struct {
+	imageClient  *llm.ImageClient
+	modelManager *llm.ModelManager
+}
+
+// NewImageExecutor 创建图像执行器
+func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager) *ImageExecutor {
+	return &ImageExecutor{
+		imageClient:  client,
+		modelManager: modelManager,
+	}
+}
 
 func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
 		Mode   string `json:"mode"`
 		Prompt string `json:"prompt"`
+		Model  string `json:"model"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse image node data: %w", err)
 	}
-	// TODO: 调用 SD API / MJ API 生图
+
+	// 没有提示词时直接返回空结果
+	if data.Prompt == "" {
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "success",
+			Data: map[string]interface{}{
+				"imageUrl": "",
+			},
+		}, nil
+	}
+
+	// 没有图像客户端时(MVP 阶段):透传返回空 URL
+	if i.imageClient == nil {
+		log.Printf("[ImageExecutor] no imageClient, returning empty imageUrl")
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "success",
+			Data: map[string]interface{}{
+				"imageUrl": "",
+			},
+		}, nil
+	}
+
+	// ✅ 尺寸参数优先级：
+	// 1. 节点数据中的 width/height（用户通过图片节点编辑弹窗设置的）
+	// 2. 模型配置中的默认参数（models.yaml 中的 parameters.width/height）
+	// 3. 系统默认值 1024x1024
+	var width, height int
+
+	// 优先使用节点数据中的尺寸
+	if data.Width > 0 && data.Height > 0 {
+		width = data.Width
+		height = data.Height
+	} else if i.modelManager != nil && data.Model != "" {
+		// 否则尝试从模型配置中读取默认尺寸
+		modelConfig := i.modelManager.FindModelByID(data.Model)
+		if modelConfig != nil {
+			if w, ok := modelConfig.Parameters["width"].(int); ok && w > 0 {
+				width = w
+			}
+			if h, ok := modelConfig.Parameters["height"].(int); ok && h > 0 {
+				height = h
+			}
+		}
+	}
+
+	// 如果仍然没有尺寸，使用系统默认值
+	if width == 0 || height == 0 {
+		width = 1024
+		height = 1024
+	}
+
+	size := fmt.Sprintf("%dx%d", width, height)
+
+	// 清理提示词中的占位符
+	cleanedPrompt := stripMentionMarkers(data.Prompt)
+
+	// 确定使用的模型 ID（传递给硅基流动 API）
+	// 前端传递的是 model.ID（如 "kolors-default"），需要转换为 model_id（如 "Kwai-Kolors/Kolors"）
+	apiModelID := "Kwai-Kolors/Kolors" // 默认值
+
+	if data.Model != "" && i.modelManager != nil {
+		// 根据 model.ID 查找模型配置
+		modelConfig := i.modelManager.FindModelByID(data.Model)
+		if modelConfig != nil && modelConfig.ModelID != "" {
+			apiModelID = modelConfig.ModelID
+			log.Printf("[ImageExecutor] 找到模型配置: ID=%s -> ModelID=%s", data.Model, apiModelID)
+		} else {
+			log.Printf("[ImageExecutor] 未找到模型配置或 ModelID 为空: modelID=%s，使用默认模型", data.Model)
+		}
+	}
+
+	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s apiModel=%s size=%s", node.ID, len(cleanedPrompt), data.Model, apiModelID, size)
+
+	// 调用图像生成 API
+	imageURL, err := i.imageClient.GenerateImageWithModel(ctx, apiModelID, cleanedPrompt, size)
+	if err != nil {
+		return nil, fmt.Errorf("generate image: %w", err)
+	}
+
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"mode":   data.Mode,
-			"prompt": data.Prompt,
-			"images": []string{},
+			"imageUrl": imageURL,
 		},
 	}, nil
 }
@@ -693,11 +785,11 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 }
 
 // NewDefaultRegistry 创建默认执行器注册表
-func NewDefaultRegistry(llmClient *llm.Client) *ExecutorRegistry {
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, modelManager *llm.ModelManager) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient))
 	registry.Register("script", NewScriptExecutor(llmClient))
-	registry.Register("image", &ImageExecutor{})
+	registry.Register("image", NewImageExecutor(imageClient, modelManager))
 	registry.Register("video", &VideoExecutor{})
 	registry.Register("audio", &AudioExecutor{})
 	return registry

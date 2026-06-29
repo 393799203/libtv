@@ -48,7 +48,7 @@ ai:
   # ---- Provider 运行时凭据（对应 models.yaml 中的 providers）----
   providers:
     siliconflow:
-      api_key: "sk-rjknkdqxefbxebrbfawaokciapqzjejqzqfvlehyhohiknys"
+      api_key: "sk-qahniunuynslawucpjnjirhzlfglbmdogyaftrntsrpypcjt"
       base_url: "https://api.siliconflow.cn/v1"
     openai:
       api_key: ""

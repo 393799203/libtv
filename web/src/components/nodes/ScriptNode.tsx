@@ -48,6 +48,7 @@ export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ 
         createPortal(
           <ScriptDetailPanel
             open={detailOpen}
+            scriptNodeId={id}
             data={data}
             onClose={handleCloseDetail}
             onUpdate={handleUpdateData}

@@ -48,6 +48,12 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
+	// 加载模型配置
+	modelManager, err := llm.NewModelManager("configs/models.yaml")
+	if err != nil {
+		log.Fatalf("load models config: %v", err)
+	}
+
 	// 连接数据库
 	db, err := gorm.Open(postgres.Open(config.C.Database.DSN()), &gorm.Config{})
 	if err != nil {
@@ -84,8 +90,11 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
 
+	// 初始化图像生成客户端
+	imageClient := llm.NewImageClient(config.C.AI, "siliconflow")
+
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, modelManager)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
@@ -108,6 +117,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
 	showHandler := handler.NewShowHandler(showService, fileUploadService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
+	modelHandler := handler.NewModelHandler(modelManager)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -149,6 +159,9 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		publicBanners.GET("", bannerHandler.ListBanners)
 		publicBanners.GET("/:id", bannerHandler.GetBanner)
 	}
+
+	// 公开模型配置接口（无需登录）
+	r.GET("/api/models", modelHandler.ListModels)
 
 	// 公开上传接口
 	publicUpload := r.Group("/api/upload")
