@@ -220,7 +220,7 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
           assetType,
           asset.name,
           undefined, // imageUrl 初始为空，等待 AI 生成
-          asset.description,
+          asset.description, // 后端会根据节点 ID 自动添加视图指令
           selectedModel
         );
 

@@ -122,6 +122,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     error: hookError,
     generate,
     regenerateDownstream,
+    clearError,
   } = useNodeGeneration({ nodeId });
 
   // 从 plugin registry 读配置（统一来源，后续加节点类型无需改 PromptPanel）
@@ -167,7 +168,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   
   const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>((config.defaultResolution as ResolutionOption) || '1K');
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);
-  const [isGenerating, setIsGenerating] = useState(false);
   // 下游确认条：执行完后弹出
   const [showDownstreamConfirm, setShowDownstreamConfirm] = useState(false);
 
@@ -233,26 +233,21 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       } as Partial<LibTVNodeData>);
     }
 
-    setIsGenerating(true);
-
     // 2) 调统一入口（自动：写下游 stale → 存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-    // isGenerating 由下面 useEffect 在终态时清掉
   }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, onUpdate, generate]);
 
-  // 监听执行状态：终态时关掉 loading + 弹下游确认条
-  const executionStatus = useExecutionStore((s) => s.status);
-  const lastError = useExecutionStore((s) => s.lastError);
+  // 监听节点执行状态：终态时弹出下游确认条
+  const currentExecution = useExecutionStore((s) => s.currentExecution);
+  const nodeExec = currentExecution?.nodes?.find((n) => n.nodeId === nodeId);
   useEffect(() => {
-    if (executionStatus === 'completed' || executionStatus === 'failed') {
-      setIsGenerating(false);
-      useExecutionStore.getState().setGeneratingNodeId(null);
+    if (nodeExec?.status === 'success' || nodeExec?.status === 'failed') {
       // 仅当有下游且执行成功时弹确认条
-      if (executionStatus === 'completed' && downstreamIds.length > 0) {
+      if (nodeExec?.status === 'success' && downstreamIds.length > 0) {
         setShowDownstreamConfirm(true);
       }
     }
-  }, [executionStatus, downstreamIds.length]);
+  }, [nodeExec?.status, downstreamIds.length]);
 
   // 点击"重新生成下游"
   const handleRegenerateDownstream = useCallback(() => {
@@ -272,13 +267,13 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   return (
     <div className={panelClass}>
 
-      {/* 错误提示条（lastError 有值时显示） */}
-      {lastError && (
+      {/* 错误提示条（hookError 有值时显示） */}
+      {hookError && (
         <div className="mb-2 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
-          <span className="flex-1 break-all">{lastError}</span>
+          <span className="flex-1 break-all">{hookError}</span>
           <button
-            onClick={() => useExecutionStore.getState().setLastError(null)}
+            onClick={clearError}
             className="text-red-500 hover:text-red-700 flex-shrink-0"
             title="关闭"
           >
@@ -338,7 +333,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onResolutionChange={setSelectedResolution}
         selectedAspectRatio={selectedAspectRatio}
         onAspectRatioChange={setSelectedAspectRatio}
-        isGenerating={isGenerating || hookIsGenerating}
+        isGenerating={hookIsGenerating}
         onGenerate={handleGenerate}
         nodeType={nodeType}
         cameraMode={cameraMode}

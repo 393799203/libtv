@@ -129,21 +129,57 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 relative`}>
         {/* 脚本节点使用自己的 ScriptCard 处理 generating 状态，其他节点使用通用骨架屏 */}
         {(status === 'running' || status === 'pending') && nodeType !== 'script' ? (
-          // 统一骨架屏：非脚本节点 running/pending 时展示（不额外设置 padding，继承外层）
-          <div className="flex flex-col h-full w-full justify-center gap-2">
-            <div className="grid grid-cols-2 gap-x-3 gap-y-2 flex-1">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="min-h-[18px] bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse"
-                  style={{ animationDelay: `${i * 60}ms` }}
-                />
-              ))}
+          // 图片节点：显示四宫格/三宫格骨架屏（更贴近实际生成结果）
+          nodeType === 'image' ? (
+            <div className="flex flex-col h-full w-full gap-2">
+              {/* 根据节点 ID 判断是角色（四宫格）、场景（四宫格）还是道具（六宫格） */}
+              {id.startsWith('角色-') || id.startsWith('场景-') ? (
+                // 四宫格骨架：上下各两格
+                <div className="grid grid-cols-2 grid-rows-2 gap-2 flex-1">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="bg-gradient-to-br from-gray-200 via-gray-100 to-gray-200 rounded-lg animate-pulse aspect-video"
+                      style={{ animationDelay: `${i * 150}ms` }}
+                    />
+                  ))}
+                </div>
+              ) : id.startsWith('道具-') ? (
+                // 六宫格骨架：上排3格、下排3格
+                <div className="grid grid-cols-3 grid-rows-2 gap-2 flex-1">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="bg-gradient-to-br from-gray-200 via-gray-100 to-gray-200 rounded-lg animate-pulse aspect-video"
+                      style={{ animationDelay: `${i * 120}ms` }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                // 普通图片节点：单张大图骨架（16:9）
+                <div className="flex-1 bg-gradient-to-br from-gray-200 via-gray-100 to-gray-200 rounded-lg animate-pulse aspect-video" />
+              )}
+              <div className="text-xs text-gray-400 text-center animate-pulse flex-shrink-0">
+                {(data.progressMessage as string | undefined) || '正在生成图片...'}
+              </div>
             </div>
-            <div className="text-xs text-gray-400 text-center animate-pulse flex-shrink-0">
-              {(data.progressMessage as string | undefined) || '正在执行...'}
+          ) : (
+            // 其他节点：使用通用骨架屏（文本块）
+            <div className="flex flex-col h-full w-full justify-center gap-2">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 flex-1">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="min-h-[18px] bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 rounded animate-pulse"
+                    style={{ animationDelay: `${i * 60}ms` }}
+                  />
+                ))}
+              </div>
+              <div className="text-xs text-gray-400 text-center animate-pulse flex-shrink-0">
+                {(data.progressMessage as string | undefined) || '正在执行...'}
+              </div>
             </div>
-          </div>
+          )
         ) : (
           children
         )}

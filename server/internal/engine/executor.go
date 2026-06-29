@@ -623,6 +623,20 @@ func stripMentionMarkers(s string) string {
 	return strings.TrimSpace(mentionMarkerRe.ReplaceAllString(s, ""))
 }
 
+// getAssetTypeFromNodeID 从节点 ID 中提取资产类型
+// 节点 ID 格式：{类型}-{资产名}-{脚本节点ID}
+// 例如："角色-小明-node123"、"场景-教室-node123"、"道具-椅子-node123"
+func getAssetTypeFromNodeID(nodeID string) string {
+	if strings.HasPrefix(nodeID, "角色-") {
+		return "character"
+	} else if strings.HasPrefix(nodeID, "场景-") {
+		return "scene"
+	} else if strings.HasPrefix(nodeID, "道具-") {
+		return "prop"
+	}
+	return "" // 普通图片节点
+}
+
 // ImageExecutor 图像节点执行器(调用硅基流动 Kolors API)
 type ImageExecutor struct {
 	imageClient  *llm.ImageClient
@@ -706,6 +720,16 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 清理提示词中的占位符
 	cleanedPrompt := stripMentionMarkers(data.Prompt)
 
+	// ✅ 根据节点 ID 提取资产类型，使用统一的提示词构建函数
+	assetType := getAssetTypeFromNodeID(node.ID)
+	finalPrompt := llm.BuildAssetImagePrompt(assetType, cleanedPrompt)
+
+	if assetType != "" {
+		log.Printf("[ImageExecutor] 检测到资产节点，添加视图指令: nodeID=%s assetType=%s", node.ID, assetType)
+	} else {
+		log.Printf("[ImageExecutor] 普通图片节点，不添加视图指令: nodeID=%s", node.ID)
+	}
+
 	// 确定使用的模型 ID（传递给硅基流动 API）
 	// 前端传递的是 model.ID（如 "kolors-default"），需要转换为 model_id（如 "Kwai-Kolors/Kolors"）
 	apiModelID := "Kwai-Kolors/Kolors" // 默认值
@@ -721,10 +745,10 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 	}
 
-	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s apiModel=%s size=%s", node.ID, len(cleanedPrompt), data.Model, apiModelID, size)
+	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s apiModel=%s size=%s", node.ID, len(finalPrompt), data.Model, apiModelID, size)
 
 	// 调用图像生成 API
-	imageURL, err := i.imageClient.GenerateImageWithModel(ctx, apiModelID, cleanedPrompt, size)
+	imageURL, err := i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
