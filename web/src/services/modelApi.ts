@@ -11,6 +11,7 @@ export interface ModelConfig {
   Temperature: number;
   Description: string;
   Parameters?: Record<string, unknown>;
+  Default?: boolean;   // 是否为默认模型（从配置文件读取）
 }
 
 // 模型列表响应（按类型分组）

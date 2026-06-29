@@ -12,11 +12,10 @@ function convertToModelOption(model: ModelConfig): ModelOption {
     value: model.ID,
     label: model.Name,
     description: model.Description,
-    // 标签逻辑：Kolors 标记"推荐"，Z-Image-Turbo 标记"快速"
-    tag: model.ID === 'kolors-default' ? '推荐' : 
-         model.ID === 'z-image-turbo' ? '快速' : undefined,
-    tagColor: model.ID === 'kolors-default' ? '#22c55e' : 
-              model.ID === 'z-image-turbo' ? '#3b82f6' : undefined,
+    isDefault: model.Default,  // 从后端配置读取默认标记
+    // 标签逻辑：Z-Image-Turbo 标记"快速"（其他标签可根据需要配置）
+    tag: model.ID === 'z-image-turbo' ? '快速' : undefined,
+    tagColor: model.ID === 'z-image-turbo' ? '#3b82f6' : undefined,
   };
 }
 

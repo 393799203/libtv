@@ -19,6 +19,7 @@ type ModelConfig struct {
 	Temperature float64                `yaml:"temperature"`
 	Description string                 `yaml:"description"`
 	Parameters  map[string]interface{} `yaml:"parameters"`
+	Default     bool                   `yaml:"default"` // 是否为默认模型
 }
 
 // ProviderConfig Provider 配置

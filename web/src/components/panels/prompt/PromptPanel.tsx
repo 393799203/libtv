@@ -159,12 +159,24 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 模型选择状态（使用动态模型列表）
   const [selectedModel, setSelectedModel] = useState(config.defaultModel);
   
-  // 当模型列表加载完成且当前模型不在列表中时，自动切换到第一个模型
+  // 当模型列表加载完成时，自动选择默认模型或合适的模型
   useEffect(() => {
-    if (availableModels.length > 0 && !availableModels.find(m => m.value === selectedModel)) {
-      setSelectedModel(availableModels[0].value);
+    if (availableModels.length > 0) {
+      // 图片节点优先选择标记为 default 的模型
+      if (nodeType === 'image') {
+        const defaultModel = availableModels.find(m => m.isDefault === true);
+        if (defaultModel && selectedModel !== defaultModel.value) {
+          setSelectedModel(defaultModel.value);
+          return;
+        }
+      }
+      // 其他节点：如果当前模型不在列表中，切换到第一个或默认模型
+      if (!availableModels.find(m => m.value === selectedModel)) {
+        const defaultModel = availableModels.find(m => m.isDefault === true);
+        setSelectedModel(defaultModel ? defaultModel.value : availableModels[0].value);
+      }
     }
-  }, [availableModels, selectedModel]);
+  }, [availableModels, selectedModel, nodeType]);
   
   const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>((config.defaultResolution as ResolutionOption) || '1K');
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);

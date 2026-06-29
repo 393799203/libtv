@@ -19,6 +19,7 @@ export interface ModelOption {
   description?: string;    // 副标题描述
   tag?: string;            // 标签（如"限时5折"）
   tagColor?: string;       // 标签颜色
+  isDefault?: boolean;     // 是否为默认模型（从后端配置读取）
 }
 
 // 分辨率选项

@@ -73,10 +73,12 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const unsubscribeRef = useRef<(() => void) | null>(null);
 
-    // 当模型列表加载完成后，设置默认模型
+    // 当模型列表加载完成后，设置默认模型（优先选择标记为 default: true 的模型）
     useEffect(() => {
       if (IMAGE_MODEL_OPTIONS.length > 0 && selectedModel === '') {
-        setSelectedModel(IMAGE_MODEL_OPTIONS[0].value);
+        // 优先选择标记为 default 的模型，如果没有则选择第一个
+        const defaultModel = IMAGE_MODEL_OPTIONS.find(m => m.isDefault === true);
+        setSelectedModel(defaultModel ? defaultModel.value : IMAGE_MODEL_OPTIONS[0].value);
       }
     }, [IMAGE_MODEL_OPTIONS, selectedModel]);
 
