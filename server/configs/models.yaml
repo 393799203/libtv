@@ -17,15 +17,16 @@ models:
       temperature: 0.7
       description: "硅基流动 DeepSeek-V4-Flash，适合剧本分镜生成"
 
-    # 通用文本（预留）
-    - id: text-general
+    # 通用文本（用于提示词生成等）
+    - id: deepseek-v4-flash
       name: "DeepSeek V4 Flash"
       provider: siliconflow
       model_id: "deepseek-ai/DeepSeek-V4-Flash"
       usage: [text]
       max_tokens: 4096
       temperature: 0.7
-      description: "硅基流动 DeepSeek-V4-Flash，适合文本生成"
+      description: "硅基流动 DeepSeek-V4-Flash，适合文本生成和提示词生成"
+      default: true  # ✅ 默认选中此模型
 
     # 图像提示词优化（预留）
     - id: prompt-refine

@@ -118,6 +118,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	showHandler := handler.NewShowHandler(showService, fileUploadService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager)
+	promptHandler := handler.NewPromptHandler(llmClient, modelManager)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -270,6 +271,12 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			banners.POST("/images", bannerHandler.UploadImage) // 上传Banner图片
 			banners.PUT("/:id", bannerHandler.UpdateBanner)
 			banners.DELETE("/:id", bannerHandler.DeleteBanner)
+		}
+
+		// 提示词生成（需登录）
+		prompt := api.Group("/prompt")
+		{
+			prompt.POST("/generate", promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
 		}
 	}
 

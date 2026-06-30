@@ -139,6 +139,12 @@ export interface ScriptShot {
   toneHint: string;
   /** 生成的参考图 URL */
   imageUrl?: string;
+  /** 画面提示词（第三阶段生成，基于表格数据重新生成，含 @ 引用） */
+  storyboardPrompt?: string;
+  /** 运动提示词（第三阶段生成，基于表格数据重新生成） */
+  motionPrompt?: string;
+  /** 最终合成提示词（画面提示词 + 运动提示词） */
+  finalPrompt?: string;
 }
 
 // 节点数据联合类型

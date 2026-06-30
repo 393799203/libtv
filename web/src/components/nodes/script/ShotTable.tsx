@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useRef } from 'react';
-import { Table, Tag, Input, Select, Dropdown } from 'antd';
+import { Table, Tag, Input, Select, Dropdown, Button } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   MoreOutlined,
@@ -7,6 +7,7 @@ import {
   DeleteOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  MergeCellsOutlined,
 } from '@ant-design/icons';
 import type { ScriptShot } from '@/types/canvas';
 
@@ -14,6 +15,8 @@ interface ShotTableProps {
   shots: ScriptShot[];
   onChange?: (shots: ScriptShot[]) => void;
   readOnly?: boolean;
+  /** 点击最终提示词按钮的回调（第三阶段专用） */
+  onMergePrompt?: (shotId: string) => void;
 }
 
 // 镜别选项 — 模块级常量，永不重建
@@ -129,6 +132,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
   shots,
   onChange,
   readOnly = false,
+  onMergePrompt,
 }) {
   // 用 ref 存储 shots/onChange 的最新值，让内部回调保持稳定引用
   const shotsRef = useRef(shots);
@@ -248,7 +252,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
         ),
     },
     {
-      title: '画面提示词',
+      title: '画面描述',
       dataIndex: 'visualPrompt',
       width: 250,
       render: (text: string, record) =>
@@ -371,16 +375,28 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
     {
       title: '操作',
       key: 'action',
-      width: 50,
+      width: readOnly && onMergePrompt ? 120 : 50, // 第三阶段显示按钮，宽度增加
       align: 'center',
       render: (_: unknown, record) =>
-        !readOnly ? (
+        readOnly && onMergePrompt ? (
+          // 第三阶段：显示最终提示词按钮
+          <Button
+            size="small"
+            type="primary"
+            icon={<MergeCellsOutlined />}
+            onClick={() => onMergePrompt(record.id)}
+            className="text-[10px]"
+          >
+            {record.finalPrompt ? '再次合成' : '最终提示词'}
+          </Button>
+        ) : !readOnly ? (
+          // 第一阶段：显示下拉菜单
           <Dropdown menu={{ items: getRowMenuItems(record) }} trigger={['click']}>
             <MoreOutlined className="text-gray-400 hover:text-gray-600 cursor-pointer text-[12px]" />
           </Dropdown>
         ) : null,
     },
-  ], [readOnly, handleCellChange, getRowMenuItems]); // 三个都是稳定引用
+  ], [readOnly, handleCellChange, getRowMenuItems, onMergePrompt]);
 
   return (
     <Table<ScriptShot>
