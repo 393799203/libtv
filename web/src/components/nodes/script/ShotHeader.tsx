@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Button, Typography } from 'antd';
-import { ExportOutlined, CalendarOutlined, PlusOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
+import { CalendarOutlined, PlusOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScriptNodeData, ScriptCharacter, ScriptScene, ScriptProp } from '@/types/canvas';
 
@@ -8,7 +8,6 @@ const { Text } = Typography;
 
 interface ShotHeaderProps {
   data: Pick<ScriptNodeData, 'label' | 'author' | 'createdAt' | 'shots' | 'characters' | 'scenes' | 'props'>;
-  onExport?: () => void;
   onAddShot?: () => void;
   /** 下一步按钮文案，null 时不显示 */
   nextStepLabel?: string | null;
@@ -24,7 +23,6 @@ interface ShotHeaderProps {
 
 export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
   data,
-  onExport,
   onAddShot,
   nextStepLabel,
   onNextStep,
@@ -112,19 +110,6 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
             className="text-xs"
           >
             {nextStepLabel}
-          </Button>
-        )}
-        {onExport && (
-          <Button
-            size="small"
-            icon={<ExportOutlined />}
-            onClick={(e) => {
-              e.stopPropagation();
-              onExport?.();
-            }}
-            className="text-xs"
-          >
-            导出
           </Button>
         )}
       </div>

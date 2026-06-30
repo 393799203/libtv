@@ -140,11 +140,7 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
       onUpdateRef.current({ shots: updatedShots });
     }, []);
 
-    const handleExport = useCallback(() => {
-      console.log('导出脚本:', dataRef.current);
-    }, []);
-
-    const handleNextStep = useCallback(async () => {
+    const handleNextStep = useCallback(() => {
       setNextLoading(true);
       try {
         const step = dataRef.current.currentStep;
@@ -185,16 +181,12 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
     // 只有第一个阶段（分镜表格）才显示"添加镜头"按钮
     const showAddShot = data.currentStep === 1;
 
-    // 只有最后一个阶段（合成提示词）才显示"导出"按钮
-    const showExport = data.currentStep === 3;
-
     return (
       <>
         <Drawer
           title={
             <ShotHeader
               data={data}
-              onExport={showExport ? handleExport : undefined}
               onAddShot={showAddShot ? handleAddShot : undefined}
               nextStepLabel={nextStepLabel}
               onNextStep={nextStepLabel ? handleNextStep : undefined}
