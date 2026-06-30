@@ -237,6 +237,13 @@ export default function VideoListPage() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 无限滚动分页状态
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 12; // 每页加载12条（4列×3行）
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
   // Intersection Observer - 检测视频列表中哪些项在可视区域
   const { visibleItems, setItemRef } = useIntersectionObserver(0.05);
 
@@ -331,12 +338,14 @@ export default function VideoListPage() {
   // 加载视频列表：从 shows API 获取（支持分类筛选 + 关键词后端搜索）
   const loadVideos = useCallback(async (keyword?: string) => {
     setVideosLoading(true);
+    setCurrentPage(1);
+    setHasMore(true);
     try {
       const data = await showApi.list({
         category_id: activeCategory,
         keyword: keyword || undefined,
         page: 1,
-        page_size: 50,
+        page_size: PAGE_SIZE,
       });
       const list: VideoListItem[] = (data.items || []).map(item => ({
         id: item.id,
@@ -350,12 +359,67 @@ export default function VideoListPage() {
         likes: item.likes || 0,
       }));
       setTvShowVideos(list);
+      // 判断是否还有更多数据
+      setHasMore(list.length >= PAGE_SIZE);
     } catch {
       setTvShowVideos([]);
+      setHasMore(false);
     } finally {
       setVideosLoading(false);
     }
   }, [activeCategory]);
+
+  // 加载更多视频（无限滚动）
+  const loadMoreVideos = useCallback(async () => {
+    if (loadingMore || !hasMore || videosLoading) return;
+    setLoadingMore(true);
+    const nextPage = currentPage + 1;
+    try {
+      const data = await showApi.list({
+        category_id: activeCategory,
+        keyword: searchKeyword.trim() || undefined,
+        page: nextPage,
+        page_size: PAGE_SIZE,
+      });
+      const newList: VideoListItem[] = (data.items || []).map(item => ({
+        id: item.id,
+        title: item.title,
+        thumbnailUrl: item.thumbnail_url || undefined,
+        videoUrl: item.video_url,
+        duration: item.duration,
+        author: item.author || 'LibTV',
+        authorId: item.author_id || '',
+        tags: item.tags || undefined,
+        likes: item.likes || 0,
+      }));
+      setTvShowVideos(prev => [...prev, ...newList]);
+      setCurrentPage(nextPage);
+      // 如果返回的数据少于每页数量，说明没有更多了
+      setHasMore(newList.length >= PAGE_SIZE);
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentPage, hasMore, loadingMore, videosLoading, activeCategory, searchKeyword]);
+
+  // 无限滚动检测器 - 监听哨兵元素进入视口
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          loadMoreVideos();
+        }
+      },
+      { rootMargin: '200px' } // 提前200px触发加载
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMoreVideos]);
 
   // 搜索防抖
   const handleSearchChange = useCallback((value: string) => {
@@ -742,6 +806,31 @@ export default function VideoListPage() {
             </div>
           ))}
         </div>
+
+          {/* 无限滚动哨兵元素 + 加载状态 */}
+          {!videosLoading && tvShowVideos.length > 0 && (
+            <div ref={sentinelRef} className="flex items-center justify-center py-8">
+              {loadingMore ? (
+                <div className="flex items-center gap-2 text-gray-500">
+                  <Spin size="small" />
+                  <span className="text-sm">加载更多...</span>
+                </div>
+              ) : hasMore ? (
+                <div className="text-gray-300 text-sm h-8" />
+              ) : (
+                <div className="text-gray-400 text-sm">
+                  <span className="text-gray-300">—</span> 已加载全部 <span className="text-gray-300">—</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 空状态 */}
+          {!videosLoading && tvShowVideos.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+              <Text className="text-gray-400">暂无视频内容</Text>
+            </div>
+          )}
         </Spin>
       </section>
     </div>
