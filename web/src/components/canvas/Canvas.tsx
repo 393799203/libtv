@@ -22,13 +22,10 @@ import {
   UndoOutlined,
   RedoOutlined,
   AimOutlined,
-  PlayCircleOutlined,
-  LoadingOutlined,
 } from '@ant-design/icons';
 
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
-import { useGraphGeneration } from '@/hooks/useGraphGeneration';
 import { NODE_TYPE_CONFIG } from '@/types/canvas';
 import type { LibTVNode, LibTVEdge, NodeType } from '@/types/canvas';
 import { PromptCompose } from '@/components/panels/prompt';
@@ -85,9 +82,6 @@ export const Canvas = memo(function Canvas() {
   const isExecuting = useExecutionStore((s) => s.isExecuting);
   const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-
-  // 一键生成全图（画布右上角按钮）
-  const { generateAll, isExecuting: isGraphExecuting } = useGraphGeneration();
 
   // 当选中节点变化时，重置之前节点的编辑状态（避免 isEditing 卡住导致提示词框不显示）
   const prevSelectedIdsRef = useRef<string[]>([]);
@@ -364,17 +358,6 @@ export const Canvas = memo(function Canvas() {
 
         <Panel position="top-right">
           <div className="bg-white/90 backdrop-blur-sm rounded-lg shadow-md px-3 py-1.5 flex items-center gap-1">
-            <Tooltip title="一键生成全图">
-              <Button
-                type="text"
-                size="small"
-                icon={isGraphExecuting ? <LoadingOutlined spin /> : <PlayCircleOutlined />}
-                onClick={generateAll}
-                disabled={isGraphExecuting}
-                className={isGraphExecuting ? '' : 'text-green-500 hover:text-green-600'}
-              />
-            </Tooltip>
-            <div className="w-px h-4 bg-gray-200 mx-1" />
             <Tooltip title="撤销">
               <Button type="text" size="small" icon={<UndoOutlined />} disabled={!canUndo} onClick={undo} />
             </Tooltip>
