@@ -8,6 +8,33 @@
   }
 }
 
+/* Chrome性能优化 - 全局滚动和渲染优化 */
+@layer base {
+  /* 优化滚动性能 */
+  * {
+    -webkit-overflow-scrolling: touch; /* iOS Safari平滑滚动 */
+  }
+
+  /* 防止Chrome过度创建合成层 */
+  img {
+    will-change: auto; /* 图片不需要will-change */
+  }
+
+  /* 禁用backdrop-filter，Chrome性能杀手 */
+  .backdrop-blur-sm,
+  .backdrop-blur-md,
+  .backdrop-blur-lg {
+    backdrop-filter: none !important; /* 移除backdrop-filter */
+  }
+
+  /* 优化transform动画性能 */
+  .react-flow__node,
+  .video-card,
+  .project-card {
+    contain: layout style paint; /* CSS containment */
+  }
+}
+
 /* React Flow 基础样式覆盖 - 必须在 tailwindcss 之后 */
 @layer base {
   .react-flow__node {

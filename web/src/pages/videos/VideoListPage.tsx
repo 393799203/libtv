@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
   Typography,
-  Button,
   Tag,
   App,
   Spin,
@@ -36,6 +35,187 @@ const formatDuration = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
+// 项目卡片组件 - 使用memo优化
+const ProjectCard = memo(function ProjectCard({
+  project,
+  isAuthenticated,
+  onNavigate,
+  onDelete,
+}: {
+  project: ProjectListItem;
+  isAuthenticated: boolean;
+  onNavigate: (id: string) => void;
+  onDelete: (project: ProjectListItem) => void;
+}) {
+  return (
+    <div
+      className="h-28 bg-gray-100 relative rounded-lg overflow-hidden cursor-pointer hover:shadow-md"
+      onClick={() => onNavigate(project.id)}
+      style={{
+        willChange: 'transform', // 提示Chrome优化
+        contain: 'layout style paint', // CSS containment优化
+      }}
+    >
+      {project.coverUrl ? (
+        <img src={project.coverUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-cyan-500">
+          <img src={`https://picsum.photos/200/150?random=${project.id}`} alt="" className="w-full h-full object-cover" loading="lazy" />
+        </div>
+      )}
+      <button
+        className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-red-500 cursor-pointer"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(project);
+        }}
+        title="删除项目"
+      >
+        <DeleteOutlined style={{ fontSize: 12 }} />
+      </button>
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
+        <p className="!text-white !text-xs truncate">{project.name}</p>
+      </div>
+    </div>
+  );
+});
+
+// 视频卡片组件 - 使用memo优化 + Intersection Observer懒渲染
+const VideoCard = memo(function VideoCard({
+  item,
+  onNavigate,
+  isVisible,
+}: {
+  item: VideoListItem;
+  onNavigate: (id: string) => void;
+  isVisible: boolean; // 是否在可视区域
+}) {
+  // 只在可见时渲染完整内容，否则只渲染占位符
+  if (!isVisible) {
+    return (
+      <div className="h-40 bg-gray-100 rounded-lg animate-pulse" style={{ minHeight: '220px' }}>
+        {/* 占位符，不渲染图片和内容 */}
+      </div>
+    );
+  }
+
+  return (
+    <Card
+      hoverable
+      className="!rounded-lg overflow-hidden cursor-pointer"
+      styles={{ body: { padding: 0 } }}
+      onClick={() => onNavigate(item.id)}
+    >
+      <div
+        className="h-40 bg-gray-100 relative overflow-hidden"
+        style={{
+          contain: 'layout style paint', // CSS containment优化
+        }}
+      >
+        <img
+          src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`}
+          alt={item.title}
+          className="w-full h-full object-cover"
+          loading="lazy"
+          decoding="async" // 异步解码，避免阻塞主线程
+        />
+        {/* 标签 - 移除backdrop-blur，使用简单半透明背景 */}
+        {(item.tags?.length || 0) > 0 && (
+          <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
+            {(item.tags || []).slice(0, 2).map(tag => (
+              <span key={tag} className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{tag}</span>
+            ))}
+          </div>
+        )}
+        {/* 播放按钮 - 简化hover效果 */}
+        <div className="absolute inset-0 bg-black/0 hover:bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 z-10 transition-none">
+          <PlayCircleOutlined style={{ fontSize: '48px', color: 'white' }} />
+        </div>
+        {/* 时长和作者信息 - 合并到一个叠加层，减少absolute元素 */}
+        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between z-20">
+          {/* 作者信息 */}
+          <div className="flex items-center gap-1">
+            <img src={`https://picsum.photos/32/32?random=${item.authorId}`} alt="" className="w-4 h-4 rounded-full border border-white/50" loading="lazy" decoding="async" />
+            <span className="text-white text-[11px] drop-shadow-sm truncate max-w-[100px]">{item.author}</span>
+          </div>
+          {/* 时长 */}
+          {item.duration > 0 && (
+            <div className="bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
+              {formatDuration(item.duration)}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="p-3">
+        <div className="flex items-start justify-between">
+          <p className="!text-sm font-medium truncate flex-1">
+            {item.title}
+          </p>
+          <span className="flex items-center gap-0.5 text-gray-500 text-xs flex-shrink-0 ml-2">
+            <HeartOutlined className="text-[12px]" />
+            {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
+          </span>
+        </div>
+      </div>
+    </Card>
+  );
+});
+
+// Intersection Observer Hook - 检测元素是否在可视区域
+function useIntersectionObserver(threshold = 0.1) {
+  const [visibleItems, setVisibleItems] = useState<Set<number>>(new Set());
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  useEffect(() => {
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        const newVisibleItems = new Set(visibleItems);
+        entries.forEach((entry) => {
+          const index = Number(entry.target.getAttribute('data-index'));
+          if (entry.isIntersecting) {
+            newVisibleItems.add(index);
+          } else {
+            // 保持已渲染的项，避免频繁卸载/重新加载
+            // newVisibleItems.delete(index);
+          }
+        });
+        setVisibleItems(newVisibleItems);
+      },
+      {
+        threshold,
+        rootMargin: '100px', // 提前100px开始渲染
+      }
+    );
+
+    // 观察所有item
+    itemRefs.current.forEach((ref) => {
+      if (ref && observerRef.current) {
+        observerRef.current.observe(ref);
+      }
+    });
+
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+      }
+    };
+  }, [threshold, visibleItems]);
+
+  const setItemRef = useCallback((index: number, el: HTMLDivElement | null) => {
+    if (el) {
+      itemRefs.current.set(index, el);
+      if (observerRef.current) {
+        observerRef.current.observe(el);
+      }
+    } else {
+      itemRefs.current.delete(index);
+    }
+  }, []);
+
+  return { visibleItems, setItemRef };
+}
+
 export default function VideoListPage() {
   const { message, modal } = App.useApp();
   const [activeCategory, setActiveCategory] = useState('all');
@@ -47,6 +227,7 @@ export default function VideoListPage() {
   const [banners, setBanners] = useState<BannerItem[]>([]);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const loadingBannersRef = useRef<Set<string>>(new Set()); // 用ref跟踪loading状态，不触发重渲染
+  const [, forceUpdate] = useState(0); // 用于强制更新loading状态
   const [isDragging, setIsDragging] = useState(false); // 是否正在拖拽
   const [dragStartX, setDragStartX] = useState(0); // 拖拽起始X坐标
   const hasDraggedRef = useRef(false); // 是否发生了拖拽（用于区分点击和拖拽）
@@ -56,23 +237,18 @@ export default function VideoListPage() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 获取当前loading状态（用于骨架屏渲染，不常更新）
-  const [loadingVersion, setLoadingVersion] = useState(0); // 用于触发骨架屏更新
+  // Intersection Observer - 检测视频列表中哪些项在可视区域
+  const { visibleItems, setItemRef } = useIntersectionObserver(0.05);
 
   // Banner图片加载处理（使用ref，不触发重渲染）
-  const handleBannerImageLoadStart = useCallback((bannerId: string) => {
-    loadingBannersRef.current.add(bannerId);
-    setLoadingVersion(v => v + 1);
-  }, []);
-
   const handleBannerImageLoad = useCallback((bannerId: string) => {
     loadingBannersRef.current.delete(bannerId);
-    setLoadingVersion(v => v + 1);
+    forceUpdate(n => n + 1); // 图片加载完成后触发一次更新
   }, []);
 
   const handleBannerImageError = useCallback((bannerId: string) => {
     loadingBannersRef.current.delete(bannerId);
-    setLoadingVersion(v => v + 1);
+    forceUpdate(n => n + 1);
   }, []);
 
   // 鼠标拖拽处理
@@ -82,17 +258,17 @@ export default function VideoListPage() {
     hasDraggedRef.current = false; // 重置拖拽标记
   }, []);
 
-  const handleDragMove = useCallback((e: React.MouseEvent) => {
+  const handleDragMove = useCallback(() => {
     if (!isDragging) return;
     // 可以在这里添加实时拖拽效果
   }, [isDragging]);
 
   const handleDragEnd = useCallback((e: React.MouseEvent) => {
     if (!isDragging) return;
-    
+
     const dragEndX = e.clientX;
     const dragDistance = dragEndX - dragStartX;
-    
+
     // 拖拽距离超过50px才触发切换
     if (Math.abs(dragDistance) > 50) {
       hasDraggedRef.current = true; // 标记发生了拖拽
@@ -108,7 +284,7 @@ export default function VideoListPage() {
         );
       }
     }
-    
+
     setIsDragging(false);
     setDragStartX(0);
   }, [isDragging, dragStartX, banners.length]);
@@ -132,10 +308,9 @@ export default function VideoListPage() {
     try {
       const data = await bannerApi.list({ is_active: true });
       setBanners(data || []);
-      // 初始化所有banner为loading状态
+      // 初始化所有banner为loading状态（不触发重渲染）
       if (data && data.length > 0) {
         loadingBannersRef.current = new Set(data.map(banner => banner.id));
-        setLoadingVersion(v => v + 1);
       }
     } catch {
       // 后端未启动时为空列表
@@ -183,18 +358,42 @@ export default function VideoListPage() {
   }, [activeCategory]);
 
   // 搜索防抖
-  const handleSearchChange = (value: string) => {
+  const handleSearchChange = useCallback((value: string) => {
     setSearchKeyword(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
       loadVideos(value.trim());
     }, 300);
-  };
+  }, [loadVideos]);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
-  useEffect(() => { loadShowCategories(); }, [loadShowCategories]);
-  useEffect(() => { loadVideos(); }, [loadVideos]);
-  useEffect(() => { loadBanners(); }, [loadBanners]);
+
+  // 使用requestIdleCallback延迟加载非关键数据（Banner和分类）
+  useEffect(() => {
+    // 优先加载视频列表（用户最关心的内容）
+    loadVideos();
+
+    // 延迟加载Banner和分类（使用requestIdleCallback或setTimeout降级）
+    const scheduleIdleTask = (callback: () => void) => {
+      if ('requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(callback, { timeout: 2000 });
+      } else {
+        // Safari降级方案：延迟执行
+        setTimeout(callback, 100);
+      }
+    };
+
+    scheduleIdleTask(() => {
+      loadShowCategories();
+      loadBanners();
+    });
+  }, [loadVideos, loadShowCategories, loadBanners]);
+
+  // 使用useMemo缓存项目列表渲染数据
+  const projectListData = useMemo(() => projects, [projects]);
+
+  // 使用useMemo缓存视频列表渲染数据
+  const videoListData = useMemo(() => tvShowVideos, [tvShowVideos]);
 
   // Banner自动播放（使用ref保存banners.length避免重复创建interval）
   const bannersLengthRef = useRef(banners.length);
@@ -216,12 +415,12 @@ export default function VideoListPage() {
   }, []); // 依赖数组为空，只在挂载/卸载时执行
 
   // 鼠标悬停暂停/恢复轮播
-  const handleBannerMouseEnter = () => {
+  const handleBannerMouseEnter = useCallback(() => {
     if (bannerTimerRef.current) {
       clearInterval(bannerTimerRef.current);
       bannerTimerRef.current = null;
     }
-  };
+  }, []);
 
   const handleBannerMouseLeave = useCallback(() => {
     if (banners.length > 1 && !bannerTimerRef.current) {
@@ -232,7 +431,7 @@ export default function VideoListPage() {
   }, [banners.length]);
 
   // 删除项目
-  const handleDeleteProject = async (project: ProjectListItem) => {
+  const handleDeleteProject = useCallback(async (project: ProjectListItem) => {
     modal.confirm({
       title: '确认删除',
       content: `确定要删除项目「${project.name}」吗？此操作不可恢复。`,
@@ -251,10 +450,10 @@ export default function VideoListPage() {
         }
       },
     });
-  };
+  }, [modal, message]);
 
   // 开始创作：未登录时弹出登录框，已登录时创建项目
-  const handleCreateProject = async () => {
+  const handleCreateProject = useCallback(async () => {
     if (!isAuthenticated) {
       openLoginModal();
       return;
@@ -268,24 +467,36 @@ export default function VideoListPage() {
     } catch {
       message.error('创建项目失败，请检查网络连接');
     }
-  };
+  }, [isAuthenticated, openLoginModal, navigate, message]);
 
   return (
-    <div className="min-h-screen bg-white pb-20">
+    <div
+      className="min-h-screen bg-white pb-20"
+      style={{
+        overflowX: 'hidden', // 防止横向滚动
+      }}
+    >
       {/* Banner 3D轮播图 */}
-      <div 
+      <div
         className="relative w-full h-96 overflow-hidden mb-8 bg-gradient-to-b from-gray-900 to-gray-800 select-none"
         onMouseEnter={handleBannerMouseEnter}
         onMouseLeave={handleBannerMouseLeave}
         onMouseDown={handleDragStart}
         onMouseMove={handleDragMove}
         onMouseUp={handleDragEnd}
-        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+        style={{
+          cursor: isDragging ? 'grabbing' : 'grab',
+          contain: 'layout style paint', // CSS containment优化
+        }}
       >
-        {/* 通过key属性触发loading状态更新（loadingVersion变化时重新渲染） */}
-        <div key={loadingVersion} className="sr-only" aria-hidden="true" />
         {banners.length > 0 ? (
-          <div className="relative w-full h-full flex items-center justify-center" style={{ perspective: '1200px' }}>
+          <div
+            className="relative w-full h-full flex items-center justify-center"
+            style={{
+              perspective: '1200px',
+              willChange: 'contents', // 提示Chrome优化内容
+            }}
+          >
             {/* Banner 图片容器 */}
             {banners.map((banner, index) => {
               // 计算每个Banner的位置和3D效果
@@ -316,13 +527,17 @@ export default function VideoListPage() {
               return (
                 <div
                   key={banner.id}
-                  className="absolute transition-all duration-700 ease-out"
+                  className="absolute"
                   style={{
                     width: '520px',
                     height: '292px',
                     transform: `translateX(${translateX}px) rotateY(${rotateY}deg) translateZ(${translateZ}px) scale(${scale})`,
                     opacity: opacity,
                     zIndex: offset === 0 ? 10 : 5,
+                    willChange: 'transform, opacity', // 提示Chrome优化合成层
+                    backfaceVisibility: 'hidden', // 避免渲染背面
+                    transformStyle: 'preserve-3d', // 优化3D变换
+                    transition: 'transform 700ms ease-out, opacity 700ms ease-out', // 只过渡必要的属性
                   }}
                 >
                   <div 
@@ -460,33 +675,14 @@ export default function VideoListPage() {
           </div>
 
           {/* 项目列表 */}
-          {projects.map((project) => (
-            <div
+          {projectListData.map((project) => (
+            <ProjectCard
               key={project.id}
-              className="h-28 bg-gray-100 relative rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => isAuthenticated ? navigate(`/project/${project.id}`) : openLoginModal()}
-            >
-              {project.coverUrl ? (
-                <img src={project.coverUrl} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-cyan-500">
-                  <img src={`https://picsum.photos/200/150?random=${project.id}`} alt="" className="w-full h-full object-cover" />
-                </div>
-              )}
-              <button
-                className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-red-500 transition-colors cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteProject(project);
-                }}
-                title="删除项目"
-              >
-                <DeleteOutlined style={{ fontSize: 12 }} />
-              </button>
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
-                <p className="!text-white !text-xs truncate">{project.name}</p>
-              </div>
-            </div>
+              project={project}
+              isAuthenticated={isAuthenticated}
+              onNavigate={(id) => isAuthenticated ? navigate(`/project/${id}`) : openLoginModal()}
+              onDelete={handleDeleteProject}
+            />
           ))}
         </div>
       </section>
@@ -526,53 +722,23 @@ export default function VideoListPage() {
           </div>
         </div>
 
-        {/* TV Show 网格 */}
+        {/* TV Show 网格 - 使用Intersection Observer懒渲染 */}
         <Spin spinning={videosLoading}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {tvShowVideos.map((item) => (
-            <div key={item.id}>
-              <Card
-                hoverable
-                className="!rounded-lg overflow-hidden cursor-pointer"
-                styles={{ body: { padding: 0 } }}
-                onClick={() => navigate(`/videos/${item.id}`)}
-              >
-                <div className="h-40 bg-gray-100 relative overflow-hidden">
-                  <img src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`} alt={item.title} className="w-full h-full object-cover" />
-                  {/* 标签 */}
-                  {(item.tags?.length || 0) > 0 && (
-                    <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
-                      {(item.tags || []).slice(0, 2).map(tag => (
-                        <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">{tag}</span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-black/0 hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 hover:opacity-100 z-10">
-                    <PlayCircleOutlined style={{ fontSize: '48px', color: 'white' }} />
-                  </div>
-                  {item.duration > 0 && (
-                    <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded z-20">
-                      {formatDuration(item.duration)}
-                    </div>
-                  )}
-                  {/* 头像 + 作者名，叠加在图片上 */}
-                  <div className="absolute bottom-2 left-2 flex items-center gap-1 z-20">
-                    <img src={`https://picsum.photos/32/32?random=${item.authorId}`} alt="" className="w-4 h-4 rounded-full border border-white/50" />
-                    <span className="text-white text-[11px] drop-shadow-sm truncate max-w-[100px]">{item.author}</span>
-                  </div>
-                </div>
-                <div className="p-3">
-                  <div className="flex items-start justify-between">
-                    <p className="!text-sm font-medium truncate flex-1">
-                      {item.title}
-                    </p>
-                    <span className="flex items-center gap-0.5 text-gray-500 text-xs flex-shrink-0 ml-2">
-                      <HeartOutlined className="text-[12px]" />
-                      {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
-                    </span>
-                  </div>
-                </div>
-              </Card>
+          {videoListData.map((item, index) => (
+            <div
+              key={item.id}
+              ref={(el) => setItemRef(index, el)}
+              data-index={index}
+              style={{
+                minHeight: '220px', // 保持高度一致，避免滚动跳动
+              }}
+            >
+              <VideoCard
+                item={item}
+                onNavigate={(id) => navigate(`/videos/${id}`)}
+                isVisible={visibleItems.has(index)} // 传递可见状态
+              />
             </div>
           ))}
         </div>
