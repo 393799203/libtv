@@ -432,17 +432,12 @@ export default function VideoListPage() {
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
 
-  // 使用requestIdleCallback延迟加载非关键数据（Banner和分类）
+  // 初始化：仅加载一次Banner和分类（不依赖activeCategory）
   useEffect(() => {
-    // 优先加载视频列表（用户最关心的内容）
-    loadVideos();
-
-    // 延迟加载Banner和分类（使用requestIdleCallback或setTimeout降级）
     const scheduleIdleTask = (callback: () => void) => {
       if ('requestIdleCallback' in window) {
         (window as any).requestIdleCallback(callback, { timeout: 2000 });
       } else {
-        // Safari降级方案：延迟执行
         setTimeout(callback, 100);
       }
     };
@@ -451,7 +446,13 @@ export default function VideoListPage() {
       loadShowCategories();
       loadBanners();
     });
-  }, [loadVideos, loadShowCategories, loadBanners]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 仅在组件初始化时执行一次
+
+  // 视频列表加载：依赖activeCategory变化
+  useEffect(() => {
+    loadVideos();
+  }, [loadVideos]);
 
   // 使用useMemo缓存项目列表渲染数据
   const projectListData = useMemo(() => projects, [projects]);
