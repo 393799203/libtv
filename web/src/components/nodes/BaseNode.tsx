@@ -49,6 +49,15 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   const [label, setLabel] = useState(data.label || config.label);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
+  // ✅ 忽略更新：清除stale标志位
+  const handleIgnoreStale = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      updateNodeData(id, { stale: false } as Partial<LibTVNodeData>);
+    },
+    [id, updateNodeData]
+  );
+
   const handleLabelChange = useCallback((val: string) => {
     setLabel(val);
   }, []);
@@ -65,12 +74,23 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       data-stale={data.stale ? 'true' : undefined}
       className={`
         min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
-        transition-all duration-150 relative flex flex-col pt-8
+        transition-all duration-150 relative flex flex-col pt-8 group
         ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
         ${data.stale ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
         ${className || ''}
       `}
     >
+      {/* ✅ 忽略更新按钮：只在stale状态且hover时显示 */}
+      {data.stale && (
+        <button
+          onClick={handleIgnoreStale}
+          className="absolute top-1 right-1 z-20 px-2 py-1 bg-red-500 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-red-600 shadow-sm"
+          title="忽略更新，去除待更新标志"
+        >
+          忽略更新
+        </button>
+      )}
+
       {/* 节点头部 — 负 margin 使其视觉上在节点上方 */}
       <div
         className={`-mt-8 flex items-center justify-between py-1 px-3 text-sm font-medium text-gray-700`}

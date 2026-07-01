@@ -257,7 +257,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   if (inputs.length === 0 && !showStyleSelector) return null;
 
   return (
-    <div className="flex items-center gap-2 pb-3">
+    <div className="flex items-start gap-2 pb-3 flex-wrap max-h-[104px] overflow-hidden">
       {/* 风格选择器 */}
       {showStyleSelector && (
         <div className="relative group/style">
