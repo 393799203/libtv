@@ -205,7 +205,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           edges: store.edges,
           viewport,
         });
-        console.log('[AssetPreparationPanel] 画布已实时保存');
+        // ✅ 性能优化：移除console.log，避免阻塞主线程
+        // console.log('[AssetPreparationPanel] 画布已实时保存');
       } catch (error) {
         console.error('[AssetPreparationPanel] 画布保存失败:', error);
       }

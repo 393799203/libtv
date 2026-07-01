@@ -1,4 +1,4 @@
-import { memo, useCallback, useState, useRef } from 'react';
+import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { Drawer, Button } from 'antd';
 import { LoadingOutlined, MergeCellsOutlined } from '@ant-design/icons';
 import type { ScriptNodeData, ScriptShot } from '@/types/canvas';
@@ -90,12 +90,25 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
     const [prevLoading, setPrevLoading] = useState(false);
     const [mergeDrawerOpen, setMergeDrawerOpen] = useState(false); // 合成提示词侧屏
     const [selectedShotId, setSelectedShotId] = useState<string | null>(null); // 当前选中的镜头ID
+    const [contentReady, setContentReady] = useState(false); // ✅ 动画性能优化：延迟渲染重型组件
 
     // 用 ref 存储 data/onUpdate 的最新值，让回调保持稳定引用
     const dataRef = useRef(data);
     dataRef.current = data;
     const onUpdateRef = useRef(onUpdate);
     onUpdateRef.current = onUpdate;
+
+    // ✅ 动画性能优化：Drawer 打开后延迟渲染重型组件
+    useEffect(() => {
+      if (open) {
+        const timer = setTimeout(() => {
+          setContentReady(true);
+        }, 200); // 主 Drawer 更大，延迟 200ms
+        return () => clearTimeout(timer);
+      } else {
+        setContentReady(false);
+      }
+    }, [open]);
 
     // 是否正在生成中 — 纯计算，不需要稳定
     const isGenerating = data.status === 'running' || data.status === 'pending';
@@ -181,6 +194,11 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
     // 只有第一个阶段（分镜表格）才显示"添加镜头"按钮
     const showAddShot = data.currentStep === 1;
 
+    // ✅ 性能优化：缓存选中的shot对象，避免每次data更新都重新find
+    const selectedShot = useMemo(() => {
+      return selectedShotId ? data.shots.find(s => s.id === selectedShotId) || null : null;
+    }, [selectedShotId, data.shots]); // 只在selectedShotId或shots变化时重新计算
+
     return (
       <>
         <Drawer
@@ -199,6 +217,10 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
           }
           open={open}
           onClose={onClose}
+          // ✅ 动画性能优化：禁用 forceRender，避免打开时立即渲染所有内容
+          forceRender={false}
+          // ✅ 遮罩层性能优化：简化样式，避免复杂视觉效果
+          maskStyle={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
           styles={{
             body: {
               padding: 0,
@@ -208,69 +230,81 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
               height: '100%',
               minHeight: 0,
             },
-            mask: { backgroundColor: 'rgba(0,0,0,0.3)' },
             wrapper: { width: '90vw', maxWidth: '90vw' },
           }}
         >
-          {/* 生成中 → 显示骨架屏 */}
-          {isGenerating ? (
-            <GeneratingSkeleton
-              message={data.progressMessage as string | undefined}
-            />
-          ) : data.currentStep === 2 ? (
-            // Step 2：准备资产
-            <AssetPreparationPanel
-              scriptNodeId={scriptNodeId}
-              data={{
-                characters: (data.characters as ScriptNodeData['characters']) || [],
-                scenes: (data.scenes as ScriptNodeData['scenes']) || [],
-                props: (data.props as ScriptNodeData['props']) || [],
-              }}
-              onUpdate={(updates) => {
-                onUpdateRef.current(updates);
-              }}
-            />
-          ) : data.currentStep === 3 ? (
-            // Step 3：合成提示词阶段
-            <>
-              {/* 提示文字 */}
-              <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-                <span className="text-xs text-gray-500">
-                  分镜表格（只读） - 点击每行的"最终提示词"按钮合成单个镜头的提示词
-                </span>
-              </div>
-              {/* 只读分镜表格（带合成按钮） */}
-              <div className="flex-1 min-h-0 overflow-auto">
-                <ShotTable
-                  shots={data.shots}
-                  readOnly={true}
-                  onMergePrompt={handleMergePrompt}
-                />
-              </div>
-            </>
-          ) : (
-            // Step 1：分镜表格（可编辑）
-            <div className="flex-1 min-h-0 overflow-auto">
-              <ShotTable
-                shots={data.shots}
-                onChange={handleShotsChange}
-                readOnly={false}
-              />
+          {/* ✅ 动画性能优化：延迟渲染重型组件 */}
+          {!contentReady ? (
+            // 动画进行中：显示轻量级占位符
+            <div className="flex items-center justify-center h-full">
+              <div className="text-gray-400 text-sm">加载中...</div>
             </div>
-          )}
+          ) : (
+            // 动画完成后：渲染实际内容
+            <>
+              {/* 生成中 → 显示骨架屏 */}
+              {isGenerating ? (
+                <GeneratingSkeleton
+                  message={data.progressMessage as string | undefined}
+                />
+              ) : data.currentStep === 2 ? (
+                // Step 2：准备资产
+                <AssetPreparationPanel
+                  scriptNodeId={scriptNodeId}
+                  data={{
+                    characters: (data.characters as ScriptNodeData['characters']) || [],
+                    scenes: (data.scenes as ScriptNodeData['scenes']) || [],
+                    props: (data.props as ScriptNodeData['props']) || [],
+                  }}
+                  onUpdate={(updates) => {
+                    onUpdateRef.current(updates);
+                  }}
+                />
+              ) : data.currentStep === 3 ? (
+                // Step 3：合成提示词阶段
+                <>
+                  {/* 提示文字 */}
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <span className="text-xs text-gray-500">
+                      分镜表格（只读） - 点击每行的"最终提示词"按钮合成单个镜头的提示词
+                    </span>
+                  </div>
+                  {/* 只读分镜表格（带合成按钮） */}
+                  <div className="flex-1 min-h-0 overflow-auto">
+                    <ShotTable
+                      shots={data.shots}
+                      readOnly={true}
+                      onMergePrompt={handleMergePrompt}
+                    />
+                  </div>
+                </>
+              ) : (
+                // Step 1：分镜表格（可编辑）
+                <div className="flex-1 min-h-0 overflow-auto">
+                  <ShotTable
+                    shots={data.shots}
+                    onChange={handleShotsChange}
+                    readOnly={false}
+                  />
+                </div>
+              )}
 
-          {/* 合成提示词侧屏 - 嵌套在主 Drawer 内部，这样能推开主 Drawer */}
-          <PromptMergeDrawer
-            open={mergeDrawerOpen}
-            scriptNodeId={scriptNodeId}
-            shot={selectedShotId ? data.shots.find(s => s.id === selectedShotId) || null : null}
-            scriptData={data}
-            onClose={() => {
-              setMergeDrawerOpen(false);
-              // ✅ 不清空 selectedShotId，保持镜头选择，下次打开能正确加载提示词
-            }}
-            onUpdate={handleShotUpdate}
-          />
+              {/* 合成提示词侧屏 - 嵌套在主 Drawer 内部，这样能推开主 Drawer */}
+              <PromptMergeDrawer
+                open={mergeDrawerOpen}
+                scriptNodeId={scriptNodeId}
+                shot={selectedShot} // ✅ 使用缓存的shot对象
+                scriptData={data}
+                onClose={() => {
+                  setMergeDrawerOpen(false);
+                  // ✅ 不清空 selectedShotId，保持镜头选择，下次打开能正确加载提示词
+                }}
+                onUpdate={handleShotUpdate}
+                // ✅ 传递 key 强制 drawer 在镜头切换时完全重建，避免状态残留
+                key={selectedShotId || 'no-shot'}
+              />
+            </>
+          )}
         </Drawer>
       </>
     );

@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useEffect, useMemo } from 'react';
+import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Drawer, Button, message, Input, Select } from 'antd';
 import { ReloadOutlined, CopyOutlined } from '@ant-design/icons';
 import type { ScriptShot, ScriptNodeData } from '@/types/canvas';
@@ -36,6 +36,23 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     const [storyboardPrompt, setStoryboardPrompt] = useState(''); // 生成的画面提示词
     const [motionPrompt, setMotionPrompt] = useState(''); // 生成的运动提示词
     const [selectedModel, setSelectedModel] = useState(''); // 选择的文本模型
+    const [contentReady, setContentReady] = useState(false); // ✅ 动画性能优化：延迟渲染重型组件
+
+    // ✅ 性能优化：缓存 scriptData 的资产数组，避免每次渲染都重新计算
+    const charactersRef = useRef(scriptData.characters);
+    const scenesRef = useRef(scriptData.scenes);
+    const propsRef = useRef(scriptData.props);
+
+    // 只在资产数组真正变化时更新 ref
+    if (scriptData.characters !== charactersRef.current) {
+      charactersRef.current = scriptData.characters;
+    }
+    if (scriptData.scenes !== scenesRef.current) {
+      scenesRef.current = scriptData.scenes;
+    }
+    if (scriptData.props !== propsRef.current) {
+      propsRef.current = scriptData.props;
+    }
 
     // 获取画布状态和模型列表（只在需要时获取，避免不必要的订阅）
     const projectId = useCanvasStore((s) => s.projectId);
@@ -50,26 +67,26 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     }, [storyboardPrompt, motionPrompt]);
 
     // 缓存资产引用数据（避免每次生成时重新 map）
+    // ✅ 性能优化：使用 ref 缓存的资产数组，而不是直接使用 scriptData
     const assetReferences = useMemo(() => {
-      if (!scriptData) return null;
       return {
-        characters: scriptData.characters.map(c => ({
+        characters: charactersRef.current.map(c => ({
           name: c.name,
           description: c.description,
           imageUrl: c.imageUrl || '',
         })),
-        scenes: scriptData.scenes.map(s => ({
+        scenes: scenesRef.current.map(s => ({
           name: s.name,
           description: s.description,
           imageUrl: s.imageUrl || '',
         })),
-        props: scriptData.props.map(p => ({
+        props: propsRef.current.map(p => ({
           name: p.name,
           description: p.description,
           imageUrl: p.imageUrl || '',
         })),
       };
-    }, [scriptData]);
+    }, [charactersRef.current, scenesRef.current, propsRef.current]); // 依赖缓存的资产数组
 
     // 默认选择第一个模型（只在模型列表变化时运行一次）
     useEffect(() => {
@@ -79,22 +96,40 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       }
     }, [textModels]); // ✅ 移除 selectedModel 依赖，避免不必要的重新运行
 
-    // 初始化：从镜头数据加载已有的提示词
+    // ✅ 性能优化：只在镜头 ID 变化时才初始化提示词，避免每次渲染都触发
+    // 使用 shot?.id 而不是整个 shot 对象作为依赖
     useEffect(() => {
       if (shot) {
         setStoryboardPrompt(shot.storyboardPrompt || '');
         setMotionPrompt(shot.motionPrompt || '');
       }
-    }, [shot]);
+    }, [shot?.id]); // 只依赖 shot.id，避免对象引用变化触发
 
     // 关闭时重置状态
     useEffect(() => {
       if (!open) {
         setGenerating(false);
+        setContentReady(false); // ✅ 关闭时重置内容渲染标记
+      }
+    }, [open]);
+
+    // ✅ 动画性能优化：Drawer 打开后延迟 150ms 再渲染重型组件
+    // 让 Drawer 滑出动画先完成，避免动画卡顿
+    useEffect(() => {
+      if (open) {
+        const timer = setTimeout(() => {
+          setContentReady(true);
+        }, 150); // Ant Design Drawer 默认动画时长约 300ms，150ms 后开始渲染内容
+        return () => clearTimeout(timer);
       }
     }, [open]);
 
     // AI生成提示词（画面 + 运动一起生成）
+    // ✅ 性能优化：缓存生成函数依赖，避免每次渲染都创建新函数
+    // 使用 ref 来获取最新的 generating 状态，避免依赖循环
+    const generatingRef = useRef(generating);
+    generatingRef.current = generating;
+
     const handleGenerate = useCallback(async () => {
       if (!shot) {
         message.warning('镜头数据不存在');
@@ -108,6 +143,12 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
 
       if (!assetReferences) {
         message.warning('资产数据不存在');
+        return;
+      }
+
+      // ✅ 如果已经在生成中，防止重复点击
+      if (generatingRef.current) {
+        message.warning('正在生成中，请稍候');
         return;
       }
 
@@ -151,20 +192,26 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
 
         onUpdate(updatedShot);
 
-        // ✅ 立即持久化到后端（避免刷新丢失）
-        try {
-          const currentStore = useCanvasStore.getState();
-          const viewport = currentStore._cache.get(projectId)?.savedViewport || { x: 0, y: 0, zoom: 1 };
-          await canvasApi.saveCanvas(projectId, {
-            nodes: currentStore.nodes,
-            edges: currentStore.edges,
-            viewport,
-          });
-          message.success('提示词生成并保存成功');
-        } catch (saveError) {
-          console.error('保存画布失败:', saveError);
-          message.warning('提示词已生成但保存失败，请手动保存画布');
-        }
+        // ✅ 性能优化：延迟保存，避免阻塞 UI，给用户响应时间
+        // 用户可以立即看到生成的提示词，保存操作在后台执行
+        message.success('提示词生成成功');
+
+        // 延迟 500ms 后保存，让用户先看到结果
+        setTimeout(async () => {
+          try {
+            const currentStore = useCanvasStore.getState();
+            const viewport = currentStore._cache.get(projectId)?.savedViewport || { x: 0, y: 0, zoom: 1 };
+            await canvasApi.saveCanvas(projectId, {
+              nodes: currentStore.nodes,
+              edges: currentStore.edges,
+              viewport,
+            });
+            message.success('已自动保存', 1);
+          } catch (saveError) {
+            console.error('保存画布失败:', saveError);
+            message.warning('保存失败，请手动保存画布');
+          }
+        }, 500);
 
         // ✅ 不自动关闭，让用户可以查看和修改生成的提示词
       } catch (error) {
@@ -173,7 +220,7 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       } finally {
         setGenerating(false);
       }
-    }, [shot, selectedModel, assetReferences, onUpdate, projectId]); // ✅ 移除 token 依赖
+    }, [shot?.id, selectedModel, assetReferences, onUpdate, projectId]); // ✅ 使用 shot?.id 而不是 shot 对象，移除 generating 依赖
 
     // Input onChange 处理器优化（避免每次输入创建新函数）
     const handleStoryboardChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -247,7 +294,10 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
         open={open}
         onClose={onClose}
         width={700}
-        destroyOnClose
+        // ✅ 动画性能优化：禁用 forceRender，避免打开时立即渲染所有内容
+        forceRender={false}
+        // ✅ 遮罩层性能优化：简化样式，避免复杂视觉效果
+        maskStyle={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
         styles={{
           body: {
             padding: 24,
@@ -257,92 +307,109 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
           },
         }}
       >
-        {/* 模型选择 */}
-        <div>
-          <div className="text-sm font-medium text-gray-700 mb-2">文本模型</div>
-          <Select
-            value={selectedModel}
-            onChange={setSelectedModel}
-            options={textModels}
-            placeholder="选择文本模型"
-            className="w-full"
-          />
-        </div>
-
-        {/* 画面提示词 */}
-        <div>
-          <div className="text-sm font-medium text-gray-700 mb-2">画面提示词</div>
-          {/* 识别到的 @ 引用标签 */}
-          {storyboardPrompt.trim() && (
-            <div className="mb-2">
-              <PromptReferenceTags prompt={storyboardPrompt} scriptData={scriptData} />
+        {/* ✅ 动画性能优化：延迟渲染重型组件，等待 Drawer 滑出动画完成 */}
+        {!contentReady ? (
+          // 动画进行中：显示轻量级占位符
+          <div className="flex items-center justify-center h-full">
+            <div className="text-gray-400 text-sm">加载中...</div>
+          </div>
+        ) : (
+          // 动画完成后：渲染实际内容
+          <>
+            {/* 模型选择 */}
+            <div>
+              <div className="text-sm font-medium text-gray-700 mb-2">文本模型</div>
+              <Select
+                value={selectedModel}
+                onChange={setSelectedModel}
+                options={textModels}
+                placeholder="选择文本模型"
+                className="w-full"
+              />
             </div>
-          )}
-          <Input.TextArea
-            value={storyboardPrompt}
-            onChange={handleStoryboardChange}
+
+            {/* 画面提示词 */}
+            <div>
+              <div className="text-sm font-medium text-gray-700 mb-2">画面提示词</div>
+              {/* 识别到的 @ 引用标签 */}
+              {/* ✅ 性能优化：延迟渲染，确保Drawer动画完成后才执行@匹配 */}
+              {contentReady && storyboardPrompt.trim() && (
+                <div className="mb-2">
+                  <PromptReferenceTags
+                    prompt={storyboardPrompt}
+                    characters={charactersRef.current}
+                    scenes={scenesRef.current}
+                    props={propsRef.current}
+                  />
+                </div>
+              )}
+              <Input.TextArea
+                value={storyboardPrompt}
+                onChange={handleStoryboardChange}
             onBlur={handleAutoSave}
-            placeholder="点击AI生成按钮或手动输入画面提示词，可使用 @ 引用资产（如 @角色-南方）"
+            placeholder="点击AI生成按钮或手动输入画面提示词，可使用括号形式引用资产（如：南方（@角色-南方））"
             rows={6}
-            className="text-sm"
-          />
-        </div>
+                className="text-sm"
+              />
+            </div>
 
-        {/* 运动提示词 */}
-        <div>
-          <div className="text-sm font-medium text-gray-700 mb-2">运动提示词</div>
-          <Input.TextArea
-            value={motionPrompt}
-            onChange={handleMotionChange}
-            onBlur={handleAutoSave}
-            placeholder="点击AI生成按钮或手动输入运动提示词"
-            rows={5}
-            className="text-sm"
-          />
-        </div>
+            {/* 运动提示词 */}
+            <div>
+              <div className="text-sm font-medium text-gray-700 mb-2">运动提示词</div>
+              <Input.TextArea
+                value={motionPrompt}
+                onChange={handleMotionChange}
+                onBlur={handleAutoSave}
+                placeholder="点击AI生成按钮或手动输入运动提示词"
+                rows={5}
+                className="text-sm"
+              />
+            </div>
 
-        {/* 最终提示词 */}
-        <div>
-          <div className="text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
-            <span>最终提示词</span>
-            {finalPrompt.trim() && (
+            {/* 最终提示词 */}
+            <div>
+              <div className="text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
+                <span>最终提示词</span>
+                {finalPrompt.trim() && (
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={handleCopyFinalPrompt}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    复制
+                  </Button>
+                )}
+              </div>
+              <Input.TextArea
+                value={finalPrompt}
+                placeholder="画面提示词 + 运动提示词自动合成"
+                rows={8}
+                className="text-sm"
+                disabled
+              />
+            </div>
+
+            {/* 底部按钮区域 */}
+            <div className="pt-4 border-t border-gray-200">
               <Button
-                type="text"
-                size="small"
-                icon={<CopyOutlined />}
-                onClick={handleCopyFinalPrompt}
-                className="text-blue-600 hover:text-blue-800"
+                type="primary"
+                size="large"
+                block
+                onClick={handleGenerate}
+                disabled={!shot || !selectedModel}
+                loading={generating}
+                icon={<ReloadOutlined />}
               >
-                复制
+                {generating ? '生成中...' : storyboardPrompt ? '重新生成提示词' : '生成提示词'}
               </Button>
-            )}
-          </div>
-          <Input.TextArea
-            value={finalPrompt}
-            placeholder="画面提示词 + 运动提示词自动合成"
-            rows={8}
-            className="text-sm"
-            disabled
-          />
-        </div>
-
-        {/* 底部按钮区域 */}
-        <div className="pt-4 border-t border-gray-200">
-          <Button
-            type="primary"
-            size="large"
-            block
-            onClick={handleGenerate}
-            disabled={!shot || !selectedModel}
-            loading={generating}
-            icon={<ReloadOutlined />}
-          >
-            {generating ? '生成中...' : storyboardPrompt ? '重新生成提示词' : '生成提示词'}
-          </Button>
-          <div className="text-xs text-gray-500 mt-2 text-center">
-            输入框失去焦点会自动保存
-          </div>
-        </div>
+              <div className="text-xs text-gray-500 mt-2 text-center">
+                输入框失去焦点会自动保存
+              </div>
+            </div>
+          </>
+        )}
       </Drawer>
     );
   }

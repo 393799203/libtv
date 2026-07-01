@@ -1,10 +1,13 @@
 import { memo, useMemo } from 'react';
 import { Tag, Tooltip } from 'antd';
-import type { ScriptNodeData } from '@/types/canvas';
+import type { ScriptCharacter, ScriptScene, ScriptProp } from '@/types/canvas';
 
+// ✅ 性能优化：只接收必要的资产数据，而不是完整的 ScriptNodeData
 interface PromptReferenceTagsProps {
   prompt: string; // 提示词文本（包含 @ 引用）
-  scriptData: ScriptNodeData; // 脚本节点数据（包含角色、场景、道具列表）
+  characters: ScriptCharacter[]; // 角色列表
+  scenes: ScriptScene[]; // 场景列表
+  props: ScriptProp[]; // 道具列表
 }
 
 /**
@@ -14,46 +17,81 @@ interface PromptReferenceTagsProps {
  * - 鼠标移上去显示对应资产的图片和描述
  */
 export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
-  function PromptReferenceTags({ prompt, scriptData }) {
-    // 解析提示词，提取 @ 引用并匹配资产数据（按资产名称列表匹配）
+  function PromptReferenceTags({ prompt, characters, scenes, props }) {
+    // ✅ 性能优化：先缓存资产映射表，避免每次 prompt 变化都重新遍历所有资产
+    const assetMap = useMemo(() => {
+      const map = new Map<string, { type: string; asset: any }>();
+
+      // 添加角色
+      characters.forEach(c => {
+        map.set(c.name, { type: '角色', asset: c });
+      });
+
+      // 添加场景
+      scenes.forEach(s => {
+        map.set(s.name, { type: '场景', asset: s });
+      });
+
+      // 添加道具
+      props.forEach(p => {
+        map.set(p.name, { type: '道具', asset: p });
+      });
+
+      return map;
+    }, [characters, scenes, props]); // 只依赖资产数组
+
+    // 解析提示词，提取括号内的 @ 引用并匹配资产数据
     const references = useMemo(() => {
       if (!prompt.trim()) return [];
 
-      // 构建资产名称映射表
-      const assetMap = new Map<string, { type: string; asset: any }>();
-      
-      // 添加角色
-      scriptData.characters.forEach(c => {
-        assetMap.set(c.name, { type: '角色', asset: c });
-      });
-      
-      // 添加场景
-      scriptData.scenes.forEach(s => {
-        assetMap.set(s.name, { type: '场景', asset: s });
-      });
-      
-      // 添加道具
-      scriptData.props.forEach(p => {
-        assetMap.set(p.name, { type: '道具', asset: p });
-      });
-
-      // 遍历映射表，查找提示词中的 @ 引用
+      // ✅ 简化匹配：只提取括号内的 @引用部分
+      // 新格式：资产名称（@类型-资产名称），只匹配括号内的 @类型-名称
       const refs: Array<{ fullText: string; type: string; name: string; asset?: any }> = [];
-      
-      assetMap.forEach((value, name) => {
-        const pattern = `@${value.type}-${name}`;
-        if (prompt.includes(pattern)) {
+
+      // 使用正则表达式提取括号内的 @引用
+      // 匹配格式：（@类型-名称）或 (@类型-名称)
+      const regex = /[（(]@(角色|场景|道具)-([\u4e00-\u9fa5a-zA-Z0-9_-]+)[）)]/g;
+      const matches = prompt.matchAll(regex);
+
+      // ✅ 去重：使用Map记录已处理的资产，避免重复显示
+      const seenAssets = new Map<string, boolean>();
+
+      for (const match of matches) {
+        const type = match[1]; // 角色|场景|道具
+        const name = match[2]; // 资产名称
+        const fullText = match[0]; // 完整的括号内容，如 "（@角色-南方）"
+
+        // 去重key：类型+名称
+        const key = `${type}-${name}`;
+
+        // 如果已经处理过这个资产，跳过
+        if (seenAssets.has(key)) {
+          continue;
+        }
+        seenAssets.set(key, true);
+
+        // 从assetMap查找对应资产
+        const assetInfo = assetMap.get(name);
+        if (assetInfo && assetInfo.type === type) {
           refs.push({
-            fullText: pattern,
-            type: value.type,
-            name: name,
-            asset: { ...value.asset, type: value.type },
+            fullText,
+            type,
+            name,
+            asset: { ...assetInfo.asset, type },
+          });
+        } else {
+          // 未找到匹配的资产，显示为红色标签
+          refs.push({
+            fullText,
+            type,
+            name,
+            asset: undefined,
           });
         }
-      });
+      }
 
       return refs;
-    }, [prompt, scriptData]);
+    }, [prompt, assetMap]); // 依赖 prompt 和缓存的 assetMap
 
     if (references.length === 0) {
       return null;
@@ -104,7 +142,7 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
               mouseEnterDelay={0.2}
             >
               <Tag color={colorMap[ref.type] || 'default'} className="cursor-pointer">
-                {ref.fullText}
+                {ref.name}
               </Tag>
             </Tooltip>
           );

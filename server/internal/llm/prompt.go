@@ -9,6 +9,140 @@ import (
 // viewMarkerRe 匹配视图要求标记【三视图要求】、【四视图要求】、【六视图要求】
 var viewMarkerRe = regexp.MustCompile(`【三视图要求】[^\n]*|【四视图要求】[^\n]*|【六视图要求】[^\n]*`)
 
+// ---- 提示词生成相关类型定义 ----
+
+// AssetReference 资产引用（角色、场景、道具）
+type AssetReference struct {
+	Name        string `json:"name"`        // 资产名称
+	Description string `json:"description"` // 资产描述
+	ImageURL    string `json:"imageUrl"`    // 资产图片 URL
+}
+
+// ShotDataForGeneration 用于生成提示词的完整镜头数据
+type ShotDataForGeneration struct {
+	VisualPrompt    string `json:"visualPrompt"`    // 画面描述
+	ShotSize        string `json:"shotSize"`        // 镜别
+	CameraAngle     string `json:"cameraAngle"`     // 拍摄角度
+	Dialogue        string `json:"dialogue"`        // 对白
+	SoundEffect     string `json:"soundEffect"`     // 音效
+	CameraMovement  string `json:"cameraMovement"`  // 运镜方式
+	ToneHint        string `json:"toneHint"`        // 基调提示
+}
+
+// ---- 提示词生成相关常量 ----
+
+// PromptGenerationSystemPrompt 提示词生成的系统提示词
+const PromptGenerationSystemPrompt = `你是一个专业的影视镜头描述专家。你的任务是根据提供的镜头信息和资产信息，同时生成画面提示词和运动提示词。
+
+要求：
+1. **画面提示词**：
+   - 基于原始画面描述，补充更详细的视觉细节
+   - 使用括号形式引用准备好的资产（角色、场景、道具）
+   - 引用格式：资产名称（@类型-资产名称）
+   - 例如：南方（@角色-南方）、水下洞穴主通道（@场景-水下洞穴主通道）、古代剑（@道具-古代剑）
+   - 画面提示词应该清晰、具体，便于后续生成视频
+
+2. **运动提示词**：
+   - 基于运镜方式和基调提示，补充更详细的运动描述
+   - 描述镜头的运动轨迹、速度、节奏等细节
+   - 结合画面内容，确保运动风格与画面氛围协调
+   - 运动提示词应该清晰、具体，便于后续生成视频
+
+输出格式（严格遵守）：
+画面提示词：[画面描述内容]
+运动提示词：[运动描述内容]`
+
+// ---- 提示词生成相关函数 ----
+
+// BuildPromptGenerationUserMessage 构建提示词生成的用户消息
+func BuildPromptGenerationUserMessage(
+	shotData ShotDataForGeneration,
+	characters []AssetReference,
+	scenes []AssetReference,
+	props []AssetReference,
+) string {
+	return fmt.Sprintf(`镜头信息：
+- 画面描述：%s
+- 镜别：%s
+- 拍摄角度：%s
+- 对白：%s
+- 音效：%s
+- 运镜方式：%s
+- 基调提示：%s
+
+- 可用资产：
+角色：%s
+场景：%s
+道具：%s
+
+请同时生成画面提示词和运动提示词，画面提示词中使用括号形式引用相关资产。格式示例：南方（@角色-南方）、水下洞穴主通道（@场景-水下洞穴主通道）。`,
+		shotData.VisualPrompt,
+		shotData.ShotSize,
+		shotData.CameraAngle,
+		shotData.Dialogue,
+		shotData.SoundEffect,
+		shotData.CameraMovement,
+		shotData.ToneHint,
+		formatAssetList(characters, "角色"),
+		formatAssetList(scenes, "场景"),
+		formatAssetList(props, "道具"),
+	)
+}
+
+// parsePromptResponse 解析 LLM 响应，提取画面提示词和运动提示词
+func parsePromptResponse(content string) (string, string) {
+	// 查找"画面提示词："和"运动提示词："标记
+	storyboardPrompt := ""
+	motionPrompt := ""
+
+	// 简单解析：查找关键标记
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "画面提示词：") || strings.HasPrefix(line, "画面提示词:") {
+			storyboardPrompt = strings.TrimPrefix(line, "画面提示词：")
+			storyboardPrompt = strings.TrimPrefix(storyboardPrompt, "画面提示词:")
+			storyboardPrompt = strings.TrimSpace(storyboardPrompt)
+		} else if strings.HasPrefix(line, "运动提示词：") || strings.HasPrefix(line, "运动提示词:") {
+			motionPrompt = strings.TrimPrefix(line, "运动提示词：")
+			motionPrompt = strings.TrimPrefix(motionPrompt, "运动提示词:")
+			motionPrompt = strings.TrimSpace(motionPrompt)
+		}
+	}
+
+	// 如果没有找到标记，尝试简单分割（兼容旧格式）
+	if storyboardPrompt == "" && motionPrompt == "" {
+		// 按换行分割，第一部分为画面，第二部分为运动
+		parts := strings.SplitN(content, "\n", 2)
+		if len(parts) >= 1 {
+			storyboardPrompt = strings.TrimSpace(parts[0])
+		}
+		if len(parts) >= 2 {
+			motionPrompt = strings.TrimSpace(parts[1])
+		}
+	}
+
+	return storyboardPrompt, motionPrompt
+}
+
+// formatAssetList 格式化资产列表
+func formatAssetList(assets []AssetReference, assetType string) string {
+	if len(assets) == 0 {
+		return fmt.Sprintf("无%s", assetType)
+	}
+
+	var result string
+	for i, asset := range assets {
+		if i > 0 {
+			result += "、"
+		}
+		result += fmt.Sprintf("%s（%s）", asset.Name, asset.Description)
+	}
+	return result
+}
+
+// ---- 故事/剧本生成相关 ----
+
 // StorySystemPrompt 故事/剧本文本生成 System Prompt
 // 用于：用户输入提示词 → LLM 生成故事剧本文本 → 填充到 TextNode.content
 const StorySystemPrompt = `你是一个富有创造力的影视编剧。你的任务是根据用户的创意提示，创作一段引人入胜的故事剧本文本。
