@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useEffect } from 'react';
 import { Tag, Tooltip } from 'antd';
 import type { ScriptCharacter, ScriptScene, ScriptProp } from '@/types/canvas';
 
@@ -8,16 +8,38 @@ interface PromptReferenceTagsProps {
   characters: ScriptCharacter[]; // 角色列表
   scenes: ScriptScene[]; // 场景列表
   props: ScriptProp[]; // 道具列表
+  delayMs?: number; // ✅ 延迟匹配时间（毫秒），默认300ms
 }
 
 /**
  * 提示词引用标签显示组件
- * - 解析 @ 符号引用（例如 @角色-南方、@场景-水下洞穴主通道）
+ * - 解析括号内的 @ 符号引用（例如 （@角色-南方）、（@场景-水下洞穴主通道））
  * - 渲染为 Tag 标签形式
  * - 鼠标移上去显示对应资产的图片和描述
+ * - ✅ 性能优化：延迟匹配，避免阻塞 Drawer 打开动画
  */
 export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
-  function PromptReferenceTags({ prompt, characters, scenes, props }) {
+  function PromptReferenceTags({ prompt, characters, scenes, props, delayMs = 500 }) {
+    // ✅ 延迟匹配状态：初始不匹配，等待 Drawer 打开后再匹配
+    const [readyToMatch, setReadyToMatch] = useState(false);
+
+    // ✅ 延迟匹配逻辑：等待 delayMs 后才开始匹配
+    useEffect(() => {
+      // 如果 prompt 为空，立即设置为 ready
+      if (!prompt.trim()) {
+        setReadyToMatch(true);
+        return;
+      }
+
+      // 延迟 delayMs 后才开始匹配
+      const timer = setTimeout(() => {
+        setReadyToMatch(true);
+      }, delayMs);
+
+      // 清理定时器
+      return () => clearTimeout(timer);
+    }, [prompt, delayMs]);
+
     // ✅ 性能优化：先缓存资产映射表，避免每次 prompt 变化都重新遍历所有资产
     const assetMap = useMemo(() => {
       const map = new Map<string, { type: string; asset: any }>();
@@ -40,9 +62,11 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
       return map;
     }, [characters, scenes, props]); // 只依赖资产数组
 
-    // 解析提示词，提取括号内的 @ 引用并匹配资产数据
+    // ✅ 解析提示词，提取括号内的 @ 引用并匹配资产数据
+    // 只有在 readyToMatch=true 时才执行匹配，避免阻塞 Drawer 打开动画
     const references = useMemo(() => {
-      if (!prompt.trim()) return [];
+      // 如果还没准备好匹配，返回空数组（避免阻塞）
+      if (!readyToMatch || !prompt.trim()) return [];
 
       // ✅ 简化匹配：只提取括号内的 @引用部分
       // 新格式：资产名称（@类型-资产名称），只匹配括号内的 @类型-名称
@@ -91,7 +115,7 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
       }
 
       return refs;
-    }, [prompt, assetMap]); // 依赖 prompt 和缓存的 assetMap
+    }, [readyToMatch, prompt, assetMap]); // ✅ 新增 readyToMatch 依赖
 
     if (references.length === 0) {
       return null;
@@ -104,7 +128,7 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
           if (!ref.asset) {
             return (
               <Tag key={index} color="red">
-                {ref.fullText} (未找到)
+                {ref.name} (未找到)
               </Tag>
             );
           }

@@ -1,10 +1,10 @@
-import { memo, useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import type { NodeProps, Node } from '@xyflow/react';
 import {
   PlayCircleOutlined,
   PauseCircleOutlined,
   UploadOutlined,
-  AudioOutlined,
+  SoundOutlined,
 } from '@ant-design/icons';
 import { BaseNode } from './BaseNode';
 import type { AudioNodeData } from '@/types/canvas';
@@ -91,7 +91,7 @@ const WaveformVisualizer = memo(function WaveformVisualizer({
     return () => { cancelled = true; };
   }, [audioUrl]);
 
-  // 加载中：显示骨架屏
+  // 加载中：显示骨架屏（只处理波形加载，不处理节点生成状态）
   if (loading || !waveformBars) {
     return (
       <div className="w-full h-20 flex items-center justify-center gap-[3px]">
@@ -351,7 +351,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
           ) : (
             /* 空状态：按配置高度撑开 + 背景图标 */
             <div className="w-full h-full min-h-[120px] rounded-lg bg-gray-50 flex flex-col items-center justify-center">
-              <AudioOutlined className="text-4xl text-gray-300" />
+              <SoundOutlined className="text-4xl text-gray-300" />
             </div>
           )
         }

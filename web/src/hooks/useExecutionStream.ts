@@ -241,7 +241,7 @@ export function useExecutionStream(
         } else if (event.type === 'node_progress' && event.nodeId) {
           const pd = event.data as { elapsed?: number; elapsedMs?: number; message?: string } | undefined;
           useCanvasStore.getState().updateNodeData(event.nodeId, {
-            progressMessage: pd?.message,
+            progressMessage: pd?.message, // 只保留progressMessage（"已运行 10s"）
           } as never);
         }
       } catch (e) {

@@ -13,11 +13,13 @@ export type NodeExecutionStatus = 'idle' | 'pending' | 'running' | 'success' | '
 // - stale: 瞬时标记，表示"上游节点刚刚被重新生成，本节点输出可能已过期"。
 //   只在会话内有效，saveCanvas 持久化前会清掉（脏标不存盘）。
 // - mentions: 提示词中的 @ 引用列表，与 data.prompt 里的 [[m:ID]] 占位符一一对应。
+// - progressMessage: 进度消息（如"已运行 10s"），从SSE接口返回
 export interface BaseNodeFields {
   status: NodeExecutionStatus;
   error?: string;
   stale?: boolean;
   mentions?: MentionMarker[];
+  progressMessage?: string; // 进度消息（从SSE node_progress事件的message字段）
 }
 
 // 文本节点数据

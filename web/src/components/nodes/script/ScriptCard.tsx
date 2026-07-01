@@ -4,20 +4,30 @@ import {
   RightOutlined,
   FileTextOutlined,
   CodeOutlined,
-  LoadingOutlined,
 } from '@ant-design/icons';
 import type { NodeExecutionStatus, ScriptNodeData } from '@/types/canvas';
 import { ScriptSteps } from './ScriptSteps';
+import { NodeLoadingState } from '../NodeLoadingState';
 
 interface ScriptCardProps {
-  data: Pick<ScriptNodeData, 'label' | 'currentStep' | 'shots' | 'scriptContent'>;
+  data: Pick<ScriptNodeData, 'label' | 'currentStep' | 'shots' | 'scriptContent' | 'characters' | 'scenes' | 'props'> & {
+    progressMessage?: string; // 进度消息（如"已运行 10s"）
+  };
   status: NodeExecutionStatus;
   onOpen: () => void;
 }
 
-/** 是否有内容（脚本文本或分镜数据） */
-function hasContent(data: Pick<ScriptNodeData, 'scriptContent' | 'shots'>): boolean {
-  return !!(data.scriptContent?.trim() || data.shots.length > 0);
+/** 是否有内容（脚本文本、分镜数据或资产数据） */
+function hasContent(data: Pick<ScriptNodeData, 'scriptContent' | 'shots' | 'characters' | 'scenes' | 'props'>): boolean {
+  // 检查是否有任何数据
+  const hasScriptContent = !!data.scriptContent?.trim();
+  const hasShots = data.shots && data.shots.length > 0;
+  const hasCharacters = data.characters && data.characters.length > 0;
+  const hasScenes = data.scenes && data.scenes.length > 0;
+  const hasProps = data.props && data.props.length > 0;
+
+  // 只有有实际数据时才返回 true
+  return hasScriptContent || hasShots || hasCharacters || hasScenes || hasProps;
 }
 
 /** 是否正在生成中 */
@@ -44,30 +54,13 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
   // ========== 生成中状态 ==========
   if (generating) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-6 px-4 min-h-[200px]">
-        <div className="flex flex-col items-center gap-3 w-full">
-          {/* 动画图标 */}
-          <div className="relative w-12 h-12 flex items-center justify-center">
-            <div className="absolute inset-0 rounded-xl bg-amber-100 animate-pulse" />
-            <LoadingOutlined className="relative text-xl text-amber-500 animate-spin" />
-          </div>
-
-          {/* 状态文字 */}
-          <span className="text-xs font-medium text-gray-700">
-            {status === 'pending' ? '等待生成中...' : '正在生成分镜...'}
-          </span>
-
-          {/* 打开按钮（可查看实时进度） */}
-          <button
-            onClick={handleOpenClick}
-            className="mt-1 flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-amber-300 text-xs text-amber-700 font-medium hover:bg-amber-50 transition-colors cursor-pointer"
-          >
-            查看详情
-            <RightOutlined className="text-[10px]" />
-          </button>
-        </div>
-      </div>
-    );
+      // ✅ 使用统一的loading组件
+      <NodeLoadingState
+        status={status}
+        statusText={data.progressMessage || (status === 'pending' ? '等待生成脚本...' : '正在生成脚本...')}
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-500"
+      />    );
   }
 
   // ========== 空状态（无内容且不在生成中）==========
@@ -90,15 +83,7 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
             </span>
           </div>
 
-          {/* 打开按钮 */}
-          <button
-            onClick={handleOpenClick}
-            className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-xs text-white font-medium transition-colors cursor-pointer shadow-sm"
-          >
-            <FileTextOutlined className="text-[10px]" />
-            打开脚本节点
-            <RightOutlined className="text-[10px]" />
-          </button>
+          {/* ✅ 空状态不显示打开按钮 */}
         </div>
       </div>
     );

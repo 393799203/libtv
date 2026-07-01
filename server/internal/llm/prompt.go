@@ -242,7 +242,7 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
 - 确保 JSON 格式合法，可以被 JSON 解析器正确解析
 - visualPrompt 使用中文描述，因为后续图像生成模型对中文理解更好
 - 如果原文信息不足，可以合理发挥创作，保持故事连贯性
-- characters/scenes/props 的 imageUrl 统一设为空字符串 ""`
+- characters/scenes/props 的 name 不要有括号，imageUrl 统一设为空字符串 ""`
 
 // BuildScriptUserPrompt 构建剧本生成的用户 Prompt
 func BuildScriptUserPrompt(textContent string) string {

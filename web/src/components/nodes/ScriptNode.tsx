@@ -19,6 +19,10 @@ export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ 
     currentStep: data.currentStep,
     shots: data.shots,
     scriptContent: data.scriptContent,
+    characters: data.characters, // 用于判断是否有数据
+    scenes: data.scenes, // 用于判断是否有数据
+    props: data.props, // 用于判断是否有数据
+    progressMessage: data.progressMessage, // 进度消息（如"已运行 10s"）
   };
 
   // 稳定的事件处理
