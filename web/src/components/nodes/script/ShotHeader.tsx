@@ -90,12 +90,13 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
         {onAddShot && (
           <Button
             size="small"
+            type="primary"
             icon={<PlusOutlined />}
             onClick={(e) => {
               e.stopPropagation();
               onAddShot();
             }}
-            className="text-xs"
+            className="text-xs font-medium h-9 px-3 rounded-md bg-black hover:bg-gray-800 border-black"
           >
             添加镜头
           </Button>
@@ -109,7 +110,7 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               e.stopPropagation();
               onPrevStep();
             }}
-            className="text-xs"
+            className="text-xs font-medium h-9 px-3 rounded-md border-black text-black hover:border-gray-800 hover:text-gray-800"
           >
             {prevStepLabel}
           </Button>
@@ -124,7 +125,7 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               e.stopPropagation();
               onNextStep();
             }}
-            className="text-xs"
+            className="text-xs font-medium h-9 px-3 rounded-md bg-black hover:bg-gray-800 border-black"
           >
             {nextStepLabel}
           </Button>

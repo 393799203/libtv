@@ -749,9 +749,9 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	finalPrompt := llm.BuildAssetImagePrompt(assetType, cleanedPrompt)
 
 	if assetType != "" {
-		log.Printf("[ImageExecutor] 检测到资产节点，添加视图指令: nodeID=%s assetType=%s", node.ID, assetType)
+		log.Printf("[ImageExecutor] 检测到资产节点: nodeID=%s assetType=%s (视图要求由脚本节点生成分镜时自动添加)", node.ID, assetType)
 	} else {
-		log.Printf("[ImageExecutor] 普通图片节点，不添加视图指令: nodeID=%s", node.ID)
+		log.Printf("[ImageExecutor] 普通图片节点: nodeID=%s", node.ID)
 	}
 
 	// 确定使用的模型 ID（传递给硅基流动 API）

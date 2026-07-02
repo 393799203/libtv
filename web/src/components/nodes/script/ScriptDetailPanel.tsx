@@ -178,9 +178,9 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
     // nextStepLabel 是纯计算派生值
     const nextStepLabel =
       data.currentStep === 1
-        ? '下一个：准备资产'
+        ? '下一步：准备资产'
         : data.currentStep === 2
-          ? '下一个：合成提示词'
+          ? '下一步：合成提示词'
           : null;
 
     // prevStepLabel：步骤 2 和 3 时显示
