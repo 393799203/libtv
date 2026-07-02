@@ -9,7 +9,6 @@ interface PromptReferenceTagsProps {
   characters: ScriptCharacter[]; // 角色列表
   scenes: ScriptScene[]; // 场景列表
   props: ScriptProp[]; // 道具列表
-  scriptNodeId: string; // ✅ 脚本节点 ID，用于从画布获取最新图片
   delayMs?: number; // ✅ 延迟匹配时间（毫秒），默认300ms
 }
 
@@ -21,7 +20,7 @@ interface PromptReferenceTagsProps {
  * - ✅ 性能优化：延迟匹配，避免阻塞 Drawer 打开动画
  */
 export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
-  function PromptReferenceTags({ prompt, characters, scenes, props, scriptNodeId, delayMs = 500 }) {
+  function PromptReferenceTags({ prompt, characters, scenes, props, delayMs = 500 }) {
     // ✅ 从画布获取最新节点数据（用于获取图片节点的最新 imageUrl）
     const nodes = useCanvasStore((s) => s.nodes);
 
@@ -45,43 +44,36 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
       return () => clearTimeout(timer);
     }, [prompt, delayMs]);
 
-    // ✅ 从画布图片节点获取最新图片 URL（通过 assetImageMapping）
+    // ✅ 简化逻辑：直接通过 nodeId 获取图片，不需要 fallback
     const assetMap = useMemo(() => {
       const map = new Map<string, { type: string; asset: any }>();
 
-      // 找到脚本节点，获取 assetImageMapping
-      const scriptNode = nodes.find(n => n.id === scriptNodeId);
-      const assetImageMapping = scriptNode?.data?.assetImageMapping as any;
-
-      // 添加角色 - 从画布图片节点获取最新 imageUrl
+      // 添加角色 - 直接通过 nodeId 获取图片
       characters.forEach(c => {
-        const imageNodeId = assetImageMapping?.characters?.[c.name];
-        const imageNode = nodes.find(n => n.id === imageNodeId);
-        const imageUrl = imageNode?.data?.imageUrl || c.imageUrl; // 优先使用画布图片，fallback 到资产数据
+        const node = nodes.find(n => n.id === c.nodeId);
+        const imageUrl = (node?.data?.imageUrl as string) || '';
 
         map.set(c.name, { type: '角色', asset: { ...c, imageUrl } });
       });
 
-      // 添加场景 - 从画布图片节点获取最新 imageUrl
+      // 添加场景 - 直接通过 nodeId 获取图片
       scenes.forEach(s => {
-        const imageNodeId = assetImageMapping?.scenes?.[s.name];
-        const imageNode = nodes.find(n => n.id === imageNodeId);
-        const imageUrl = imageNode?.data?.imageUrl || s.imageUrl; // 优先使用画布图片，fallback 到资产数据
+        const node = nodes.find(n => n.id === s.nodeId);
+        const imageUrl = (node?.data?.imageUrl as string) || '';
 
         map.set(s.name, { type: '场景', asset: { ...s, imageUrl } });
       });
 
-      // 添加道具 - 从画布图片节点获取最新 imageUrl
+      // 添加道具 - 直接通过 nodeId 获取图片
       props.forEach(p => {
-        const imageNodeId = assetImageMapping?.props?.[p.name];
-        const imageNode = nodes.find(n => n.id === imageNodeId);
-        const imageUrl = imageNode?.data?.imageUrl || p.imageUrl; // 优先使用画布图片，fallback 到资产数据
+        const node = nodes.find(n => n.id === p.nodeId);
+        const imageUrl = (node?.data?.imageUrl as string) || '';
 
         map.set(p.name, { type: '道具', asset: { ...p, imageUrl } });
       });
 
       return map;
-    }, [nodes, scriptNodeId, characters, scenes, props]); // 依赖节点数据
+    }, [nodes, characters, scenes, props]);
 
     // ✅ 解析提示词，提取括号内的 @ 引用并匹配资产数据
     // 只有在 readyToMatch=true 时才执行匹配，避免阻塞 Drawer 打开动画

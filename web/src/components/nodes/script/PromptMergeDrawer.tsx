@@ -70,26 +70,40 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     }, [storyboardPrompt, motionPrompt]);
 
     // 缓存资产引用数据（避免每次生成时重新 map）
-    // ✅ 性能优化：使用 ref 缓存的资产数组，而不是直接使用 scriptData
+    // ✅ 通过 nodeId 从画布节点获取最新图片
     const assetReferences = useMemo(() => {
+      const store = useCanvasStore.getState();
+
       return {
-        characters: charactersRef.current.map(c => ({
-          name: c.name,
-          description: c.description,
-          imageUrl: c.imageUrl || '',
-        })),
-        scenes: scenesRef.current.map(s => ({
-          name: s.name,
-          description: s.description,
-          imageUrl: s.imageUrl || '',
-        })),
-        props: propsRef.current.map(p => ({
-          name: p.name,
-          description: p.description,
-          imageUrl: p.imageUrl || '',
-        })),
+        characters: charactersRef.current.map(c => {
+          const node = c.nodeId ? store.nodes.find(n => n.id === c.nodeId) : null;
+          const imageUrl = (node?.data?.imageUrl as string) || '';
+          return {
+            name: c.name,
+            description: c.description,
+            imageUrl,
+          };
+        }),
+        scenes: scenesRef.current.map(s => {
+          const node = s.nodeId ? store.nodes.find(n => n.id === s.nodeId) : null;
+          const imageUrl = (node?.data?.imageUrl as string) || '';
+          return {
+            name: s.name,
+            description: s.description,
+            imageUrl,
+          };
+        }),
+        props: propsRef.current.map(p => {
+          const node = p.nodeId ? store.nodes.find(n => n.id === p.nodeId) : null;
+          const imageUrl = (node?.data?.imageUrl as string) || '';
+          return {
+            name: p.name,
+            description: p.description,
+            imageUrl,
+          };
+        }),
       };
-    }, [charactersRef.current, scenesRef.current, propsRef.current]); // 依赖缓存的资产数组
+    }, [charactersRef.current, scenesRef.current, propsRef.current]); // 依赖资产数组变化
 
     // 默认选择第一个模型（只在模型列表变化时运行一次）
     useEffect(() => {
@@ -406,7 +420,6 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
                     characters={charactersRef.current}
                     scenes={scenesRef.current}
                     props={propsRef.current}
-                    scriptNodeId={scriptNodeId}
                     delayMs={100}
                   />
                 </div>

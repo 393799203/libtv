@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { Button, Typography } from 'antd';
 import { CalendarOutlined, PlusOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useCanvasStore } from '@/stores/canvasStore';
 import type { ScriptNodeData, ScriptCharacter, ScriptScene, ScriptProp } from '@/types/canvas';
 
 const { Text } = Typography;
@@ -32,10 +33,26 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
   prevLoading,
   showMissingAssetsWarning,
 }) {
-  // 计算缺少设定图的数量
-  const missingChars = (data.characters || []).filter((c: ScriptCharacter) => !c.imageUrl).length;
-  const missingScenes = (data.scenes || []).filter((s: ScriptScene) => !s.imageUrl).length;
-  const missingProps = (data.props || []).filter((p: ScriptProp) => !p.imageUrl).length;
+  // 计算缺少设定图的数量（通过 nodeId 检查节点是否有图片）
+  const nodes = useCanvasStore((s) => s.nodes);
+
+  const missingChars = (data.characters || []).filter((c: ScriptCharacter) => {
+    if (!c.nodeId) return true; // 没有关联节点
+    const node = nodes.find(n => n.id === c.nodeId);
+    return !node?.data?.imageUrl; // 节点不存在或没有图片
+  }).length;
+
+  const missingScenes = (data.scenes || []).filter((s: ScriptScene) => {
+    if (!s.nodeId) return true;
+    const node = nodes.find(n => n.id === s.nodeId);
+    return !node?.data?.imageUrl;
+  }).length;
+
+  const missingProps = (data.props || []).filter((p: ScriptProp) => {
+    if (!p.nodeId) return true;
+    const node = nodes.find(n => n.id === p.nodeId);
+    return !node?.data?.imageUrl;
+  }).length;
 
   const parts: string[] = [];
   if (missingChars > 0) parts.push(`${missingChars} 个人物角色`);

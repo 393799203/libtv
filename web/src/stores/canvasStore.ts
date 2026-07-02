@@ -380,8 +380,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                 const assets = scriptData[dataType];
                 const asset = assets.find((a: any) => a.name === assetName);
                 if (asset) {
-                  asset.imageUrl = '';
-                  console.log('[CanvasStore] 清空资产 imageUrl:', {
+                  asset.nodeId = undefined; // ✅ 清除资产关联的节点 ID
+                  console.log('[CanvasStore] 清除资产 nodeId:', {
                     assetType,
                     assetName,
                     scriptNodeId,
@@ -389,30 +389,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
                 }
               }
 
-              // ✅ 清理脚本节点的 assetImageMapping
-              if (scriptData.assetImageMapping) {
-                const mappingType = typeMap[assetType as '角色' | '场景' | '道具'];
-                if (mappingType && scriptData.assetImageMapping[mappingType]) {
-                  const updatedMapping = {
-                    ...scriptData.assetImageMapping,
-                    [mappingType]: {
-                      ...scriptData.assetImageMapping[mappingType],
-                    },
-                  };
-                  delete updatedMapping[mappingType][assetName];
-
-                  // 更新脚本节点数据
-                  state.updateNodeData(scriptNodeId, {
-                    assetImageMapping: updatedMapping,
-                  } as any);
-
-                  console.log('[CanvasStore] 清理映射关系:', {
-                    mappingType,
-                    assetName,
-                    scriptNodeId,
-                  });
-                }
-              }
+              // ✅ assetImageMapping 已废弃，不再需要清理映射关系
             }
           }
         }

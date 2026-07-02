@@ -28,8 +28,8 @@ export function generateAssetImageNodeId(
 }
 
 /**
- * 获取资产映射的图片节点 ID（从 scriptNode.assetImageMapping 中读取）
- * @returns 图片节点 ID，如果没有映射则返回 null
+ * 获取资产的节点 ID（从资产数据的 nodeId 字段读取）
+ * @returns 节点 ID，如果没有则返回 null
  */
 export function getAssetImageNodeId(
   scriptNodeId: string,
@@ -44,27 +44,24 @@ export function getAssetImageNodeId(
   }
 
   const scriptData = scriptNode.data as any;
-  const mapping = scriptData.assetImageMapping;
-
-  if (!mapping) {
-    return null;
-  }
-
   const typeMap = {
     character: 'characters',
     scene: 'scenes',
     prop: 'props',
   };
 
-  const mappingType = typeMap[assetType];
-  return mapping[mappingType]?.[assetName] || null;
+  const assetArray = scriptData[typeMap[assetType]] as any[];
+  const asset = assetArray?.find(a => a.name === assetName);
+
+  // ✅ 新逻辑：直接从资产的 nodeId 字段获取
+  return asset?.nodeId || null;
 }
 
 /**
- * 创建资产图片节点并建立映射关系
+ * 创建资产图片节点并设置关联
  * - 创建图片节点（位置：脚本节点左侧 -350px）
  * - 创建连接边（图片节点 → 脚本节点）
- * - 更新脚本节点的 assetImageMapping
+ * - ✅ 直接设置资产的 imageNodeId 字段
  *
  * @returns 创建的图片节点对象
  */
@@ -101,8 +98,8 @@ export function createAssetImageNode(
       status: imageUrl ? 'success' : 'idle',
     } as any);
 
-    // 更新脚本节点的映射关系
-    updateAssetImageMapping(scriptNodeId, assetType, assetName, imageNodeId);
+    // ✅ 新逻辑：直接更新资产的 imageNodeId
+    updateAssetImageNodeId(scriptNodeId, assetType, assetName, imageNodeId);
 
     return existingImageNode;
   }
@@ -144,8 +141,8 @@ export function createAssetImageNode(
   };
   store.addEdge(edge);
 
-  // 更新脚本节点的映射关系
-  updateAssetImageMapping(scriptNodeId, assetType, assetName, imageNodeId);
+  // ✅ 新逻辑：直接更新资产的 imageNodeId
+  updateAssetImageNodeId(scriptNodeId, assetType, assetName, imageNodeId);
 
   console.log('[AssetImageSync] 创建图片节点成功:', {
     imageNodeId,
@@ -159,7 +156,7 @@ export function createAssetImageNode(
 }
 
 /**
- * 更新资产图片节点的 imageUrl（通过映射 ID 直接定位，避免遍历查找）
+ * 更新资产图片节点的 imageUrl（通过 imageNodeId 直接定位）
  */
 export function updateAssetImageNodeUrl(
   scriptNodeId: string,
@@ -170,7 +167,7 @@ export function updateAssetImageNodeUrl(
   const imageNodeId = getAssetImageNodeId(scriptNodeId, assetType, assetName);
 
   if (!imageNodeId) {
-    console.warn('[AssetImageSync] 未找到图片节点映射:', {
+    console.warn('[AssetImageSync] 未找到图片节点关联:', {
       scriptNodeId,
       assetType,
       assetName,
@@ -201,45 +198,9 @@ export function updateAssetImageNodeUrl(
 }
 
 /**
- * 删除资产图片节点并清理映射关系
- * - 删除图片节点
- * - 删除连接边
- * - 清理脚本节点的 assetImageMapping
+ * ✅ 新函数：直接更新资产的 nodeId 字段
  */
-export function removeAssetImageNode(
-  scriptNodeId: string,
-  assetType: AssetType,
-  assetName: string
-): boolean {
-  const imageNodeId = getAssetImageNodeId(scriptNodeId, assetType, assetName);
-
-  if (!imageNodeId) {
-    console.warn('[AssetImageSync] 未找到图片节点映射，无需删除');
-    return false;
-  }
-
-  const store = useCanvasStore.getState();
-
-  // 删除节点（自动删除连接边）
-  store.removeNodes([imageNodeId]);
-
-  // 清理脚本节点的映射关系
-  clearAssetImageMapping(scriptNodeId, assetType, assetName);
-
-  console.log('[AssetImageSync] 删除图片节点成功:', {
-    imageNodeId,
-    scriptNodeId,
-    assetType,
-    assetName,
-  });
-
-  return true;
-}
-
-/**
- * 更新脚本节点的 assetImageMapping（内部函数）
- */
-function updateAssetImageMapping(
+function updateAssetImageNodeId(
   scriptNodeId: string,
   assetType: AssetType,
   assetName: string,
@@ -260,40 +221,74 @@ function updateAssetImageMapping(
   };
 
   const mappingType = typeMap[assetType];
+  const assetArray = scriptData[mappingType] as any[];
 
-  // 初始化映射对象（如果不存在）
-  const currentMapping = scriptData.assetImageMapping || {
-    characters: {},
-    scenes: {},
-    props: {},
-  };
+  if (!assetArray) {
+    console.warn('[AssetImageSync] 资产数组不存在:', mappingType);
+    return;
+  }
 
-  // 更新映射
-  const updatedMapping = {
-    ...currentMapping,
-    [mappingType]: {
-      ...currentMapping[mappingType],
-      [assetName]: imageNodeId,
-    },
-  };
+  // 找到对应资产并更新 nodeId
+  const updatedAssets = assetArray.map(asset => {
+    if (asset.name === assetName) {
+      return { ...asset, nodeId: imageNodeId };
+    }
+    return asset;
+  });
 
   // 更新脚本节点数据
   store.updateNodeData(scriptNodeId, {
-    assetImageMapping: updatedMapping,
+    [mappingType]: updatedAssets,
   } as any);
 
-  console.log('[AssetImageSync] 更新映射成功:', {
+  console.log('[AssetImageSync] 更新资产 nodeId 成功:', {
     scriptNodeId,
-    mappingType,
+    assetType,
     assetName,
-    imageNodeId,
+    nodeId: imageNodeId,
   });
 }
 
 /**
- * 清理脚本节点的 assetImageMapping（内部函数）
+ * 删除资产图片节点并清除关联
+ * - 删除图片节点
+ * - 删除连接边
+ * - ✅ 清除资产的 imageNodeId 字段
  */
-function clearAssetImageMapping(
+export function removeAssetImageNode(
+  scriptNodeId: string,
+  assetType: AssetType,
+  assetName: string
+): boolean {
+  const imageNodeId = getAssetImageNodeId(scriptNodeId, assetType, assetName);
+
+  if (!imageNodeId) {
+    console.warn('[AssetImageSync] 未找到图片节点关联，无需删除');
+    return false;
+  }
+
+  const store = useCanvasStore.getState();
+
+  // 删除节点（自动删除连接边）
+  store.removeNodes([imageNodeId]);
+
+  // ✅ 新逻辑：清除资产的 imageNodeId
+  clearAssetImageNodeId(scriptNodeId, assetType, assetName);
+
+  console.log('[AssetImageSync] 删除图片节点成功:', {
+    imageNodeId,
+    scriptNodeId,
+    assetType,
+    assetName,
+  });
+
+  return true;
+}
+
+/**
+ * ✅ 新函数：清除资产的 nodeId 字段
+ */
+function clearAssetImageNodeId(
   scriptNodeId: string,
   assetType: AssetType,
   assetName: string
@@ -313,31 +308,31 @@ function clearAssetImageMapping(
   };
 
   const mappingType = typeMap[assetType];
+  const assetArray = scriptData[mappingType] as any[];
 
-  // 初始化映射对象（如果不存在）
-  const currentMapping = scriptData.assetImageMapping || {
-    characters: {},
-    scenes: {},
-    props: {},
-  };
+  if (!assetArray) {
+    return;
+  }
 
-  // 删除映射
-  const updatedTypeMapping = { ...currentMapping[mappingType] };
-  delete updatedTypeMapping[assetName];
-
-  const updatedMapping = {
-    ...currentMapping,
-    [mappingType]: updatedTypeMapping,
-  };
+  // 找到对应资产并清除 nodeId
+  const updatedAssets = assetArray.map(asset => {
+    if (asset.name === assetName) {
+      return { ...asset, nodeId: undefined };
+    }
+    return asset;
+  });
 
   // 更新脚本节点数据
   store.updateNodeData(scriptNodeId, {
-    assetImageMapping: updatedMapping,
+    [mappingType]: updatedAssets,
   } as any);
 
-  console.log('[AssetImageSync] 清理映射成功:', {
+  console.log('[AssetImageSync] 清除资产 nodeId 成功:', {
     scriptNodeId,
-    mappingType,
+    assetType,
     assetName,
   });
 }
+
+// ✅ 旧的 updateAssetImageMapping 和 clearAssetImageMapping 函数已删除
+// 现在直接使用资产的 nodeId 字段，不需要额外的 mapping 表
