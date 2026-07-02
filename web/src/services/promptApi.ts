@@ -3,13 +3,13 @@ import api from './api';
 // 提示词生成 API
 
 interface ShotDataForGeneration {
-  visualPrompt: string;    // 画面描述
-  shotSize: string;        // 镜别
-  cameraAngle: string;     // 拍摄角度
-  dialogue: string;        // 对白
-  soundEffect: string;     // 音效
-  cameraMovement: string;  // 运镜方式
-  toneHint: string;        // 基调提示
+  visual: string;        // 画面描述
+  shotSize: string;            // 镜别
+  cameraMovement: string;      // 运镜方式（含角度，如"俯视缓慢推镜头"、"仰视快速摇镜头"）
+  dialogue: string;            // 对白
+  soundEffect: string;         // 音效
+  lightingAtmosphere: string;  // 光影氛围（如"柔和自然光"、"强烈对比光"、"温暖夕阳光"）
+  toneHint: string;            // 基调提示
 }
 
 interface AssetReference {

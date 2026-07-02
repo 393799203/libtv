@@ -26,6 +26,7 @@ import {
 
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
+import { useShallow } from 'zustand/react/shallow';
 import { NODE_TYPE_CONFIG } from '@/types/canvas';
 import type { LibTVNode, LibTVEdge, NodeType } from '@/types/canvas';
 import { PromptCompose } from '@/components/panels/prompt';
@@ -70,18 +71,26 @@ export const Canvas = memo(function Canvas() {
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
-  const onNodesChange = useCanvasStore((s) => s.onNodesChange);
-  const onEdgesChange = useCanvasStore((s) => s.onEdgesChange);
-  const onConnect = useCanvasStore((s) => s.onConnect);
+  // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge } = useCanvasStore(
+    useShallow((s) => ({
+      nodes: s.nodes,
+      edges: s.edges,
+      onNodesChange: s.onNodesChange,
+      onEdgesChange: s.onEdgesChange,
+      onConnect: s.onConnect,
+      selectedNodeIds: s.selectedNodeIds,
+      updateNodeData: s.updateNodeData,
+      addNode: s.addNode,
+      addEdge: s.addEdge,
+    }))
+  );
+
   const canUndo = useCanvasStore((s) => s.canUndo);
   const canRedo = useCanvasStore((s) => s.canRedo);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
   const isExecuting = useExecutionStore((s) => s.isExecuting);
-  const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
 
   // 当选中节点变化时，重置之前节点的编辑状态（避免 isEditing 卡住导致提示词框不显示）
   const prevSelectedIdsRef = useRef<string[]>([]);
@@ -95,8 +104,6 @@ export const Canvas = memo(function Canvas() {
     }
     prevSelectedIdsRef.current = selectedNodeIds;
   }, [selectedNodeIds, nodes, updateNodeData]);
-  const addNode = useCanvasStore((s) => s.addNode);
-  const addEdge = useCanvasStore((s) => s.addEdge);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
   const isLoading = useCanvasStore((s) => s.isLoading);
   const saveViewport = useCanvasStore((s) => s.saveViewport);
@@ -327,7 +334,10 @@ export const Canvas = memo(function Canvas() {
         nodesDraggable={!isExecuting}
         nodesConnectable={!isExecuting}
         elementsSelectable
-        onlyRenderVisibleElements={true}
+        // ✅ 性能优化属性
+        onlyRenderVisibleElements={true}  // 只渲染可见区域的节点（已启用）
+        autoPanOnNodeDrag={false}  // 拖动节点时不自动平移画布（减少计算）
+        preventScrolling={true}  // 防止意外的滚动行为
         selectNodesOnDrag={true}
         selectionOnDrag={true}
         panOnDrag={[1, 2]}

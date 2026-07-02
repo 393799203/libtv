@@ -126,17 +126,17 @@ export interface ScriptShot {
   /** 时长（秒） */
   duration: number;
   /** 画面提示词（AI生成，含高亮标记） */
-  visualPrompt: string;
+  visual: string;
   /** 镜别：中景/特写/全景/近景等 */
   shotSize: string;
-  /** 拍摄角度 */
-  cameraAngle: string;
+  /** 运镜方式（融合角度：如"俯视推镜头"、"仰视摇镜头"等） */
+  cameraMovement: string;
   /** 对白/旁白 */
   dialogue: string;
   /** 音效描述 */
   soundEffect: string;
-  /** 运镜方式 */
-  cameraMovement: string;
+  /** 光影氛围（如"柔和自然光"、"强烈对比光"、"温暖夕阳光"等） */
+  lightingAtmosphere: string;
   /** 基调/风格提示方式 */
   toneHint: string;
   /** 生成的参考图 URL */

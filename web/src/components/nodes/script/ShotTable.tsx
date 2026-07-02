@@ -253,14 +253,14 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
     },
     {
       title: '画面描述',
-      dataIndex: 'visualPrompt',
+      dataIndex: 'visual',
       width: 250,
       render: (text: string, record) =>
         !readOnly ? (
           <Input.TextArea
             size="small"
             value={text}
-            onChange={(e) => handleCellChange(record.id, 'visualPrompt', e.target.value)}
+            onChange={(e) => handleCellChange(record.id, 'visual', e.target.value)}
             variant="borderless"
             className="w-full"
             style={{ fontSize: 12 }}
@@ -285,16 +285,24 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       ),
     },
     {
-      title: '角度',
-      dataIndex: 'cameraAngle',
-      width: 80,
-      render: (v: string, record) => (
-        <EditableCell
-          value={v}
-          onChange={(val) => handleCellChange(record.id, 'cameraAngle', val)}
-          editable={!readOnly}
-        />
-      ),
+      title: '运镜（含角度）',
+      dataIndex: 'cameraMovement',
+      width: 140,
+      render: (v: string, record) =>
+        !readOnly ? (
+          <Input.TextArea
+            size="small"
+            value={v}
+            onChange={(e) => handleCellChange(record.id, 'cameraMovement', e.target.value)}
+            variant="borderless"
+            className="w-full"
+            style={{ fontSize: 12 }}
+            placeholder="如：俯视缓慢推镜头、仰视快速摇镜头"
+            autoSize={{ minRows: 1, maxRows: 3 }}
+          />
+        ) : (
+          <span className="text-[12px] whitespace-pre-wrap">{v || '-'}</span>
+        ),
     },
     {
       title: '对白/旁白',
@@ -335,18 +343,19 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
         ),
     },
     {
-      title: '运镜',
-      dataIndex: 'cameraMovement',
-      width: 100,
+      title: '光影氛围',
+      dataIndex: 'lightingAtmosphere',
+      width: 140,
       render: (v: string, record) =>
         !readOnly ? (
           <Input.TextArea
             size="small"
             value={v}
-            onChange={(e) => handleCellChange(record.id, 'cameraMovement', e.target.value)}
+            onChange={(e) => handleCellChange(record.id, 'lightingAtmosphere', e.target.value)}
             variant="borderless"
             className="w-full"
             style={{ fontSize: 12 }}
+            placeholder="如：柔和自然光、强烈对比光、温暖夕阳光"
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         ) : (

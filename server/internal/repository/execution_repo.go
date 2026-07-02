@@ -13,6 +13,8 @@ type ExecutionRepo interface {
 	Create(ctx context.Context, exec *model.WorkflowExecution) error
 	FindByID(ctx context.Context, id int64) (*model.WorkflowExecution, error)
 	UpdateStatus(ctx context.Context, id int64, status string, errMsg string) error
+	DeleteByProjectID(ctx context.Context, projectID string) error
+	ListByProjectID(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error)
 }
 
 type executionRepo struct {
@@ -43,12 +45,25 @@ func (r *executionRepo) UpdateStatus(ctx context.Context, id int64, status strin
 	return r.db.WithContext(ctx).Model(&model.WorkflowExecution{}).Where("id = ?", id).Updates(updates).Error
 }
 
+func (r *executionRepo) DeleteByProjectID(ctx context.Context, projectID string) error {
+	return r.db.WithContext(ctx).Where("project_id = ?", projectID).Delete(&model.WorkflowExecution{}).Error
+}
+
+func (r *executionRepo) ListByProjectID(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error) {
+	var executions []*model.WorkflowExecution
+	if err := r.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&executions).Error; err != nil {
+		return nil, err
+	}
+	return executions, nil
+}
+
 // AITaskRepo AI 任务数据访问
 type AITaskRepo interface {
 	Create(ctx context.Context, task *model.AITask) error
 	FindByID(ctx context.Context, id int64) (*model.AITask, error)
 	UpdateOutput(ctx context.Context, id int64, status string, output []byte, errMsg string) error
 	ListByExecutionID(ctx context.Context, executionID int64) ([]*model.AITask, error)
+	DeleteByExecutionIDs(ctx context.Context, executionIDs []int64) error
 }
 
 type aiTaskRepo struct {
@@ -88,4 +103,11 @@ func (r *aiTaskRepo) ListByExecutionID(ctx context.Context, executionID int64) (
 		return nil, err
 	}
 	return tasks, nil
+}
+
+func (r *aiTaskRepo) DeleteByExecutionIDs(ctx context.Context, executionIDs []int64) error {
+	if len(executionIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Where("execution_id IN ?", executionIDs).Delete(&model.AITask{}).Error
 }

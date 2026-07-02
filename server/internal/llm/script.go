@@ -11,16 +11,16 @@ import (
 
 // ScriptShot LLM 返回的分镜结构
 type ScriptShot struct {
-	ID             string `json:"id"`
-	ShotNumber     int    `json:"shotNumber"`
-	Duration       int    `json:"duration"`
-	VisualPrompt   string `json:"visualPrompt"`
-	ShotSize       string `json:"shotSize"`
-	CameraAngle    string `json:"cameraAngle"`
-	Dialogue       string `json:"dialogue"`
-	SoundEffect    string `json:"soundEffect"`
-	CameraMovement string `json:"cameraMovement"`
-	ToneHint       string `json:"toneHint"`
+	ID                 string `json:"id"`
+	ShotNumber         int    `json:"shotNumber"`
+	Duration           int    `json:"duration"`
+	Visual       string `json:"visual"`
+	ShotSize           string `json:"shotSize"`
+	CameraMovement     string `json:"cameraMovement"`     // 运镜方式（含角度）
+	Dialogue           string `json:"dialogue"`
+	SoundEffect        string `json:"soundEffect"`
+	LightingAtmosphere string `json:"lightingAtmosphere"` // 光影氛围
+	ToneHint           string `json:"toneHint"`
 }
 
 // Character 角色信息

@@ -20,13 +20,13 @@ type AssetReference struct {
 
 // ShotDataForGeneration 用于生成提示词的完整镜头数据
 type ShotDataForGeneration struct {
-	VisualPrompt    string `json:"visualPrompt"`    // 画面描述
-	ShotSize        string `json:"shotSize"`        // 镜别
-	CameraAngle     string `json:"cameraAngle"`     // 拍摄角度
-	Dialogue        string `json:"dialogue"`        // 对白
-	SoundEffect     string `json:"soundEffect"`     // 音效
-	CameraMovement  string `json:"cameraMovement"`  // 运镜方式
-	ToneHint        string `json:"toneHint"`        // 基调提示
+	Visual        string `json:"visual"`        // 画面描述
+	ShotSize            string `json:"shotSize"`            // 镜别
+	CameraMovement      string `json:"cameraMovement"`      // 运镜方式（含角度，如"俯视缓慢推镜头"、"仰视快速摇镜头"）
+	Dialogue            string `json:"dialogue"`            // 对白
+	SoundEffect         string `json:"soundEffect"`         // 音效
+	LightingAtmosphere  string `json:"lightingAtmosphere"`  // 光影氛围（如"柔和自然光"、"强烈对比光"、"温暖夕阳光"）
+	ToneHint            string `json:"toneHint"`            // 基调提示
 }
 
 // ---- 提示词生成相关常量 ----
@@ -40,10 +40,12 @@ const PromptGenerationSystemPrompt = `你是一个专业的影视镜头描述专
    - 使用括号形式引用准备好的资产（角色、场景、道具）
    - 引用格式：资产名称（@类型-资产名称）
    - 例如：南方（@角色-南方）、水下洞穴主通道（@场景-水下洞穴主通道）、古代剑（@道具-古代剑）
+   - 结合光影氛围，描述画面的光影效果、亮度分布、阴影形态等
    - 画面提示词应该清晰、具体，便于后续生成视频
 
 2. **运动提示词**：
-   - 基于运镜方式和基调提示，补充更详细的运动描述
+   - 基于运镜方式（包含拍摄角度），补充更详细的运动描述
+   - 运镜方式中已包含拍摄角度信息（如"俯视缓慢推镜头"、"仰视快速摇镜头"），请结合角度和运动方式一起描述
    - 描述镜头的运动轨迹、速度、节奏等细节
    - 结合画面内容，确保运动风格与画面氛围协调
    - 运动提示词应该清晰、具体，便于后续生成视频
@@ -64,24 +66,24 @@ func BuildPromptGenerationUserMessage(
 	return fmt.Sprintf(`镜头信息：
 - 画面描述：%s
 - 镜别：%s
-- 拍摄角度：%s
+- 运镜方式（含角度）：%s
 - 对白：%s
 - 音效：%s
-- 运镜方式：%s
+- 光影氛围：%s
 - 基调提示：%s
 
-- 可用资产：
+可用资产：
 角色：%s
 场景：%s
 道具：%s
 
 请同时生成画面提示词和运动提示词，画面提示词中使用括号形式引用相关资产。格式示例：南方（@角色-南方）、水下洞穴主通道（@场景-水下洞穴主通道）。`,
-		shotData.VisualPrompt,
+		shotData.Visual,
 		shotData.ShotSize,
-		shotData.CameraAngle,
+		shotData.CameraMovement,
 		shotData.Dialogue,
 		shotData.SoundEffect,
-		shotData.CameraMovement,
+		shotData.LightingAtmosphere,
 		shotData.ToneHint,
 		formatAssetList(characters, "角色"),
 		formatAssetList(scenes, "场景"),
@@ -185,12 +187,12 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
   - id: 唯一标识，如 "shot-1"
   - shotNumber: 镜头序号（从1开始递增）
   - duration: 时长（秒），建议2-8秒
-  - visualPrompt: 画面内容的详细描述，用于AI图像生成
+  - visual: 画面内容的详细描述，要讲清细节，场景
   - shotSize: 镜别（特写/近景/中景/全景/远景/大远景）
-  - cameraAngle: 拍摄角度（俯视/仰视/平视/鸟瞰/倾斜）
+  - cameraMovement: 运镜方式（含拍摄角度，如："俯视缓慢推镜头"、"仰视快速摇镜头"、"平视固定镜头"、"鸟瞰环绕镜头"）
   - dialogue: 角色对白或旁白
   - soundEffect: 音效描述
-  - cameraMovement: 运镜方式（固定/推/拉/摇/移/跟/升降/环绕）
+  - lightingAtmosphere: 光影氛围（如："柔和自然光"、"强烈对比光"、"温暖夕阳光"、"冷色调月光"、"霓虹灯效果"）
   - toneHint: 基调风格提示词
 
 ## 字段说明
@@ -215,9 +217,11 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
   【风格调性】时代风格、设计风格、品质感、文化属性
   这些详细描述是后续AI生图的关键输入，确保道具在不同镜头中保持视觉一致性
 - **shots**: 分镜列表，每个分镜包含：
+  - **cameraMovement**: 运镜方式字段需融合拍摄角度和运动方式，格式为"角度+运动方式"，如"俯视缓慢推镜头"、"仰视快速摇镜头"
+  - **lightingAtmosphere**: 光影氛围，描述画面的光线特性，如光源类型、光线强度、阴影形态、色调倾向等
   - shotNumber: 镜头序号（从1开始递增）
   - duration: 时长（秒），建议2-8秒
-  - visualPrompt: **最重要的字段**，详细描述画面内容、构图、光影、色调，用于后续AI生图
+  - visual: **最重要的字段**，详细描述画面内容、构图、光影、色调
   - shotSize: 镜别（特写/近景/中景/全景/远景/大远景）
   - cameraAngle: 拍摄角度（俯视/仰视/平视/鸟瞰/倾斜）
   - dialogue: 该镜头的对白或旁白（可为空字符串）
@@ -228,7 +232,7 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
 ## 创作原则
 
 1. 根据文本内容自动拆分为合理的镜头数量（一般5-15个镜头）
-2. 每个镜头的 visualPrompt 要足够详细，包含：主体、环境、光线、色彩、构图、氛围
+2. 每个镜头的 visual 要足够详细，包含：主体、环境、光线、色彩、构图、氛围
 3. 角色描述必须按照提示词格式详细描述，包含：基本外貌（年龄、性别、身高、体型）、面部特征（发型、发色、眼睛、肤色、五官）、服装细节（上装、下装、鞋子、配饰）、性格气质（表情、姿态、风格）
 4. 场景描述必须按照提示词格式详细描述，包含：空间布局、环境氛围、主要元素、风格特征
 5. 道具描述必须按照提示词格式详细描述，包含：基本外观、细节特征、功能提示、风格调性
@@ -240,9 +244,9 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
 
 - 只输出 JSON，不要输出任何其他文字
 - 确保 JSON 格式合法，可以被 JSON 解析器正确解析
-- visualPrompt 使用中文描述，因为后续图像生成模型对中文理解更好
+- visual 使用中文描述，因为后续图像生成模型对中文理解更好
 - 如果原文信息不足，可以合理发挥创作，保持故事连贯性
-- characters/scenes/props 的 name 不要有括号，imageUrl 统一设为空字符串 ""`
+- characters/scenes/props 中的 name 不要有括号，imageUrl 统一设为空字符串 ""`
 
 // BuildScriptUserPrompt 构建剧本生成的用户 Prompt
 func BuildScriptUserPrompt(textContent string) string {

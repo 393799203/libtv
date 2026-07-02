@@ -120,12 +120,12 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
         id: `shot-${Date.now()}`,
         shotNumber: currentData.shots.length + 1,
         duration: 5,
-        visualPrompt: '',
+        visual: '',
         shotSize: '中景',
-        cameraAngle: '',
+        cameraMovement: '',
+        lightingAtmosphere: '',
         dialogue: '',
         soundEffect: '',
-        cameraMovement: '',
         toneHint: '',
       };
       onUpdateRef.current({ shots: [...currentData.shots, newShot] });

@@ -8,12 +8,24 @@ import (
 )
 
 type ProjectService struct {
-	projectRepo repository.ProjectRepo
-	canvasRepo  repository.CanvasRepo
+	projectRepo   repository.ProjectRepo
+	canvasRepo    repository.CanvasRepo
+	executionRepo repository.ExecutionRepo
+	aiTaskRepo    repository.AITaskRepo
 }
 
-func NewProjectService(projectRepo repository.ProjectRepo, canvasRepo repository.CanvasRepo) *ProjectService {
-	return &ProjectService{projectRepo: projectRepo, canvasRepo: canvasRepo}
+func NewProjectService(
+	projectRepo repository.ProjectRepo,
+	canvasRepo repository.CanvasRepo,
+	executionRepo repository.ExecutionRepo,
+	aiTaskRepo repository.AITaskRepo,
+) *ProjectService {
+	return &ProjectService{
+		projectRepo:   projectRepo,
+		canvasRepo:    canvasRepo,
+		executionRepo: executionRepo,
+		aiTaskRepo:    aiTaskRepo,
+	}
 }
 
 func (s *ProjectService) Create(ctx context.Context, userID string, name, description string) (*model.Project, error) {
@@ -66,9 +78,33 @@ func (s *ProjectService) Update(ctx context.Context, id string, name, descriptio
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
-	// 先删除关联的画布
+	// 1. 查询项目的所有 WorkflowExecution 记录
+	executions, err := s.executionRepo.ListByProjectID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// 2. 删除这些 WorkflowExecution 对应的所有 AITask 记录
+	if len(executions) > 0 {
+		executionIDs := make([]int64, len(executions))
+		for i, exec := range executions {
+			executionIDs[i] = exec.ID
+		}
+		if err := s.aiTaskRepo.DeleteByExecutionIDs(ctx, executionIDs); err != nil {
+			return err
+		}
+	}
+
+	// 3. 删除 WorkflowExecution 记录
+	if err := s.executionRepo.DeleteByProjectID(ctx, id); err != nil {
+		return err
+	}
+
+	// 4. 删除关联的画布
 	if err := s.canvasRepo.DeleteByProjectID(ctx, id); err != nil {
 		return err
 	}
+
+	// 5. 删除项目
 	return s.projectRepo.Delete(ctx, id)
 }

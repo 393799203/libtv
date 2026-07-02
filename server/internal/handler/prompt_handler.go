@@ -46,13 +46,13 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 
 	// 转换请求参数到 llm 包的类型
 	shotData := llm.ShotDataForGeneration{
-		VisualPrompt:    req.ShotData.VisualPrompt,
-		ShotSize:        req.ShotData.ShotSize,
-		CameraAngle:     req.ShotData.CameraAngle,
-		Dialogue:        req.ShotData.Dialogue,
-		SoundEffect:     req.ShotData.SoundEffect,
-		CameraMovement:  req.ShotData.CameraMovement,
-		ToneHint:        req.ShotData.ToneHint,
+		Visual:             req.ShotData.Visual,
+		ShotSize:           req.ShotData.ShotSize,
+		CameraMovement:     req.ShotData.CameraMovement,
+		Dialogue:           req.ShotData.Dialogue,
+		SoundEffect:        req.ShotData.SoundEffect,
+		LightingAtmosphere: req.ShotData.LightingAtmosphere,
+		ToneHint:           req.ShotData.ToneHint,
 	}
 
 	characters := make([]llm.AssetReference, len(req.Characters))

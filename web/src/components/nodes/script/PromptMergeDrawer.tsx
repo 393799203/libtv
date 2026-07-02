@@ -160,12 +160,12 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
           model: selectedModel,
           shotId: shot.id,
           shotData: {
-            visualPrompt: shot.visualPrompt,
+            visual: shot.visual,
             shotSize: shot.shotSize,
-            cameraAngle: shot.cameraAngle,
+            cameraMovement: shot.cameraMovement, // 运镜方式（含角度）
             dialogue: shot.dialogue,
             soundEffect: shot.soundEffect,
-            cameraMovement: shot.cameraMovement,
+            lightingAtmosphere: shot.lightingAtmosphere, // 光影氛围
             toneHint: shot.toneHint,
           },
           characters: assetReferences.characters,
@@ -227,28 +227,79 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       setStoryboardPrompt(e.target.value);
     }, []);
 
-    // 复制最终提示词
-    const handleCopyFinalPrompt = useCallback(() => {
+    // 复制最终提示词（增强错误处理）
+    const handleCopyFinalPrompt = useCallback(async () => {
       if (!finalPrompt.trim()) {
         message.warning('最终提示词为空，无法复制');
         return;
       }
 
-      navigator.clipboard.writeText(finalPrompt).then(() => {
-        message.success('已复制到剪贴板');
-      }).catch(() => {
-        // fallback: 使用 document.execCommand
+      // Step 1: 安全上下文校验
+      const isSecureContext = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+      // Step 2: 尝试 Clipboard API（现代浏览器）
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(finalPrompt);
+          message.success('已复制到剪贴板');
+          console.log('[复制成功] Clipboard API');
+          return; // 成功则直接返回
+        } catch (err) {
+          console.error('[Clipboard API 失败]', {
+            error: err,
+            name: err instanceof Error ? err.name : 'Unknown',
+            message: err instanceof Error ? err.message : 'Unknown error',
+            isSecureContext,
+            hasFocus: document.hasFocus(),
+            clipboardAvailable: !!navigator.clipboard,
+          });
+
+          // SecurityError 或其他错误，继续尝试 fallback
+          if (err instanceof Error && err.name === 'SecurityError') {
+            console.warn('[安全限制] Clipboard API 被阻止，尝试备用方案');
+          }
+        }
+      } else {
+        console.warn('[Clipboard API 不可用]', {
+          clipboardExists: !!navigator.clipboard,
+          writeTextExists: !!navigator.clipboard?.writeText,
+          isSecureContext,
+        });
+      }
+
+      // Step 3: execCommand 降级方案（兼容性兜底）
+      try {
         const textarea = document.createElement('textarea');
         textarea.value = finalPrompt;
         textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
         textarea.style.opacity = '0';
+        textarea.setAttribute('readonly', ''); // 防止iOS键盘弹出
         document.body.appendChild(textarea);
+
+        // iOS兼容性：需要先focus再select
+        textarea.focus();
         textarea.select();
-        document.execCommand('copy');
+
+        // 设置selection范围（兼容所有浏览器）
+        textarea.setSelectionRange(0, finalPrompt.length);
+
+        const success = document.execCommand('copy');
         document.body.removeChild(textarea);
-        message.success('已复制到剪贴板');
-      });
-    }, [finalPrompt]);
+
+        if (success) {
+          message.success('已复制到剪贴板');
+          console.log('[复制成功] execCommand fallback');
+        } else {
+          message.error('复制失败，请手动复制');
+          console.error('[execCommand 失败] 返回 false');
+        }
+      } catch (fallbackErr) {
+        console.error('[Fallback 失败]', fallbackErr);
+        message.error('复制失败，请手动复制');
+      }
+    }, [finalPrompt, message]);
 
     const handleMotionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setMotionPrompt(e.target.value);

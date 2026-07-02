@@ -82,7 +82,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 
 	// 初始化 Service
 	userService := service.NewUserService(userRepo)
-	projectService := service.NewProjectService(projectRepo, canvasRepo)
+	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
