@@ -16,7 +16,6 @@ import {
   HeartOutlined,
 } from '@ant-design/icons';
 import { projectApi } from '@/services/projectApi';
-import { deleteCanvasDir } from '@/services/uploadApi';
 import { showApi } from '@/services/showApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
@@ -506,8 +505,6 @@ export default function VideoListPage() {
       onOk: async () => {
         try {
           await projectApi.deleteProject(project.id);
-          // 同步删除该项目的 canvas 文件夹（静默失败，不影响主流程）
-          deleteCanvasDir(project.id).catch(() => {});
           setProjects((prev) => prev.filter((p) => p.id !== project.id));
           message.success('项目已删除');
         } catch {

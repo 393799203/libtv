@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -52,6 +53,67 @@ type FileUploadService struct {
 // NewFileUploadService 创建上传服务
 func NewFileUploadService(s storage.Storage) *FileUploadService {
 	return &FileUploadService{storage: s}
+}
+
+// UploadFromReader 从 Reader 上传（用于AI生成的图片等场景）
+// 复用哈希去重、存储路径构建、URL生成等逻辑
+func (s *FileUploadService) UploadFromReader(reader io.Reader, size int64, filename string, opts UploadOptions) (*UploadResult, error) {
+	// 1. 校验扩展名
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == "" {
+		ext = opts.DefaultExt
+	}
+	if ext == "" && len(opts.AllowedExts) > 0 {
+		return nil, fmt.Errorf("文件缺少扩展名")
+	}
+	if len(opts.AllowedExts) > 0 && !opts.AllowedExts[ext] {
+		return nil, fmt.Errorf("不支持的文件格式")
+	}
+
+	// 2. 校验大小
+	if opts.MaxSize > 0 && size > opts.MaxSize {
+		return nil, fmt.Errorf("文件大小超过限制")
+	}
+
+	// 3. 计算内容哈希用于去重
+	hasher := sha256.New()
+	// 使用 TeeReader 同时计算哈希和保存数据
+	dataBuffer := &bytes.Buffer{}
+	teeReader := io.TeeReader(reader, hasher)
+
+	if _, err := io.Copy(dataBuffer, teeReader); err != nil {
+		return nil, fmt.Errorf("读取数据失败: %w", err)
+	}
+	fileHash := hex.EncodeToString(hasher.Sum(nil))
+
+	finalFilename := fileHash[:12] + ext
+	objectName := s.buildObjectName(opts, finalFilename)
+
+	// 4. 去重检查
+	if _, err := s.storage.StatObject(objectName); err == nil {
+		return &UploadResult{
+			URL:         s.urlFor(objectName, opts),
+			ObjectName:  objectName,
+			StorageType: s.storage.GetType(),
+			Cached:      true,
+		}, nil
+	}
+
+	contentType := "application/octet-stream"
+	if opts.ContentTypeFor != nil {
+		contentType = opts.ContentTypeFor(ext)
+	}
+
+	// 5. 上传到存储
+	if err := s.storage.PutObject(objectName, dataBuffer, size, contentType); err != nil {
+		return nil, fmt.Errorf("上传失败: %w", err)
+	}
+
+	return &UploadResult{
+		URL:         s.urlFor(objectName, opts),
+		ObjectName:  objectName,
+		StorageType: s.storage.GetType(),
+	}, nil
 }
 
 // Upload 执行标准上传流程：校验扩展名/大小 → 计算哈希 → StatObject 去重 → PutObject → 返回 URL

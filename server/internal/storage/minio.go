@@ -221,6 +221,64 @@ func (m *MinIOStorage) DeleteObject(objectName string) error {
 	return nil
 }
 
+// ListObjects 列出指定前缀的所有文件
+func (m *MinIOStorage) ListObjects(prefix string) ([]string, error) {
+	if !m.IsAvailable() {
+		return nil, fmt.Errorf("MinIO不可用")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var objects []string
+
+	// 使用 ListObjects 列出所有匹配前缀的对象
+	for objectInfo := range m.client.ListObjects(ctx, m.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if objectInfo.Err != nil {
+			return nil, fmt.Errorf("列出对象失败: %w", objectInfo.Err)
+		}
+		objects = append(objects, objectInfo.Key)
+	}
+
+	return objects, nil
+}
+
+// DeleteObjectsByPrefix 删除指定前缀的所有文件（用于删除目录）
+func (m *MinIOStorage) DeleteObjectsByPrefix(prefix string) error {
+	if !m.IsAvailable() {
+		return fmt.Errorf("MinIO不可用")
+	}
+
+	// 1. 列出所有匹配前缀的文件
+	objects, err := m.ListObjects(prefix)
+	if err != nil {
+		return fmt.Errorf("列出文件失败: %w", err)
+	}
+
+	if len(objects) == 0 {
+		log.Printf("[MinIOStorage] 没有找到匹配前缀的文件: prefix=%s", prefix)
+		return nil
+	}
+
+	log.Printf("[MinIOStorage] 开始删除文件: prefix=%s count=%d", prefix, len(objects))
+
+	// 2. 批量删除
+	ctx := context.Background()
+	for _, objectName := range objects {
+		if err := m.client.RemoveObject(ctx, m.bucket, objectName, minio.RemoveObjectOptions{}); err != nil {
+			log.Printf("[MinIOStorage] 删除文件失败: objectName=%s err=%v", objectName, err)
+			// 继续删除其他文件，不中断整个流程
+			continue
+		}
+	}
+
+	log.Printf("[MinIOStorage] 删除完成: prefix=%s deleted=%d", prefix, len(objects))
+	return nil
+}
+
 // StatObject 获取文件信息
 func (m *MinIOStorage) StatObject(objectName string) (ObjectInfo, error) {
 	if !m.IsAvailable() {

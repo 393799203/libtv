@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"libtv/internal/llm"
+	"libtv/internal/service"
 )
 
 // NodeOutput 节点执行输出
@@ -32,6 +34,8 @@ type ExecutionContext struct {
 	// nodeDataByID 全图所有节点的原始 data（来自 plan.Schema.Nodes），
 	// 即便是 single / downstream 模式被裁掉的节点，data 也保留在此供执行器参考。
 	nodeDataByID map[string]json.RawMessage
+	// projectID 项目ID，用于确定存储路径
+	projectID string
 }
 
 func NewExecutionContext() *ExecutionContext {
@@ -39,6 +43,7 @@ func NewExecutionContext() *ExecutionContext {
 		outputs:          make(map[string]*NodeOutput),
 		upstreamByTarget: make(map[string][]string),
 		nodeDataByID:     make(map[string]json.RawMessage),
+		projectID:        "",
 	}
 }
 
@@ -85,8 +90,22 @@ func (ec *ExecutionContext) SetNodeDataMap(m map[string]json.RawMessage) {
 func (ec *ExecutionContext) GetNodeData(nodeID string) (json.RawMessage, bool) {
 	ec.mu.RLock()
 	defer ec.mu.RUnlock()
-	d, ok := ec.nodeDataByID[nodeID]
-	return d, ok
+	data, ok := ec.nodeDataByID[nodeID]
+	return data, ok
+}
+
+// SetProjectID 设置项目ID
+func (ec *ExecutionContext) SetProjectID(projectID string) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.projectID = projectID
+}
+
+// GetProjectID 获取项目ID
+func (ec *ExecutionContext) GetProjectID() string {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	return ec.projectID
 }
 
 // NodeExecutor 节点执行器接口
@@ -175,9 +194,12 @@ func (e *WorkflowEngine) LastOutputs() map[string]*NodeOutput {
 }
 
 // Execute 执行工作流
-func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, executionID int64) error {
-	log.Printf("[Engine] Execute start: executionID=%d, plan levels=%d, totalNodes=%d", executionID, len(plan.Levels), len(plan.Schema.Nodes))
+func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, executionID int64, projectID string) error {
+	log.Printf("[Engine] Execute start: executionID=%d, projectID=%s, plan levels=%d, totalNodes=%d", executionID, projectID, len(plan.Levels), len(plan.Schema.Nodes))
 	execCtx := NewExecutionContext()
+
+	// 设置项目ID，供节点执行器使用（如ImageExecutor需要确定存储路径）
+	execCtx.SetProjectID(projectID)
 
 	// 构造上游映射表（target -> [source, ...]），供 ScriptExecutor 等需要读上游的节点使用
 	upstreamByTarget := make(map[string][]string, len(plan.Schema.Connections))
@@ -639,15 +661,17 @@ func getAssetTypeFromNodeID(nodeID string) string {
 
 // ImageExecutor 图像节点执行器(调用硅基流动 Kolors API)
 type ImageExecutor struct {
-	imageClient  *llm.ImageClient
-	modelManager *llm.ModelManager
+	imageClient      *llm.ImageClient
+	modelManager     *llm.ModelManager
+	fileUploadService *service.FileUploadService
 }
 
 // NewImageExecutor 创建图像执行器
-func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager) *ImageExecutor {
+func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ImageExecutor {
 	return &ImageExecutor{
-		imageClient:  client,
-		modelManager: modelManager,
+		imageClient:      client,
+		modelManager:     modelManager,
+		fileUploadService: fileUploadService,
 	}
 }
 
@@ -748,18 +772,69 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s apiModel=%s size=%s", node.ID, len(finalPrompt), data.Model, apiModelID, size)
 
 	// 调用图像生成 API
-	imageURL, err := i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size)
+	siliconflowURL, err := i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size)
 	if err != nil {
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
+
+	// ✅ 下载硅基流动图片并使用 FileUploadService 上传
+	ownURL, err := i.downloadAndUpload(ctx, siliconflowURL, node.ID, execCtx.GetProjectID())
+	if err != nil {
+		log.Printf("[ImageExecutor] 下载上传失败，使用原始URL: %v", err)
+		// 如果失败，仍然返回原始URL，确保功能可用
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "success",
+			Data: map[string]interface{}{
+				"imageUrl": siliconflowURL,
+			},
+		}, nil
+	}
+
+	log.Printf("[ImageExecutor] 图片上传成功: siliconflowURL=%s -> ownURL=%s", siliconflowURL, ownURL)
 
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"imageUrl": imageURL,
+			"imageUrl": ownURL,
 		},
 	}, nil
+}
+
+// downloadAndUpload 下载硅基流动图片并使用 FileUploadService 上传（复用哈希去重等逻辑）
+func (i *ImageExecutor) downloadAndUpload(ctx context.Context, siliconflowURL string, nodeID string, projectID string) (string, error) {
+	// 1. 下载图片
+	log.Printf("[ImageExecutor] 开始下载图片: url=%s projectID=%s nodeID=%s", siliconflowURL, projectID, nodeID)
+
+	httpClient := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+
+	resp, err := httpClient.Get(siliconflowURL)
+	if err != nil {
+		return "", fmt.Errorf("download image from siliconflow: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image failed: status=%d", resp.StatusCode)
+	}
+
+	// 2. 使用 FileUploadService 上传（复用哈希去重、路径构建、URL生成等逻辑）
+	result, err := i.fileUploadService.UploadFromReader(resp.Body, resp.ContentLength, "image.png", service.UploadOptions{
+		Dir:          "canvas",
+		ProjectID:    projectID,
+		DefaultExt:   ".png",
+		ContentTypeFor: service.ContentTypeForImage,
+	})
+	if err != nil {
+		return "", fmt.Errorf("upload image: %w", err)
+	}
+
+	log.Printf("[ImageExecutor] 图片上传成功: objectName=%s url=%s cached=%v", result.ObjectName, result.URL, result.Cached)
+
+	return result.URL, nil
 }
 
 // VideoExecutor 视频节点执行器（MVP: 透传，后续接入可灵/Seedance）
@@ -809,11 +884,11 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 }
 
 // NewDefaultRegistry 创建默认执行器注册表
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, modelManager *llm.ModelManager) *ExecutorRegistry {
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient))
 	registry.Register("script", NewScriptExecutor(llmClient))
-	registry.Register("image", NewImageExecutor(imageClient, modelManager))
+	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService))
 	registry.Register("video", &VideoExecutor{})
 	registry.Register("audio", &AudioExecutor{})
 	return registry

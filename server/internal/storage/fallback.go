@@ -207,6 +207,53 @@ func (f *FallbackStorage) ParseObjectName(url string) (string, bool) {
 	return f.Fallback.ParseObjectName(url)
 }
 
+// ListObjects 列出指定前缀的所有文件（优先MinIO，降级本地）
+func (f *FallbackStorage) ListObjects(prefix string) ([]string, error) {
+	// 优先从MinIO列出
+	if f.Primary.IsAvailable() {
+		objects, err := f.Primary.ListObjects(prefix)
+		if err == nil {
+			return objects, nil
+		}
+		log.Printf("⚠️ MinIO列出文件失败，尝试本地存储: %v", err)
+	}
+
+	// 降级到本地存储
+	return f.Fallback.ListObjects(prefix)
+}
+
+// DeleteObjectsByPrefix 删除指定前缀的所有文件（两个存储都删除）
+func (f *FallbackStorage) DeleteObjectsByPrefix(prefix string) error {
+	var errors []error
+
+	log.Printf("[FallbackStorage] 开始删除目录: prefix=%s", prefix)
+
+	// 删除MinIO中的文件
+	if f.Primary.IsAvailable() {
+		if err := f.Primary.DeleteObjectsByPrefix(prefix); err != nil {
+			errors = append(errors, fmt.Errorf("MinIO删除目录失败: %w", err))
+			log.Printf("[FallbackStorage] MinIO删除失败: prefix=%s err=%v", prefix, err)
+		} else {
+			log.Printf("[FallbackStorage] MinIO删除成功: prefix=%s", prefix)
+		}
+	}
+
+	// 删除本地存储中的文件
+	if err := f.Fallback.DeleteObjectsByPrefix(prefix); err != nil {
+		errors = append(errors, fmt.Errorf("本地删除目录失败: %w", err))
+		log.Printf("[FallbackStorage] 本地删除失败: prefix=%s err=%v", prefix, err)
+	} else {
+		log.Printf("[FallbackStorage] 本地删除成功: prefix=%s", prefix)
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("删除目录失败: %v", errors)
+	}
+
+	log.Printf("[FallbackStorage] 目录删除完成: prefix=%s", prefix)
+	return nil
+}
+
 // addToSyncQueue 添加到同步队列
 func (f *FallbackStorage) addToSyncQueue(objectName string) {
 	f.mu.Lock()

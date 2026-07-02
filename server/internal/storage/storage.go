@@ -31,6 +31,12 @@ type Storage interface {
 	// 若 URL 不属于本存储管辖，返回 ("", false)
 	ParseObjectName(url string) (objectName string, ok bool)
 
+	// ListObjects 列出指定前缀的所有文件（用于批量删除）
+	ListObjects(prefix string) ([]string, error)
+
+	// DeleteObjectsByPrefix 删除指定前缀的所有文件（用于删除目录）
+	DeleteObjectsByPrefix(prefix string) error
+
 	// IsAvailable 检查存储是否可用
 	IsAvailable() bool
 

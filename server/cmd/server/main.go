@@ -82,7 +82,7 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 
 	// 初始化 Service
 	userService := service.NewUserService(userRepo)
-	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo)
+	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
@@ -93,12 +93,12 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 初始化图像生成客户端
 	imageClient := llm.NewImageClient(config.C.AI, "siliconflow")
 
-	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, modelManager)
-	eng := engine.NewWorkflowEngine(registry)
-
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)
+
+	// 初始化工作流引擎
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, modelManager, fileUploadService)
+	eng := engine.NewWorkflowEngine(registry)
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
 	transcodeService := service.NewTranscodeService(appStorage)

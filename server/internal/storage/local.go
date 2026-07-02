@@ -7,7 +7,6 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"libtv/internal/config"
 )
@@ -181,29 +180,61 @@ func (l *LocalStorage) ParseObjectName(url string) (string, bool) {
 
 // ListObjects 列出所有文件（用于同步）
 func (l *LocalStorage) ListObjects(prefix string) ([]string, error) {
+	prefixPath := filepath.Join(l.basePath, prefix)
 	var objects []string
 
-	err := filepath.Walk(l.basePath, func(path string, info os.FileInfo, err error) error {
+	// 如果路径不存在，返回空列表
+	if !os.IsPathSeparator(prefix[len(prefix)-1]) {
+		prefix = prefix + "/"
+	}
+
+	err := filepath.Walk(prefixPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// 如果路径不存在，忽略错误
+			if os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 
+		// 只处理文件，忽略目录
 		if !info.IsDir() {
-			// 获取相对路径
-			relPath := strings.TrimPrefix(path, l.basePath)
-			relPath = strings.TrimPrefix(relPath, "/")
-
-			if strings.HasPrefix(relPath, prefix) {
-				objects = append(objects, relPath)
+			// 获取相对于basePath的路径
+			relPath, err := filepath.Rel(l.basePath, path)
+			if err != nil {
+				return err
 			}
+			objects = append(objects, relPath)
 		}
 
 		return nil
 	})
 
-	if err != nil {
-		return nil, fmt.Errorf("列出文件失败: %w", err)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("遍历目录失败: %w", err)
 	}
 
 	return objects, nil
+}
+
+// DeleteObjectsByPrefix 删除指定前缀的所有文件（用于删除目录）
+func (l *LocalStorage) DeleteObjectsByPrefix(prefix string) error {
+	prefixPath := filepath.Join(l.basePath, prefix)
+
+	log.Printf("[LocalStorage] 开始删除目录: prefix=%s path=%s", prefix, prefixPath)
+
+	// 检查目录是否存在
+	if _, err := os.Stat(prefixPath); os.IsNotExist(err) {
+		log.Printf("[LocalStorage] 目录不存在: path=%s", prefixPath)
+		return nil
+	}
+
+	// 直接删除整个目录及其内容
+	err := os.RemoveAll(prefixPath)
+	if err != nil {
+		return fmt.Errorf("删除目录失败: %w", err)
+	}
+
+	log.Printf("[LocalStorage] 删除目录成功: prefix=%s", prefix)
+	return nil
 }

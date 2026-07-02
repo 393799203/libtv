@@ -148,7 +148,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		err := h.engine.Execute(ctx, plan, exec.ID)
+		err := h.engine.Execute(ctx, plan, exec.ID, projectID)
 		if err != nil {
 			log.Printf("[Handler] engine.Execute returned error: %v", err)
 		} else {

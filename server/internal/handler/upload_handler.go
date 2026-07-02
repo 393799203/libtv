@@ -337,8 +337,11 @@ func (h *UploadHandler) DeleteCanvasDir(c *gin.Context) {
 	}
 
 	// 删除整个canvas目录下的projectID文件夹
-	// 注意：MinIO不支持目录删除，这里简化处理
-	// 实际应用中可能需要遍历删除所有文件
+	prefix := "canvas/" + projectID + "/"
+	if err := h.storage.DeleteObjectsByPrefix(prefix); err != nil {
+		response.Fail(c, http.StatusInternalServerError, fmt.Sprintf("删除目录失败: %v", err))
+		return
+	}
 
-	response.OKWithMsg(c, "已删除（注意：MinIO环境下可能需要手动清理文件）", nil)
+	response.OKWithMsg(c, "目录已删除", nil)
 }
