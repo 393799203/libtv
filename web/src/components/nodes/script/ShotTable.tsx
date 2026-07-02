@@ -68,10 +68,11 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
   component = 'input',
   options,
 }) {
+  // ✅ 第三阶段：统一显示为普通文本，不显示Tag标签
   if (!editable) {
     if (component === 'select' && options) {
       const opt = options.find((o) => o.value === value);
-      return opt ? <Tag color="blue" style={{ fontSize: 12, margin: 0 }}>{opt.label}</Tag> : <span style={{ fontSize: 12 }}>{value || '-'}</span>;
+      return <span style={{ fontSize: 12 }}>{opt ? opt.label : value || '-'}</span>;
     }
     return <span style={{ fontSize: 12 }}>{value || '-'}</span>;
   }

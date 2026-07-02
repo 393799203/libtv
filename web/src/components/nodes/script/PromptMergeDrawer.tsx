@@ -43,6 +43,9 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     const scenesRef = useRef(scriptData.scenes);
     const propsRef = useRef(scriptData.props);
 
+    // ✅ 保存setTimeout timer的引用，用于清理内存泄漏
+    const saveTimerRef = useRef<number | null>(null);
+
     // 只在资产数组真正变化时更新 ref
     if (scriptData.characters !== charactersRef.current) {
       charactersRef.current = scriptData.characters;
@@ -110,6 +113,12 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       if (!open) {
         setGenerating(false);
         setContentReady(false); // ✅ 关闭时重置内容渲染标记
+
+        // ✅ 修复内存泄漏：关闭Drawer时清理未完成的保存timer
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
       }
     }, [open]);
 
@@ -196,8 +205,13 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
         // 用户可以立即看到生成的提示词，保存操作在后台执行
         message.success('提示词生成成功');
 
+        // ✅ 修复内存泄漏：清理之前的timer，避免堆积
+        if (saveTimerRef.current) {
+          clearTimeout(saveTimerRef.current);
+        }
+
         // 延迟 500ms 后保存，让用户先看到结果
-        setTimeout(async () => {
+        saveTimerRef.current = setTimeout(async () => {
           try {
             const currentStore = useCanvasStore.getState();
             const viewport = currentStore._cache.get(projectId)?.savedViewport || { x: 0, y: 0, zoom: 1 };
@@ -211,6 +225,7 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
             console.error('保存画布失败:', saveError);
             message.warning('保存失败，请手动保存画布');
           }
+          saveTimerRef.current = null; // ✅ 执行完后清空引用
         }, 500);
 
         // ✅ 不自动关闭，让用户可以查看和修改生成的提示词
@@ -391,6 +406,7 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
                     characters={charactersRef.current}
                     scenes={scenesRef.current}
                     props={propsRef.current}
+                    delayMs={100}
                   />
                 </div>
               )}
