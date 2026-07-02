@@ -126,6 +126,17 @@ func GenerateScript(ctx context.Context, client *Client, textContent string) (*S
 		}
 	}
 
+	// 清理资产名字中的括号（全角和半角都替换为连字符）
+	for i := range result.Characters {
+		result.Characters[i].Name = cleanAssetName(result.Characters[i].Name)
+	}
+	for i := range result.Scenes {
+		result.Scenes[i].Name = cleanAssetName(result.Scenes[i].Name)
+	}
+	for i := range result.Props {
+		result.Props[i].Name = cleanAssetName(result.Props[i].Name)
+	}
+
 	return &ScriptResult{
 		ScriptContent: result.ScriptContent,
 		Characters:    result.Characters,
@@ -168,4 +179,16 @@ func cleanMarkdownBlock(raw string) string {
 		raw = strings.TrimSuffix(raw, "```")
 	}
 	return strings.TrimSpace(raw)
+}
+
+// cleanAssetName 清理资产名字中的括号，将全角和半角括号替换为连字符
+// 例如："康熙（黄三）" -> "康熙-黄三"
+func cleanAssetName(name string) string {
+	name = strings.ReplaceAll(name, "（", "-")
+	name = strings.ReplaceAll(name, "）", "-")
+	name = strings.ReplaceAll(name, "(", "-")
+	name = strings.ReplaceAll(name, ")", "-")
+	// 清理可能出现的连续连字符（如 "康熙--黄三"）
+	name = strings.ReplaceAll(name, "--", "-")
+	return strings.TrimSpace(name)
 }
