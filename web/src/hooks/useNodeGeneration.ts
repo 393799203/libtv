@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
 import { workflowApi } from '@/services/workflowApi';
@@ -53,7 +53,9 @@ export function useNodeGeneration(
 
   const currentExecution = useExecutionStore((s) => s.currentExecution);
   const nodeExec = currentExecution?.nodes?.find((n) => n.nodeId === nodeId);
+  const generatingNodeId = useExecutionStore((s) => s.generatingNodeId);
   const setGeneratingNodeId = useExecutionStore((s) => s.setGeneratingNodeId);
+  const setCurrentExecution = useExecutionStore((s) => s.setCurrentExecution);
   const lastError = useExecutionStore((s) => s.lastError);
   const activeStreams = useExecutionStore((s) => s.activeStreams);
   const addActiveStream = useExecutionStore((s) => s.addActiveStream);
@@ -67,9 +69,19 @@ export function useNodeGeneration(
     [nodeId, nodes, edges],
   );
 
-  const isGenerating = !!executionId && (nodeExec?.status === 'running' || nodeExec?.status === 'pending');
+  // 简化逻辑：只要当前节点是 generatingNodeId，就显示生成中
+  const isGenerating = generatingNodeId === nodeId || (!!executionId && (nodeExec?.status === 'running' || nodeExec?.status === 'pending'));
   const progress = nodeExec?.progress ?? 0;
   const error = lastError || nodeExec?.error || null;
+
+  // 监听节点状态：完成后清除 generatingNodeId
+  useEffect(() => {
+    if (nodeExec?.status === 'success' || nodeExec?.status === 'failed') {
+      if (generatingNodeId === nodeId) {
+        setGeneratingNodeId(null);
+      }
+    }
+  }, [nodeExec?.status, generatingNodeId, nodeId, setGeneratingNodeId]);
 
   const persistCanvas = useCallback(async () => {
     if (!projectId) return;
@@ -87,63 +99,61 @@ export function useNodeGeneration(
   const generate: UseNodeGenerationResult['generate'] = useCallback(
     async (params) => {
       if (!projectId) return;
+
+      // 防重复点击：如果已经在生成中，直接返回
+      if (generatingNodeId === nodeId) {
+        console.log('[useNodeGeneration] 当前节点正在生成，忽略重复点击');
+        return;
+      }
+
       const mode = params?.mode ?? 'single';
 
-      // 1) 准备标记（只设 stale，不改变当前节点状态为 running/pending）
-      const downstream = getDownstreamOf(nodeId, nodes, edges);
-      if (mode === 'downstream') {
-        // downstream 模式：只跑下游节点，当前节点不动
-        downstream.forEach((id) => {
-          updateNodeData(id, { stale: true } as Partial<LibTVNodeData>);
-        });
-      } else {
-        // single 模式：只跑当前节点
-        downstream.forEach((id) => {
-          updateNodeData(id, { stale: true } as Partial<LibTVNodeData>);
-        });
-        // 注意：这里不设置当前节点为 running！等保存后再设
-      }
+      // 1) 立即设置为生成中（按钮马上显示状态）
+      setGeneratingNodeId(nodeId);
 
-      // 2) 【关键】先持久化（此时状态还是 idle/之前的值，不保存 running）
+      // 2) 标记下游节点为 stale
+      const downstream = getDownstreamOf(nodeId, nodes, edges);
+      downstream.forEach((id) => {
+        updateNodeData(id, { stale: true } as Partial<LibTVNodeData>);
+      });
+
+      // 3) 持久化画布（不保存 running 状态）
       await persistCanvas();
 
-      // 3) 保存完成后，再设置运行状态（显示骨架屏）
-      if (mode === 'downstream') {
-        downstream.forEach((id) => {
-          updateNodeStatus(id, 'pending');
-        });
-      } else {
-        updateNodeData(nodeId, { stale: false, status: 'running', progressMessage: undefined } as Partial<LibTVNodeData>);
+      // 4) 设置节点运行状态
+      if (mode !== 'downstream') {
+        updateNodeData(nodeId, { stale: false, status: 'running' } as Partial<LibTVNodeData>);
         updateNodeStatus(nodeId, 'running');
-        setGeneratingNodeId(nodeId);
       }
 
-      // 4) 调后端
+      // 5) 调后端 API
       try {
         const resp = await workflowApi.execute(projectId, {
           startNodeId: nodeId,
           mode,
         });
         if (resp?.executionId != null) {
-          // 写入全局 store，由 WorkspacePage 顶层订阅 SSE
-          // （与节点选中状态解耦：节点失焦不会卸载 SSE 订阅）
-          // 支持多节点并行：每个 executionId 独立订阅
+          // 设置 currentExecution，让 SSE 能正常更新节点状态
+          setCurrentExecution({
+            id: resp.executionId,
+            status: 'running',
+            nodes: [{ nodeId, status: 'running', progress: 0 }],
+          } as never);
           addActiveStream({ projectId, executionId: resp.executionId, nodeId });
         } else {
-          // 启动失败：先设 failed，再保存（确保不保存 running）
+          // API 返回但没有 executionId，说明失败
           updateNodeStatus(nodeId, 'failed');
           setGeneratingNodeId(null);
           await persistCanvas();
         }
       } catch (e) {
         console.error('[useNodeGeneration] execute failed:', e);
-        // 调用失败：先设 failed，再保存（确保不保存 running）
         updateNodeStatus(nodeId, 'failed');
         setGeneratingNodeId(null);
         await persistCanvas();
       }
     },
-    [projectId, nodeId, nodes, edges, updateNodeData, updateNodeStatus, setGeneratingNodeId, persistCanvas, addActiveStream],
+    [projectId, nodeId, nodes, edges, generatingNodeId, updateNodeData, updateNodeStatus, setGeneratingNodeId, setCurrentExecution, persistCanvas, addActiveStream],
   );
 
   const regenerateDownstream: UseNodeGenerationResult['regenerateDownstream'] =
