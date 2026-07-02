@@ -13,7 +13,7 @@ declare module 'axios' {
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 60000, // 统一60秒超时
   headers: {
     'Content-Type': 'application/json',
   },
