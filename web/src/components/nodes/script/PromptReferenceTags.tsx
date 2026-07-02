@@ -1,5 +1,6 @@
 import { memo, useMemo, useState, useEffect } from 'react';
 import { Tag, Tooltip } from 'antd';
+import { useCanvasStore } from '@/stores/canvasStore';
 import type { ScriptCharacter, ScriptScene, ScriptProp } from '@/types/canvas';
 
 // ✅ 性能优化：只接收必要的资产数据，而不是完整的 ScriptNodeData
@@ -8,6 +9,7 @@ interface PromptReferenceTagsProps {
   characters: ScriptCharacter[]; // 角色列表
   scenes: ScriptScene[]; // 场景列表
   props: ScriptProp[]; // 道具列表
+  scriptNodeId: string; // ✅ 脚本节点 ID，用于从画布获取最新图片
   delayMs?: number; // ✅ 延迟匹配时间（毫秒），默认300ms
 }
 
@@ -19,7 +21,10 @@ interface PromptReferenceTagsProps {
  * - ✅ 性能优化：延迟匹配，避免阻塞 Drawer 打开动画
  */
 export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
-  function PromptReferenceTags({ prompt, characters, scenes, props, delayMs = 500 }) {
+  function PromptReferenceTags({ prompt, characters, scenes, props, scriptNodeId, delayMs = 500 }) {
+    // ✅ 从画布获取最新节点数据（用于获取图片节点的最新 imageUrl）
+    const nodes = useCanvasStore((s) => s.nodes);
+
     // ✅ 延迟匹配状态：初始不匹配，等待 Drawer 打开后再匹配
     const [readyToMatch, setReadyToMatch] = useState(false);
 
@@ -40,27 +45,43 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
       return () => clearTimeout(timer);
     }, [prompt, delayMs]);
 
-    // ✅ 性能优化：先缓存资产映射表，避免每次 prompt 变化都重新遍历所有资产
+    // ✅ 从画布图片节点获取最新图片 URL（通过 assetImageMapping）
     const assetMap = useMemo(() => {
       const map = new Map<string, { type: string; asset: any }>();
 
-      // 添加角色
+      // 找到脚本节点，获取 assetImageMapping
+      const scriptNode = nodes.find(n => n.id === scriptNodeId);
+      const assetImageMapping = scriptNode?.data?.assetImageMapping as any;
+
+      // 添加角色 - 从画布图片节点获取最新 imageUrl
       characters.forEach(c => {
-        map.set(c.name, { type: '角色', asset: c });
+        const imageNodeId = assetImageMapping?.characters?.[c.name];
+        const imageNode = nodes.find(n => n.id === imageNodeId);
+        const imageUrl = imageNode?.data?.imageUrl || c.imageUrl; // 优先使用画布图片，fallback 到资产数据
+
+        map.set(c.name, { type: '角色', asset: { ...c, imageUrl } });
       });
 
-      // 添加场景
+      // 添加场景 - 从画布图片节点获取最新 imageUrl
       scenes.forEach(s => {
-        map.set(s.name, { type: '场景', asset: s });
+        const imageNodeId = assetImageMapping?.scenes?.[s.name];
+        const imageNode = nodes.find(n => n.id === imageNodeId);
+        const imageUrl = imageNode?.data?.imageUrl || s.imageUrl; // 优先使用画布图片，fallback 到资产数据
+
+        map.set(s.name, { type: '场景', asset: { ...s, imageUrl } });
       });
 
-      // 添加道具
+      // 添加道具 - 从画布图片节点获取最新 imageUrl
       props.forEach(p => {
-        map.set(p.name, { type: '道具', asset: p });
+        const imageNodeId = assetImageMapping?.props?.[p.name];
+        const imageNode = nodes.find(n => n.id === imageNodeId);
+        const imageUrl = imageNode?.data?.imageUrl || p.imageUrl; // 优先使用画布图片，fallback 到资产数据
+
+        map.set(p.name, { type: '道具', asset: { ...p, imageUrl } });
       });
 
       return map;
-    }, [characters, scenes, props]); // 只依赖资产数组
+    }, [nodes, scriptNodeId, characters, scenes, props]); // 依赖节点数据
 
     // ✅ 解析提示词，提取括号内的 @ 引用并匹配资产数据
     // 只有在 readyToMatch=true 时才执行匹配，避免阻塞 Drawer 打开动画

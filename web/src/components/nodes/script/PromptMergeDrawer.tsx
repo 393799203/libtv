@@ -406,6 +406,7 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
                     characters={charactersRef.current}
                     scenes={scenesRef.current}
                     props={propsRef.current}
+                    scriptNodeId={scriptNodeId}
                     delayMs={100}
                   />
                 </div>
