@@ -659,7 +659,7 @@ func getAssetTypeFromNodeID(nodeID string) string {
 	return "" // 普通图片节点
 }
 
-// ImageExecutor 图像节点执行器(调用硅基流动 Kolors API)
+// ImageExecutor 图像节点执行器(调用硅基流动图像生成API)
 type ImageExecutor struct {
 	imageClient      *llm.ImageClient
 	modelManager     *llm.ModelManager
@@ -755,8 +755,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	// 确定使用的模型 ID（传递给硅基流动 API）
-	// 前端传递的是 model.ID（如 "kolors-default"），需要转换为 model_id（如 "Kwai-Kolors/Kolors"）
-	apiModelID := "Kwai-Kolors/Kolors" // 默认值
+	// 前端传递的是 model.ID，需要转换为 model_id
+	apiModelID := "Tongyi-MAI/Z-Image-Turbo" // 默认值
 
 	if data.Model != "" && i.modelManager != nil {
 		// 根据 model.ID 查找模型配置
