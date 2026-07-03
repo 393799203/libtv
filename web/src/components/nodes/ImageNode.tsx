@@ -114,6 +114,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     );
   }, [data.imageUrl, data.width, data.height, handleCreateDownstream]);
 
+  // 计算图片容器高度：优先使用 ReactFlow 测量的实际高度，否则按280px宽度等比例缩放
+  const imageContainerHeight = 
+    (data.imageUrl && data.width && data.height
+      ? Math.round(280 * data.height / data.width) // 按节点宽度280px等比例缩放
+      : 190);
+
   return (
     <>
       <BaseNode
@@ -126,7 +132,10 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
       >
         {/* 图片区域 */}
         {data.imageUrl ? (
-          <div className="relative rounded-lg overflow-hidden bg-gray-100">
+          <div
+            className="relative rounded-lg overflow-hidden bg-gray-100"
+            style={{ minHeight: `${imageContainerHeight}px` }}
+          >
             <img
               src={data.imageUrl}
               alt={data.label}
@@ -136,7 +145,10 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
             />
           </div>
         ) : (
-          <div className="w-full h-[180px] rounded-lg bg-gray-50 flex flex-col items-center justify-center">
+          <div
+            className="w-full rounded-lg bg-gray-50 flex flex-col items-center justify-center"
+            style={{ minHeight: `${imageContainerHeight}px` }}
+          >
             <PictureOutlined className="text-4xl text-gray-300" />
           </div>
         )}
