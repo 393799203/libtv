@@ -508,7 +508,7 @@ export default function VideoListPage() {
           setProjects((prev) => prev.filter((p) => p.id !== project.id));
           message.success('项目已删除');
         } catch {
-          message.error('删除失败，请重试');
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
         }
       },
     });
@@ -527,7 +527,7 @@ export default function VideoListPage() {
       });
       navigate(`/project/${project.id}`);
     } catch {
-      message.error('创建项目失败，请检查网络连接');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
     }
   }, [isAuthenticated, openLoginModal, navigate, message]);
 

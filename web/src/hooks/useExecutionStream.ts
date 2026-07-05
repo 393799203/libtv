@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { message } from 'antd';
 import { useExecutionStore } from '@/stores/executionStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -228,6 +229,7 @@ export function useExecutionStream(
             (event.data as { error?: string } | undefined)?.error ||
             (event.data as { message?: string } | undefined)?.message ||
             '节点执行失败';
+          message.error(errMsg);
           useCanvasStore.getState().updateNodeData(event.nodeId, {
             status: 'failed',
             error: errMsg,

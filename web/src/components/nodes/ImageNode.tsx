@@ -5,6 +5,7 @@ import {
   UploadOutlined,
   ExperimentOutlined,
 } from '@ant-design/icons';
+import { message } from 'antd';
 import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { BaseNode } from './BaseNode';
@@ -48,6 +49,10 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         img.src = url;
       } catch (err) {
         console.error('图片上传失败:', err);
+        // HTTP 错误已由 api.ts 拦截器统一 message.error()，此处仅兜底非 HTTP 错误
+        if (!(err instanceof Error) || !err.message) {
+          message.error('图片上传失败');
+        }
       }
 
       if (fileInputRef.current) fileInputRef.current.value = '';

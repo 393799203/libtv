@@ -142,7 +142,7 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
           onUpload(asset.name, url);
           message.success('上传成功');
         } catch {
-          message.error('上传失败');
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
         } finally {
           setUploading(false);
           if (fileInputRef.current) fileInputRef.current.value = '';
@@ -315,9 +315,10 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
         console.error('图像生成失败:', error);
 
         message.destroy('gen');
-        // 节点创建失败时用户可能看不到节点，所以需要全局提示
-        const errorMsg = (error as Error).message || '图像生成失败';
-        message.error(errorMsg, 3); // 3秒后自动消失
+        // HTTP 错误已由 api.ts 拦截器统一 message.error()，此处仅兜底非 HTTP 错误
+        if (!(error instanceof Error) || !error.message) {
+          message.error('图像生成失败', 3);
+        }
         setGenerating(false);
       }
     }, [asset, assetType, selectedModel, scriptNodeId, onUpload, generating, IMAGE_MODEL_OPTIONS]);

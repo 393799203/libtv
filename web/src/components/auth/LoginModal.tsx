@@ -32,7 +32,7 @@ export function LoginModal() {
         navigate(redirect, { replace: true });
       }
     } catch {
-      message.error('登录失败，请检查邮箱和密码');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
     } finally {
       setLoading(false);
     }
@@ -52,7 +52,7 @@ export function LoginModal() {
         navigate(redirect, { replace: true });
       }
     } catch {
-      message.error('注册失败，请稍后重试');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
     } finally {
       setLoading(false);
     }

@@ -97,7 +97,7 @@ function WorkspaceInner() {
     try {
       await projectApi.updateProject(urlProjectId, { name: projectName.trim() });
     } catch {
-      message.error('项目名称保存失败');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
     }
   }, [urlProjectId, projectName]);
 
@@ -125,7 +125,7 @@ function WorkspaceInner() {
       message.success('保存成功');
     } catch (error) {
       console.error('保存画布失败:', error);
-      message.error('保存失败');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
     } finally {
       setSaving(false);
     }

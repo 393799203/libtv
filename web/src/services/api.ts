@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
+import { message } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
 
 declare module 'axios' {
@@ -10,6 +11,17 @@ declare module 'axios' {
     delete<T = any>(url: string, config?: any): Promise<T>;
   }
 }
+
+// 常见 HTTP 状态码的默认错误提示
+const DEFAULT_ERROR_MESSAGES: Record<number, string> = {
+  400: '请求参数错误',
+  401: '未授权，请重新登录',
+  403: '没有权限访问',
+  404: '请求的资源不存在',
+  500: '服务器内部错误',
+  502: '网关错误',
+  503: '服务暂不可用',
+};
 
 const api = axios.create({
   baseURL: '/api',
@@ -31,9 +43,11 @@ api.interceptors.request.use((config) => {
 // 响应拦截器：统一错误处理
 api.interceptors.response.use(
   (response) => {
-    const { code, msg, data } = response.data;
+    const { code, msg, message: msgMessage, data } = response.data;
     if (code !== 0) {
-      return Promise.reject(new Error(msg || '请求失败'));
+      const errMsg = msg || msgMessage || '请求失败';
+      message.error(errMsg);
+      return Promise.reject(new Error(errMsg));
     }
     return data;
   },
@@ -50,7 +64,17 @@ api.interceptors.response.use(
         }, 100);
       }
     }
-    return Promise.reject(error);
+
+    // 统一提取错误消息并展示
+    const errData = error.response?.data;
+    const errMsg =
+      (errData && (errData.message || errData.msg || errData.error)) ||
+      DEFAULT_ERROR_MESSAGES[error.response?.status] ||
+      error.message ||
+      '请求失败';
+    message.error(errMsg);
+
+    return Promise.reject(new Error(errMsg));
   }
 );
 

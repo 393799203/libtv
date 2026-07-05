@@ -330,8 +330,7 @@ export default function AdminPage() {
       message.success('图片上传成功，请填写标题等信息后点击"创建"按钮');
     } catch (err: any) {
       console.error('❌ 上传失败:', err);
-      console.error('错误详情:', err?.response?.data);
-      message.error(err?.response?.data?.msg || '图片上传失败');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
       // 上传失败，清除预览
       setAddBannerFile(null);
       setAddBannerPreviewUrl('');
@@ -386,7 +385,7 @@ export default function AdminPage() {
       loadBanners();
     } catch (err: any) {
       console.error('操作失败:', err);
-      message.error(err?.response?.data?.msg || '操作失败');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
     }
     setAddingBanner(false);
   };
@@ -408,7 +407,7 @@ export default function AdminPage() {
           message.success('删除成功');
           loadBanners();
         } catch (err) {
-          message.error('删除失败');
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
           console.error(err);
         }
       },
@@ -421,7 +420,7 @@ export default function AdminPage() {
       message.success(banner.is_active ? '已禁用' : '已启用');
       loadBanners();
     } catch (err) {
-      message.error('操作失败');
+      // HTTP 错误已由 api.ts 拦截器统一 message.error()
       console.error(err);
     }
   };
@@ -648,7 +647,7 @@ export default function AdminPage() {
           loadShows(activeShowCategory);
           loadShowCategories();
         } catch (err) {
-          message.error('删除失败');
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
           console.error(err);
         }
       },
@@ -821,7 +820,7 @@ export default function AdminPage() {
           loadStyles(activeCategory);
           loadCategories();
         } catch (err) {
-          message.error('删除失败');
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
           console.error(err);
         }
       },
@@ -1175,7 +1174,9 @@ export default function AdminPage() {
                                       message.success('角色已更新');
                                       loadUsers();
                                     })
-                                    .catch(() => message.error('更新失败'));
+                                    .catch(() => {
+                                      // HTTP 错误已由 api.ts 拦截器统一 message.error()
+                                    });
                                 }}
                               />
                             </td>

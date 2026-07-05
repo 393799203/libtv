@@ -245,7 +245,10 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
         // ✅ 不自动关闭，让用户可以查看和修改生成的提示词
       } catch (error) {
         console.error('生成提示词失败:', error);
-        message.error(error instanceof Error ? error.message : '生成提示词失败');
+        // HTTP 错误已由 api.ts 拦截器统一 message.error()，此处仅兜底非 HTTP 错误
+        if (!(error instanceof Error) || !error.message) {
+          message.error('生成提示词失败');
+        }
       } finally {
         setGenerating(false);
       }
@@ -363,7 +366,7 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
         message.success('已自动保存', 1); // 1秒后自动消失
       } catch (error) {
         console.error('自动保存失败:', error);
-        message.error('保存失败，请重试');
+        // HTTP 错误已由 api.ts 拦截器统一 message.error()
       }
     }, [shot, storyboardPrompt, motionPrompt, projectId, onUpdate]);
 
