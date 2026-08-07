@@ -62,11 +62,11 @@ func NewImageClient(cfg config.AIConfig, providerName string) *ImageClient {
 
 // ImageRequest 图像生成请求（OpenAI 标准格式）
 type ImageRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Size   string `json:"size,omitempty"`  // 例如 "1920x1080"
-	N      int    `json:"n,omitempty"`     // 生成图片数量
-	Image  string `json:"image,omitempty"` // 参考图（公网URL或base64），图生图时传入
+	Model  string   `json:"model"`
+	Prompt string   `json:"prompt"`
+	Size   string   `json:"size,omitempty"`  // 例如 "1920x1080"
+	N      int      `json:"n,omitempty"`     // 生成图片数量
+	Image  []string `json:"image,omitempty"` // 参考图数组（公网URL或base64），图生图时传入
 }
 
 // ImageGenerationResponse 图像生成响应
@@ -113,39 +113,40 @@ func (c *ImageClient) GenerateImageWithModel(ctx context.Context, model string, 
 
 // GenerateImageFromImage 图生图：基于参考图生成新图像（使用默认model）
 func (c *ImageClient) GenerateImageFromImage(ctx context.Context, imageURL string, prompt string, size string) (string, error) {
-	return c.GenerateImageFromImageWithGuidance(ctx, c.model, imageURL, prompt, size, 7.5)
+	return c.GenerateImageFromImageWithGuidance(ctx, c.model, []string{imageURL}, prompt, size, 7.5)
 }
 
 // GenerateImageFromImageWithGuidance 图生图：基于参考图生成新图像，可指定model和guidance_scale
-func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, model string, imageURL string, prompt string, size string, guidanceScale float64) (string, error) {
+func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, model string, imageURLs []string, prompt string, size string, guidanceScale float64) (string, error) {
 	if size == "" {
 		size = "1920x1080"
 	}
 
-	// 本地URL需要转换为base64格式
-	var finalImageURL string
-	var err error
+	// 逐个处理参考图：本地URL转base64，公网URL直接使用
+	var finalImages []string
+	for _, imageURL := range imageURLs {
+		isPublicURL := (strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://")) &&
+			!strings.Contains(imageURL, "localhost") &&
+			!strings.Contains(imageURL, "127.0.0.1")
 
-	isPublicURL := (strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://")) &&
-		!strings.Contains(imageURL, "localhost") &&
-		!strings.Contains(imageURL, "127.0.0.1")
-
-	if isPublicURL {
-		finalImageURL = imageURL
-		log.Printf("[ImageGen] 使用公网URL: imageURL=%s", imageURL)
-	} else {
-		log.Printf("[ImageGen] 检测到本地URL，转换为base64: originalURL=%s", imageURL)
-		finalImageURL, err = c.convertLocalImageToBase64(ctx, imageURL)
-		if err != nil {
-			return "", fmt.Errorf("convert local image to base64: %w", err)
+		if isPublicURL {
+			finalImages = append(finalImages, imageURL)
+			log.Printf("[ImageGen] 使用公网URL: imageURL=%s", imageURL)
+		} else {
+			log.Printf("[ImageGen] 检测到本地URL，转换为base64: originalURL=%s", imageURL)
+			base64Data, err := c.convertLocalImageToBase64(ctx, imageURL)
+			if err != nil {
+				return "", fmt.Errorf("convert local image to base64: %w", err)
+			}
+			finalImages = append(finalImages, base64Data)
+			log.Printf("[ImageGen] 本地图片转换成功: base64Len=%d", len(base64Data))
 		}
-		log.Printf("[ImageGen] 本地图片转换成功: base64Len=%d", len(finalImageURL))
 	}
 
 	req := ImageRequest{
 		Model:  model,
 		Prompt: prompt,
-		Image:  finalImageURL,
+		Image:  finalImages,
 		Size:   size,
 		N:      1,
 	}
@@ -153,7 +154,7 @@ func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, mo
 	if err != nil {
 		return "", fmt.Errorf("marshal image request: %w", err)
 	}
-	log.Printf("[ImageGen] 图生图: model=%s size=%s", model, size)
+	log.Printf("[ImageGen] 图生图(多图): model=%s size=%s imageCount=%d", model, size, len(finalImages))
 
 	return c.doRequest(ctx, payload)
 }

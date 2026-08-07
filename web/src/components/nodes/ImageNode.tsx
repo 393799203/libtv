@@ -10,7 +10,6 @@ import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { BaseNode } from './BaseNode';
 import { uploadImage } from '@/services/uploadApi';
-import { createNode } from '@/utils/nodeFactory';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
 
@@ -20,8 +19,6 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   selected,
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const addNode = useCanvasStore((s) => s.addNode);
-  const addEdge = useCanvasStore((s) => s.addEdge);
   const projectId = useCanvasStore((s) => s.projectId);
 
   // 是否为风格图片节点
@@ -82,23 +79,6 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     [id, projectId]
   );
 
-  // 已有图片时，创建下游节点用于图生图
-  const handleCreateDownstream = useCallback(() => {
-    const nodes = useCanvasStore.getState().nodes;
-    const currentNode = nodes.find((n) => n.id === id);
-    const posX = currentNode?.position.x ?? 0;
-    const posY = currentNode?.position.y ?? 0;
-
-    const newNode = createNode('image', { x: posX + 350, y: posY });
-    addNode(newNode);
-    addEdge({
-      id: `e-${id}-${newNode.id}`,
-      source: id,
-      target: newNode.id,
-      type: 'dataFlow',
-    });
-  }, [id, addNode, addEdge]);
-
   // 标题栏右侧内容 — useMemo 避免每次渲染重建 JSX 导致 BaseNode 无效重渲染
   const headerRight = useMemo(() => {
     if (isStyleNode) {
@@ -112,22 +92,9 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     }
     if (data.imageUrl && imageWidth && imageHeight) {
       return (
-        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-          <span className="text-[11px] text-gray-400">
-            {imageWidth} × {imageHeight}
-          </span>
-          <button
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCreateDownstream();
-            }}
-            title="基于此图片生成新图片"
-          >
-            <UploadOutlined className="text-[10px]" />
-            图生图
-          </button>
-        </div>
+        <span className="text-[11px] text-gray-400 flex-shrink-0 ml-2">
+          {imageWidth} × {imageHeight}
+        </span>
       );
     }
     return (
@@ -139,7 +106,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         上传
       </button>
     );
-  }, [data.imageUrl, imageWidth, imageHeight, handleCreateDownstream, isStyleNode]);
+  }, [data.imageUrl, imageWidth, imageHeight, isStyleNode]);
 
   // 计算图片容器高度：使用图片的实际尺寸等比例缩放
   const imageContainerHeight = 

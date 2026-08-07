@@ -1,12 +1,20 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Drawer, Button, message, Input, Select } from 'antd';
-import { ReloadOutlined, CopyOutlined } from '@ant-design/icons';
+import { ReloadOutlined, CopyOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import type { ScriptShot, ScriptNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useModels } from '@/hooks/useModels';
 import { generatePrompt } from '@/services/promptApi';
 import { canvasApi } from '@/services/canvasApi';
 import { PromptReferenceTags } from './PromptReferenceTags';
+import {
+  createShotImageNode,
+  createShotVideoNode,
+  persistShotCanvas,
+  findShotImageNode,
+  findShotVideoNode,
+  generateShotImageNodeId,
+} from '@/utils/shotNodeSync';
 
 interface PromptMergeDrawerProps {
   open: boolean;
@@ -37,6 +45,8 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     const [motionPrompt, setMotionPrompt] = useState(''); // 生成的运动提示词
     const [selectedModel, setSelectedModel] = useState(''); // 选择的文本模型
     const [contentReady, setContentReady] = useState(false); // ✅ 动画性能优化：延迟渲染重型组件
+    const [imageGenerating, setImageGenerating] = useState(false); // 分镜图片节点生成中
+    const [videoGenerating, setVideoGenerating] = useState(false); // 分镜视频节点生成中
 
     // ✅ 性能优化：缓存 scriptData 的资产数组，避免每次渲染都重新计算
     const charactersRef = useRef(scriptData.characters);
@@ -59,7 +69,22 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
 
     // 获取画布状态和模型列表（只在需要时获取，避免不必要的订阅）
     const projectId = useCanvasStore((s) => s.projectId);
+    // ✅ 响应式判断：画布上是否已存在该镜头的图片节点（已存在则隐藏"生成提示词图片"按钮）
+    const shotImageNodeId = shot ? generateShotImageNodeId(shot.id, scriptNodeId) : '';
+    const imageNodeExists = useCanvasStore((s) => s.nodes.some((n) => n.id === shotImageNodeId));
     const textModels = useModels('text');
+    const imageModels = useModels('image');
+    const videoModels = useModels('video');
+
+    // 默认图片/视频模型 ID（用于创建分镜节点时写入 data.model）
+    const defaultImageModelId = useMemo(() => {
+      const m = imageModels.find(m => m.isDefault) || imageModels[0];
+      return m?.modelId || '';
+    }, [imageModels]);
+    const defaultVideoModelId = useMemo(() => {
+      const m = videoModels.find(m => m.isDefault) || videoModels[0];
+      return m?.modelId || '';
+    }, [videoModels]);
 
     // 实时计算最终提示词（画面 + 运动提示词拼接）
     const finalPrompt = useMemo(() => {
@@ -126,6 +151,8 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     useEffect(() => {
       if (!open) {
         setGenerating(false);
+        setImageGenerating(false);
+        setVideoGenerating(false);
         setContentReady(false); // ✅ 关闭时重置内容渲染标记
 
         // ✅ 修复内存泄漏：关闭Drawer时清理未完成的保存timer
@@ -370,6 +397,67 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       }
     }, [shot, storyboardPrompt, motionPrompt, projectId, onUpdate]);
 
+    // 创建分镜图片节点并触发生成（前提：已有画面提示词）
+    const handleGenerateImage = useCallback(async () => {
+      if (!shot) return;
+      if (!storyboardPrompt.trim()) {
+        message.warning('请先生成画面提示词');
+        return;
+      }
+      if (!projectId) return;
+
+      // 已在生成中则阻止重复点击
+      const existing = findShotImageNode(scriptNodeId, shot.id);
+      if (existing && (existing.data.status === 'running' || existing.data.status === 'pending')) {
+        message.warning('该镜头的图片正在生成中，请稍候');
+        return;
+      }
+
+      setImageGenerating(true);
+      try {
+        const node = createShotImageNode(scriptNodeId, shot, storyboardPrompt.trim(), defaultImageModelId);
+        if (!node) {
+          message.error('创建图片节点失败');
+          return;
+        }
+        await persistShotCanvas(projectId);
+        message.success('已创建图片节点，请在画布上点击生成');
+      } finally {
+        setImageGenerating(false);
+      }
+    }, [shot, storyboardPrompt, scriptNodeId, projectId, defaultImageModelId]);
+
+    // 创建分镜视频节点并触发生成（前提：已有画面提示词 + 运动提示词）
+    const handleGenerateVideo = useCallback(async () => {
+      if (!shot) return;
+      if (!storyboardPrompt.trim() || !motionPrompt.trim()) {
+        message.warning('请先生成画面提示词和运动提示词');
+        return;
+      }
+      if (!projectId) return;
+
+      const existing = findShotVideoNode(scriptNodeId, shot.id);
+      if (existing && (existing.data.status === 'running' || existing.data.status === 'pending')) {
+        message.warning('该镜头的视频正在生成中，请稍候');
+        return;
+      }
+
+      // 合成最终提示词（画面 + 运动）
+      const combined = `画面提示词：${storyboardPrompt.trim()}\n视频运动提示词：${motionPrompt.trim()}`;
+      setVideoGenerating(true);
+      try {
+        const node = createShotVideoNode(scriptNodeId, shot, combined, defaultVideoModelId);
+        if (!node) {
+          message.error('创建视频节点失败');
+          return;
+        }
+        await persistShotCanvas(projectId);
+        message.success('已创建视频节点，请在画布上点击生成');
+      } finally {
+        setVideoGenerating(false);
+      }
+    }, [shot, storyboardPrompt, motionPrompt, scriptNodeId, projectId, defaultVideoModelId]);
+
     return (
       <Drawer
         title={`镜头 ${shot?.shotNumber || ''} - 提示词生成`}
@@ -488,6 +576,35 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
               >
                 {generating ? '生成中...' : storyboardPrompt ? '重新生成提示词' : '生成提示词'}
               </Button>
+
+              {/* 生成提示词资产节点（仅在有提示词时显示） */}
+              {storyboardPrompt.trim() && (
+                <div className="flex gap-2 mt-2">
+                  {!imageNodeExists && (
+                    <Button
+                      block
+                      onClick={handleGenerateImage}
+                      loading={imageGenerating}
+                      disabled={!shot}
+                      icon={<PictureOutlined />}
+                    >
+                      生成提示词图片
+                    </Button>
+                  )}
+                  {motionPrompt.trim() && (
+                    <Button
+                      block
+                      onClick={handleGenerateVideo}
+                      loading={videoGenerating}
+                      disabled={!shot}
+                      icon={<VideoCameraOutlined />}
+                    >
+                      生成提示词视频
+                    </Button>
+                  )}
+                </div>
+              )}
+
               <div className="text-xs text-gray-500 mt-2 text-center">
                 输入框失去焦点会自动保存
               </div>

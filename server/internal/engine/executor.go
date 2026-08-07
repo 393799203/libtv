@@ -731,7 +731,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	// ✅ 解析 mentions 字段，提取用户明确@引用的节点ID
 	// 根据nodeId从节点data中提取完整imageUrl，而不是直接使用mentions中的imageUrl（前端预览用）
-	var upstreamImageURL string
+	var upstreamImageURLs []string
 	var mentions []struct {
 		NodeID   string `json:"nodeId"`
 		NodeType string `json:"nodeType"`
@@ -755,9 +755,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 						ImageUrl string `json:"imageUrl"`
 					}
 					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-						upstreamImageURL = nd.ImageUrl // ✅ 完整图片URL
-						log.Printf("[ImageExecutor] ✅ 从@引用的图片节点提取到URL: nodeId=%s imageUrl=%s", m.NodeID, upstreamImageURL)
-						break // 只取第一个，避免多张图片导致的逻辑复杂化
+						upstreamImageURLs = append(upstreamImageURLs, nd.ImageUrl)
+						log.Printf("[ImageExecutor] ✅ 从@引用的图片节点提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
 					} else {
 						log.Printf("[ImageExecutor] ❌ @引用的图片节点没有imageUrl: nodeId=%s raw=%s", m.NodeID, string(raw))
 					}
@@ -770,8 +769,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] ❌ mentions解析失败: err=%v", err)
 	}
 
-	if upstreamImageURL != "" {
-		log.Printf("[ImageExecutor] ✅ 最终结果：检测到用户@引用的上游图片: upstreamImageURL=%s", upstreamImageURL)
+	if len(upstreamImageURLs) > 0 {
+		log.Printf("[ImageExecutor] ✅ 最终结果：检测到用户@引用的上游图片: count=%d urls=%v", len(upstreamImageURLs), upstreamImageURLs)
 	} else {
 		log.Printf("[ImageExecutor] ⚠️ 没有找到@引用的图片，尝试fallback逻辑（查找上游连接的图片节点）")
 		// ✅ 如果用户没有明确@引用图片，但当前节点有上游连接的图片节点，默认使用第一个上游图片作为参考图
@@ -790,9 +789,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					log.Printf("[ImageExecutor] 上游节点数据: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
 					// ✅ 检查是否是图片节点（通过type字段或imageUrl字段判断）
 					if nd.Type == "image" || nd.ImageUrl != "" {
-						upstreamImageURL = nd.ImageUrl
-						log.Printf("[ImageExecutor] ✅ 默认使用上游连接的图片作为参考图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, upstreamImageURL)
-						break // 只取第一个上游图片，避免多张图片导致的逻辑复杂化
+						upstreamImageURLs = append(upstreamImageURLs, nd.ImageUrl)
+						log.Printf("[ImageExecutor] ✅ 默认使用上游连接的图片作为参考图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
 					} else {
 						log.Printf("[ImageExecutor] ❌ 上游节点不是图片节点: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
 					}
@@ -807,7 +805,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	// ✅ 最终判断结果
 	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（结束） ========== ")
-	log.Printf("[ImageExecutor] 最终结果: upstreamImageURL=%s (是否使用图生图=%v)", upstreamImageURL, upstreamImageURL != "")
+	log.Printf("[ImageExecutor] 最终结果: upstreamImageURLs=%v (是否使用图生图=%v 图片数=%d)", upstreamImageURLs, len(upstreamImageURLs) > 0, len(upstreamImageURLs))
 
 	// 没有提示词时直接返回空结果
 	if data.Prompt == "" {
@@ -874,16 +872,16 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 提升后尺寸: %dx%d (%d像素)", width, height, width*height)
 	}
 
-	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s size=%s hasRefImage=%v", node.ID, len(finalPrompt), apiModelID, size, upstreamImageURL != "")
+	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s size=%s hasRefImage=%v refImageCount=%d", node.ID, len(finalPrompt), apiModelID, size, len(upstreamImageURLs) > 0, len(upstreamImageURLs))
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
 	var generatedURL string
 	var err error
 
-	if upstreamImageURL != "" {
+	if len(upstreamImageURLs) > 0 {
 		imageToImagePrompt := fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
-		log.Printf("[ImageExecutor] 使用图生图模式: refImage=%s prompt=%s", upstreamImageURL, imageToImagePrompt)
-		generatedURL, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURL, imageToImagePrompt, size, 12.0)
+		log.Printf("[ImageExecutor] 使用图生图模式(多图): refImageCount=%d prompt=%s", len(upstreamImageURLs), imageToImagePrompt)
+		generatedURL, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0)
 		if err != nil {
 			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
 		}
