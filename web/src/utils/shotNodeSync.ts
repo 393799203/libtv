@@ -192,11 +192,11 @@ export function createShotImageNode(
   const imageNode = createNode('image', { x: scriptPos.x + 400, y: scriptPos.y + offsetY }, {
     id: imageNodeId,
     data: {
-      label: `镜头${shot.shotNumber}图片`,
+      label: `分镜${shot.shotNumber}-参考图`,
       prompt: convertedPrompt,
       model: modelId || '',
       mentions: assetMentions,
-      resolution: '1K',
+      resolution: '2K',
       aspectRatio: '16:9',
       quality: '标准画质',
     },
@@ -258,7 +258,7 @@ export function createShotVideoNode(
   const videoNode = createNode('video', { x: scriptPos.x + 800, y: scriptPos.y + offsetY }, {
     id: videoNodeId,
     data: {
-      label: `镜头${shot.shotNumber}视频`,
+      label: `分镜${shot.shotNumber}-视频`,
       prompt: convertedPrompt,
       model: modelId || '',
       mentions: assetMentions,
