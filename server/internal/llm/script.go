@@ -232,5 +232,6 @@ func cleanAssetName(name string) string {
 	name = strings.ReplaceAll(name, ")", "-")
 	// 清理可能出现的连续连字符（如 "康熙--黄三"）
 	name = strings.ReplaceAll(name, "--", "-")
-	return strings.TrimSpace(name)
+	// 去除首尾的连字符和空格
+	return strings.Trim(name, "- ")
 }
