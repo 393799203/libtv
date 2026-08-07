@@ -96,7 +96,7 @@ RSYNC_RSH="ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=10 -o ConnectTim
 
 if [ "$FRONTEND_ONLY" = true ]; then
     rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
-        --exclude='node_modules' --exclude='dist' --exclude='.git' \
+        --exclude='node_modules' --exclude='.git' \
         ${LOCAL_DIR}/web/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/web/
     rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
         ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
@@ -105,15 +105,19 @@ elif [ "$BACKEND_ONLY" = true ]; then
         --exclude='.git' --exclude='public' --exclude='uploads' --exclude='bin' \
         ${LOCAL_DIR}/server/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/server/
     rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
+        ${LOCAL_DIR}/redis/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/redis/
+    rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
         ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
 else
     rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
-        --exclude='node_modules' --exclude='dist' --exclude='.git' \
+        --exclude='node_modules' --exclude='.git' \
         --exclude='public' --exclude='uploads' \
         ${LOCAL_DIR}/web/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/web/
     rsync -avz --delete --timeout=300 --rsh="$RSYNC_RSH" \
         --exclude='.git' --exclude='public' --exclude='uploads' --exclude='bin' \
         ${LOCAL_DIR}/server/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/server/
+    rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
+        ${LOCAL_DIR}/redis/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/redis/
     rsync -avz --timeout=60 --rsh="$RSYNC_RSH" \
         ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
 fi

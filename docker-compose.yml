@@ -65,7 +65,9 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    build:
+      context: ./redis
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:6379:6379"
     command: redis-server --appendonly yes
