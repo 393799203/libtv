@@ -90,8 +90,8 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
 
-	// 初始化图像生成客户端
-	imageClient := llm.NewImageClient(config.C.AI, "siliconflow")
+	// 初始化图像生成客户端（华数TokenHub）
+	imageClient := llm.NewImageClient(config.C.AI, "wasu")
 
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)

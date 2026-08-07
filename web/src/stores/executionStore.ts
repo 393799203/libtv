@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { message } from 'antd';  // ✅ 导入Ant Design message组件用于全局错误提示
 import type { WorkflowExecution, NodeExecution, WSEvent, WorkflowStatus } from '@/types/workflow';
 
 // 活跃 SSE 订阅信息（与组件生命周期解耦，避免节点失焦导致 SSE 被关闭）
@@ -115,9 +116,43 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         set({ lastError: null });
         break;
       case 'execution_failed': {
-        const errMsg = (event.data?.error as string) || '工作流执行失败';
+        // ✅ 兼容多种字段位置：
+        // - errorMsg在顶层（SSE直接返回）: event.errorMsg
+        // - errorMsg在data里面（标准格式）: event.data?.errorMsg
+        // - error在data里面（WorkflowEvent格式）: event.data?.error
+        const errMsg =
+          (event as { errorMsg?: string }).errorMsg ||  // ✅ SSE直接返回的errorMsg在顶层
+          (event.data?.error as string) ||              // WorkflowEvent格式的error
+          (event.data?.errorMsg as string) ||           // 标准格式的errorMsg在data里
+          '工作流执行失败';
         setExecutionStatus('failed');
         set({ lastError: errMsg });
+
+        // ✅ 更新currentExecution中所有正在运行/等待中的节点状态为failed（确保按钮状态正确恢复）
+        const { currentExecution } = get();
+        if (currentExecution?.nodes) {
+          const updatedNodes = currentExecution.nodes.map((node) => {
+            if (node.status === 'running' || node.status === 'pending') {
+              return {
+                ...node,
+                status: 'failed' as const,
+                error: errMsg,
+              };
+            }
+            return node;
+          });
+          set({
+            currentExecution: {
+              ...currentExecution,
+              nodes: updatedNodes,
+              status: 'failed',
+              error: errMsg,
+            },
+          });
+        }
+
+        // ✅ 调用message.error显示全局错误提示（红色提示条）
+        message.error(errMsg, 8);  // 显示8秒，给用户足够时间阅读完整错误消息
         break;
       }
     }

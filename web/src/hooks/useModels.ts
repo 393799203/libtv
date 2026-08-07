@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useModelStore } from '@/stores/modelStore';
 import type { ModelOption } from '@/types/prompt';
 import type { ModelConfig } from '@/services/modelApi';
@@ -10,6 +10,7 @@ import type { NodeType } from '@/types/canvas';
 function convertToModelOption(model: ModelConfig): ModelOption {
   return {
     value: model.ID,
+    modelId: model.ModelID,  // ✅ 实际调用API使用的model_id
     label: model.Name,
     description: model.Description,
     isDefault: model.Default,  // 从后端配置读取默认标记
@@ -27,7 +28,7 @@ function filterModelsByUsage(models: ModelConfig[], nodeType: NodeType): ModelCo
     // 检查模型的 Usage 字段是否包含当前节点类型
     // Usage 字段示例：["script"], ["text"], ["image", "character", "scene", "prop"]
     const usage = model.Usage || [];
-    
+
     // 映射节点类型到 usage 关键字
     const usageKeywords: Record<NodeType, string[]> = {
       text: ['text', 'llm'],  // text 节点使用 text 或通用 llm 模型
@@ -36,7 +37,7 @@ function filterModelsByUsage(models: ModelConfig[], nodeType: NodeType): ModelCo
       video: ['video'],
       audio: ['audio'],
     };
-    
+
     const keywords = usageKeywords[nodeType] || [];
     return keywords.some(keyword => usage.includes(keyword));
   });
@@ -46,14 +47,14 @@ function filterModelsByUsage(models: ModelConfig[], nodeType: NodeType): ModelCo
  * 获取指定类型的模型列表
  */
 export function useModels(nodeType: NodeType): ModelOption[] {
-  const { 
-    imageModels, 
-    videoModels, 
+  const {
+    imageModels,
+    videoModels,
     llmModels,  // 后端返回的是 llm 而不是 text
-    audioModels, 
-    isLoading, 
-    error, 
-    loadModels 
+    audioModels,
+    isLoading,
+    error,
+    loadModels
   } = useModelStore();
 
   // 组件初始化时加载模型配置
@@ -63,19 +64,29 @@ export function useModels(nodeType: NodeType): ModelOption[] {
     }
   }, [imageModels.length, isLoading, error, loadModels]);
 
-  // 根据节点类型返回对应的模型列表，并根据用途过滤
-  switch (nodeType) {
-    case 'image':
-      return filterModelsByUsage(imageModels, nodeType).map(convertToModelOption);
-    case 'video':
-      return filterModelsByUsage(videoModels, nodeType).map(convertToModelOption);
-    case 'text':
-      return filterModelsByUsage(llmModels, nodeType).map(convertToModelOption);  // text 使用 llm 模型
-    case 'audio':
-      return filterModelsByUsage(audioModels, nodeType).map(convertToModelOption);
-    case 'script':
-      return filterModelsByUsage(llmModels, nodeType).map(convertToModelOption);  // script 使用 llm 模型
-    default:
-      return [];
-  }
+  // ✅ 使用 useMemo 缓存结果，避免每次渲染都返回新数组引用
+  // 使用 JSON.stringify 确保只有在内容真正变化时才重新计算
+  return useMemo(() => {
+    switch (nodeType) {
+      case 'image':
+        return filterModelsByUsage(imageModels, nodeType).map(convertToModelOption);
+      case 'video':
+        return filterModelsByUsage(videoModels, nodeType).map(convertToModelOption);
+      case 'text':
+        return filterModelsByUsage(llmModels, nodeType).map(convertToModelOption);  // text 使用 llm 模型
+      case 'audio':
+        return filterModelsByUsage(audioModels, nodeType).map(convertToModelOption);
+      case 'script':
+        return filterModelsByUsage(llmModels, nodeType).map(convertToModelOption);  // script 使用 llm 模型
+      default:
+        return [];
+    }
+  }, [
+    nodeType,
+    // 使用 JSON.stringify 确保内容变化时才重新计算
+    JSON.stringify(imageModels),
+    JSON.stringify(videoModels),
+    JSON.stringify(llmModels),
+    JSON.stringify(audioModels),
+  ]);
 }

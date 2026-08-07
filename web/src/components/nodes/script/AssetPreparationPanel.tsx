@@ -11,6 +11,7 @@ import { canvasApi } from '@/services/canvasApi';
 import {
   updateAssetImageNodeUrl,
   createAssetImageNode,
+  generateAssetImageNodeId,
   getAssetImageNodeId,
 } from '@/utils/assetImageSync';
 
@@ -227,17 +228,17 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         // ✅ 使用新的同步工具：直接通过 ID 映射更新图片节点
         const updatedNode = updateAssetImageNodeUrl(scriptNodeId, 'character', name, url);
         if (!updatedNode) {
-          // 如果没有图片节点，创建新节点并建立映射
+          // 如果没有图片节点，创建新节点并写入数据
           const character = data.characters.find(c => c.name === name);
           if (character) {
-            createAssetImageNode(
-              scriptNodeId,
-              'character',
-              name,
-              url,
-              character.description,
-              undefined
-            );
+            const created = createAssetImageNode(scriptNodeId, 'character', name);
+            if (created) {
+              const imageNodeId = generateAssetImageNodeId('character', name, scriptNodeId);
+              useCanvasStore.getState().updateNodeData(imageNodeId, {
+                imageUrl: url,
+                prompt: character.description,
+              } as any);
+            }
           }
         }
 
@@ -277,17 +278,17 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         // ✅ 使用新的同步工具：直接通过 ID 映射更新图片节点
         const updatedNode = updateAssetImageNodeUrl(scriptNodeId, 'scene', name, url);
         if (!updatedNode) {
-          // 如果没有图片节点，创建新节点并建立映射
+          // 如果没有图片节点，创建新节点并写入数据
           const scene = data.scenes.find(s => s.name === name);
           if (scene) {
-            createAssetImageNode(
-              scriptNodeId,
-              'scene',
-              name,
-              url,
-              scene.description,
-              undefined
-            );
+            const created = createAssetImageNode(scriptNodeId, 'scene', name);
+            if (created) {
+              const imageNodeId = generateAssetImageNodeId('scene', name, scriptNodeId);
+              useCanvasStore.getState().updateNodeData(imageNodeId, {
+                imageUrl: url,
+                prompt: scene.description,
+              } as any);
+            }
           }
         }
 
@@ -327,17 +328,17 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         // ✅ 使用新的同步工具：直接通过 ID 映射更新图片节点
         const updatedNode = updateAssetImageNodeUrl(scriptNodeId, 'prop', name, url);
         if (!updatedNode) {
-          // 如果没有图片节点，创建新节点并建立映射
+          // 如果没有图片节点，创建新节点并写入数据
           const prop = data.props.find(p => p.name === name);
           if (prop) {
-            createAssetImageNode(
-              scriptNodeId,
-              'prop',
-              name,
-              url,
-              prop.description,
-              undefined
-            );
+            const created = createAssetImageNode(scriptNodeId, 'prop', name);
+            if (created) {
+              const imageNodeId = generateAssetImageNodeId('prop', name, scriptNodeId);
+              useCanvasStore.getState().updateNodeData(imageNodeId, {
+                imageUrl: url,
+                prompt: prop.description,
+              } as any);
+            }
           }
         }
 

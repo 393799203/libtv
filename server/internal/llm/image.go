@@ -3,10 +3,12 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,7 +16,7 @@ import (
 	"libtv/internal/config"
 )
 
-// ImageClient 图像生成客户端(支持硅基流动等 OpenAI 兼容 API)
+// ImageClient 图像生成客户端（OpenAI 兼容 API，华数TokenHub）
 type ImageClient struct {
 	apiKey  string
 	baseURL string
@@ -39,45 +41,39 @@ func NewImageClient(cfg config.AIConfig, providerName string) *ImageClient {
 	return &ImageClient{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		model:   "Tongyi-MAI/Z-Image-Turbo", // 默认使用 Z-Image-Turbo 模型
+		model:   "qwen-image-2.0",
 		httpCli: &http.Client{
-			Timeout: 120 * time.Second, // 图像生成通常需要更长时间
+			Timeout: 180 * time.Second,
 			Transport: &http.Transport{
 				DisableKeepAlives:   true,
 				MaxIdleConns:        0,
 				MaxIdleConnsPerHost: 0,
 				IdleConnTimeout:     1 * time.Second,
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 120 * time.Second,
 			},
 		},
 	}
 }
 
-// OpenAIImageRequest OpenAI 标准格式图像生成请求
-type OpenAIImageRequest struct {
+// ImageRequest 图像生成请求（OpenAI 标准格式）
+type ImageRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
-	Size   string `json:"size,omitempty"` // OpenAI 格式：例如 "1024x1024"
-	N      int    `json:"n,omitempty"`    // OpenAI 格式：生成图片数量
-}
-
-// SiliconFlowImageRequest 硅基流动图像生成请求格式（扩展格式）
-type SiliconFlowImageRequest struct {
-	Model             string  `json:"model"`
-	Prompt            string  `json:"prompt"`
-	ImageSize         string  `json:"image_size"`              // 硅基流动格式：例如 "1024x1024"
-	BatchSize         int     `json:"batch_size"`              // 硅基流动格式：生成图片数量
-	NumInferenceSteps int     `json:"num_inference_steps"`     // 必需：控制生成步长（1-100）
-	GuidanceScale     float64 `json:"guidance_scale"`          // 必需：匹配程度（0-20）
-	NegativePrompt    string  `json:"negative_prompt,omitempty"` // 可选：负面提示词
-	Seed              int     `json:"seed,omitempty"`          // 可选：固定种子值
-	Image             string  `json:"image,omitempty"`         // 可选：参考图URL（图生图模式）
+	Size   string `json:"size,omitempty"`  // 例如 "1920x1080"
+	N      int    `json:"n,omitempty"`     // 生成图片数量
+	Image  string `json:"image,omitempty"` // 参考图（公网URL或base64），图生图时传入
 }
 
 // ImageGenerationResponse 图像生成响应
 type ImageGenerationResponse struct {
 	Created int64 `json:"created"`
 	Data    []struct {
-		URL string `json:"url"` // 图片 URL
+		URL string `json:"url"`
 	} `json:"data"`
 	Error *struct {
 		Message string `json:"message"`
@@ -85,54 +81,86 @@ type ImageGenerationResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// GenerateImage 生成图像
-// 根据 baseURL 判断平台类型，自动选择合适的请求格式
+// GenerateImage 生成图像（文生图）
 func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size string) (string, error) {
-	// 默认尺寸
 	if size == "" {
-		size = "1024x1024"
+		size = "1920x1080"
 	}
 
-	// 判断是否为硅基流动平台（使用扩展格式）
-	var payload []byte
+	req := ImageRequest{
+		Model:  c.model,
+		Prompt: prompt,
+		Size:   size,
+		N:      1,
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("marshal image request: %w", err)
+	}
+	log.Printf("[ImageGen] 文生图: model=%s size=%s", c.model, size)
+
+	return c.doRequest(ctx, payload)
+}
+
+// GenerateImageWithModel 使用指定模型生成图像
+func (c *ImageClient) GenerateImageWithModel(ctx context.Context, model string, prompt string, size string) (string, error) {
+	originalModel := c.model
+	c.model = model
+	defer func() { c.model = originalModel }()
+
+	return c.GenerateImage(ctx, prompt, size)
+}
+
+// GenerateImageFromImage 图生图：基于参考图生成新图像（使用默认model）
+func (c *ImageClient) GenerateImageFromImage(ctx context.Context, imageURL string, prompt string, size string) (string, error) {
+	return c.GenerateImageFromImageWithGuidance(ctx, c.model, imageURL, prompt, size, 7.5)
+}
+
+// GenerateImageFromImageWithGuidance 图生图：基于参考图生成新图像，可指定model和guidance_scale
+func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, model string, imageURL string, prompt string, size string, guidanceScale float64) (string, error) {
+	if size == "" {
+		size = "1920x1080"
+	}
+
+	// 本地URL需要转换为base64格式
+	var finalImageURL string
 	var err error
-	isSiliconFlow := strings.Contains(c.baseURL, "siliconflow.cn") ||
-	                 strings.Contains(c.baseURL, "api.siliconflow")
 
-	if isSiliconFlow {
-		// 硅基流动扩展格式（支持更多参数）
-		req := SiliconFlowImageRequest{
-			Model:             c.model,
-			Prompt:            prompt,
-			ImageSize:         size,
-			BatchSize:         1,
-			NumInferenceSteps: 20,       // 默认步长
-			GuidanceScale:     7.5,      // 默认匹配程度
-			NegativePrompt:    "低质量, 模糊, 变形, 文字, 水印", // 默认负面提示词
-		}
-		payload, err = json.Marshal(req)
-		if err != nil {
-			return "", fmt.Errorf("marshal siliconflow image request: %w", err)
-		}
-		log.Printf("[ImageGen] Using SiliconFlow format: model=%s size=%s", c.model, size)
+	isPublicURL := (strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://")) &&
+		!strings.Contains(imageURL, "localhost") &&
+		!strings.Contains(imageURL, "127.0.0.1")
+
+	if isPublicURL {
+		finalImageURL = imageURL
+		log.Printf("[ImageGen] 使用公网URL: imageURL=%s", imageURL)
 	} else {
-		// OpenAI 标准格式（兼容其他平台）
-		req := OpenAIImageRequest{
-			Model:  c.model,
-			Prompt: prompt,
-			Size:   size,
-			N:      1,
-		}
-		payload, err = json.Marshal(req)
+		log.Printf("[ImageGen] 检测到本地URL，转换为base64: originalURL=%s", imageURL)
+		finalImageURL, err = c.convertLocalImageToBase64(ctx, imageURL)
 		if err != nil {
-			return "", fmt.Errorf("marshal openai image request: %w", err)
+			return "", fmt.Errorf("convert local image to base64: %w", err)
 		}
-		log.Printf("[ImageGen] Using OpenAI format: model=%s size=%s", c.model, size)
+		log.Printf("[ImageGen] 本地图片转换成功: base64Len=%d", len(finalImageURL))
 	}
 
-	// 图像生成 API endpoint（统一使用 OpenAI 兼容路径）
+	req := ImageRequest{
+		Model:  model,
+		Prompt: prompt,
+		Image:  finalImageURL,
+		Size:   size,
+		N:      1,
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("marshal image request: %w", err)
+	}
+	log.Printf("[ImageGen] 图生图: model=%s size=%s", model, size)
+
+	return c.doRequest(ctx, payload)
+}
+
+// doRequest 统一发送图像生成请求
+func (c *ImageClient) doRequest(ctx context.Context, payload []byte) (string, error) {
 	url := fmt.Sprintf("%s/images/generations", c.baseURL)
-	log.Printf("[ImageGen] API endpoint: %s", url)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
@@ -156,7 +184,7 @@ func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size str
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[ImageGen] http error: status=%d body=%s", resp.StatusCode, string(respBody))
+		log.Printf("[ImageGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
 		return "", fmt.Errorf("Image API error (status=%d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -166,114 +194,56 @@ func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size str
 	}
 
 	if imgResp.Error != nil {
-		log.Printf("[ImageGen] api error: %s", imgResp.Error.Message)
 		return "", fmt.Errorf("Image API error: %s", imgResp.Error.Message)
 	}
 
 	if len(imgResp.Data) == 0 {
-		log.Printf("[ImageGen] empty data, body=%s", string(respBody))
 		return "", fmt.Errorf("no image generated")
 	}
 
-	imageURL := imgResp.Data[0].URL
-	log.Printf("[ImageGen] ok: imageURL=%s", imageURL)
-
-	return imageURL, nil
+	log.Printf("[ImageGen] success: imageURL=%s", imgResp.Data[0].URL)
+	return imgResp.Data[0].URL, nil
 }
 
-// GenerateImageWithModel 使用指定模型生成图像
-func (c *ImageClient) GenerateImageWithModel(ctx context.Context, model string, prompt string, size string) (string, error) {
-	// 临时切换模型
-	originalModel := c.model
-	c.model = model
-	defer func() { c.model = originalModel }()
-
-	return c.GenerateImage(ctx, prompt, size)
-}
-
-// GenerateImageFromImage 图生图：基于参考图生成新图像
-// imageURL: 参考图URL，prompt: 文本描述，size: 输出尺寸
-func (c *ImageClient) GenerateImageFromImage(ctx context.Context, imageURL string, prompt string, size string) (string, error) {
-	// 默认尺寸
-	if size == "" {
-		size = "1024x1024"
-	}
-
-	// 判断是否为硅基流动平台
-	var payload []byte
-	var err error
-	isSiliconFlow := strings.Contains(c.baseURL, "siliconflow.cn") ||
-	                 strings.Contains(c.baseURL, "api.siliconflow")
-
-	if isSiliconFlow {
-		// 硅基流动扩展格式（支持图生图）
-		req := SiliconFlowImageRequest{
-			Model:             c.model,
-			Prompt:            prompt,
-			ImageSize:         size,
-			Image:             imageURL, // 参考图URL
-			BatchSize:         1,
-			NumInferenceSteps: 20,
-			GuidanceScale:     7.5,
-			NegativePrompt:    "低质量, 模糊, 变形, 文字, 水印",
-		}
-		payload, err = json.Marshal(req)
-		if err != nil {
-			return "", fmt.Errorf("marshal siliconflow image-to-image request: %w", err)
-		}
-		log.Printf("[ImageGen] Image-to-Image (SiliconFlow): model=%s refImage=%s", c.model, imageURL)
+// convertLocalImageToBase64 将本地图片转换为base64格式
+func (c *ImageClient) convertLocalImageToBase64(ctx context.Context, imageURL string) (string, error) {
+	var fullURL string
+	if strings.HasPrefix(imageURL, "/") {
+		fullURL = fmt.Sprintf("http://localhost:8080%s", imageURL)
 	} else {
-		// OpenAI 标准格式（注意：OpenAI 标准格式可能不支持图生图，需要检查具体平台）
-		// 这里暂时使用标准格式，实际使用时需要确认平台是否支持
-		req := OpenAIImageRequest{
-			Model:  c.model,
-			Prompt: prompt,
-			Size:   size,
-			N:      1,
-		}
-		payload, err = json.Marshal(req)
-		if err != nil {
-			return "", fmt.Errorf("marshal openai image request: %w", err)
-		}
-		log.Printf("[ImageGen] Image-to-Image (OpenAI): model=%s - Warning: may not support ref image", c.model)
+		fullURL = imageURL
 	}
 
-	// 图像生成 API endpoint
-	url := fmt.Sprintf("%s/images/generations", c.baseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	log.Printf("[ImageGen] 从本地URL下载图片: fullURL=%s", fullURL)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.httpCli.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
+		return "", fmt.Errorf("download image: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response body: %w", err)
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Image API error (status=%d): %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("download image failed (status=%d)", resp.StatusCode)
 	}
 
-	var imgResp ImageGenerationResponse
-	if err := json.Unmarshal(respBody, &imgResp); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read image data: %w", err)
 	}
 
-	if imgResp.Error != nil {
-		return "", fmt.Errorf("Image API error: %s", imgResp.Error.Message)
+	log.Printf("[ImageGen] 图片下载成功: size=%d bytes", len(imageData))
+
+	contentType := resp.Header.Get("Content-Type")
+	mimeType := contentType
+	if mimeType == "" {
+		mimeType = "image/jpeg"
 	}
 
-	if len(imgResp.Data) == 0 {
-		return "", fmt.Errorf("no image generated")
-	}
-
-	return imgResp.Data[0].URL, nil
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64Data), nil
 }

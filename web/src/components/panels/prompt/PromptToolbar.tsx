@@ -1,6 +1,5 @@
 import { memo, useState } from 'react';
 import {
-  CloseOutlined,
   LinkOutlined,
   BarChartOutlined,
   RobotOutlined,
@@ -17,7 +16,6 @@ import { RESOLUTION_OPTIONS, QUALITY_OPTIONS, ASPECT_RATIO_ROWS } from '@/config
 // 模型图标映射（匹配截图中的图标风格）
 const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
   link: <LinkOutlined style={{ fontSize: 16 }} />,
-  close: <CloseOutlined style={{ fontSize: 16 }} />,
   'bar-chart': <BarChartOutlined style={{ fontSize: 16 }} />,
   robot: <RobotOutlined style={{ fontSize: 16 }} />,
   'video-camera': <VideoCameraOutlined style={{ fontSize: 16 }} />,
@@ -35,6 +33,8 @@ interface PromptToolbarProps {
   onResolutionChange: (res: ResolutionOption) => void;
   selectedAspectRatio: string;
   onAspectRatioChange: (ratio: string) => void;
+  selectedQuality?: string;
+  onQualityChange?: (quality: string) => void;
   isGenerating?: boolean;
   onGenerate?: () => void;
   nodeType?: NodeType;
@@ -63,13 +63,13 @@ const ModelSelector = memo(function ModelSelector({
 
   return (
     <div className="relative">
-      {/* 触发按钮：✕ Lib Navo 2 ^ */}
+      {/* 触发按钮 */}
       <button
         className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer"
         onClick={() => setOpen(!open)}
       >
         <span className="text-gray-600">
-          {currentModel ? MODEL_ICON_MAP[currentModel.icon || ''] || <CloseOutlined style={{ fontSize: 14 }} /> : <CloseOutlined style={{ fontSize: 14 }} />}
+          {currentModel && currentModel.icon ? MODEL_ICON_MAP[currentModel.icon] : null}
         </span>
         <span className="text-[13px] font-medium text-gray-800">{currentModel?.label || '选择模型'}</span>
         <span className="text-[10px] text-gray-400 ml-0.5">^</span>
@@ -167,16 +167,26 @@ function RatioIcon({ value, active }: { value: string; active: boolean }) {
 const AspectRatioSelector = memo(function AspectRatioSelector({
   resolution,
   aspectRatio,
+  quality,
+  selectedModelId,
   onResolutionChange,
   onAspectRatioChange,
+  onQualityChange,
 }: {
   resolution: ResolutionOption;
   aspectRatio: string;
+  quality: string;
+  selectedModelId?: string;
   onResolutionChange: (r: ResolutionOption) => void;
   onAspectRatioChange: (r: string) => void;
+  onQualityChange: (q: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [quality, setQuality] = useState<string>('标准画质');
+
+  // 部分模型有最小像素要求，1K分辨率不足时禁用
+  const is1KDisabled = selectedModelId ? selectedModelId.startsWith('doubao-seedream') : false;
+  // 如果当前选了1K但模型要求更高，自动切到2K
+  const effectiveResolution = (is1KDisabled && resolution === '1K') ? '2K' : resolution;
 
   return (
     <div className="relative">
@@ -194,7 +204,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
         <span className="text-gray-300 text-[13px]">·</span>
         <span className="text-[13px] text-gray-500">{quality}</span>
         <span className="text-gray-300 text-[13px]">·</span>
-        <span className="text-[13px] text-gray-500">{resolution}</span>
+        <span className="text-[13px] text-gray-500">{effectiveResolution}</span>
         <span className="text-[10px] text-gray-400 ml-0.5">^</span>
       </button>
 
@@ -215,7 +225,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                         ? 'bg-white text-gray-800 border border-gray-900 shadow-sm'
                         : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
                     }`}
-                    onClick={() => setQuality(q)}
+                    onClick={() => onQualityChange(q)}
                   >
                     {q}
                   </button>
@@ -227,20 +237,31 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
             <div className="mb-4">
               <div className="text-[13px] font-medium text-gray-700 mb-2.5">清晰度</div>
               <div className="flex gap-2">
-                {RESOLUTION_OPTIONS.map((res) => (
-                  <button
-                    key={res}
-                    className={`flex-1 max-w-[90px] py-[6px] rounded-lg text-[12px] font-medium transition-all ${
-                      resolution === res
-                        ? 'bg-white text-gray-800 border border-gray-900 shadow-sm'
-                        : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
-                    }`}
-                    onClick={() => onResolutionChange(res)}
-                  >
-                    {res}
-                  </button>
-                ))}
+                {RESOLUTION_OPTIONS.map((res) => {
+                  const disabled = is1KDisabled && res === '1K';
+                  const isActive = effectiveResolution === res;
+                  return (
+                    <button
+                      key={res}
+                      className={`flex-1 max-w-[90px] py-[6px] rounded-lg text-[12px] font-medium transition-all ${
+                        isActive
+                          ? 'bg-white text-gray-800 border border-gray-900 shadow-sm'
+                          : disabled
+                            ? 'bg-gray-50 text-gray-300 border border-transparent cursor-not-allowed'
+                            : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
+                      }`}
+                      onClick={() => !disabled && onResolutionChange(res)}
+                      disabled={disabled}
+                    >
+                      {res}
+                      {disabled && <span className="ml-0.5 text-[9px] text-gray-400">✕</span>}
+                    </button>
+                  );
+                })}
               </div>
+              {is1KDisabled && (
+                <div className="text-[11px] text-amber-600 mt-1.5">当前模型不支持1K清晰度，已自动切换至2K</div>
+              )}
             </div>
 
             {/* 比例网格 */}
@@ -298,6 +319,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onResolutionChange,
   selectedAspectRatio,
   onAspectRatioChange,
+  selectedQuality = '标准画质',
+  onQualityChange,
   isGenerating = false,
   onGenerate,
   nodeType = 'image',
@@ -423,8 +446,11 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         <AspectRatioSelector
           resolution={selectedResolution}
           aspectRatio={selectedAspectRatio}
+          quality={selectedQuality}
+          selectedModelId={selectedModel}
           onResolutionChange={onResolutionChange}
           onAspectRatioChange={onAspectRatioChange}
+          onQualityChange={onQualityChange || (() => {})}
         />
       )}
 

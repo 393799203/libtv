@@ -1,8 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/gif"  // ✅ 只导入副作用：自动注册 GIF 解码器
+	_ "image/jpeg" // ✅ 只导入副作用：自动注册 JPEG 解码器
+	_ "image/png"  // ✅ 只导入副作用：自动注册 PNG 解码器
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -118,13 +124,35 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 
 	projectID := c.PostForm("project_id")
 
+	// ✅ 读取图片数据到 buffer，用于解码获取尺寸
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "读取文件失败")
+		return
+	}
+
+	// ✅ 解码图片获取实际尺寸
+	var width, height int
+	imgConfig, format, err := image.DecodeConfig(bytes.NewReader(imageData))
+	if err != nil {
+		// 解码失败时记录错误，使用默认尺寸（不应该影响上传流程）
+		log.Printf("[UploadImage] 图片解码失败: filename=%s size=%d bytes err=%v, 使用默认尺寸 1024×1024", header.Filename, len(imageData), err)
+		width = 1024
+		height = 1024
+	} else {
+		width = imgConfig.Width
+		height = imgConfig.Height
+		log.Printf("[UploadImage] 图片解码成功: filename=%s format=%s size=%d bytes dimensions=%d×%d", header.Filename, format, len(imageData), width, height)
+	}
+
 	// 没有项目ID时存到 images/，有项目ID时存到 canvas/项目ID/
 	dir := "images"
 	if projectID != "" {
 		dir = "canvas"
 	}
 
-	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+	// ✅ 使用 bytes.NewReader 重新创建 reader（因为前面的 ReadAll 已经读完了）
+	result, err := h.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), header.Filename, service.UploadOptions{
 		Dir:            dir,
 		ProjectID:      projectID,
 		AllowedExts:    service.ImageExts(),
@@ -135,11 +163,14 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		return
 	}
 
+	// ✅ 返回图片尺寸信息，统一数据格式
 	response.OKWithMsg(c, "上传成功", gin.H{
 		"url":          result.URL,
 		"storage_type": result.StorageType,
 		"filename":     result.ObjectName,
 		"cached":       result.Cached,
+		"width":        width,   // ✅ 图片宽度
+		"height":       height,  // ✅ 图片高度
 	})
 }
 

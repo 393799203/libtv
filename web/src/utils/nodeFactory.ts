@@ -55,6 +55,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         label: '剧本',
         content: '',
         prompt: '',
+        model: '',
       };
     case 'image':
       return {
@@ -63,9 +64,11 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         label: '图片',
         prompt: '',
         negativePrompt: '',
-        model: 'stable-diffusion',
-        width: 1024,
-        height: 1024,
+        model: '',
+        resolution: '1K',
+        aspectRatio: '16:9',
+        quality: '标准画质',
+        // width和height不设置默认值，让系统从resolution和aspectRatio计算
         imageUrl: undefined,
       };
     case 'video':
@@ -74,7 +77,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         type: 'video',
         label: '视频',
         prompt: '',
-        model: 'kling',
+        model: '',
         duration: 5,
         fps: 24,
         videoUrl: undefined,
@@ -88,7 +91,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         text: '',
         voice: 'default',
         speed: 1.0,
-        model: 'tts-1',
+        model: '',
         duration: 0,
         audioUrl: undefined,
       };
@@ -98,8 +101,12 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         type: 'script',
         label: '分镜脚本',
         prompt: '',
+        model: '',
         scriptContent: '',
         shots: [],
+        characters: [],
+        scenes: [],
+        props: [],
         currentStep: 1,
         author: undefined,
         createdAt: new Date().toISOString(),

@@ -65,7 +65,7 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
     const [generating, setGenerating] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // 模型选择状态（默认选中第一个模型，如果模型列表还未加载则使用空字符串）
+    // 模型选择状态
     const [selectedModel, setSelectedModel] = useState('');
     const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
@@ -73,14 +73,22 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const unsubscribeRef = useRef<(() => void) | null>(null);
 
-    // 当模型列表加载完成后，设置默认模型（优先选择标记为 default: true 的模型）
+    // 打开/切换资产时，从图片节点读取当前模型选中（仅在资产切换时触发，不随节点更新重置）
     useEffect(() => {
-      if (IMAGE_MODEL_OPTIONS.length > 0 && selectedModel === '') {
-        // 优先选择标记为 default 的模型，如果没有则选择第一个
-        const defaultModel = IMAGE_MODEL_OPTIONS.find(m => m.isDefault === true);
-        setSelectedModel(defaultModel ? defaultModel.value : IMAGE_MODEL_OPTIONS[0].value);
+      if (IMAGE_MODEL_OPTIONS.length > 0) {
+        // 读取当前图片节点的 model
+        const store = useCanvasStore.getState();
+        const nid = imageNodeId;
+        const node = nid ? store.nodes.find(n => n.id === nid) : null;
+        const nodeModel = node ? (node.data as any)?.model : undefined;
+        if (nodeModel && IMAGE_MODEL_OPTIONS.some(m => m.modelId === nodeModel)) {
+          setSelectedModel(nodeModel);
+        } else {
+          const defaultModel = IMAGE_MODEL_OPTIONS.find(m => m.isDefault === true);
+          setSelectedModel(defaultModel ? defaultModel.modelId : IMAGE_MODEL_OPTIONS[0].modelId);
+        }
       }
-    }, [IMAGE_MODEL_OPTIONS, selectedModel]);
+    }, [IMAGE_MODEL_OPTIONS, asset?.name, imageNodeId]);
 
     // 描述本地草稿 + 上一份已保存的描述（用于失焦比对）
     const [descriptionDraft, setDescriptionDraft] = useState('');
@@ -138,8 +146,9 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
         if (!file || !asset) return;
         setUploading(true);
         try {
-          const url = await uploadImage(file);
-          onUpload(asset.name, url);
+          // ✅ uploadImage 现在返回 { url, width, height }
+          const result = await uploadImage(file);
+          onUpload(asset.name, result.url);  // 使用 result.url
           message.success('上传成功');
         } catch {
           // HTTP 错误已由 api.ts 拦截器统一 message.error()
@@ -153,18 +162,16 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
 
     /**
      * 基于资产描述生成视图
-     * 使用新的 ID 映射机制，确保高性能和可靠性
+     * 流程：确保图片节点存在 → 把抽屉状态写入节点 → 保存画布 → 执行
      */
     const handleGenerate = useCallback(async () => {
       if (!asset) return;
 
-      // ✅ P0: 并发保护 - 防止重复点击
       if (generating) {
         message.warning('正在生成中，请稍候');
         return;
       }
 
-      // ✅ P1: 验证模型选择
       if (!selectedModel) {
         message.error('请先选择生成模型');
         return;
@@ -177,14 +184,13 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
         return;
       }
 
-      // 找到脚本节点
       const scriptNode = store.nodes.find(n => n.id === scriptNodeId);
       if (!scriptNode) {
         message.error('找不到脚本节点');
         return;
       }
 
-      // 清理之前的资源（防止重复点击时资源泄漏）
+      // 清理之前的资源
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
@@ -194,7 +200,6 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
         unsubscribeRef.current = null;
       }
 
-      // 立即显示loading状态
       setGenerating(true);
 
       const viewText =
@@ -204,33 +209,36 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
             ? '四视图'
             : '六视图';
 
-      // ✅ P2: 显示模型名称而非 ID
-      const modelName = IMAGE_MODEL_OPTIONS.find(m => m.value === selectedModel)?.label || selectedModel;
+      const modelName = IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel;
       message.loading({
         content: `正在使用 ${modelName} 生成${viewText}…`,
         key: 'gen',
         duration: 0,
       });
 
-      // ✅ 生成唯一的图片节点 ID（避免重复创建）
       const imageNodeId = generateAssetImageNodeId(assetType, asset.name, scriptNodeId);
 
       try {
-        // ✅ 使用新的同步工具创建图片节点并建立映射
-        const imageNode = createAssetImageNode(
-          scriptNodeId,
-          assetType,
-          asset.name,
-          undefined, // imageUrl 初始为空，等待 AI 生成
-          asset.description, // 后端会根据节点 ID 自动添加视图指令
-          selectedModel
-        );
-
-        if (!imageNode) {
-          throw new Error('创建图片节点失败');
+        // Step 1: 确保图片节点存在（不存在则创建）
+        const existingNode = store.nodes.find(n => n.id === imageNodeId);
+        if (!existingNode) {
+          const created = createAssetImageNode(
+            scriptNodeId,
+            assetType,
+            asset.name,
+          );
+          if (!created) {
+            throw new Error('创建图片节点失败');
+          }
         }
 
-        // 保存画布(让后端能看到节点状态)
+        // Step 2: 把抽屉状态（模型、提示词等）写入图片节点
+        useCanvasStore.getState().updateNodeData(imageNodeId, {
+          model: selectedModel,
+          prompt: asset.description || '',
+        } as any);
+
+        // Step 3: 保存画布（让后端能读到最新节点数据）
         const currentStore = useCanvasStore.getState();
         const viewport = currentStore._cache.get(projectId)?.savedViewport || { x: 0, y: 0, zoom: 1 };
         await canvasApi.saveCanvas(projectId, {
@@ -239,9 +247,9 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
           viewport,
         });
 
-        // 执行图片节点
+        // Step 4: 执行图片节点
         const resp = await workflowApi.execute(projectId, {
-          startNodeId: imageNode.id,
+          startNodeId: imageNodeId,
           mode: 'single',
         });
 
@@ -253,13 +261,13 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
         useExecutionStore.getState().addActiveStream({
           projectId,
           executionId: resp.executionId,
-          nodeId: imageNode.id,
+          nodeId: imageNodeId,
         });
 
         // 监听节点状态变化（使用 Zustand 订阅，实时响应）
         const unsubscribe = useCanvasStore.subscribe((state, prevState) => {
-          const node = state.nodes.find(n => n.id === imageNode.id);
-          const prevNode = prevState.nodes.find(n => n.id === imageNode.id);
+          const node = state.nodes.find(n => n.id === imageNodeId);
+          const prevNode = prevState.nodes.find(n => n.id === imageNodeId);
 
           // 只在节点数据变化时处理
           if (node && node !== prevNode) {
@@ -445,21 +453,19 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
               <div className="text-xs font-medium text-gray-700 mb-2">
                 {getImageLabel()}
               </div>
-              {/* ✅ 图片显示区域默认 16:9 比例（宽度 460px，高度约 260px） */}
               <div
-                className="relative w-full h-[260px] rounded-lg border border-gray-200 bg-gray-50 overflow-hidden group"
+                className="relative w-full h-[260px] rounded-lg border border-gray-200 bg-gray-50 group"
                 onClick={handleImageClick}
               >
-                {/* ✅ 使用从画布图片节点实时读取的 imageUrl */}
                 {imageUrl ? (
                   <>
                     <img
                       src={imageUrl}
                       alt={asset.name}
-                      className="w-full h-full object-contain bg-white"
+                      className="w-full h-full object-contain bg-white rounded-lg"
                     />
                     {/* 悬浮遮罩 */}
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer rounded-lg">
                       <span className="px-3 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700">
                         替换图片
                       </span>
@@ -489,7 +495,7 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
                         title="选择生成模型"
                       >
                         <span className="leading-none truncate max-w-[80px]">
-                          {IMAGE_MODEL_OPTIONS.find(m => m.value === selectedModel)?.label || selectedModel}
+                          {IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel}
                         </span>
                         <span className="text-[10px]">▼</span>
                       </button>
@@ -505,18 +511,18 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
                             }}
                           />
                           <div
-                            className="absolute top-full right-0 mt-1 w-[240px] bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-30"
+                            className="absolute top-full right-0 mt-1 w-[240px] max-h-[280px] overflow-y-auto bg-white rounded-lg shadow-xl border border-gray-200 z-30"
                             onClick={(e) => e.stopPropagation()}
                           >
                             {IMAGE_MODEL_OPTIONS.map((model) => (
                               <button
                                 key={model.value}
                                 className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
-                                  selectedModel === model.value ? 'bg-gray-100' : 'hover:bg-gray-50'
+                                  selectedModel === model.modelId ? 'bg-gray-100' : 'hover:bg-gray-50'
                                 }`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setSelectedModel(model.value);
+                                  setSelectedModel(model.modelId);
                                   setModelDropdownOpen(false);
                                 }}
                               >

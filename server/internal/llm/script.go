@@ -68,14 +68,31 @@ type scriptResponse struct {
 
 // GenerateStory 根据用户提示词生成故事剧本文本
 // 用于 TextNode：用户输入 prompt → LLM 生成故事 → 填充 content
-func GenerateStory(ctx context.Context, client *Client, userPrompt string) (string, error) {
-	resp, err := client.Chat(
-		ctx,
-		StorySystemPrompt,
-		BuildStoryUserPrompt(userPrompt),
-		WithTemperature(0.8),
-		WithMaxTokens(4096),
-	)
+func GenerateStory(ctx context.Context, client *Client, userPrompt string, model string) (string, error) {
+	var resp *ChatResponse
+	var err error
+
+	if model != "" {
+		// 使用指定的模型
+		resp, err = client.ChatWithModel(
+			ctx,
+			model,
+			StorySystemPrompt,
+			BuildStoryUserPrompt(userPrompt),
+			WithTemperature(0.8),
+			WithMaxTokens(4096),
+		)
+	} else {
+		// 使用默认模型
+		resp, err = client.Chat(
+			ctx,
+			StorySystemPrompt,
+			BuildStoryUserPrompt(userPrompt),
+			WithTemperature(0.8),
+			WithMaxTokens(4096),
+		)
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("llm chat: %w", err)
 	}
@@ -85,6 +102,10 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string) (stri
 	}
 
 	content := resp.Choices[0].Message.Content
+	// DeepSeek 推理模型：如果 content 为空但 reasoning_content 有值，使用 reasoning_content
+	if content == "" && resp.Choices[0].Message.ReasoningContent != "" {
+		content = resp.Choices[0].Message.ReasoningContent
+	}
 
 	// 清理可能的 markdown 包裹
 	content = cleanMarkdownBlock(content)
@@ -93,14 +114,31 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string) (stri
 }
 
 // GenerateScript 从文本内容生成结构化分镜剧本（后续脚本节点用）
-func GenerateScript(ctx context.Context, client *Client, textContent string) (*ScriptResult, error) {
-	resp, err := client.Chat(
-		ctx,
-		ScriptSystemPrompt,
-		BuildScriptUserPrompt(textContent),
-		WithTemperature(0.7),
-		WithMaxTokens(8192),
-	)
+func GenerateScript(ctx context.Context, client *Client, textContent string, model string) (*ScriptResult, error) {
+	var resp *ChatResponse
+	var err error
+
+	if model != "" {
+		// 使用指定的模型
+		resp, err = client.ChatWithModel(
+			ctx,
+			model,
+			ScriptSystemPrompt,
+			BuildScriptUserPrompt(textContent),
+			WithTemperature(0.7),
+			WithMaxTokens(8192),
+		)
+	} else {
+		// 使用默认模型
+		resp, err = client.Chat(
+			ctx,
+			ScriptSystemPrompt,
+			BuildScriptUserPrompt(textContent),
+			WithTemperature(0.7),
+			WithMaxTokens(8192),
+		)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("llm chat: %w", err)
 	}
@@ -110,6 +148,10 @@ func GenerateScript(ctx context.Context, client *Client, textContent string) (*S
 	}
 
 	content := resp.Choices[0].Message.Content
+	// DeepSeek 推理模型：如果 content 为空但 reasoning_content 有值，使用 reasoning_content
+	if content == "" && resp.Choices[0].Message.ReasoningContent != "" {
+		content = resp.Choices[0].Message.ReasoningContent
+	}
 
 	// 清理可能的 markdown 代码块包裹
 	content = cleanJSONMarkdown(content)

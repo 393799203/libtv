@@ -46,8 +46,8 @@ export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> =
 export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   image: {
     acceptedInputs: ['image', 'text', 'script'],
-    defaultModel: 'kolors-default',  // 默认模型 ID
-    defaultResolution: '1K',
+    defaultModel: 'qwen-image-2.0',  // 默认模型 ID（华数TokenHub）
+    defaultResolution: '2K',
     defaultAspectRatio: '16:9',
     availableModels: [],  // 空数组，由组件从 Store 动态获取
     toolbarControls: ['model', 'aspectRatio', 'negativePrompt', 'count', 'tokenCount'],
@@ -86,7 +86,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   },
   script: {
     acceptedInputs: ['text'],
-    defaultModel: 'deepseek-v4-flash',
+    defaultModel: 'script-default',
     defaultResolution: '1K',
     defaultAspectRatio: 'free',
     availableModels: [],

@@ -28,6 +28,7 @@ export interface TextNodeData extends BaseNodeFields, Record<string, unknown> {
   label: string;
   content: string;       // 节点展示的内容（由AI生成或手动编辑）
   prompt: string;        // 提示词（用户输入，用于AI生成内容）
+  model: string;         // 文本生成模型
   isEditing?: boolean;
 }
 
@@ -38,9 +39,12 @@ export interface ImageNodeData extends BaseNodeFields, Record<string, unknown> {
   prompt: string;
   negativePrompt?: string;
   model: string;
-  width: number;
-  height: number;
+  resolution?: string;  // 清晰度：'1K' | '2K' | '4K'
+  aspectRatio?: string;  // 比例：'16:9' | '9:16' | '1:1' 等
+  quality?: string;     // 画质：'低画质' | '标准画质' | '高画质'
   imageUrl?: string;
+  width?: number;       // 实际图片宽度（从后端生成结果获取）
+  height?: number;      // 实际图片高度（从后端生成结果获取）
 }
 
 // 视频生成模式
@@ -78,6 +82,7 @@ export interface ScriptNodeData extends BaseNodeFields, Record<string, unknown> 
   type: 'script';
   label: string;
   prompt: string;         // 用户输入的提示词（用于生成剧本）
+  model: string;          // 脚本生成模型
   scriptContent: string;  // 生成的剧本正文
   shots: ScriptShot[];    // 生成的分镜列表
   characters: ScriptCharacter[]; // 角色列表

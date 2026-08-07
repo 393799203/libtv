@@ -124,11 +124,15 @@ export function useExecutionStream(
           if (status === 'done' || status === 'failed') {
             const finalStatus = status === 'done' ? ('success' as const) : ('failed' as const);
 
+            // ✅ 提取错误消息（用于显示在节点上）
+            const errorMsg = exec.error_msg;
+
             // 如果后端返回了节点数据，直接更新该节点
             if (nodeId && exec.node_data) {
               store.updateNodeData(nodeId, {
                 ...exec.node_data,
                 status: finalStatus,
+                error: finalStatus === 'failed' ? errorMsg : undefined,  // ✅ 保存错误消息到节点error字段
                 progressMessage: undefined,
               } as never);
             }
@@ -139,6 +143,7 @@ export function useExecutionStream(
               if (s === 'running' || s === 'pending') {
                 store.updateNodeData(n.id, {
                   status: finalStatus,
+                  error: finalStatus === 'failed' ? errorMsg : undefined,  // ✅ 保存错误消息到节点error字段
                   progressMessage: undefined,
                 } as never);
               }
@@ -203,6 +208,8 @@ export function useExecutionStream(
             scenes?: unknown[];
             props?: unknown[];
             imageUrl?: string;
+            width?: number;    // ✅ 图片宽度
+            height?: number;   // ✅ 图片高度
             videoUrl?: string;
             audioUrl?: string;
           };
@@ -217,6 +224,8 @@ export function useExecutionStream(
           if (data.scenes !== undefined) updates.scenes = data.scenes;
           if (data.props !== undefined) updates.props = data.props;
           if (data.imageUrl !== undefined) updates.imageUrl = data.imageUrl;
+          if (data.width !== undefined) updates.width = data.width;      // ✅ 保存图片宽度
+          if (data.height !== undefined) updates.height = data.height;   // ✅ 保存图片高度
           if (data.videoUrl !== undefined) updates.videoUrl = data.videoUrl;
           if (data.audioUrl !== undefined) updates.audioUrl = data.audioUrl;
           updates.stale = false;
@@ -234,6 +243,25 @@ export function useExecutionStream(
             status: 'failed',
             error: errMsg,
           } as never);
+        } else if (event.type === 'execution_failed') {
+          // ✅ 处理execution_failed事件（整体执行失败）
+          // ✅ 兼容两种字段名：error（WorkflowEvent格式）和errorMsg（GetExecution API格式）
+          const errMsg =
+            (event.data as { error?: string } | undefined)?.error ||
+            (event.data as { errorMsg?: string } | undefined)?.errorMsg ||
+            '执行失败';
+          // ✅ 更新所有running/pending状态的节点为failed
+          const store = useCanvasStore.getState();
+          store.nodes.forEach((n) => {
+            const s = n.data.status;
+            if (s === 'running' || s === 'pending') {
+              store.updateNodeData(n.id, {
+                status: 'failed',
+                error: errMsg,
+                progressMessage: undefined,
+              } as never);
+            }
+          });
         } else if (event.type === 'node_started' && event.nodeId) {
           useCanvasStore.getState().updateNodeData(event.nodeId, {
             status: 'running',

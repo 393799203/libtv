@@ -1,4 +1,4 @@
-import { memo, useRef, useCallback, useMemo } from 'react';
+import { memo, useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import type { NodeProps, Node } from '@xyflow/react';
 import {
   PictureOutlined,
@@ -29,6 +29,32 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 风格节点使用粉色主题
   const styleColor = isStyleNode ? '#ec4899' : undefined;
 
+  // 图片尺寸：优先使用data中的值（后端返回），否则通过加载图片获取（fallback）
+  const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
+
+  // 最终尺寸：data中有值就用data的，否则用加载获取的
+  const imageWidth = data.width || loadedSize?.width;
+  const imageHeight = data.height || loadedSize?.height;
+
+  // Fallback：如果data中没有width/height，通过加载图片获取尺寸
+  useEffect(() => {
+    if (data.imageUrl && !data.width && !data.height) {
+      const img = new window.Image();
+      img.onload = () => {
+        setLoadedSize({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      };
+      img.onerror = () => {
+        setLoadedSize(null);
+      };
+      img.src = data.imageUrl;
+    } else {
+      setLoadedSize(null);
+    }
+  }, [data.imageUrl, data.width, data.height]);
+
   // 图片上传（上传到服务端 public/canvas/{projectId}/ 目录）
   const handleUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -36,17 +62,13 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
       if (!file) return;
 
       try {
-        const url = await uploadImage(file, projectId || undefined);
-        // 获取图片尺寸
-        const img = new window.Image();
-        img.onload = () => {
-          useCanvasStore.getState().updateNodeData(id, {
-            imageUrl: url,
-            width: img.naturalWidth,
-            height: img.naturalHeight,
-          } as Partial<ImageNodeData>);
-        };
-        img.src = url;
+        // ✅ 后端现在返回 url + width + height，统一数据格式
+        const result = await uploadImage(file, projectId || undefined);
+        useCanvasStore.getState().updateNodeData(id, {
+          imageUrl: result.url,
+          width: result.width,    // ✅ 保存宽度
+          height: result.height,  // ✅ 保存高度
+        } as Partial<ImageNodeData>);
       } catch (err) {
         console.error('图片上传失败:', err);
         // HTTP 错误已由 api.ts 拦截器统一 message.error()，此处仅兜底非 HTTP 错误
@@ -57,7 +79,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
 
       if (fileInputRef.current) fileInputRef.current.value = '';
     },
-    [id]
+    [id, projectId]
   );
 
   // 已有图片时，创建下游节点用于图生图
@@ -88,11 +110,11 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         </span>
       );
     }
-    if (data.imageUrl) {
+    if (data.imageUrl && imageWidth && imageHeight) {
       return (
         <div className="flex items-center gap-2 flex-shrink-0 ml-2">
           <span className="text-[11px] text-gray-400">
-            {data.width} × {data.height}
+            {imageWidth} × {imageHeight}
           </span>
           <button
             className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
@@ -117,12 +139,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         上传
       </button>
     );
-  }, [data.imageUrl, data.width, data.height, handleCreateDownstream]);
+  }, [data.imageUrl, imageWidth, imageHeight, handleCreateDownstream, isStyleNode]);
 
-  // 计算图片容器高度：优先使用 ReactFlow 测量的实际高度，否则按280px宽度等比例缩放
+  // 计算图片容器高度：使用图片的实际尺寸等比例缩放
   const imageContainerHeight = 
-    (data.imageUrl && data.width && data.height
-      ? Math.round(280 * data.height / data.width) // 按节点宽度280px等比例缩放
+    (data.imageUrl && imageWidth && imageHeight
+      ? Math.round(280 * imageHeight / imageWidth) // 按节点宽度280px等比例缩放
       : 190);
 
   return (

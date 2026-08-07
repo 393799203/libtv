@@ -7,85 +7,161 @@
 models:
   # ---------- LLM / 文本生成 ----------
   llm:
-    # 剧本生成（文本节点 → 脚本节点）
-    - id: script-default
-      name: "DeepSeek V4 Flash"
-      provider: siliconflow
-      model_id: "deepseek-ai/DeepSeek-V4-Flash"
-      usage: [script]
-      max_tokens: 8192
-      temperature: 0.7
-      description: "硅基流动 DeepSeek-V4-Flash，适合剧本分镜生成"
-
-    # 通用文本（用于提示词生成等）
+    # DeepSeek V4 Flash - 华数TokenHub接入，支持文本生成、剧本分镜、提示词生成
     - id: deepseek-v4-flash
       name: "DeepSeek V4 Flash"
-      provider: siliconflow
-      model_id: "deepseek-ai/DeepSeek-V4-Flash"
-      usage: [text]
-      max_tokens: 4096
+      provider: wasu
+      model_id: "deepseek-v4-flash"
+      usage: [text, script]  # ✅ 同时支持文本节点和脚本节点
+      max_tokens: 8192       # ✅ 使用更大的 tokens，兼容剧本生成需求
       temperature: 0.7
-      description: "硅基流动 DeepSeek-V4-Flash，适合文本生成和提示词生成"
-      default: true  # ✅ 默认选中此模型
+      description: "DeepSeek V4 Flash（华数TokenHub），适合文本生成、剧本分镜和提示词生成"
+      default: true          # ✅ 默认选中此模型
 
-    # 图像提示词优化（预留）
-    - id: prompt-refine
-      name: "DeepSeek V4 Flash"
-      provider: siliconflow
-      model_id: "deepseek-ai/DeepSeek-V4-Flash"
-      usage: [image_prompt, video_prompt]
-      max_tokens: 2048
-      temperature: 0.5
-      description: "硅基流动 DeepSeek-V4-Flash，适合图像/视频提示词优化"
+    - id: deepseek-v4-pro
+      name: "DeepSeek V4 Pro"
+      provider: wasu
+      model_id: "deepseek-v4-pro"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "DeepSeek V4 Pro（华数TokenHub），推理能力更强，适合复杂剧本和提示词生成"
 
-  # ---------- 图像生成 ----------
+    - id: qwen3.6-plus
+      name: "Qwen 3.6 Plus"
+      provider: wasu
+      model_id: "qwen3.6-plus"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "通义千问3.6增强版（华数TokenHub），中文能力强"
+
+    - id: qwen3.6-flash
+      name: "Qwen 3.6 Flash"
+      provider: wasu
+      model_id: "qwen3.6-flash"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "通义千问3.6快速版（华数TokenHub），响应速度快"
+
+    - id: glm-5.1
+      name: "GLM-5.1"
+      provider: wasu
+      model_id: "glm-5.1"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "智谱GLM-5.1（华数TokenHub），综合能力均衡"
+
+    - id: kimi-k2.6
+      name: "Kimi K2.6"
+      provider: wasu
+      model_id: "kimi-k2.6"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "Kimi K2.6（华数TokenHub），长文本理解能力强"
+
+    - id: doubao-seed-2.0-pro
+      name: "豆包 Seed 2.0 Pro"
+      provider: wasu
+      model_id: "doubao-seed-2.0-pro"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "字节豆包Seed 2.0 Pro（华数TokenHub），综合能力强"
+
+    - id: doubao-seed-2.0-lite
+      name: "豆包 Seed 2.0 Lite"
+      provider: wasu
+      model_id: "doubao-seed-2.0-lite"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "字节豆包Seed 2.0 Lite（华数TokenHub），轻量快速"
+
+    - id: doubao-seed-2.0-mini
+      name: "豆包 Seed 2.0 Mini"
+      provider: wasu
+      model_id: "doubao-seed-2.0-mini"
+      usage: [text, script]
+      max_tokens: 8192
+      temperature: 0.7
+      description: "字节豆包Seed 2.0 Mini（华数TokenHub），极速轻量"
+
+  # ---------- 图像生成（华数TokenHub）----------
   image:
-    - id: seedream-5.0-lite
-      name: "Doubao-Seedream-5.0-lite"
-      provider: siliconflow
-      model_id: "doubao/seedream-5.0-lite"
+    - id: qwen-image-2.0
+      name: "Qwen Image 2.0"
+      provider: wasu
+      model_id: "qwen-image-2.0"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包图像生成模型，适合角色/场景/道具图生成"
+      description: "通义千问图像2.0（华数TokenHub），适合角色/场景/道具图生成"
+      default: true  # 默认选中此模型
       parameters:
-        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
-        height: 720
-        steps: 25
-        guidance_scale: 7.5
+        width: 1920   # ✅ 16:9 比例，适合视频分镜场景
+        height: 1080
 
-    - id: qwen-image
-      name: "Qwen/Qwen-Image"
-      provider: siliconflow
-      model_id: "Qwen/Qwen-Image"
+    - id: qwen-image-2.0-pro
+      name: "Qwen Image 2.0 Pro"
+      provider: wasu
+      model_id: "qwen-image-2.0-pro"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "通义千问图像生成模型，适合角色/场景/道具图生成"
-      parameters:
-        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
-        height: 720
-        steps: 25
-        guidance_scale: 7.5
+      description: "通义千问图像2.0专业版（华数TokenHub），画质更高"
 
-    - id: z-image-turbo
-      name: "Tongyi-MAI/Z-Image-Turbo"
-      provider: siliconflow
-      model_id: "Tongyi-MAI/Z-Image-Turbo"
+    - id: wan2.7-image
+      name: "Wan 2.7 Image"
+      provider: wasu
+      model_id: "wan2.7-image"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "阿里通义图像生成模型，适合角色/场景/道具图生成"
-      default: true  # ✅ 默认选中此模型
-      parameters:
-        width: 1280   # ✅ 默认 16:9 比例，适合视频分镜场景
-        height: 720
-        steps: 25
-        guidance_scale: 7.5
+      description: "万象2.7图像生成（华数TokenHub），适合创意图像生成"
+
+    - id: wan2.7-image-pro
+      name: "Wan 2.7 Image Pro"
+      provider: wasu
+      model_id: "wan2.7-image-pro"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "万象2.7图像专业版（华数TokenHub），画质更高"
+
+    - id: doubao-seedream-4.0
+      name: "豆包 Seedream 4.0"
+      provider: wasu
+      model_id: "doubao-seedream-4.0"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "字节豆包Seedream 4.0（华数TokenHub），综合图像生成"
+
+    - id: doubao-seedream-4.5
+      name: "豆包 Seedream 4.5"
+      provider: wasu
+      model_id: "doubao-seedream-4.5"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "字节豆包Seedream 4.5（华数TokenHub），画质提升"
+
+    - id: doubao-seedream-5.0-lite
+      name: "豆包 Seedream 5.0 Lite"
+      provider: wasu
+      model_id: "doubao-seedream-5.0-lite"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "字节豆包Seedream 5.0轻量版（华数TokenHub），生成速度快"
 
   # ---------- 视频生成（预留）----------
   video:
-    - id: video-default
+    - id: kling-2.0
       name: "Kling 2.0"
       provider: kling
       model_id: "kling-2.0"
@@ -93,7 +169,7 @@ models:
 
   # ---------- 音频 / TTS（预留）----------
   audio:
-    - id: audio-default
+    - id: edge-tts
       name: "Edge TTS"
       provider: edge_tts
       model_id: "edge-tts"
@@ -104,9 +180,13 @@ models:
 #  Provider 定义（运行时凭据在 config.yaml）
 # ============================================
 providers:
-  siliconflow:
+  wasu:
     type: openai_compatible
-    base_url_template: "https://api.siliconflow.cn/v1"
+    base_url_template: "https://token.wasu.cn/v1"
+
+  deepseek:
+    type: openai_compatible
+    base_url_template: "https://api.deepseek.com/v1"
 
   openai:
     type: openai_compatible

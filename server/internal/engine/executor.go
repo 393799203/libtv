@@ -1,10 +1,13 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -471,6 +474,7 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	var data struct {
 		Content string `json:"content"`
 		Prompt  string `json:"prompt"`
+		Model   string `json:"model"`
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse text node data: %w", err)
@@ -491,8 +495,8 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 		}, nil
 	}
 
-	// 调用 LLM 生成故事文本
-	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput)
+	// 调用 LLM 生成故事文本（直接使用data.Model作为model_id）
+	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
 		return nil, fmt.Errorf("generate story: %w", err)
 	}
@@ -516,41 +520,76 @@ func NewScriptExecutor(client *llm.Client) *ScriptExecutor {
 
 func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
-		Prompt        string `json:"prompt"`
-		ScriptContent string `json:"scriptContent"`
+		Prompt        string          `json:"prompt"`
+		Model         string          `json:"model"`
+		ScriptContent string          `json:"scriptContent"`
+		Mentions      json.RawMessage `json:"mentions"` // ✅ 添加 Mentions 字段，用于用户明确@引用的上游节点
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse script node data: %w", err)
 	}
 
-	// 收集上游节点已保存的 data（来自画布，不依赖上游是否在本轮被执行）
-	// 优先读上游的 data.content（持久化结果），其次尝试读本轮 execCtx.output（罕见）
+	// ✅ 解析 mentions 字段，提取用户明确@引用的节点ID
+	// 根据nodeId从节点data中提取完整content，而不是使用截断的textSnippet（前端预览用）
 	var upstreamText strings.Builder
-	for _, srcID := range execCtx.GetUpstreamSources(node.ID) {
-		// 1) 优先：从已保存的画布 data 读 content（即便上游没跑也能拿到上次结果）
-		if raw, ok := execCtx.GetNodeData(srcID); ok && len(raw) > 0 {
-			var nd struct {
-				Content string `json:"content"`
-			}
-			if err := json.Unmarshal(raw, &nd); err == nil && nd.Content != "" {
-				if upstreamText.Len() > 0 {
-					upstreamText.WriteString("\n\n")
+	var mentions []struct {
+		NodeID      string `json:"nodeId"`
+		NodeType    string `json:"nodeType"`
+		TextSnippet string `json:"textSnippet"` // 前端预览用（后端不使用）
+	}
+	// ✅ 记录用户@引用了哪些文本节点，用于错误提示
+	var referencedTextNodes []string // 引用的文本节点ID列表
+	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
+		for _, m := range mentions {
+			// ✅ 只处理用户明确@引用的文本节点
+			if m.NodeType == "text" {
+				referencedTextNodes = append(referencedTextNodes, m.NodeID)
+				// ✅ 根据nodeId从节点data中提取完整content（支持实时更新）
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						Content string `json:"content"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil && nd.Content != "" {
+						if upstreamText.Len() > 0 {
+							upstreamText.WriteString("\n\n")
+						}
+						upstreamText.WriteString(nd.Content) // ✅ 完整剧本正文（不截断）
+					}
 				}
-				upstreamText.WriteString(nd.Content)
-				continue
-			}
-		}
-		// 2) 兜底：读本轮执行输出
-		if out, ok := execCtx.GetOutput(srcID); ok && out != nil {
-			if content, ok := out.Data["content"].(string); ok && content != "" {
-				if upstreamText.Len() > 0 {
-					upstreamText.WriteString("\n\n")
-				}
-				upstreamText.WriteString(content)
 			}
 		}
 	}
-	material := truncateStr(upstreamText.String(), 3000)
+	material := upstreamText.String() // ✅ 直接使用完整内容（不截断）
+
+	// ✅ 如果用户@引用了文本节点，但提取不到任何剧本内容，返回错误提示
+	if len(referencedTextNodes) > 0 && material == "" {
+		return nil, fmt.Errorf("您引用的上游剧本节点没有内容，请确保剧本节点已生成或上传剧本内容（引用的节点ID: %s）", strings.Join(referencedTextNodes, ", "))
+	}
+
+	// ✅ 检查用户是否连接了上游剧本节点但没有@引用
+	// 场景1：上游输入栏有剧本节点，但提示词中没有@引用
+	upstreamSources := execCtx.GetUpstreamSources(node.ID)
+	var hasUpstreamTextNode bool // 是否连接了上游text节点
+	for _, srcID := range upstreamSources {
+		if raw, ok := execCtx.GetNodeData(srcID); ok && len(raw) > 0 {
+			var nd struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(raw, &nd); err == nil && nd.Type == "text" {
+				hasUpstreamTextNode = true
+				break
+			}
+		}
+	}
+	// ✅ 如果连接了上游text节点，但没有@引用任何text节点，返回错误提示
+	if hasUpstreamTextNode && len(referencedTextNodes) == 0 {
+		return nil, fmt.Errorf("您已连接上游剧本节点，但未在提示词中通过@引用使用剧本内容，请点击上游输入栏插入@引用")
+	}
+
+	// ✅ 场景2：没有连接任何上游节点，也没有输入提示词
+	if len(upstreamSources) == 0 && data.Prompt == "" {
+		return nil, fmt.Errorf("请连接上游剧本节点并在提示词中通过@引用，或直接输入创作提示词")
+	}
 
 	// 既没有上游文本也没有用户 prompt：透传保留的 scriptContent
 	if material == "" && data.Prompt == "" {
@@ -595,8 +634,9 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 		}
 	}
 
-	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d", node.ID, len(material), len(cleanedPrompt), len(fullInput))
-	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput)
+	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d model=%s", node.ID, len(material), len(cleanedPrompt), len(fullInput), data.Model)
+	// 调用 LLM 生成分镜剧本（直接使用data.Model作为model_id）
+	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
 		return nil, fmt.Errorf("generate script: %w", err)
 	}
@@ -659,33 +699,115 @@ func getAssetTypeFromNodeID(nodeID string) string {
 	return "" // 普通图片节点
 }
 
-// ImageExecutor 图像节点执行器(调用硅基流动图像生成API)
+// ImageExecutor 图像节点执行器（调用图像生成API）
 type ImageExecutor struct {
-	imageClient      *llm.ImageClient
-	modelManager     *llm.ModelManager
+	imageClient       *llm.ImageClient
+	modelManager      *llm.ModelManager
 	fileUploadService *service.FileUploadService
 }
 
 // NewImageExecutor 创建图像执行器
 func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ImageExecutor {
 	return &ImageExecutor{
-		imageClient:      client,
-		modelManager:     modelManager,
+		imageClient:       client,
+		modelManager:      modelManager,
 		fileUploadService: fileUploadService,
 	}
 }
 
 func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
-		Mode   string `json:"mode"`
-		Prompt string `json:"prompt"`
-		Model  string `json:"model"`
-		Width  int    `json:"width"`
-		Height int    `json:"height"`
+		Mode        string          `json:"mode"`
+		Prompt      string          `json:"prompt"`
+		Model       string          `json:"model"`
+		Resolution  string          `json:"resolution"`  // 清晰度：1K/2K/4K
+		AspectRatio string          `json:"aspectRatio"` // 比例：16:9/9:16/1:1等
+		Quality     string          `json:"quality"`     // 画质：低画质/标准画质/高画质
+		Mentions    json.RawMessage `json:"mentions"`    // ✅ 添加 Mentions 字段，用于用户明确@引用的上游节点
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse image node data: %w", err)
 	}
+
+	// ✅ 解析 mentions 字段，提取用户明确@引用的节点ID
+	// 根据nodeId从节点data中提取完整imageUrl，而不是直接使用mentions中的imageUrl（前端预览用）
+	var upstreamImageURL string
+	var mentions []struct {
+		NodeID   string `json:"nodeId"`
+		NodeType string `json:"nodeType"`
+		ImageUrl string `json:"imageUrl"` // 前端预览用（后端不使用）
+	}
+
+	// ✅ 详细日志：打印mentions字段内容（用于调试图生图判断逻辑）
+	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（开始） ========== ")
+	log.Printf("[ImageExecutor] 当前节点ID: %s", node.ID)
+	log.Printf("[ImageExecutor] data.Mentions字段: %s", string(data.Mentions))
+
+	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
+		log.Printf("[ImageExecutor] mentions解析成功，找到%d个引用", len(mentions))
+		for idx, m := range mentions {
+			log.Printf("[ImageExecutor] mentions[%d]: nodeId=%s nodeType=%s imageUrl=%s", idx, m.NodeID, m.NodeType, m.ImageUrl)
+			// ✅ 只处理用户明确@引用的图片节点
+			if m.NodeType == "image" {
+				// ✅ 根据nodeId从节点data中提取完整imageUrl（支持实时更新）
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						ImageUrl string `json:"imageUrl"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
+						upstreamImageURL = nd.ImageUrl // ✅ 完整图片URL
+						log.Printf("[ImageExecutor] ✅ 从@引用的图片节点提取到URL: nodeId=%s imageUrl=%s", m.NodeID, upstreamImageURL)
+						break // 只取第一个，避免多张图片导致的逻辑复杂化
+					} else {
+						log.Printf("[ImageExecutor] ❌ @引用的图片节点没有imageUrl: nodeId=%s raw=%s", m.NodeID, string(raw))
+					}
+				} else {
+					log.Printf("[ImageExecutor] ❌ @引用的图片节点找不到数据: nodeId=%s", m.NodeID)
+				}
+			}
+		}
+	} else {
+		log.Printf("[ImageExecutor] ❌ mentions解析失败: err=%v", err)
+	}
+
+	if upstreamImageURL != "" {
+		log.Printf("[ImageExecutor] ✅ 最终结果：检测到用户@引用的上游图片: upstreamImageURL=%s", upstreamImageURL)
+	} else {
+		log.Printf("[ImageExecutor] ⚠️ 没有找到@引用的图片，尝试fallback逻辑（查找上游连接的图片节点）")
+		// ✅ 如果用户没有明确@引用图片，但当前节点有上游连接的图片节点，默认使用第一个上游图片作为参考图
+		// 这符合直觉：用户通过画布连接上游图片节点，本身就表示"基于上游图片生成"
+		upstreamSources := execCtx.GetUpstreamSources(node.ID)
+		log.Printf("[ImageExecutor] 上游节点列表: %v", upstreamSources)
+
+		for idx, sourceNodeID := range upstreamSources {
+			log.Printf("[ImageExecutor] 检查上游节点[%d]: nodeId=%s", idx, sourceNodeID)
+			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
+				var nd struct {
+					Type     string `json:"type"`     // 节点类型
+					ImageUrl string `json:"imageUrl"` // 图片URL
+				}
+				if err := json.Unmarshal(raw, &nd); err == nil {
+					log.Printf("[ImageExecutor] 上游节点数据: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
+					// ✅ 检查是否是图片节点（通过type字段或imageUrl字段判断）
+					if nd.Type == "image" || nd.ImageUrl != "" {
+						upstreamImageURL = nd.ImageUrl
+						log.Printf("[ImageExecutor] ✅ 默认使用上游连接的图片作为参考图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, upstreamImageURL)
+						break // 只取第一个上游图片，避免多张图片导致的逻辑复杂化
+					} else {
+						log.Printf("[ImageExecutor] ❌ 上游节点不是图片节点: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
+					}
+				} else {
+					log.Printf("[ImageExecutor] ❌ 上游节点数据解析失败: nodeId=%s", sourceNodeID)
+				}
+			} else {
+				log.Printf("[ImageExecutor] ❌ 上游节点找不到数据: nodeId=%s", sourceNodeID)
+			}
+		}
+	}
+
+	// ✅ 最终判断结果
+	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（结束） ========== ")
+	log.Printf("[ImageExecutor] 最终结果: upstreamImageURL=%s (是否使用图生图=%v)", upstreamImageURL, upstreamImageURL != "")
 
 	// 没有提示词时直接返回空结果
 	if data.Prompt == "" {
@@ -710,33 +832,19 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}, nil
 	}
 
-	// ✅ 尺寸参数优先级：
-	// 1. 节点数据中的 width/height（用户通过图片节点编辑弹窗设置的）
-	// 2. 模型配置中的默认参数（models.yaml 中的 parameters.width/height）
-	// 3. 系统默认值 1024x1024
+	// ✅ 尺寸参数：从 resolution + aspectRatio 计算
+	// 前端保存时确保这两个字段必有值
 	var width, height int
 
-	// 优先使用节点数据中的尺寸
-	if data.Width > 0 && data.Height > 0 {
-		width = data.Width
-		height = data.Height
-	} else if i.modelManager != nil && data.Model != "" {
-		// 否则尝试从模型配置中读取默认尺寸
-		modelConfig := i.modelManager.FindModelByID(data.Model)
-		if modelConfig != nil {
-			if w, ok := modelConfig.Parameters["width"].(int); ok && w > 0 {
-				width = w
-			}
-			if h, ok := modelConfig.Parameters["height"].(int); ok && h > 0 {
-				height = h
-			}
-		}
-	}
-
-	// 如果仍然没有尺寸，使用系统默认值
-	if width == 0 || height == 0 {
-		width = 1024
-		height = 1024
+	if data.Resolution != "" && data.AspectRatio != "" {
+		// 根据分辨率和比例计算尺寸
+		width, height = calculateSizeFromResolutionAndRatio(data.Resolution, data.AspectRatio)
+		log.Printf("[ImageExecutor] 从分辨率和比例计算尺寸: resolution=%s aspectRatio=%s -> %dx%d", data.Resolution, data.AspectRatio, width, height)
+	} else {
+		// 如果节点没有保存resolution/aspectRatio（异常情况），使用系统默认值
+		width = 1920
+		height = 1080
+		log.Printf("[ImageExecutor] 使用系统默认尺寸: %dx%d", width, height)
 	}
 
 	size := fmt.Sprintf("%dx%d", width, height)
@@ -754,87 +862,117 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 普通图片节点: nodeID=%s", node.ID)
 	}
 
-	// 确定使用的模型 ID（传递给硅基流动 API）
-	// 前端传递的是 model.ID，需要转换为 model_id
-	apiModelID := "Tongyi-MAI/Z-Image-Turbo" // 默认值
+	// 确定使用的模型 ID（传递给图像生成 API）
+	apiModelID := data.Model
 
-	if data.Model != "" && i.modelManager != nil {
-		// 根据 model.ID 查找模型配置
-		modelConfig := i.modelManager.FindModelByID(data.Model)
-		if modelConfig != nil && modelConfig.ModelID != "" {
-			apiModelID = modelConfig.ModelID
-			log.Printf("[ImageExecutor] 找到模型配置: ID=%s -> ModelID=%s", data.Model, apiModelID)
-		} else {
-			log.Printf("[ImageExecutor] 未找到模型配置或 ModelID 为空: modelID=%s，使用默认模型", data.Model)
+	// 华数TokenHub部分模型有最小像素要求，自动提升分辨率
+	minPixels := getModelMinPixels(apiModelID)
+	if minPixels > 0 && width*height < minPixels {
+		log.Printf("[ImageExecutor] 模型%s要求最小%d像素，当前%d像素(%dx%d)，自动提升", apiModelID, minPixels, width*height, width, height)
+		width, height = upscaleToMinPixels(width, height, minPixels)
+		size = fmt.Sprintf("%dx%d", width, height)
+		log.Printf("[ImageExecutor] 提升后尺寸: %dx%d (%d像素)", width, height, width*height)
+	}
+
+	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s size=%s hasRefImage=%v", node.ID, len(finalPrompt), apiModelID, size, upstreamImageURL != "")
+
+	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
+	var generatedURL string
+	var err error
+
+	if upstreamImageURL != "" {
+		imageToImagePrompt := fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
+		log.Printf("[ImageExecutor] 使用图生图模式: refImage=%s prompt=%s", upstreamImageURL, imageToImagePrompt)
+		generatedURL, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURL, imageToImagePrompt, size, 12.0)
+		if err != nil {
+			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
+		}
+	} else {
+		log.Printf("[ImageExecutor] 使用文生图模式")
+		generatedURL, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size)
+		if err != nil {
+			return nil, fmt.Errorf("generate image: %w", err)
 		}
 	}
 
-	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s apiModel=%s size=%s", node.ID, len(finalPrompt), data.Model, apiModelID, size)
-
-	// 调用图像生成 API
-	siliconflowURL, err := i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size)
-	if err != nil {
-		return nil, fmt.Errorf("generate image: %w", err)
-	}
-
-	// ✅ 下载硅基流动图片并使用 FileUploadService 上传
-	ownURL, err := i.downloadAndUpload(ctx, siliconflowURL, node.ID, execCtx.GetProjectID())
+	// 下载图片并使用 FileUploadService 上传
+	imageInfo, err := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetProjectID(), width, height)
 	if err != nil {
 		log.Printf("[ImageExecutor] 下载上传失败，使用原始URL: %v", err)
-		// 如果失败，仍然返回原始URL，确保功能可用
+		// 如果失败，仍然返回原始URL和计算的尺寸，确保功能可用
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "success",
 			Data: map[string]interface{}{
-				"imageUrl": siliconflowURL,
+				"imageUrl": generatedURL,
+				"width":    width,
+				"height":   height,
 			},
 		}, nil
 	}
 
-	log.Printf("[ImageExecutor] 图片上传成功: siliconflowURL=%s -> ownURL=%s", siliconflowURL, ownURL)
+	log.Printf("[ImageExecutor] 图片上传成功: generatedURL=%s -> ownURL=%s size=%dx%d", generatedURL, imageInfo.url, imageInfo.width, imageInfo.height)
 
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"imageUrl": ownURL,
+			"imageUrl": imageInfo.url,
+			"width":    imageInfo.width,  // ✅ 返回实际图片宽度
+			"height":   imageInfo.height, // ✅ 返回实际图片高度
 		},
 	}, nil
 }
 
-// downloadAndUpload 下载硅基流动图片并使用 FileUploadService 上传（复用哈希去重等逻辑）
-func (i *ImageExecutor) downloadAndUpload(ctx context.Context, siliconflowURL string, nodeID string, projectID string) (string, error) {
-	// 1. 下载图片
-	log.Printf("[ImageExecutor] 开始下载图片: url=%s projectID=%s nodeID=%s", siliconflowURL, projectID, nodeID)
+// imageInfo 包含图片URL和尺寸信息
+type imageInfo struct {
+	url    string
+	width  int
+	height int
+}
+
+// downloadAndUpload 下载图片并使用 FileUploadService 上传（复用哈希去重等逻辑）
+func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, nodeID string, projectID string, width int, height int) (*imageInfo, error) {
+	log.Printf("[ImageExecutor] 开始下载图片: url=%s projectID=%s nodeID=%s", imageURL, projectID, nodeID)
 
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
 	}
 
-	resp, err := httpClient.Get(siliconflowURL)
+	resp, err := httpClient.Get(imageURL)
 	if err != nil {
-		return "", fmt.Errorf("download image from siliconflow: %w", err)
+		return nil, fmt.Errorf("download image: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download image failed: status=%d", resp.StatusCode)
+		return nil, fmt.Errorf("download image failed: status=%d", resp.StatusCode)
 	}
 
-	// 2. 使用 FileUploadService 上传（复用哈希去重、路径构建、URL生成等逻辑）
-	result, err := i.fileUploadService.UploadFromReader(resp.Body, resp.ContentLength, "image.png", service.UploadOptions{
-		Dir:          "canvas",
-		ProjectID:    projectID,
-		DefaultExt:   ".png",
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read image data: %w", err)
+	}
+
+	log.Printf("[ImageExecutor] 图片下载成功: size=%d bytes, 使用生成尺寸: %dx%d", len(imageData), width, height)
+
+	result, err := i.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), "image.png", service.UploadOptions{
+		Dir:            "canvas",
+		ProjectID:      projectID,
+		DefaultExt:     ".png",
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {
-		return "", fmt.Errorf("upload image: %w", err)
+		return nil, fmt.Errorf("upload image: %w", err)
 	}
 
 	log.Printf("[ImageExecutor] 图片上传成功: objectName=%s url=%s cached=%v", result.ObjectName, result.URL, result.Cached)
 
-	return result.URL, nil
+	return &imageInfo{
+		url:    result.URL,
+		width:  width,
+		height: height,
+	}, nil
 }
 
 // VideoExecutor 视频节点执行器（MVP: 透传，后续接入可灵/Seedance）
@@ -844,11 +982,15 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var data struct {
 		Mode   string `json:"mode"`
 		Prompt string `json:"prompt"`
+		Model  string `json:"model"` // ✅ 视频生成模型（model_id）
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse video node data: %w", err)
 	}
-	// TODO: 调用可灵/Seedance API 生视频
+
+	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d", node.ID, data.Model, len(data.Prompt))
+
+	// TODO: 调用可灵/Seedance API 生视频（使用data.Model作为model_id）
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
@@ -865,22 +1007,121 @@ type AudioExecutor struct{}
 
 func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
-		Mode string `json:"mode"`
-		Text string `json:"text"`
+		Mode  string `json:"mode"`
+		Text  string `json:"text"`
+		Model string `json:"model"` // ✅ 音频生成模型（model_id）
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse audio node data: %w", err)
 	}
-	// TODO: 调用 TTS API
+
+	log.Printf("[AudioExecutor] nodeID=%s model=%s textLen=%d", node.ID, data.Model, len(data.Text))
+
+	// TODO: 调用 TTS API（使用data.Model作为model_id）
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"mode":       data.Mode,
-			"text":       data.Text,
-			"audio_url":  "",
+			"mode":      data.Mode,
+			"text":      data.Text,
+			"audio_url": "",
 		},
 	}, nil
+}
+
+// calculateSizeFromResolutionAndRatio 根据分辨率和比例计算图片尺寸
+// resolution: "1K" / "2K" / "4K"
+// aspectRatio: "16:9" / "9:16" / "1:1" / "4:3" 等
+func calculateSizeFromResolutionAndRatio(resolution, aspectRatio string) (int, int) {
+	// 1. 计算目标像素总数
+	var totalPixels int
+	switch resolution {
+	case "1K":
+		totalPixels = 1280 * 720 // 约92万像素
+	case "2K":
+		totalPixels = 1920 * 1080 // 约207万像素
+	case "4K":
+		totalPixels = 3840 * 2160 // 约829万像素
+	default:
+		totalPixels = 1280 * 720 // 默认1K
+	}
+
+	// 2. 解析宽高比
+	var ratioW, ratioH float64
+	if aspectRatio == "free" || aspectRatio == "" {
+		// 自适应比例，默认使用16:9
+		ratioW = 16
+		ratioH = 9
+	} else {
+		parts := strings.Split(aspectRatio, ":")
+		if len(parts) == 2 {
+			// 将字符串转换为浮点数
+			w, err1 := parseFloat(parts[0])
+			h, err2 := parseFloat(parts[1])
+			if err1 == nil && err2 == nil && w > 0 && h > 0 {
+				ratioW = w
+				ratioH = h
+			} else {
+				// 解析失败，使用默认16:9
+				ratioW = 16
+				ratioH = 9
+			}
+		} else {
+			// 格式错误，使用默认16:9
+			ratioW = 16
+			ratioH = 9
+		}
+	}
+
+	// 3. 计算实际宽度和高度
+	// width * height = totalPixels
+	// width / height = ratioW / ratioH
+	// => width = sqrt(totalPixels * ratioW / ratioH)
+	// => height = sqrt(totalPixels * ratioH / ratioW)
+	ratio := ratioW / ratioH
+	width := int(math.Sqrt(float64(totalPixels) * ratio))
+	height := int(math.Sqrt(float64(totalPixels) / ratio))
+
+	// 确保是8的倍数（大多数图片生成API的要求）
+	width = roundTo8(width)
+	height = roundTo8(height)
+
+	return width, height
+}
+
+// getModelMinPixels 返回模型要求的最小像素数（0表示无限制）
+// 华数TokenHub的 doubao-seedream 系列要求至少 3,686,400 像素
+func getModelMinPixels(modelID string) int {
+	switch {
+	case strings.HasPrefix(modelID, "doubao-seedream"):
+		return 3686400 // 至少约 1920x1920
+	default:
+		return 0
+	}
+}
+
+// upscaleToMinPixels 等比放大尺寸以满足最小像素要求
+func upscaleToMinPixels(width, height, minPixels int) (int, int) {
+	if width*height >= minPixels {
+		return width, height
+	}
+	// 按比例放大：scale = sqrt(minPixels / (width * height))
+	scale := math.Sqrt(float64(minPixels) / float64(width*height))
+	newW := roundTo8(int(math.Ceil(float64(width) * scale)))
+	newH := roundTo8(int(math.Ceil(float64(height) * scale)))
+	return newW, newH
+}
+
+// parseFloat 辅助函数：将字符串解析为浮点数
+func parseFloat(s string) (float64, error) {
+	var f float64
+	_, err := fmt.Sscanf(s, "%f", &f)
+	return f, err
+}
+
+// roundTo8 将数值调整为最接近的8的倍数
+func roundTo8(n int) int {
+	return ((n + 4) / 8) * 8
 }
 
 // NewDefaultRegistry 创建默认执行器注册表

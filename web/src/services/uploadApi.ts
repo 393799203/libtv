@@ -14,18 +14,25 @@ export interface VideoTaskResult {
  * 上传图片到服务端 public/canvas/ 目录（按项目 ID 分文件夹）
  * @param file 图片文件
  * @param projectId 可选的项目 ID，传入后图片存入 canvas/{projectId}/ 子目录
- * @returns 可访问的图片 URL（如 /media/canvas/xxx.png 或 /media/canvas/{projectId}/xxx.png）
+ * @returns 图片信息（URL + 宽度 + 高度）
  */
-export async function uploadImage(file: File, projectId?: string): Promise<string> {
+export async function uploadImage(
+  file: File,
+  projectId?: string,
+): Promise<{ url: string; width: number; height: number }> {
   const formData = new FormData();
   formData.append('file', file);
   if (projectId) formData.append('project_id', projectId);
 
-  const res = await api.post<{ url: string }>('/upload/image', formData, {
+  const res = await api.post<{ url: string; width: number; height: number }>('/upload/image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 
-  return res.url;
+  return {
+    url: res.url,
+    width: res.width,
+    height: res.height,
+  };
 }
 
 /**

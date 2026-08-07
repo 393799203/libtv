@@ -15,7 +15,7 @@ import (
 )
 
 // Client OpenAI 兼容协议 LLM 客户端
-// 支持 SiliconFlow、OpenAI、通义千问等所有兼容 /v1/chat/completions 的 Provider
+// 支持华数TokenHub、DeepSeek、OpenAI 等所有兼容 /v1/chat/completions 的 Provider
 type Client struct {
 	apiKey  string
 	baseURL string
@@ -44,26 +44,25 @@ func NewClient(cfg config.AIConfig, providerName string) *Client {
 		model:   cfg.LLM.Model,
 		httpCli: &http.Client{
 			// 整体客户端超时：放宽到 5 分钟，脚本/图像生成长 prompt + 大输出需要更久
-				Timeout: 5 * time.Minute,
-				// 禁用连接池 keep-alive，避免长跑进程下 IdleConn 被某中间链路污染/死链
-				// 每次 Chat 都新建连接
-				Transport: &http.Transport{
-					DisableKeepAlives:   true,
-					MaxIdleConns:        0,
-					MaxIdleConnsPerHost: 0,
-					IdleConnTimeout:     1 * time.Second,
-					// 显式较短 dial 超时，避免依赖 Client.Timeout 等死
-					DialContext: (&net.Dialer{
-						Timeout:   10 * time.Second,
-						KeepAlive: 30 * time.Second,
-					}).DialContext,
-					TLSHandshakeTimeout: 15 * time.Second,
-					// ResponseHeaderTimeout：服务器开始返回 headers 之前的等待上限。
-					// 硅基流动的长 prompt/分镜生成经常要 2-3 分钟才开始返回首字节，
-					// 90s 远远不够；这里直接对齐 Client.Timeout=5min。
-					ResponseHeaderTimeout: 5 * time.Minute,
-					ExpectContinueTimeout: 1 * time.Second,
-				},
+			Timeout: 5 * time.Minute,
+			// 禁用连接池 keep-alive，避免长跑进程下 IdleConn 被某中间链路污染/死链
+			// 每次 Chat 都新建连接
+			Transport: &http.Transport{
+				DisableKeepAlives:   true,
+				MaxIdleConns:        0,
+				MaxIdleConnsPerHost: 0,
+				IdleConnTimeout:     1 * time.Second,
+				// 显式较短 dial 超时，避免依赖 Client.Timeout 等死
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout: 15 * time.Second,
+				// ResponseHeaderTimeout：服务器开始返回 headers 之前的等待上限。
+				// 长prompt/分镜生成经常要较长时间才开始返回首字节，对齐 Client.Timeout
+				ResponseHeaderTimeout: 5 * time.Minute,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
 		},
 	}
 }
@@ -91,8 +90,9 @@ type ChatResponse struct {
 	Choices []struct {
 		Index   int `json:"index"`
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content,omitempty"` // DeepSeek 推理模型的思考过程
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -231,6 +231,10 @@ func (c *Client) GeneratePrompt(
 
 	// 解析响应，提取画面提示词和运动提示词（从 prompt.go 获取）
 	content := resp.Choices[0].Message.Content
+	// DeepSeek 推理模型：如果 content 为空但 reasoning_content 有值，使用 reasoning_content
+	if content == "" && resp.Choices[0].Message.ReasoningContent != "" {
+		content = resp.Choices[0].Message.ReasoningContent
+	}
 	storyboardPrompt, motionPrompt := parsePromptResponse(content)
 
 	return storyboardPrompt, motionPrompt, nil

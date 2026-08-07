@@ -268,24 +268,33 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	// 获取执行记录并立即推送当前状态
 	exec, err := h.execRepo.FindByID(c.Request.Context(), execID)
 	if err == nil {
+		// ✅ 立即推送当前状态（包含type字段，方便前端识别事件类型）
+		var eventType string
+		if exec.Status == "failed" {
+			eventType = "execution_failed"
+		} else if exec.Status == "done" {
+			eventType = "execution_completed"
+		} else {
+			eventType = "execution_started"
+		}
 		statusEvent := map[string]interface{}{
+			"type":        eventType,      // ✅ 添加type字段，前端需要这个字段识别事件类型
 			"executionId": execID,
 			"status":      exec.Status,
 			"errorMsg":    exec.ErrorMsg,
 		}
 		if exec.Status == "failed" || exec.Status == "done" {
 			// 如果执行已经结束，立即推送终态事件
-			var eventType string
-			if exec.Status == "failed" {
-				eventType = "execution_failed"
-			} else {
-				eventType = "execution_completed"
-			}
 			payload, _ := json.Marshal(statusEvent)
 			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, string(payload))
 			flusher.Flush()
-			log.Printf("[SSE] pushed final status: execID=%d status=%s", execID, exec.Status)
+			log.Printf("[SSE] pushed final status: execID=%d status=%s type=%s", execID, exec.Status, eventType)
 			return // 执行已结束，直接返回，不再订阅后续事件
+		} else {
+			// 执行还在运行，推送当前状态
+			payload, _ := json.Marshal(statusEvent)
+			fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, string(payload))
+			flusher.Flush()
 		}
 	}
 

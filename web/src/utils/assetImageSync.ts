@@ -61,17 +61,15 @@ export function getAssetImageNodeId(
  * 创建资产图片节点并设置关联
  * - 创建图片节点（位置：脚本节点左侧 -350px）
  * - 创建连接边（图片节点 → 脚本节点）
- * - ✅ 直接设置资产的 imageNodeId 字段
+ * - 设置资产的 nodeId 字段
+ * 注意：节点数据（model/prompt等）由调用方通过 updateNodeData 单独写入
  *
- * @returns 创建的图片节点对象
+ * @returns 创建的图片节点对象（如已存在则返回已有节点）
  */
 export function createAssetImageNode(
   scriptNodeId: string,
   assetType: AssetType,
   assetName: string,
-  imageUrl?: string,
-  prompt?: string,
-  model?: string
 ): LibTVNode | null {
   const store = useCanvasStore.getState();
 
@@ -88,19 +86,9 @@ export function createAssetImageNode(
   // 检查是否已存在该图片节点（避免重复创建）
   const existingImageNode = store.nodes.find(n => n.id === imageNodeId);
   if (existingImageNode) {
-    console.warn('[AssetImageSync] 图片节点已存在:', imageNodeId, '将更新数据');
-
-    // 更新已有节点的 imageUrl 和状态
-    store.updateNodeData(imageNodeId, {
-      imageUrl,
-      prompt,
-      model,
-      status: imageUrl ? 'success' : 'idle',
-    } as any);
-
-    // ✅ 新逻辑：直接更新资产的 imageNodeId
+    console.warn('[AssetImageSync] 图片节点已存在:', imageNodeId);
+    // 确保资产关联
     updateAssetImageNodeId(scriptNodeId, assetType, assetName, imageNodeId);
-
     return existingImageNode;
   }
 
@@ -117,12 +105,6 @@ export function createAssetImageNode(
   const imageNode = createNode('image', imageNodePos, {
     data: {
       label: `${typeMap[assetType]}-${assetName}`,
-      prompt: prompt || '',
-      model: model || '',
-      imageUrl,
-      width: 1280,  // 默认 16:9 比例
-      height: 720,
-      status: imageUrl ? 'success' : 'idle',
     },
   });
 
@@ -149,7 +131,6 @@ export function createAssetImageNode(
     assetType,
     assetName,
     scriptNodeId,
-    imageUrl,
   });
 
   return imageNode;

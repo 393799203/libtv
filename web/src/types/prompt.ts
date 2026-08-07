@@ -12,7 +12,8 @@ export interface UpstreamInput {
 
 // 模型选项
 export interface ModelOption {
-  value: string;
+  value: string;           // 模型ID（用于显示和匹配）
+  modelId: string;         // 实际调用API时使用的model_id
   label: string;
   icon?: string;           // 图标名称
   duration?: number;       // 预估耗时（秒）

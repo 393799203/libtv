@@ -146,40 +146,87 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [promptText, setPromptText] = useState(initialPrompt);
   const [mentions, setMentions] = useState<MentionMarker[]>(initialMentions);
 
+  // 模型选择状态（使用动态模型列表）
+  // 初始化时：如果节点data中有model（modelId），根据modelId找到对应的模型value
+  // 否则使用配置的默认模型
+  const initialModel = ('model' in data && (data as { model?: string }).model)
+    ? (() => {
+        const savedModelId = (data as { model: string }).model;
+        // 根据保存的modelId找到对应的模型配置
+        const matchedModel = availableModels.find(m => m.modelId === savedModelId);
+        return matchedModel?.value || config.defaultModel;
+      })()
+    : config.defaultModel;
+  const [selectedModel, setSelectedModel] = useState(initialModel);
+
   // 切换节点时重置本地状态为新节点的数据（useState 只初始化一次，不会随 nodeId 变化重新执行）
   useEffect(() => {
     const newPrompt = ('prompt' in data ? (data as { prompt?: string }).prompt : '') || '';
     const newMentions = ('mentions' in data && Array.isArray((data as { mentions?: unknown }).mentions)
       ? ((data as { mentions: MentionMarker[] }).mentions || [])
       : []);
-    setPromptText(newPrompt);
-    setMentions(newMentions);
-  }, [nodeId]);
 
-  // 模型选择状态（使用动态模型列表）
-  const [selectedModel, setSelectedModel] = useState(config.defaultModel);
-  
+    // ✅ 只在值真正变化时才更新状态，避免无限循环
+    setPromptText(prev => prev !== newPrompt ? newPrompt : prev);
+    setMentions(prev => {
+      // 简单比较：长度和第一个元素
+      if (prev.length !== newMentions.length) return newMentions;
+      if (prev.length > 0 && prev[0].nodeId !== newMentions[0]?.nodeId) return newMentions;
+      return prev;
+    });
+
+    // 恢复节点数据中的模型选择：根据保存的modelId找到对应的value
+    if ('model' in data && (data as { model?: string }).model) {
+      const savedModelId = (data as { model: string }).model;
+      const matchedModel = availableModels.find(m => m.modelId === savedModelId);
+      if (matchedModel) {
+        setSelectedModel(prev => prev !== matchedModel.value ? matchedModel.value : prev);
+      }
+    }
+
+    // 图片节点：恢复节点数据中的分辨率、比例、画质
+    if (nodeType === 'image') {
+      if ('resolution' in data && (data as any).resolution) {
+        setSelectedResolution(prev => prev !== (data as any).resolution ? (data as any).resolution : prev);
+      }
+      if ('aspectRatio' in data && (data as any).aspectRatio) {
+        setSelectedAspectRatio(prev => prev !== (data as any).aspectRatio ? (data as any).aspectRatio : prev);
+      }
+      if ('quality' in data && (data as any).quality) {
+        setSelectedQuality(prev => prev !== (data as any).quality ? (data as any).quality : prev);
+      }
+    }
+  }, [nodeId, data, nodeType, availableModels]);
+
   // 当模型列表加载完成时，自动选择默认模型或合适的模型
+  // 只在初始化时或当前模型不在可用列表中时才重置，避免强制重置用户的选择
   useEffect(() => {
     if (availableModels.length > 0) {
-      // 图片节点优先选择标记为 default 的模型
-      if (nodeType === 'image') {
-        const defaultModel = availableModels.find(m => m.isDefault === true);
-        if (defaultModel && selectedModel !== defaultModel.value) {
-          setSelectedModel(defaultModel.value);
-          return;
-        }
-      }
-      // 其他节点：如果当前模型不在列表中，切换到第一个或默认模型
-      if (!availableModels.find(m => m.value === selectedModel)) {
+      // 检查当前选中的模型是否在可用列表中
+      const currentModelAvailable = availableModels.find(m => m.value === selectedModel);
+
+      // 如果当前模型不在可用列表中，才重置到默认模型
+      if (!currentModelAvailable) {
         const defaultModel = availableModels.find(m => m.isDefault === true);
         setSelectedModel(defaultModel ? defaultModel.value : availableModels[0].value);
       }
     }
-  }, [availableModels, selectedModel, nodeType]);
-  
-  const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>((config.defaultResolution as ResolutionOption) || '1K');
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(config.defaultAspectRatio);
+  }, [availableModels, nodeType]); // 移除 selectedModel 依赖，避免每次切换都重置
+
+  // 图片节点专属参数：优先从节点data中读取，否则使用配置默认值
+  const initialResolution = ('resolution' in data && (data as any).resolution)
+    ? (data as any).resolution as ResolutionOption
+    : (config.defaultResolution as ResolutionOption) || '1K';
+  const initialAspectRatio = ('aspectRatio' in data && (data as any).aspectRatio)
+    ? (data as any).aspectRatio
+    : config.defaultAspectRatio;
+  const initialQuality = ('quality' in data && (data as any).quality)
+    ? (data as any).quality
+    : '标准画质';
+
+  const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>(initialResolution);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(initialAspectRatio);
+  const [selectedQuality, setSelectedQuality] = useState<string>(initialQuality);
   // 下游确认条：执行完后弹出
   const [showDownstreamConfirm, setShowDownstreamConfirm] = useState(false);
 
@@ -238,16 +285,29 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     // 1) 同步本地状态到节点 data（通过 onUpdate 传出来）
     //    mentions 跟 prompt 一起持久化，避免 reload 后 [[m:ID]] 找不到对应元数据
     if (nodeType === 'text' || nodeType === 'image' || nodeType === 'video' || nodeType === 'audio' || nodeType === 'script') {
-      onUpdate({
+      // 找到当前选中的模型配置，获取实际的modelId
+      const currentModel = availableModels.find(m => m.value === selectedModel);
+      const modelIdToSave = currentModel?.modelId || selectedModel;  // ✅ 保存modelId而不是ID
+
+      const updateData: Partial<LibTVNodeData> = {
         prompt: promptText,
         mentions,
-        model: selectedModel,
-      } as Partial<LibTVNodeData>);
+        model: modelIdToSave,  // ✅ 保存实际的model_id
+      };
+
+      // 图片节点额外同步分辨率、比例、画质字段
+      if (nodeType === 'image') {
+        (updateData as any).resolution = selectedResolution;
+        (updateData as any).aspectRatio = selectedAspectRatio;
+        (updateData as any).quality = selectedQuality;
+      }
+
+      onUpdate(updateData);
     }
 
     // 2) 调统一入口（自动：写下游 stale → 存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, onUpdate, generate]);
+  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, onUpdate, generate]);
 
   // 监听节点执行状态：终态时弹出下游确认条
   const currentExecution = useExecutionStore((s) => s.currentExecution);
@@ -345,6 +405,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onResolutionChange={setSelectedResolution}
         selectedAspectRatio={selectedAspectRatio}
         onAspectRatioChange={setSelectedAspectRatio}
+        selectedQuality={selectedQuality}
+        onQualityChange={setSelectedQuality}
         isGenerating={hookIsGenerating}
         onGenerate={handleGenerate}
         nodeType={nodeType}
