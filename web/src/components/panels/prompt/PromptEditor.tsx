@@ -194,16 +194,10 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     for (const u of upstreamInputs) thumbMap[u.nodeId] = u.thumbnail;
 
     let html = escapeHtml(value);
-    // 按占位符在 value 里的出现位置排序（后出现的先替换，避免索引错位）
-    const sorted = [...mentions].sort(
-      (a, b) =>
-        value.lastIndexOf(mentionMarker(b.id)) -
-        value.lastIndexOf(mentionMarker(a.id))
-    );
-    for (const m of sorted) {
-      const marker = mentionMarker(m.id);
-      const idx = html.lastIndexOf(escapeHtml(marker));
-      if (idx === -1) continue;
+    // 逐个 mention 替换所有出现的占位符（同一 mention 可能在 prompt 中出现多次）
+    for (const m of mentions) {
+      const marker = escapeHtml(mentionMarker(m.id));
+      if (!html.includes(marker)) continue;
 
       const thumbUrl = thumbMap[m.nodeId];
       const iconPart =
@@ -211,13 +205,14 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
           ? `<img src="${escapeHtml(thumbUrl)}" class="libtv-mention-thumb" />`
           : NODE_TYPE_ICON_TEXT[m.nodeType] || '';
 
-      html =
-        html.slice(0, idx) +
+      const spanHtml =
         `<span class="libtv-mention" contenteditable="false" data-mention-id="${escapeHtml(m.id)}" data-node-id="${m.nodeId}" data-label="${escapeHtml(m.label)}">` +
         iconPart +
         `<span>${escapeHtml(m.label)}</span>` +
-        `</span>` +
-        html.slice(idx + escapeHtml(marker).length);
+        `</span>`;
+
+      // 全局替换所有出现的占位符
+      html = html.split(marker).join(spanHtml);
     }
     // 停顿标签：<#N#> → 渲染为青色标签
     html = html.replace(/&lt;#([\d.]+)#&gt;/g, (_match, val) =>

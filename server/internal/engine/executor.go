@@ -973,29 +973,113 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 	}, nil
 }
 
-// VideoExecutor 视频节点执行器（MVP: 透传，后续接入可灵/Seedance）
-type VideoExecutor struct{}
+// VideoExecutor 视频节点执行器（doubao-seedance）
+type VideoExecutor struct {
+	videoClient *llm.VideoClient
+}
+
+// NewVideoExecutor 创建视频执行器
+func NewVideoExecutor(videoClient *llm.VideoClient) *VideoExecutor {
+	return &VideoExecutor{videoClient: videoClient}
+}
 
 func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
-		Mode   string `json:"mode"`
-		Prompt string `json:"prompt"`
-		Model  string `json:"model"` // ✅ 视频生成模型（model_id）
+		Mode        string          `json:"mode"`
+		Prompt      string          `json:"prompt"`
+		Model       string          `json:"model"`
+		Duration    int             `json:"duration"`
+		Fps         int             `json:"fps"`
+		AspectRatio string          `json:"aspectRatio"`
+		Resolution  string          `json:"resolution"`
+		Mentions    json.RawMessage `json:"mentions"`
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse video node data: %w", err)
 	}
 
-	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d", node.ID, data.Model, len(data.Prompt))
+	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d", node.ID, data.Model, len(data.Prompt), data.Duration)
 
-	// TODO: 调用可灵/Seedance API 生视频（使用data.Model作为model_id）
+	// 解析 mentions，收集上游图片URL
+	var imageURLs []string
+	var mentions []struct {
+		NodeID   string `json:"nodeId"`
+		NodeType string `json:"nodeType"`
+	}
+	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
+		for _, m := range mentions {
+			if m.NodeType == "image" {
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						ImageUrl string `json:"imageUrl"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
+						imageURLs = append(imageURLs, nd.ImageUrl)
+						log.Printf("[VideoExecutor] ✅ 参考图: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
+					}
+				}
+			}
+		}
+	}
+
+	// fallback: 查找上游连接的图片节点
+	if len(imageURLs) == 0 {
+		upstreamSources := execCtx.GetUpstreamSources(node.ID)
+		for _, sourceNodeID := range upstreamSources {
+			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
+				var nd struct {
+					ImageUrl string `json:"imageUrl"`
+					Type     string `json:"type"`
+				}
+				if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" && nd.Type == "image" {
+					imageURLs = append(imageURLs, nd.ImageUrl)
+					log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
+				}
+			}
+		}
+	}
+
+	// 确定模型
+	model := data.Model
+	if model == "" {
+		model = "doubao-seedance-2.0-fast"
+	}
+
+	// 映射分辨率
+	resolution := "1080p"
+	if data.Resolution == "4K" {
+		resolution = "4k"
+	}
+
+	// 调用视频生成API
+	videoURL, err := v.videoClient.GenerateVideo(
+		ctx,
+		model,
+		data.Prompt,
+		data.Duration,
+		resolution,
+		data.AspectRatio,
+		imageURLs,
+	)
+	if err != nil {
+		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "failed",
+			Data: map[string]interface{}{
+				"error": err.Error(),
+			},
+		}, nil
+	}
+
+	log.Printf("[VideoExecutor] ✅ 视频生成成功: nodeId=%s videoUrl=%s", node.ID, videoURL)
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"mode":      data.Mode,
-			"prompt":    data.Prompt,
-			"video_url": "",
+			"mode":     data.Mode,
+			"prompt":   data.Prompt,
+			"videoUrl": videoURL,
 		},
 	}, nil
 }
@@ -1123,12 +1207,12 @@ func roundTo8(n int) int {
 }
 
 // NewDefaultRegistry 创建默认执行器注册表
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ExecutorRegistry {
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient))
 	registry.Register("script", NewScriptExecutor(llmClient))
 	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService))
-	registry.Register("video", &VideoExecutor{})
+	registry.Register("video", NewVideoExecutor(videoClient))
 	registry.Register("audio", &AudioExecutor{})
 	return registry
 }

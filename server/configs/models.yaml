@@ -159,13 +159,20 @@ models:
       temperature: 0.7
       description: "字节豆包Seedream 5.0轻量版（华数TokenHub），生成速度快"
 
-  # ---------- 视频生成（预留）----------
+  # ---------- 视频生成 ----------
   video:
-    - id: kling-2.0
-      name: "Kling 2.0"
-      provider: kling
-      model_id: "kling-2.0"
+    - id: doubao-seedance-2.0
+      name: "豆包 Seedance 2.0"
+      provider: wasu
+      model_id: "doubao-seedance-2.0"
       usage: [video]
+      description: "字节豆包Seedance 2.0视频生成（华数TokenHub）"
+    - id: doubao-seedance-2.0-fast
+      name: "豆包 Seedance 2.0 Fast"
+      provider: wasu
+      model_id: "doubao-seedance-2.0-fast"
+      usage: [video]
+      description: "字节豆包Seedance 2.0快速版（华数TokenHub），生成速度更快"
 
   # ---------- 音频 / TTS（预留）----------
   audio:

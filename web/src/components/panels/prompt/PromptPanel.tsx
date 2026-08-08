@@ -295,10 +295,12 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         model: modelIdToSave,  // ✅ 保存实际的model_id
       };
 
-      // 图片节点额外同步分辨率、比例、画质字段
-      if (nodeType === 'image') {
+      // 图片/视频节点同步分辨率、比例字段；画质仅图片节点
+      if (nodeType === 'image' || nodeType === 'video') {
         (updateData as any).resolution = selectedResolution;
         (updateData as any).aspectRatio = selectedAspectRatio;
+      }
+      if (nodeType === 'image') {
         (updateData as any).quality = selectedQuality;
       }
 
@@ -373,7 +375,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         inputs={upstreamInputs}
         onInsertMention={handleInsertMention}
         targetNodeId={nodeId}
-        showStyleSelector={nodeType === 'image' || nodeType === 'video'}
+        showStyleSelector={nodeType === 'image'}
       />
 
       {/* 第二层：提示词编辑区 */}

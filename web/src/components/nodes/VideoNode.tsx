@@ -61,17 +61,34 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     setShowPlayer(true);
   }, []);
 
+  // 视频时长标签：< 60s 显示 "Ns"，否则 "M:SS"
+  const durationLabel = useMemo(() => {
+    const d = data.duration || 0;
+    if (d <= 0) return '';
+    if (d < 60) return `${d}s`;
+    const m = Math.floor(d / 60);
+    const s = d % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }, [data.duration]);
+
   const headerRight = useMemo(() => {
     if (data.videoUrl) {
       return (
-        <button
-          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-          title="重新上传视频"
-        >
-          <UploadOutlined className="text-[10px]" />
-          重传
-        </button>
+        <div className="flex items-center gap-1.5">
+          {durationLabel && (
+            <span className="px-1.5 py-1 rounded bg-gray-100 text-gray-600 text-[11px] font-medium leading-none">
+              {durationLabel}
+            </span>
+          )}
+          <button
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
+            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+            title="重新上传视频"
+          >
+            <UploadOutlined className="text-[10px]" />
+            重传
+          </button>
+        </div>
       );
     }
     return (
@@ -85,7 +102,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         {uploading ? `${uploadPercent}%` : '上传'}
       </button>
     );
-  }, [data.videoUrl, uploading, uploadPercent]);
+  }, [data.videoUrl, uploading, uploadPercent, durationLabel]);
 
   const phaseLabel = uploadPhase === 'processing' ? '压缩转码中...' : `上传中 ${uploadPercent}%`;
 

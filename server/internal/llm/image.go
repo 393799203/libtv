@@ -134,7 +134,7 @@ func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, mo
 			log.Printf("[ImageGen] 使用公网URL: imageURL=%s", imageURL)
 		} else {
 			log.Printf("[ImageGen] 检测到本地URL，转换为base64: originalURL=%s", imageURL)
-			base64Data, err := c.convertLocalImageToBase64(ctx, imageURL)
+			base64Data, err := c.ConvertLocalImageToBase64(ctx, imageURL)
 			if err != nil {
 				return "", fmt.Errorf("convert local image to base64: %w", err)
 			}
@@ -207,7 +207,7 @@ func (c *ImageClient) doRequest(ctx context.Context, payload []byte) (string, er
 }
 
 // convertLocalImageToBase64 将本地图片转换为base64格式
-func (c *ImageClient) convertLocalImageToBase64(ctx context.Context, imageURL string) (string, error) {
+func (c *ImageClient) ConvertLocalImageToBase64(ctx context.Context, imageURL string) (string, error) {
 	var fullURL string
 	if strings.HasPrefix(imageURL, "/") {
 		fullURL = fmt.Sprintf("http://localhost:8080%s", imageURL)

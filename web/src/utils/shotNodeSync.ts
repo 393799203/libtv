@@ -218,8 +218,8 @@ export function createShotImageNode(
 
 /**
  * 创建或复用分镜视频节点
- * - 位置：脚本节点右侧 +800（比图片节点更靠右），按镜头序号纵向堆叠
- * - 连接边：脚本节点 → 视频节点
+ * - 如果已存在分镜图片节点：视频节点放在图片节点右侧 +400，并连边 image→video（作为上游参考图）
+ * - 如果没有图片节点：视频节点放在脚本节点右侧 +400（图片节点的位置）
  * - 设置 data.prompt = finalPrompt（画面 + 运动合成提示词）
  */
 export function createShotVideoNode(
@@ -236,45 +236,65 @@ export function createShotVideoNode(
   }
 
   const videoNodeId = generateShotVideoNodeId(shot.id, scriptNodeId);
-  const assetMentions = buildAssetMentions(scriptNodeId, finalPrompt);
-  // ✅ 将 prompt 中的 (@类型-名称) 转为 [[m:<id>]] 占位符
-  const convertedPrompt = convertPromptMentions(finalPrompt, assetMentions);
+  // 视频节点不需要资产引用，去掉提示词中的 (@类型-名称) 标签
+  const cleanPrompt = finalPrompt.replace(/[（(]@[^\）)]+[）)]/g, '');
+
+  // 查找已存在的分镜图片节点
+  const imageNode = findShotImageNode(scriptNodeId, shot.id);
+  const hasImage = !!(imageNode && (imageNode.data as ImageNodeData).imageUrl);
+
   const existing = store.nodes.find(n => n.id === videoNodeId);
   if (existing) {
     const existingModel = (existing.data as VideoNodeData).model || '';
     store.updateNodeData(videoNodeId, {
-      prompt: convertedPrompt,
+      prompt: cleanPrompt,
       model: modelId || existingModel || '',
-      mentions: assetMentions,
       status: 'idle',
       error: undefined,
     } as Partial<VideoNodeData>);
-    ensureAssetEdges(assetMentions, videoNodeId);
+    // 补连 image→video 边
+    if (hasImage && imageNode) {
+      const edgeExists = store.edges.some(e => e.source === imageNode.id && e.target === videoNodeId);
+      if (!edgeExists) {
+        store.addEdge({
+          id: `e-${imageNode.id}-${videoNodeId}`,
+          source: imageNode.id,
+          target: videoNodeId,
+          type: 'dataFlow',
+        });
+      }
+    }
     return existing;
   }
 
-  const scriptPos = scriptNode.position;
+  // 计算位置：有图片节点则放在其右侧，否则放在图片节点的默认位置
   const offsetY = (shot.shotNumber - 1) * 220;
-  const videoNode = createNode('video', { x: scriptPos.x + 800, y: scriptPos.y + offsetY }, {
+  const posX = imageNode ? imageNode.position.x + 400 : scriptNode.position.x + 400;
+  const posY = imageNode ? imageNode.position.y : scriptNode.position.y + offsetY;
+
+  const videoNode = createNode('video', { x: posX, y: posY }, {
     id: videoNodeId,
     data: {
       label: `分镜${shot.shotNumber}-视频`,
-      prompt: convertedPrompt,
+      prompt: cleanPrompt,
       model: modelId || '',
-      mentions: assetMentions,
       duration: shot.duration || 5,
       fps: 24,
+      aspectRatio: '16:9',
+      resolution: '1080p',
     },
   });
 
   store.addNode(videoNode);
-  store.addEdge({
-    id: `e-${scriptNodeId}-${videoNodeId}`,
-    source: scriptNodeId,
-    target: videoNodeId,
-    type: 'dataFlow',
-  });
-  ensureAssetEdges(assetMentions, videoNodeId);
+  // 如果有图片节点，连 image→video（作为上游参考图）
+  if (hasImage && imageNode) {
+    store.addEdge({
+      id: `e-${imageNode.id}-${videoNodeId}`,
+      source: imageNode.id,
+      target: videoNodeId,
+      type: 'dataFlow',
+    });
+  }
 
   return videoNode;
 }

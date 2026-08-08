@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// 自动迁移
-if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -93,11 +93,14 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 	// 初始化图像生成客户端（华数TokenHub）
 	imageClient := llm.NewImageClient(config.C.AI, "wasu")
 
+	// 初始化视频生成客户端（华数TokenHub doubao-seedance）
+	videoClient := llm.NewVideoClient(config.C.AI, "wasu")
+
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)
 
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, modelManager, fileUploadService)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, modelManager, fileUploadService)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
@@ -183,14 +186,14 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 		// 删除项目 canvas 文件夹（需认证）
 		api.DELETE("/upload/canvas/:projectId", uploadHandler.DeleteCanvasDir)
 		// 存储同步（管理员专用）
-		api.POST("/storage/sync", uploadHandler.SyncStorage)              // 同步本地存储到MinIO
-		api.POST("/storage/sync-volume", uploadHandler.SyncFromVolume)    // 从Docker volume同步
+		api.POST("/storage/sync", uploadHandler.SyncStorage)           // 同步本地存储到MinIO
+		api.POST("/storage/sync-volume", uploadHandler.SyncFromVolume) // 从Docker volume同步
 
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
-		api.GET("/users", userHandler.List) // 管理员：获取所有用户
+		api.GET("/users", userHandler.List)                // 管理员：获取所有用户
 		api.PUT("/users/:id/role", userHandler.UpdateRole) // 管理员：更新用户角色
-		api.DELETE("/users/:id", userHandler.Delete) // 管理员：删除用户
+		api.DELETE("/users/:id", userHandler.Delete)       // 管理员：删除用户
 
 		// 项目 + 画布
 		projects := api.Group("/projects")
@@ -201,17 +204,17 @@ if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &mode
 			projects.PUT("/:id", projectHandler.Update)
 			projects.DELETE("/:id", projectHandler.Delete)
 			projects.GET("/:id/canvas", canvasHandler.Get)
-		projects.PUT("/:id/canvas", canvasHandler.Save)
-		// 工作流（路径对齐前端 api/services/workflowApi.ts）
-		projects.POST("/:id/workflows/execute", workflowHandler.Execute)
-		projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)
-		// SSE 流式订阅工作流执行进度（必须单独注册在 r 上，不能走 Auth 中间件：
-		//   原生 EventSource 不支持自定义 header，token 只能放 query ，
-		//   所以鉴权由 StreamExecution 内部处理，见 workflow_handler.go）
-	}
+			projects.PUT("/:id/canvas", canvasHandler.Save)
+			// 工作流（路径对齐前端 api/services/workflowApi.ts）
+			projects.POST("/:id/workflows/execute", workflowHandler.Execute)
+			projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)
+			// SSE 流式订阅工作流执行进度（必须单独注册在 r 上，不能走 Auth 中间件：
+			//   原生 EventSource 不支持自定义 header，token 只能放 query ，
+			//   所以鉴权由 StreamExecution 内部处理，见 workflow_handler.go）
+		}
 
-	// SSE 工作流流（独立鉴权：query 传 token）
-	r.GET("/api/projects/:id/workflows/:execId/stream", workflowHandler.StreamExecution)
+		// SSE 工作流流（独立鉴权：query 传 token）
+		r.GET("/api/projects/:id/workflows/:execId/stream", workflowHandler.StreamExecution)
 
 		// 工作流（兼容旧路由 /api/workflow/*）
 		workflow := api.Group("/workflow")
