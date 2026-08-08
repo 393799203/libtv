@@ -212,7 +212,18 @@ export function useExecutionStream(
             height?: number;   // ✅ 图片高度
             videoUrl?: string;
             audioUrl?: string;
+            error?: string;
           };
+          // ✅ executor 返回 Status=failed 但 err=nil 时，data 带 error 字段（图片/视频节点）
+          if (data.error) {
+            message.error(data.error);
+            useCanvasStore.getState().updateNodeData(event.nodeId, {
+              status: 'failed',
+              error: data.error,
+              stale: false,
+            } as never);
+            return;
+          }
           const updates: Record<string, unknown> = {};
           if (data.content !== undefined) updates.content = data.content;
           if (data.scriptContent !== undefined) updates.scriptContent = data.scriptContent;
