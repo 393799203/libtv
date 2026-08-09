@@ -134,7 +134,7 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	metadata := VideoMetadata{
 		Resolution:    resolution,
 		Ratio:         ratio,
-		GenerateAudio: false,
+		GenerateAudio: true,
 		Content:       []VideoContentItem{},
 	}
 

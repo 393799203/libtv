@@ -19,7 +19,8 @@ type ModelConfig struct {
 	Temperature float64                `yaml:"temperature"`
 	Description string                 `yaml:"description"`
 	Parameters  map[string]interface{} `yaml:"parameters"`
-	Default     bool                   `yaml:"default"` // 是否为默认模型
+	Default     bool                   `yaml:"default"`     // 是否为默认模型
+	Resolutions []string               `yaml:"resolutions"` // 支持的分辨率（视频模型用）
 }
 
 // ProviderConfig Provider 配置

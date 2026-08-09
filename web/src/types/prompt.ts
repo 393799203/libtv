@@ -21,10 +21,11 @@ export interface ModelOption {
   tag?: string;            // 标签（如"限时5折"）
   tagColor?: string;       // 标签颜色
   isDefault?: boolean;     // 是否为默认模型（从后端配置读取）
+  resolutions?: string[];  // 支持的分辨率列表（视频模型用，来自后端 models.yaml）
 }
 
-// 分辨率选项
-export type ResolutionOption = '1K' | '2K' | '4K';
+// 分辨率选项（图片节点用 1K/2K/4K，视频节点用 480p/720p/1080p/4K）
+export type ResolutionOption = '1K' | '2K' | '4K' | '480p' | '720p' | '1080p';
 
 // 比例选项
 export type AspectRatioOption =

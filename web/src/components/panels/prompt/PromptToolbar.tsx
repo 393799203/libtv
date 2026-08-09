@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
-import { RESOLUTION_OPTIONS, QUALITY_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
+import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, QUALITY_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
 
 // 模型图标映射（匹配截图中的图标风格）
 const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
@@ -169,6 +169,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   aspectRatio,
   quality,
   selectedModelId,
+  nodeType,
+  models,
   onResolutionChange,
   onAspectRatioChange,
   onQualityChange,
@@ -177,16 +179,39 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   aspectRatio: string;
   quality: string;
   selectedModelId?: string;
+  nodeType: NodeType;
+  models: ModelOption[];
   onResolutionChange: (r: ResolutionOption) => void;
   onAspectRatioChange: (r: string) => void;
   onQualityChange: (q: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const isVideo = nodeType === 'video';
 
-  // 部分模型有最小像素要求，1K分辨率不足时禁用
-  const is1KDisabled = selectedModelId ? selectedModelId.startsWith('doubao-seedream') : false;
-  // 如果当前选了1K但模型要求更高，自动切到2K
-  const effectiveResolution = (is1KDisabled && resolution === '1K') ? '2K' : resolution;
+  // 分辨率选项：
+  // - 视频节点：根据选中模型的 resolutions 动态过滤；模型未配置则用默认全集
+  // - 图片节点：固定 1K/2K/4K
+  const modelResolutions = isVideo && selectedModelId
+    ? models.find((m) => m.value === selectedModelId)?.resolutions
+    : undefined;
+  const resolutionOptions: readonly string[] = isVideo
+    ? (modelResolutions && modelResolutions.length > 0 ? modelResolutions : VIDEO_RESOLUTION_OPTIONS)
+    : RESOLUTION_OPTIONS;
+
+  // 图片节点：doubao-seedream 系列不支持 1K
+  const is1KDisabled = !isVideo && !!selectedModelId && selectedModelId.startsWith('doubao-seedream');
+
+  // 当前分辨率不可用时自动回退：
+  // - 图片：1K 被禁用时回退到 2K
+  // - 视频：当前值不在模型支持列表时回退到第一个可用项
+  let effectiveResolution: string = resolution;
+  if (isVideo) {
+    if (!resolutionOptions.includes(resolution)) {
+      effectiveResolution = resolutionOptions[0] ?? resolution;
+    }
+  } else if (is1KDisabled && resolution === '1K') {
+    effectiveResolution = '2K';
+  }
 
   return (
     <div className="relative">
@@ -237,8 +262,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
             <div className="mb-4">
               <div className="text-[13px] font-medium text-gray-700 mb-2.5">清晰度</div>
               <div className="flex gap-2">
-                {RESOLUTION_OPTIONS.map((res) => {
-                  const disabled = is1KDisabled && res === '1K';
+                {resolutionOptions.map((res) => {
+                  const disabled = !isVideo && is1KDisabled && res === '1K';
                   const isActive = effectiveResolution === res;
                   return (
                     <button
@@ -250,7 +275,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                             ? 'bg-gray-50 text-gray-300 border border-transparent cursor-not-allowed'
                             : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
                       }`}
-                      onClick={() => !disabled && onResolutionChange(res)}
+                      onClick={() => !disabled && onResolutionChange(res as ResolutionOption)}
                       disabled={disabled}
                     >
                       {res}
@@ -448,6 +473,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           aspectRatio={selectedAspectRatio}
           quality={selectedQuality}
           selectedModelId={selectedModel}
+          nodeType={nodeType}
+          models={models}
           onResolutionChange={onResolutionChange}
           onAspectRatioChange={onAspectRatioChange}
           onQualityChange={onQualityChange || (() => {})}
@@ -487,8 +514,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
 
       {/* 右侧区域 */}
       <div className="flex items-center gap-0.5 ml-auto">
-        {/* 生成数量（仅图片/视频节点） */}
-        {(nodeType === 'image' || nodeType === 'video') && (
+        {/* 生成数量（仅图片节点） */}
+        {nodeType === 'image' && (
         <div className="relative">
           <button
             onClick={() => setCountOpen(!countOpen)}

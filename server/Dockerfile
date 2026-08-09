@@ -14,7 +14,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server/
 
 FROM alpine:3.19
 
-RUN apk add --no-cache tzdata curl ca-certificates ffmpeg && \
+# 使用国内 Alpine 镜像源加速 apk 安装
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
+    apk add --no-cache tzdata curl ca-certificates ffmpeg && \
     ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone
 

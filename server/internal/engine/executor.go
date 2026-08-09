@@ -1046,9 +1046,12 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		model = "doubao-seedance-2.0-fast"
 	}
 
-	// 映射分辨率
-	resolution := "1080p"
-	if data.Resolution == "4K" {
+	// 视频节点直接使用前端传来的分辨率（480p/720p/1080p/4K）
+	resolution := data.Resolution
+	if resolution == "" {
+		resolution = "1080p"
+	}
+	if resolution == "4K" {
 		resolution = "4k"
 	}
 

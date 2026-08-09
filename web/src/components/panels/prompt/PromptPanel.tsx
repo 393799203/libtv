@@ -4,6 +4,7 @@ import { useExecutionStore } from '@/stores/executionStore';
 import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
 import { nodeRegistry } from '@/plugins/registry';
+import { VIDEO_RESOLUTION_OPTIONS } from '@/configs/promptConfig';
 import type {
   UpstreamInput,
   MentionMarker,
@@ -227,6 +228,19 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>(initialResolution);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(initialAspectRatio);
   const [selectedQuality, setSelectedQuality] = useState<string>(initialQuality);
+
+  // 视频节点：模型切换后，若当前分辨率不在新模型支持的列表中，自动切换到第一个可用项
+  // 避免向后端发送模型不支持的分辨率
+  useEffect(() => {
+    if (nodeType !== 'video') return;
+    const currentModel = availableModels.find((m) => m.value === selectedModel);
+    const supported = currentModel?.resolutions;
+    const opts = supported && supported.length > 0 ? supported : [...VIDEO_RESOLUTION_OPTIONS];
+    if (!opts.includes(selectedResolution)) {
+      setSelectedResolution(opts[0] as ResolutionOption);
+    }
+  }, [nodeType, selectedModel, availableModels, selectedResolution]);
+
   // 下游确认条：执行完后弹出
   const [showDownstreamConfirm, setShowDownstreamConfirm] = useState(false);
 

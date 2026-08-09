@@ -167,12 +167,14 @@ models:
       model_id: "doubao-seedance-2.0"
       usage: [video]
       description: "字节豆包Seedance 2.0视频生成（华数TokenHub）"
+      resolutions: ["480p", "720p", "1080p", "4k"]
     - id: doubao-seedance-2.0-fast
       name: "豆包 Seedance 2.0 Fast"
       provider: wasu
       model_id: "doubao-seedance-2.0-fast"
       usage: [video]
       description: "字节豆包Seedance 2.0快速版（华数TokenHub），生成速度更快"
+      resolutions: ["480p", "720p"]
 
   # ---------- 音频 / TTS（预留）----------
   audio:

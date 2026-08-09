@@ -17,6 +17,8 @@ function convertToModelOption(model: ModelConfig): ModelOption {
     // 标签逻辑：Z-Image-Turbo 标记"快速"（其他标签可根据需要配置）
     tag: model.ID === 'z-image-turbo' ? '快速' : undefined,
     tagColor: model.ID === 'z-image-turbo' ? '#3b82f6' : undefined,
+    // 视频模型支持的分辨率（后端 models.yaml 配置），归一化 4k→4K 以便前端统一比较/展示
+    resolutions: model.Resolutions?.map((r) => (r.toLowerCase() === '4k' ? '4K' : r)),
   };
 }
 

@@ -12,6 +12,7 @@ export interface ModelConfig {
   Description: string;
   Parameters?: Record<string, unknown>;
   Default?: boolean;   // 是否为默认模型（从配置文件读取）
+  Resolutions?: string[];  // 支持的分辨率（视频模型用，后端 models.yaml 配置）
 }
 
 // 模型列表响应（按类型分组）

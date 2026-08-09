@@ -8,6 +8,10 @@ import type { NodeType } from '@/types/canvas';
 
 export const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const;
 
+// 视频节点分辨率选项（值直接传给后端）
+export const VIDEO_RESOLUTION_OPTIONS = ['480p', '720p', '1080p', '4K'] as const;
+export type VideoResolutionOption = typeof VIDEO_RESOLUTION_OPTIONS[number];
+
 // ==================== 画质选项 ====================
 
 export const QUALITY_OPTIONS = ['低画质', '标准画质', '高画质'] as const;
@@ -57,7 +61,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   video: {
     acceptedInputs: ['image', 'video', 'text', 'script', 'audio'],
     defaultModel: 'video-default',
-    defaultResolution: '1K',
+    defaultResolution: '1080p',
     defaultAspectRatio: '9:16',
     availableModels: [],
     toolbarControls: ['model', 'aspectRatio', 'camera', 'viewMode', 'duration', 'count', 'tokenCount'],
