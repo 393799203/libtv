@@ -50,7 +50,7 @@ export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> =
 export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   image: {
     acceptedInputs: ['image', 'text', 'script'],
-    defaultModel: 'qwen-image-2.0',  // 默认模型 ID（华数TokenHub）
+    defaultModel: 'doubao-seedream-5.0-lite',  // 默认模型 ID（豆包 Seedream 5.0 Lite）
     defaultResolution: '2K',
     defaultAspectRatio: '16:9',
     availableModels: [],  // 空数组，由组件从 Store 动态获取
@@ -60,7 +60,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   },
   video: {
     acceptedInputs: ['image', 'video', 'text', 'script', 'audio'],
-    defaultModel: 'video-default',
+    defaultModel: 'doubao-seedance-2.0-fast',  // 默认模型 ID（seedance2.0 fast）
     defaultResolution: '1080p',
     defaultAspectRatio: '9:16',
     availableModels: [],

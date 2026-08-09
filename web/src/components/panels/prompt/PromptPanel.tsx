@@ -197,6 +197,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         setSelectedQuality(prev => prev !== (data as any).quality ? (data as any).quality : prev);
       }
     }
+
+    // 视频节点：恢复节点数据中的时长（4-15秒规范化）
+    if (nodeType === 'video') {
+      const d = (data as { duration?: number }).duration;
+      if (d && d > 0) {
+        const normalized = d < 4 ? 4 : d > 15 ? 15 : d;
+        setSelectedDuration(prev => prev !== normalized ? normalized : prev);
+      }
+    }
   }, [nodeId, data, nodeType, availableModels]);
 
   // 当模型列表加载完成时，自动选择默认模型或合适的模型
@@ -251,6 +260,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [videoMode, setVideoMode] = useState<VideoMode>(
     nodeType === 'video' ? ((data as { videoMode?: VideoMode }).videoMode || 'text-to-video') : 'text-to-video'
   );
+  // 视频节点专属：时长（4-15秒，从节点data读取，默认5秒）
+  const [selectedDuration, setSelectedDuration] = useState<number>(
+    nodeType === 'video'
+      ? (() => {
+          const d = (data as { duration?: number }).duration;
+          if (!d || d <= 0) return 5;
+          if (d < 4) return 4;
+          if (d > 15) return 15;
+          return d;
+        })()
+      : 5
+  );
   // 上游已连接的图片节点数量（用于控制模式可用性）
   const upstreamImageCount = useMemo(
     () => upstreamInputs.filter((i) => i.nodeType === 'image').length,
@@ -290,7 +311,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   );
 
   // 发送生成 — 通过 useNodeGeneration 统一入口
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (count?: number) => {
+    console.log('[PromptPanel] handleGenerate count=', count);
     if (!projectId) {
       console.error('projectId 不存在，无法执行工作流');
       return;
@@ -316,9 +338,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       }
       if (nodeType === 'image') {
         (updateData as any).quality = selectedQuality;
+        (updateData as any).count = count; // 生成数量
       }
       if (nodeType === 'video') {
         (updateData as any).videoMode = videoMode;
+        (updateData as any).duration = selectedDuration;  // 视频时长（4-15秒）
       }
 
       onUpdate(updateData);
@@ -326,7 +350,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
     // 2) 调统一入口（自动：写下游 stale → 存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, onUpdate, generate]);
+  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, onUpdate, generate]);
+
+  // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
+  const handleDurationChange = useCallback((duration: number) => {
+    setSelectedDuration(duration);
+    if (nodeType === 'video') {
+      onUpdate({ duration } as Partial<LibTVNodeData>);
+    }
+  }, [nodeType, onUpdate]);
 
   // 监听节点执行状态：终态时弹出下游确认条
   const currentExecution = useExecutionStore((s) => s.currentExecution);
@@ -435,6 +467,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onVoiceChange={setSelectedVoice}
         selectedSpeed={selectedSpeed}
         onSpeedChange={setSelectedSpeed}
+        selectedDuration={selectedDuration}
+        onDurationChange={handleDurationChange}
       />
     </div>
   );

@@ -5,7 +5,110 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useAuthStore } from '@/stores/authStore';
 import { workflowApi } from '@/services/workflowApi';
 import { canvasApi } from '@/services/canvasApi';
+import { createNode } from '@/utils/nodeFactory';
 import type { WSEvent } from '@/types/workflow';
+import type { ImageNodeData, LibTVEdge } from '@/types/canvas';
+
+/**
+ * 为多图生成结果创建兄弟图片节点
+ * - 第一个 URL 已用于更新原节点，这里处理 urls[1..n-1]
+ * - 新节点 ID：{原节点ID}-{index}（index 从 2 开始）
+ * - 新节点位置：原节点下方，每个间隔 320px
+ * - 复制原节点的关键属性（prompt/model/mentions/resolution/aspectRatio 等）
+ * - 复制原节点的上游边
+ */
+function createSiblingImageNodes(
+  originalNodeId: string,
+  imageUrls: string[],
+  width?: number,
+  height?: number,
+): void {
+  const store = useCanvasStore.getState();
+  const originalNode = store.nodes.find((n) => n.id === originalNodeId);
+  if (!originalNode || originalNode.type !== 'image') {
+    return;
+  }
+
+  const originalData = originalNode.data as ImageNodeData;
+  const originalPos = originalNode.position;
+
+  // 找到原节点的上游边（target = originalNodeId），用于复制到新节点
+  const upstreamEdges = store.edges.filter((e) => e.target === originalNodeId);
+
+  // 为 urls[1..n-1] 创建新节点（urls[0] 已用于更新原节点）
+  for (let i = 1; i < imageUrls.length; i++) {
+    const url = imageUrls[i];
+    if (!url) continue;
+    const index = i + 1; // 2, 3, 4, ...
+    const newNodeId = `${originalNodeId}-${index}`;
+
+    // 计算新节点 label
+    const originalLabel = originalData.label || '';
+    let newLabel: string;
+    if (originalLabel.endsWith('参考图')) {
+      // 原 label 是"分镜1-参考图" → 新节点"分镜1-参考图2"、"分镜1-参考图3"
+      newLabel = `${originalLabel}${index}`;
+    } else {
+      // 其他情况 → "{原label}-{index}"
+      newLabel = `${originalLabel}-${index}`;
+    }
+
+    // 如果节点已存在（重复执行场景），只更新 imageUrl
+    if (store.nodes.some((n) => n.id === newNodeId)) {
+      store.updateNodeData(newNodeId, {
+        imageUrl: url,
+        width,
+        height,
+        status: 'success' as const,
+        stale: false,
+        error: undefined,
+        progressMessage: undefined,
+      } as never);
+      continue;
+    }
+
+    // 计算新节点位置：原节点下方，每个间隔 320px
+    const newPos = {
+      x: originalPos.x,
+      y: originalPos.y + 320 * i,
+    };
+
+    // 创建新节点（复制原节点 data，但 imageUrl / label / status 不同）
+    const newNode = createNode('image', newPos, {
+      id: newNodeId,
+      data: {
+        ...originalData,
+        label: newLabel,
+        imageUrl: url,
+        width,
+        height,
+        status: 'success' as const,
+        stale: false,
+        error: undefined,
+        progressMessage: undefined,
+      } as Partial<ImageNodeData>,
+    });
+
+    store.addNode(newNode);
+
+    // 复制原节点的上游边到新节点
+    for (const edge of upstreamEdges) {
+      const newEdgeId = `e-${edge.source}-${newNodeId}`;
+      if (!store.edges.some((e) => e.id === newEdgeId)) {
+        const newEdge: LibTVEdge = {
+          id: newEdgeId,
+          source: edge.source,
+          target: newNodeId,
+          type: edge.type || 'dataFlow',
+        };
+        store.addEdge(newEdge);
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[SSE] 创建兄弟图片节点:', { newNodeId, url, label: newLabel });
+  }
+}
 
 // 静默超时：超过这个时长没收到任何 SSE 消息（心跳/progress/事件），认为连接已死，切 polling
 const SSE_SILENT_TIMEOUT_MS = 45_000;
@@ -130,12 +233,36 @@ export function useExecutionStream(
 
             // 如果后端返回了节点数据，直接更新该节点
             if (nodeId && exec.node_data) {
+              // ✅ 提取 imageUrls（如果存在），用于轮询兜底创建兄弟节点
+              const pollNodeData = exec.node_data as Record<string, unknown> & {
+                imageUrls?: unknown;
+                width?: number;
+                height?: number;
+              };
+              const pollImageUrls = pollNodeData.imageUrls;
+              const pollWidth = pollNodeData.width;
+              const pollHeight = pollNodeData.height;
+
               store.updateNodeData(nodeId, {
                 ...exec.node_data,
                 status: finalStatus,
                 error: finalStatus === 'failed' ? errorMsg : undefined,  // ✅ 保存错误消息到节点error字段
                 progressMessage: undefined,
               } as never);
+
+              // ✅ 轮询兜底：如果 node_data 里有 imageUrls 数组且长度 > 1，同样创建兄弟节点
+              if (
+                finalStatus === 'success' &&
+                Array.isArray(pollImageUrls) &&
+                pollImageUrls.length > 1
+              ) {
+                createSiblingImageNodes(
+                  nodeId,
+                  pollImageUrls as string[],
+                  pollWidth,
+                  pollHeight,
+                );
+              }
             }
 
             // 收尾所有还在 running/pending 的节点
@@ -209,6 +336,7 @@ export function useExecutionStream(
             scenes?: unknown[];
             props?: unknown[];
             imageUrl?: string;
+            imageUrls?: string[];  // ✅ 多图 URL 数组（N>1 时后端返回）
             width?: number;    // ✅ 图片宽度
             height?: number;   // ✅ 图片高度
             videoUrl?: string;
@@ -244,6 +372,12 @@ export function useExecutionStream(
           updates.status = 'success';
           if (Object.keys(updates).length > 0) {
             useCanvasStore.getState().updateNodeData(event.nodeId, updates as never);
+          }
+
+          // ✅ 多图生成：如果 imageUrls 是数组且长度 > 1，为其余 URL 创建新的图片节点
+          // 第一个 URL 已用于更新当前节点，剩余 URL 创建兄弟节点
+          if (Array.isArray(data.imageUrls) && data.imageUrls.length > 1) {
+            createSiblingImageNodes(event.nodeId, data.imageUrls, data.width, data.height);
           }
         } else if (event.type === 'node_failed' && event.nodeId) {
           const errMsg =

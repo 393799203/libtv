@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
-import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, QUALITY_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
+import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
 
 // 模型图标映射（匹配截图中的图标风格）
 const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
@@ -36,7 +36,7 @@ interface PromptToolbarProps {
   selectedQuality?: string;
   onQualityChange?: (quality: string) => void;
   isGenerating?: boolean;
-  onGenerate?: () => void;
+  onGenerate?: (count?: number) => void;
   nodeType?: NodeType;
   cameraMode?: 'normal' | 'camera' | 'panorama';
   onCameraModeChange?: (mode: 'normal' | 'camera' | 'panorama') => void;
@@ -45,6 +45,9 @@ interface PromptToolbarProps {
   onVoiceChange?: (voice: string) => void;
   selectedSpeed?: number;
   onSpeedChange?: (speed: number) => void;
+  // 视频节点专属：时长（秒）
+  selectedDuration?: number;
+  onDurationChange?: (duration: number) => void;
 }
 
 // ==================== 模型选择器（截图2）====================
@@ -227,8 +230,6 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
         </span>
         <span className="text-[13px] font-medium text-gray-800">{aspectRatio}</span>
         <span className="text-gray-300 text-[13px]">·</span>
-        <span className="text-[13px] text-gray-500">{quality}</span>
-        <span className="text-gray-300 text-[13px]">·</span>
         <span className="text-[13px] text-gray-500">{effectiveResolution}</span>
         <span className="text-[10px] text-gray-400 ml-0.5">^</span>
       </button>
@@ -238,26 +239,6 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
           <div className="absolute bottom-full left-0 mb-2 w-[340px] bg-white rounded-2xl shadow-xl border border-gray-200 p-5 z-30">
-            {/* 画质 */}
-            <div className="mb-4">
-              <div className="text-[13px] font-medium text-gray-700 mb-2.5">画质</div>
-              <div className="flex gap-2">
-                {QUALITY_OPTIONS.map((q) => (
-                  <button
-                    key={q}
-                    className={`flex-1 max-w-[90px] py-[6px] rounded-lg text-[12px] font-medium transition-all ${
-                      quality === q
-                        ? 'bg-white text-gray-800 border border-gray-900 shadow-sm'
-                        : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
-                    }`}
-                    onClick={() => onQualityChange(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* 清晰度 */}
             <div className="mb-4">
               <div className="text-[13px] font-medium text-gray-700 mb-2.5">清晰度</div>
@@ -355,6 +336,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onVoiceChange,
   selectedSpeed = 1.0,
   onSpeedChange,
+  selectedDuration = 5,
+  onDurationChange,
 }) {
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
@@ -363,6 +346,9 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   const [countOpen, setCountOpen] = useState(false);
   const [count, setCount] = useState(1);
   const countOptions = [1, 2, 4];
+  // 视频时长选项：4-15 秒（火山引擎 doubao-seedance-2.0 官方限制）
+  const durationOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+  const [durationOpen, setDurationOpen] = useState(false);
 
   // 音色选项
   const VOICE_OPTIONS = [
@@ -514,8 +500,47 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
 
       {/* 右侧区域 */}
       <div className="flex items-center gap-0.5 ml-auto">
-        {/* 生成数量（仅图片节点） */}
-        {nodeType === 'image' && (
+        {/* 视频时长选择器（仅视频节点，显示在生成按钮左侧） */}
+        {isVideo && (
+          <div className="relative mr-1">
+            <button
+              onClick={() => setDurationOpen(!durationOpen)}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px] text-gray-600"
+              title="视频时长（4-15秒）"
+            >
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="7" r="5.5" stroke="#6B7280" strokeWidth="1.3" />
+                <path d="M7 4v3l2 1.5" stroke="#6B7280" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="font-medium text-gray-800">{selectedDuration}s</span>
+              <span className="text-[10px] text-gray-400">^</span>
+            </button>
+            {durationOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setDurationOpen(false)} />
+                <div className="absolute bottom-full right-0 mb-2 w-[64px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30 max-h-[260px] overflow-y-auto">
+                  {durationOptions.map((opt) => (
+                    <button
+                      key={opt}
+                      className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                        selectedDuration === opt ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                      onClick={() => {
+                        onDurationChange?.(opt);
+                        setDurationOpen(false);
+                      }}
+                    >
+                      {opt}s
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 生成数量：API 暂不支持批量生成，暂时隐藏 */}
+        {false && nodeType === 'image' && (
         <div className="relative">
           <button
             onClick={() => setCountOpen(!countOpen)}
@@ -547,7 +572,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         {/* 生成按钮 */}
         <button
           className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-gray-800 to-gray-950 text-white flex items-center justify-center hover:from-gray-700 hover:to-gray-900 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm text-[13px] font-medium tracking-wide"
-          onClick={onGenerate}
+          onClick={() => onGenerate?.(count)}
           disabled={isGenerating}
         >
           {isGenerating ? '生成中…' : '生成'}

@@ -723,6 +723,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		Resolution  string          `json:"resolution"`  // 清晰度：1K/2K/4K
 		AspectRatio string          `json:"aspectRatio"` // 比例：16:9/9:16/1:1等
 		Quality     string          `json:"quality"`     // 画质：低画质/标准画质/高画质
+		Count       int             `json:"count"`       // 生成数量
 		Mentions    json.RawMessage `json:"mentions"`    // ✅ 添加 Mentions 字段，用于用户明确@引用的上游节点
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
@@ -813,7 +814,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			NodeID: node.ID,
 			Status: "success",
 			Data: map[string]interface{}{
-				"imageUrl": "",
+				"imageUrl":  "",
+				"imageUrls": []string{},
 			},
 		}, nil
 	}
@@ -825,7 +827,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			NodeID: node.ID,
 			Status: "success",
 			Data: map[string]interface{}{
-				"imageUrl": "",
+				"imageUrl":  "",
+				"imageUrls": []string{},
 			},
 		}, nil
 	}
@@ -872,52 +875,65 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 提升后尺寸: %dx%d (%d像素)", width, height, width*height)
 	}
 
-	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s size=%s hasRefImage=%v refImageCount=%d", node.ID, len(finalPrompt), apiModelID, size, len(upstreamImageURLs) > 0, len(upstreamImageURLs))
+	log.Printf("[ImageExecutor] nodeID=%s promptLen=%d model=%s size=%s hasRefImage=%v refImageCount=%d data.Count=%d", node.ID, len(finalPrompt), apiModelID, size, len(upstreamImageURLs) > 0, len(upstreamImageURLs), data.Count)
+
+	// 生成数量：count <= 0 时默认为 1
+	count := data.Count
+	if count <= 0 {
+		count = 1
+	}
+	log.Printf("[ImageExecutor] 生成数量: data.Count=%d -> 实际count=%d", data.Count, count)
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
-	var generatedURL string
+	// 返回所有生成图片的 URL 列表（N>1 时有多个）
+	var generatedURLs []string
 	var err error
 
 	if len(upstreamImageURLs) > 0 {
 		imageToImagePrompt := fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
 		log.Printf("[ImageExecutor] 使用图生图模式(多图): refImageCount=%d prompt=%s", len(upstreamImageURLs), imageToImagePrompt)
-		generatedURL, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0)
+		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
 		if err != nil {
 			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
 		}
 	} else {
 		log.Printf("[ImageExecutor] 使用文生图模式")
-		generatedURL, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size)
+		generatedURLs, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size, count)
 		if err != nil {
 			return nil, fmt.Errorf("generate image: %w", err)
 		}
 	}
 
-	// 下载图片并使用 FileUploadService 上传
-	imageInfo, err := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetProjectID(), width, height)
-	if err != nil {
-		log.Printf("[ImageExecutor] 下载上传失败，使用原始URL: %v", err)
-		// 如果失败，仍然返回原始URL和计算的尺寸，确保功能可用
-		return &NodeOutput{
-			NodeID: node.ID,
-			Status: "success",
-			Data: map[string]interface{}{
-				"imageUrl": generatedURL,
-				"width":    width,
-				"height":   height,
-			},
-		}, nil
+	log.Printf("[ImageExecutor] 生成完成: imageCount=%d", len(generatedURLs))
+
+	// 逐个下载图片并使用 FileUploadService 上传
+	// 失败的图片回退使用原始 URL，确保功能可用
+	ownURLs := make([]string, 0, len(generatedURLs))
+	for idx, generatedURL := range generatedURLs {
+		imageInfo, dlErr := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetProjectID(), width, height)
+		if dlErr != nil {
+			log.Printf("[ImageExecutor] 下载上传失败(idx=%d)，使用原始URL: %v", idx, dlErr)
+			ownURLs = append(ownURLs, generatedURL)
+		} else {
+			log.Printf("[ImageExecutor] 图片上传成功(idx=%d): generatedURL=%s -> ownURL=%s size=%dx%d", idx, generatedURL, imageInfo.url, imageInfo.width, imageInfo.height)
+			ownURLs = append(ownURLs, imageInfo.url)
+		}
 	}
 
-	log.Printf("[ImageExecutor] 图片上传成功: generatedURL=%s -> ownURL=%s size=%dx%d", generatedURL, imageInfo.url, imageInfo.width, imageInfo.height)
+	// 第一个 URL（兼容现有前端逻辑读取 data.imageUrl）
+	firstURL := ""
+	if len(ownURLs) > 0 {
+		firstURL = ownURLs[0]
+	}
 
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"imageUrl": imageInfo.url,
-			"width":    imageInfo.width,  // ✅ 返回实际图片宽度
-			"height":   imageInfo.height, // ✅ 返回实际图片高度
+			"imageUrl":  firstURL, // ✅ 第一个，兼容现有前端逻辑
+			"imageUrls": ownURLs,  // ✅ 全部 URL，供前端创建多节点
+			"width":     width,    // ✅ 返回实际图片宽度
+			"height":    height,   // ✅ 返回实际图片高度
 		},
 	}, nil
 }

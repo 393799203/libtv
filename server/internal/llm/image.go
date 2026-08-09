@@ -83,7 +83,7 @@ type ImageGenerationResponse struct {
 }
 
 // GenerateImage 生成图像（文生图）
-func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size string) (string, error) {
+func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size string) ([]string, error) {
 	if size == "" {
 		size = "1920x1080"
 	}
@@ -96,7 +96,7 @@ func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size str
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("marshal image request: %w", err)
+		return nil, fmt.Errorf("marshal image request: %w", err)
 	}
 	log.Printf("[ImageGen] 文生图: model=%s size=%s", c.model, size)
 
@@ -104,23 +104,41 @@ func (c *ImageClient) GenerateImage(ctx context.Context, prompt string, size str
 }
 
 // GenerateImageWithModel 使用指定模型生成图像
-func (c *ImageClient) GenerateImageWithModel(ctx context.Context, model string, prompt string, size string) (string, error) {
-	originalModel := c.model
-	c.model = model
-	defer func() { c.model = originalModel }()
+func (c *ImageClient) GenerateImageWithModel(ctx context.Context, model string, prompt string, size string, n int) ([]string, error) {
+	if size == "" {
+		size = "1920x1080"
+	}
+	if n <= 0 {
+		n = 1
+	}
 
-	return c.GenerateImage(ctx, prompt, size)
+	req := ImageRequest{
+		Model:  model,
+		Prompt: prompt,
+		Size:   size,
+		N:      n,
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal image request: %w", err)
+	}
+	log.Printf("[ImageGen] 文生图: model=%s size=%s n=%d", model, size, n)
+
+	return c.doRequest(ctx, payload)
 }
 
 // GenerateImageFromImage 图生图：基于参考图生成新图像（使用默认model）
-func (c *ImageClient) GenerateImageFromImage(ctx context.Context, imageURL string, prompt string, size string) (string, error) {
-	return c.GenerateImageFromImageWithGuidance(ctx, c.model, []string{imageURL}, prompt, size, 7.5)
+func (c *ImageClient) GenerateImageFromImage(ctx context.Context, imageURL string, prompt string, size string) ([]string, error) {
+	return c.GenerateImageFromImageWithGuidance(ctx, c.model, []string{imageURL}, prompt, size, 7.5, 1)
 }
 
 // GenerateImageFromImageWithGuidance 图生图：基于参考图生成新图像，可指定model和guidance_scale
-func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, model string, imageURLs []string, prompt string, size string, guidanceScale float64) (string, error) {
+func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, model string, imageURLs []string, prompt string, size string, guidanceScale float64, n int) ([]string, error) {
 	if size == "" {
 		size = "1920x1080"
+	}
+	if n <= 0 {
+		n = 1
 	}
 
 	// 逐个处理参考图：本地URL转base64，公网URL直接使用
@@ -137,7 +155,7 @@ func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, mo
 			log.Printf("[ImageGen] 检测到本地URL，转换为base64: originalURL=%s", imageURL)
 			base64Data, err := c.ConvertLocalImageToBase64(ctx, imageURL)
 			if err != nil {
-				return "", fmt.Errorf("convert local image to base64: %w", err)
+				return nil, fmt.Errorf("convert local image to base64: %w", err)
 			}
 			finalImages = append(finalImages, base64Data)
 			log.Printf("[ImageGen] 本地图片转换成功: base64Len=%d", len(base64Data))
@@ -149,24 +167,24 @@ func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, mo
 		Prompt: prompt,
 		Image:  finalImages,
 		Size:   size,
-		N:      1,
+		N:      n,
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("marshal image request: %w", err)
+		return nil, fmt.Errorf("marshal image request: %w", err)
 	}
-	log.Printf("[ImageGen] 图生图(多图): model=%s size=%s imageCount=%d", model, size, len(finalImages))
+	log.Printf("[ImageGen] 图生图(多图): model=%s size=%s imageCount=%d n=%d", model, size, len(finalImages), n)
 
 	return c.doRequest(ctx, payload)
 }
 
-// doRequest 统一发送图像生成请求
-func (c *ImageClient) doRequest(ctx context.Context, payload []byte) (string, error) {
+// doRequest 统一发送图像生成请求，返回所有生成图片的 URL 列表
+func (c *ImageClient) doRequest(ctx context.Context, payload []byte) ([]string, error) {
 	url := fmt.Sprintf("%s/images/generations", c.baseURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -175,36 +193,54 @@ func (c *ImageClient) doRequest(ctx context.Context, payload []byte) (string, er
 	resp, err := c.httpCli.Do(httpReq)
 	if err != nil {
 		log.Printf("[ImageGen] error after %s: %v", time.Since(start), err)
-		return "", fmt.Errorf("http request: %w", err)
+		return nil, fmt.Errorf("http request: %w", err)
 	}
 	defer resp.Body.Close()
 	log.Printf("[ImageGen] got response after %s, status=%d", time.Since(start), resp.StatusCode)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read response body: %w", err)
+		return nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[ImageGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("Image API error (status=%d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("Image API error (status=%d): %s", resp.StatusCode, string(respBody))
 	}
+
+	// 打印 API 原始响应（截取前800字符），确认返回的 Data 数组长度
+	bodyPreview := string(respBody)
+	if len(bodyPreview) > 800 {
+		bodyPreview = bodyPreview[:800]
+	}
+	log.Printf("[ImageGen] API 原始响应: %s", bodyPreview)
 
 	var imgResp ImageGenerationResponse
 	if err := json.Unmarshal(respBody, &imgResp); err != nil {
-		return "", fmt.Errorf("unmarshal response: %w", err)
+		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	if imgResp.Error != nil {
-		return "", fmt.Errorf("Image API error: %s", imgResp.Error.Message)
+		return nil, fmt.Errorf("Image API error: %s", imgResp.Error.Message)
 	}
 
 	if len(imgResp.Data) == 0 {
-		return "", fmt.Errorf("no image generated")
+		return nil, fmt.Errorf("no image generated")
 	}
 
-	log.Printf("[ImageGen] success: imageURL=%s", imgResp.Data[0].URL)
-	return imgResp.Data[0].URL, nil
+	// 收集所有生成图片的 URL（N>1 时返回多个）
+	urls := make([]string, 0, len(imgResp.Data))
+	for _, d := range imgResp.Data {
+		if d.URL != "" {
+			urls = append(urls, d.URL)
+		}
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("no image generated")
+	}
+
+	log.Printf("[ImageGen] success: imageCount=%d firstURL=%s", len(urls), urls[0])
+	return urls, nil
 }
 
 // convertLocalImageToBase64 将本地图片转换为base64格式
