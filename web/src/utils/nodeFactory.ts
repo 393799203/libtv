@@ -81,6 +81,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         duration: 5,
         fps: 24,
         videoUrl: undefined,
+        generateAudio: true,  // 默认开启声音生成
       };
     case 'audio':
       return {

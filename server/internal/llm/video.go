@@ -112,7 +112,8 @@ type VideoTaskResponse struct {
 
 // GenerateVideo 调用视频生成API
 // imageURLs: 参考图列表。videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=无role
-func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoMode string) (string, error) {
+// generateAudio: 是否生成音频（true=生成声音，false=静音）
+func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoMode string, generateAudio bool) (string, error) {
 	if resolution == "" {
 		resolution = "1080p"
 	}
@@ -134,7 +135,7 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	metadata := VideoMetadata{
 		Resolution:    resolution,
 		Ratio:         ratio,
-		GenerateAudio: true,
+		GenerateAudio: generateAudio,
 		Content:       []VideoContentItem{},
 	}
 

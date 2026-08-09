@@ -1001,21 +1001,28 @@ func NewVideoExecutor(videoClient *llm.VideoClient) *VideoExecutor {
 
 func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
-		Mode        string          `json:"mode"`
-		Prompt      string          `json:"prompt"`
-		Model       string          `json:"model"`
-		Duration    int             `json:"duration"`
-		Fps         int             `json:"fps"`
-		AspectRatio string          `json:"aspectRatio"`
-		Resolution  string          `json:"resolution"`
-		VideoMode   string          `json:"videoMode"`
-		Mentions    json.RawMessage `json:"mentions"`
+		Mode          string          `json:"mode"`
+		Prompt        string          `json:"prompt"`
+		Model         string          `json:"model"`
+		Duration      int             `json:"duration"`
+		Fps           int             `json:"fps"`
+		AspectRatio   string          `json:"aspectRatio"`
+		Resolution    string          `json:"resolution"`
+		VideoMode     string          `json:"videoMode"`
+		GenerateAudio *bool           `json:"generateAudio"` // 指针类型，区分未设置(nil)和显式false
+		Mentions      json.RawMessage `json:"mentions"`
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse video node data: %w", err)
 	}
 
-	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d videoMode=%s", node.ID, data.Model, len(data.Prompt), data.Duration, data.VideoMode)
+	// generateAudio 默认为 true（开启声音生成）
+	generateAudio := true
+	if data.GenerateAudio != nil {
+		generateAudio = *data.GenerateAudio
+	}
+
+	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d videoMode=%s generateAudio=%v", node.ID, data.Model, len(data.Prompt), data.Duration, data.VideoMode, generateAudio)
 
 	// 解析 mentions，收集上游图片URL
 	var imageURLs []string
@@ -1081,6 +1088,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		data.AspectRatio,
 		imageURLs,
 		data.VideoMode,
+		generateAudio,
 	)
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)

@@ -183,6 +183,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       if (matchedModel) {
         setSelectedModel(prev => prev !== matchedModel.value ? matchedModel.value : prev);
       }
+    } else {
+      // 新节点没有保存的 model，使用配置的默认模型（避免保留上个节点的选择）
+      setSelectedModel(prev => prev !== config.defaultModel ? config.defaultModel : prev);
     }
 
     // 图片节点：恢复节点数据中的分辨率、比例、画质
@@ -205,6 +208,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         const normalized = d < 4 ? 4 : d > 15 ? 15 : d;
         setSelectedDuration(prev => prev !== normalized ? normalized : prev);
       }
+      // 恢复声音开关（未设置时默认开启）
+      const ga = (data as { generateAudio?: boolean }).generateAudio;
+      const gaVal = ga !== false;
+      setGenerateAudio(prev => prev !== gaVal ? gaVal : prev);
     }
   }, [nodeId, data, nodeType, availableModels]);
 
@@ -271,6 +278,12 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           return d;
         })()
       : 5
+  );
+  // 视频节点专属：是否生成音频（默认开启）
+  const [generateAudio, setGenerateAudio] = useState<boolean>(
+    nodeType === 'video'
+      ? ((data as { generateAudio?: boolean }).generateAudio !== false)
+      : true
   );
   // 上游已连接的图片节点数量（用于控制模式可用性）
   const upstreamImageCount = useMemo(
@@ -343,6 +356,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       if (nodeType === 'video') {
         (updateData as any).videoMode = videoMode;
         (updateData as any).duration = selectedDuration;  // 视频时长（4-15秒）
+        (updateData as any).generateAudio = generateAudio;  // 是否生成音频
       }
 
       onUpdate(updateData);
@@ -350,13 +364,21 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
     // 2) 调统一入口（自动：写下游 stale → 存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, onUpdate, generate]);
+  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, onUpdate, generate]);
 
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
   const handleDurationChange = useCallback((duration: number) => {
     setSelectedDuration(duration);
     if (nodeType === 'video') {
       onUpdate({ duration } as Partial<LibTVNodeData>);
+    }
+  }, [nodeType, onUpdate]);
+
+  // 视频节点：声音开关切换后实时同步到节点 data
+  const handleGenerateAudioChange = useCallback((enabled: boolean) => {
+    setGenerateAudio(enabled);
+    if (nodeType === 'video') {
+      onUpdate({ generateAudio: enabled } as Partial<LibTVNodeData>);
     }
   }, [nodeType, onUpdate]);
 
@@ -469,6 +491,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onSpeedChange={setSelectedSpeed}
         selectedDuration={selectedDuration}
         onDurationChange={handleDurationChange}
+        generateAudio={generateAudio}
+        onGenerateAudioChange={handleGenerateAudioChange}
       />
     </div>
   );

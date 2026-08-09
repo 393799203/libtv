@@ -61,6 +61,7 @@ export interface VideoNodeData extends BaseNodeFields, Record<string, unknown> {
   videoUrl?: string;
   videoMode?: VideoMode;       // 视频生成模式
   referenceImages?: string[];   // 参考图片 URL 列表（全能参考/首尾帧模式）
+  generateAudio?: boolean;      // 是否生成音频（默认 true）
 }
 
 // 音频节点数据

@@ -8,6 +8,7 @@ import {
   CloudOutlined,
   AudioOutlined,
   SoundOutlined,
+  AudioMutedOutlined,
 } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
@@ -48,6 +49,9 @@ interface PromptToolbarProps {
   // 视频节点专属：时长（秒）
   selectedDuration?: number;
   onDurationChange?: (duration: number) => void;
+  // 视频节点专属：是否生成音频
+  generateAudio?: boolean;
+  onGenerateAudioChange?: (enabled: boolean) => void;
 }
 
 // ==================== 模型选择器（截图2）====================
@@ -338,6 +342,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onSpeedChange,
   selectedDuration = 5,
   onDurationChange,
+  generateAudio = true,
+  onGenerateAudioChange,
 }) {
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
@@ -537,6 +543,24 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
               </>
             )}
           </div>
+        )}
+
+        {/* 声音开关（仅视频节点，时长选择器右侧） */}
+        {isVideo && (
+          <button
+            onClick={() => onGenerateAudioChange?.(!generateAudio)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer text-[13px] mr-1 ${
+              generateAudio
+                ? 'bg-gray-100 text-gray-800'
+                : 'text-gray-400 hover:bg-gray-100/80'
+            }`}
+            title={generateAudio ? '声音：开（点击关闭）' : '声音：关（点击开启）'}
+          >
+            {generateAudio
+              ? <SoundOutlined style={{ fontSize: 14 }} />
+              : <AudioMutedOutlined style={{ fontSize: 14 }} />}
+            <span className="text-[12px]">{generateAudio ? '声音' : '静音'}</span>
+          </button>
         )}
 
         {/* 生成数量：API 暂不支持批量生成，暂时隐藏 */}
