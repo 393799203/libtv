@@ -1,10 +1,12 @@
-import { memo, useState, useCallback } from 'react';
+import { memo, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { NodeProps, Node } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { ScriptCard } from './script/ScriptCard';
 import { ScriptDetailPanel } from './script/ScriptDetailPanel';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { canvasApi } from '@/services/canvasApi';
+import { clearAllStale } from '@/utils/topology';
 import type { ScriptNodeData } from '@/types/canvas';
 
 type ScriptNodeType = Node<ScriptNodeData, 'script'>;
@@ -12,6 +14,28 @@ type ScriptNodeType = Node<ScriptNodeData, 'script'>;
 export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ id, data, selected }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const projectId = useCanvasStore((s) => s.projectId);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // debounce 自动保存（编辑分镜内容后实时同步到后端）
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      if (!projectId) return;
+      const store = useCanvasStore.getState();
+      const cleanNodes = clearAllStale(store.nodes);
+      const viewport = store._cache.get(projectId)?.savedViewport || { x: 0, y: 0, zoom: 1 };
+      try {
+        await canvasApi.saveCanvas(projectId, {
+          nodes: cleanNodes.length === store.nodes.length ? store.nodes : cleanNodes,
+          edges: store.edges,
+          viewport,
+        });
+      } catch (e) {
+        console.error('[ScriptNode] 自动保存失败:', e);
+      }
+    }, 800);
+  }, [projectId]);
 
   // 稳定的 card data 对象 — 只在数据实际变化时新建，保证 ScriptCard.memo 生效
   const cardData = {
@@ -29,12 +53,13 @@ export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ 
   const handleOpenDetail = useCallback(() => setDetailOpen(true), []);
   const handleCloseDetail = useCallback(() => setDetailOpen(false), []);
 
-  // 稳定的更新回调
+  // 稳定的更新回调（更新 store + debounce 保存到后端）
   const handleUpdateData = useCallback(
     (updates: Partial<ScriptNodeData>) => {
       updateNodeData(id, updates as Partial<ScriptNodeData>);
+      scheduleSave();
     },
-    [id, updateNodeData]
+    [id, updateNodeData, scheduleSave]
   );
 
   return (

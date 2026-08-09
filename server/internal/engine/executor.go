@@ -992,13 +992,14 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		Fps         int             `json:"fps"`
 		AspectRatio string          `json:"aspectRatio"`
 		Resolution  string          `json:"resolution"`
+		VideoMode   string          `json:"videoMode"`
 		Mentions    json.RawMessage `json:"mentions"`
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse video node data: %w", err)
 	}
 
-	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d", node.ID, data.Model, len(data.Prompt), data.Duration)
+	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d videoMode=%s", node.ID, data.Model, len(data.Prompt), data.Duration, data.VideoMode)
 
 	// 解析 mentions，收集上游图片URL
 	var imageURLs []string
@@ -1060,6 +1061,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		resolution,
 		data.AspectRatio,
 		imageURLs,
+		data.VideoMode,
 	)
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)

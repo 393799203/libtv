@@ -123,11 +123,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         headerRight={headerRight}
         headerColor={styleColor}
         noContentPadding
+        className="!w-[280px]"
       >
         {/* 图片区域 */}
         {data.imageUrl ? (
           <div
-            className="relative rounded-lg overflow-hidden bg-gray-100"
+            className="relative rounded-lg overflow-hidden bg-gray-100 w-[280px]"
             style={{ minHeight: `${imageContainerHeight}px` }}
           >
             <img

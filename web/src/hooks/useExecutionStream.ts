@@ -105,7 +105,8 @@ export function useExecutionStream(
         if (!projectId || !executionId) return;
         try {
           const resp = await workflowApi.getStatus(projectId, String(executionId), nodeId);
-          const exec = (resp?.data as unknown) as
+          // 注意：axios 拦截器已解包 ApiResponse.data，resp 本身就是 {status, error_msg, node_data, ...}
+          const exec = (resp as unknown) as
             | {
                 status?: string;
                 error_msg?: string;

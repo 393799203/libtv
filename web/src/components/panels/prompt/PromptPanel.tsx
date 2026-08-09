@@ -303,6 +303,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       if (nodeType === 'image') {
         (updateData as any).quality = selectedQuality;
       }
+      if (nodeType === 'video') {
+        (updateData as any).videoMode = videoMode;
+      }
 
       onUpdate(updateData);
     }

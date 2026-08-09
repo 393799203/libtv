@@ -62,11 +62,12 @@ func NewImageClient(cfg config.AIConfig, providerName string) *ImageClient {
 
 // ImageRequest 图像生成请求（OpenAI 标准格式）
 type ImageRequest struct {
-	Model  string   `json:"model"`
-	Prompt string   `json:"prompt"`
-	Size   string   `json:"size,omitempty"`  // 例如 "1920x1080"
-	N      int      `json:"n,omitempty"`     // 生成图片数量
-	Image  []string `json:"image,omitempty"` // 参考图数组（公网URL或base64），图生图时传入
+	Model     string   `json:"model"`
+	Prompt    string   `json:"prompt"`
+	Size      string   `json:"size,omitempty"`  // 例如 "1920x1080"
+	N         int      `json:"n,omitempty"`     // 生成图片数量
+	Image     []string `json:"image,omitempty"` // 参考图数组（公网URL或base64），图生图时传入
+	Watermark bool     `json:"watermark"`       // 去水印（false=无水印）
 }
 
 // ImageGenerationResponse 图像生成响应

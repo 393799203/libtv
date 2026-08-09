@@ -50,6 +50,12 @@
     cursor: grabbing;
   }
 
+  /* 图片/视频节点固定 280px 宽，覆盖 ReactFlow 动态测量的 inline style width */
+  .react-flow__node-image,
+  .react-flow__node-video {
+    width: 280px !important;
+  }
+
   .react-flow__node.selected,
   .react-flow__node.selected.selected {
     box-shadow: none !important;

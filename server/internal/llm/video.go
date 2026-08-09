@@ -66,6 +66,7 @@ type VideoMetadata struct {
 	Resolution    string             `json:"resolution"`     // "1080p"
 	Ratio         string             `json:"ratio"`          // "16:9"
 	GenerateAudio bool               `json:"generate_audio"` // false
+	Watermark     bool               `json:"watermark"`      // 去水印（false=无水印）
 	Content       []VideoContentItem `json:"content"`        // 参考图列表
 }
 
@@ -110,16 +111,24 @@ type VideoTaskResponse struct {
 }
 
 // GenerateVideo 调用视频生成API
-// imageURLs: 参考图列表。0张=纯文生视频；1张=参考模式（无role）；2张=首尾帧模式（first_frame+last_frame）
-func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string) (string, error) {
+// imageURLs: 参考图列表。videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=无role
+func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoMode string) (string, error) {
 	if resolution == "" {
 		resolution = "1080p"
 	}
 	if ratio == "" {
 		ratio = "16:9"
 	}
-	if duration <= 0 {
-		duration = 5
+	// doubao-seedance-2.0 支持的 duration 范围：4-15秒（火山引擎官方限制）
+	originalDuration := duration
+	if duration < 4 {
+		duration = 4
+	}
+	if duration > 15 {
+		duration = 15
+	}
+	if originalDuration != duration {
+		log.Printf("[VideoGen] duration 规范化: %d → %d", originalDuration, duration)
 	}
 
 	metadata := VideoMetadata{
@@ -146,8 +155,8 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 			Type:     "image_url",
 			ImageURL: VideoContentImage{URL: finalURL},
 		}
-		// 2张图时为首尾帧模式
-		if len(imageURLs) >= 2 {
+		// 仅首尾帧模式设置 role；其他模式（参考/全能参考）无 role
+		if videoMode == "first-last-frame" {
 			if i == 0 {
 				item.Role = "first_frame"
 			} else {
@@ -158,16 +167,23 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 		log.Printf("[VideoGen] ✅ 参考图[%d]已添加: role=%s urlLen=%d", i, item.Role, len(finalURL))
 	}
 
-	// 限制最多2张（API只支持参考模式1张或首尾帧2张）
-	if len(metadata.Content) > 2 {
+	// 首尾帧模式限制2张；全能参考最多5张
+	if videoMode == "first-last-frame" && len(metadata.Content) > 2 {
 		metadata.Content = metadata.Content[:2]
 	}
 
 	mode := "文生视频"
-	if len(metadata.Content) == 1 {
-		mode = "参考模式"
-	} else if len(metadata.Content) == 2 {
-		mode = "首尾帧模式"
+	if len(metadata.Content) > 0 {
+		switch videoMode {
+		case "first-last-frame":
+			mode = "首尾帧模式"
+		case "video-ref":
+			mode = "视频参考模式"
+		case "universal-ref":
+			mode = "全能参考模式"
+		default:
+			mode = "参考模式"
+		}
 	}
 
 	req := VideoRequest{

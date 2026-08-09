@@ -114,8 +114,9 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         selected={selected}
         headerRight={headerRight}
         noContentPadding
+        className="!w-[280px]"
       >
-        <div className="w-full aspect-video">
+        <div className="w-[280px] aspect-video">
           {data.videoUrl && showPlayer ? (
             <video
               src={data.videoUrl}
