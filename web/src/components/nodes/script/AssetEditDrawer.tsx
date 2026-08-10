@@ -12,6 +12,7 @@ import { useExecutionStore } from '@/stores/executionStore';
 import { workflowApi } from '@/services/workflowApi';
 import { canvasApi } from '@/services/canvasApi';
 import { useModels } from '@/hooks/useModels';
+import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
 import {
   getAssetImageNodeId,
   createAssetImageNode,
@@ -84,8 +85,11 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
         if (nodeModel && IMAGE_MODEL_OPTIONS.some(m => m.modelId === nodeModel)) {
           setSelectedModel(nodeModel);
         } else {
-          const defaultModel = IMAGE_MODEL_OPTIONS.find(m => m.isDefault === true);
-          setSelectedModel(defaultModel ? defaultModel.modelId : IMAGE_MODEL_OPTIONS[0].modelId);
+          // 优先使用 promptConfig 配置的默认模型，其次 isDefault 标记，最后第一个
+          const configDefault = PROMPT_PANEL_CONFIGS.image.defaultModel;
+          const matched = IMAGE_MODEL_OPTIONS.find(m => m.modelId === configDefault)
+            || IMAGE_MODEL_OPTIONS.find(m => m.isDefault === true);
+          setSelectedModel(matched ? matched.modelId : IMAGE_MODEL_OPTIONS[0].modelId);
         }
       }
     }, [IMAGE_MODEL_OPTIONS, asset?.name, imageNodeId]);
@@ -232,10 +236,12 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
           }
         }
 
-        // Step 2: 把抽屉状态（模型、提示词等）写入图片节点
+        // Step 2: 把抽屉状态（模型、提示词等）写入图片节点，并重置运行状态
+        // 重置 status='running' 确保订阅能检测到后续 success/failed 变化（避免第二次生成时 status 不变导致 loading 不消失）
         useCanvasStore.getState().updateNodeData(imageNodeId, {
           model: selectedModel,
           prompt: asset.description || '',
+          status: 'running',
         } as any);
 
         // Step 3: 保存画布（让后端能读到最新节点数据）

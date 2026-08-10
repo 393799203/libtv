@@ -116,7 +116,7 @@ func (c *Client) Chat(ctx context.Context, systemPrompt, userMessage string, opt
 func (c *Client) ChatWithModel(ctx context.Context, model, systemPrompt, userMessage string, opts ...Option) (*ChatResponse, error) {
 	reqOpts := &chatOptions{
 		Temperature: 0.7,
-		MaxTokens:   4096,
+		MaxTokens:   8192,
 	}
 	for _, opt := range opts {
 		opt(reqOpts)
@@ -220,7 +220,7 @@ func (c *Client) GeneratePrompt(
 	userMessage := BuildPromptGenerationUserMessage(shotData, characters, scenes, props)
 
 	// 调用 LLM
-	resp, err := c.ChatWithModel(ctx, model, systemPrompt, userMessage, WithTemperature(0.7), WithMaxTokens(2048))
+	resp, err := c.ChatWithModel(ctx, model, systemPrompt, userMessage, WithTemperature(0.7), WithMaxTokens(4096))
 	if err != nil {
 		return "", "", err
 	}

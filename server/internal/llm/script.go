@@ -14,9 +14,9 @@ type ScriptShot struct {
 	ID                 string `json:"id"`
 	ShotNumber         int    `json:"shotNumber"`
 	Duration           int    `json:"duration"`
-	Visual       string `json:"visual"`
+	Visual             string `json:"visual"`
 	ShotSize           string `json:"shotSize"`
-	CameraMovement     string `json:"cameraMovement"`     // 运镜方式（含角度）
+	CameraMovement     string `json:"cameraMovement"` // 运镜方式（含角度）
 	Dialogue           string `json:"dialogue"`
 	SoundEffect        string `json:"soundEffect"`
 	LightingAtmosphere string `json:"lightingAtmosphere"` // 光影氛围
@@ -34,9 +34,9 @@ type Character struct {
 type Scene struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	TimeOfDay   string `json:"timeOfDay"`   // 早晨/上午/中午/下午/傍晚/夜晚/深夜
-	Location    string `json:"location"`     // 具体地点
-	Mood        string `json:"mood"`         // 氛围/情绪
+	TimeOfDay   string `json:"timeOfDay"`          // 早晨/上午/中午/下午/傍晚/夜晚/深夜
+	Location    string `json:"location"`           // 具体地点
+	Mood        string `json:"mood"`               // 氛围/情绪
 	ImageURL    string `json:"imageUrl,omitempty"` // 用户上传的场景参考图
 }
 
@@ -44,25 +44,25 @@ type Scene struct {
 type Prop struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Category    string `json:"category"` // 服装/武器/交通工具/日常用品/电子设备/其他
+	Category    string `json:"category"`           // 服装/武器/交通工具/日常用品/电子设备/其他
 	ImageURL    string `json:"imageUrl,omitempty"` // 用户上传的道具参考图
 }
 
 // ScriptResult 剧本生成结果
 type ScriptResult struct {
-	ScriptContent string      `json:"scriptContent"`
-	Characters    []Character `json:"characters"`
-	Scenes        []Scene     `json:"scenes"`
-	Props         []Prop      `json:"props"`
+	ScriptContent string       `json:"scriptContent"`
+	Characters    []Character  `json:"characters"`
+	Scenes        []Scene      `json:"scenes"`
+	Props         []Prop       `json:"props"`
 	Shots         []ScriptShot `json:"shots"`
 }
 
 // scriptResponse LLM 原始响应结构
 type scriptResponse struct {
-	ScriptContent string      `json:"scriptContent"`
-	Characters    []Character `json:"characters"`
-	Scenes        []Scene     `json:"scenes"`
-	Props         []Prop      `json:"props"`
+	ScriptContent string       `json:"scriptContent"`
+	Characters    []Character  `json:"characters"`
+	Scenes        []Scene      `json:"scenes"`
+	Props         []Prop       `json:"props"`
 	Shots         []ScriptShot `json:"shots"`
 }
 
@@ -80,7 +80,7 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string, model
 			StorySystemPrompt,
 			BuildStoryUserPrompt(userPrompt),
 			WithTemperature(0.8),
-			WithMaxTokens(4096),
+			WithMaxTokens(8192),
 		)
 	} else {
 		// 使用默认模型
@@ -89,7 +89,7 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string, model
 			StorySystemPrompt,
 			BuildStoryUserPrompt(userPrompt),
 			WithTemperature(0.8),
-			WithMaxTokens(4096),
+			WithMaxTokens(8192),
 		)
 	}
 
@@ -126,7 +126,7 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 			ScriptSystemPrompt,
 			BuildScriptUserPrompt(textContent),
 			WithTemperature(0.7),
-			WithMaxTokens(8192),
+			WithMaxTokens(16384),
 		)
 	} else {
 		// 使用默认模型
@@ -135,7 +135,7 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 			ScriptSystemPrompt,
 			BuildScriptUserPrompt(textContent),
 			WithTemperature(0.7),
-			WithMaxTokens(8192),
+			WithMaxTokens(16384),
 		)
 	}
 

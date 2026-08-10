@@ -20,6 +20,8 @@ import { createNode } from '@/utils/nodeFactory';
 interface PromptUpstreamBarProps {
   inputs: UpstreamInput[];
   onInsertMention: (input: UpstreamInput) => void;
+  /** 移除 @引用（用于风格图删除/切换时自动清理） */
+  onRemoveMention?: (nodeId: string) => void;
   /** 当前节点 ID，用于删除连线时定位边 */
   targetNodeId?: string;
   /** 是否显示风格选择按钮（仅图片节点） */
@@ -37,6 +39,7 @@ const NODE_TYPE_ICON: Record<UpstreamInput['nodeType'], React.ReactNode> = {
 export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUpstreamBar({
   inputs,
   onInsertMention,
+  onRemoveMention,
   targetNodeId,
   showStyleSelector = false,
 }) {
@@ -103,14 +106,14 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       .finally(() => setStyleLoading(false));
   }, []);
 
-  // 选中风格：先清理旧风格，再创建新图片节点 + 连接
+  // 选中风格：先清理旧风格，再创建新图片节点 + 连接 + 自动加入 @引用
   const handleSelectStyle = useCallback((style: StyleItem) => {
     setSelectedStyle(style);
     setStyleMarketOpen(false);
 
     if (!targetNodeId) return;
 
-    // 如果已有旧风格节点，先删除它和连线
+    // 如果已有旧风格节点，先删除它和连线，并移除对应的 @引用
     if (styleNodeId) {
       const { edges } = useCanvasStore.getState();
       const oldEdge = edges.find(
@@ -118,6 +121,8 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       );
       if (oldEdge) removeEdges([oldEdge.id]);
       removeNodes([styleNodeId]);
+      // 移除旧风格的 @引用
+      onRemoveMention?.(styleNodeId);
     }
 
     // 按需读取当前节点位置（不订阅 nodes，避免无关更新触发重渲染）
@@ -127,10 +132,11 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     const posY = current?.position.y ?? 0;
 
     const newNodeId = `style-${Date.now()}`;
+    const styleLabel = `风格-${style.name}`;
     const styleNode = createNode('image', { x: posX, y: posY }, {
       id: newNodeId,
       data: {
-        label: `风格-${style.name}`,
+        label: styleLabel,
         imageUrl: style.image_url,
         styleId: style.id,
       } as any,
@@ -144,9 +150,17 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       type: 'dataFlow',
     });
     setStyleNodeId(newNodeId);
-  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges]);
 
-  // 移除风格：删除连线 + 删除图片节点
+    // 自动加入 @引用，无需用户手动在提示词中 @
+    onInsertMention({
+      nodeId: newNodeId,
+      nodeType: 'image',
+      label: styleLabel,
+      thumbnail: style.image_url,
+    });
+  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges, onInsertMention, onRemoveMention]);
+
+  // 移除风格：删除连线 + 删除图片节点 + 移除 @引用
   const handleRemoveStyle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setSelectedStyle(undefined);
@@ -162,8 +176,10 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
 
     // 删除图片节点
     removeNodes([styleNodeId]);
+    // 移除对应的 @引用
+    onRemoveMention?.(styleNodeId);
     setStyleNodeId(null);
-  }, [styleNodeId, targetNodeId, removeEdges, removeNodes]);
+  }, [styleNodeId, targetNodeId, removeEdges, removeNodes, onRemoveMention]);
 
   // 切换收藏
   const handleToggleFav = async (e: React.MouseEvent, styleId: string) => {

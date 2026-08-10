@@ -323,6 +323,26 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     []
   );
 
+  // 移除 @ 引用（用于风格图删除/切换时自动清理）
+  const handleRemoveMention = useCallback(
+    (nodeId: string) => {
+      const removed = mentions.find(m => m.nodeId === nodeId);
+      if (!removed) return;
+      // 从 mentions 数组中移除
+      setMentions(prev => prev.filter(m => m.nodeId !== nodeId));
+      // 从 promptText 中移除对应的标记（兼容 [[m:id]] 和 @label 两种格式）
+      setPromptText(prev => {
+        let result = prev;
+        const escapedId = removed.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(`\\[\\[m:${escapedId}\\]\\]`, 'g'), '');
+        const escapedLabel = removed.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(`\\s*@${escapedLabel}\\s*`, 'g'), ' ');
+        return result.replace(/\s{2,}/g, ' ').trim();
+      });
+    },
+    [mentions]
+  );
+
   // 发送生成 — 通过 useNodeGeneration 统一入口
   const handleGenerate = useCallback(async (count?: number) => {
     console.log('[PromptPanel] handleGenerate count=', count);
@@ -445,6 +465,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       <PromptUpstreamBar
         inputs={upstreamInputs}
         onInsertMention={handleInsertMention}
+        onRemoveMention={handleRemoveMention}
         targetNodeId={nodeId}
         showStyleSelector={nodeType === 'image'}
       />
