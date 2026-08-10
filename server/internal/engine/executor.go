@@ -991,12 +991,16 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 
 // VideoExecutor 视频节点执行器（doubao-seedance）
 type VideoExecutor struct {
-	videoClient *llm.VideoClient
+	videoClient       *llm.VideoClient
+	fileUploadService *service.FileUploadService
 }
 
 // NewVideoExecutor 创建视频执行器
-func NewVideoExecutor(videoClient *llm.VideoClient) *VideoExecutor {
-	return &VideoExecutor{videoClient: videoClient}
+func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService) *VideoExecutor {
+	return &VideoExecutor{
+		videoClient:       videoClient,
+		fileUploadService: fileUploadService,
+	}
 }
 
 func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -1102,15 +1106,77 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	log.Printf("[VideoExecutor] ✅ 视频生成成功: nodeId=%s videoUrl=%s", node.ID, videoURL)
+
+	// 下载视频并使用 FileUploadService 上传到 canvas/{projectID}/（与图片保存机制一致）
+	ownVideoURL, dlErr := v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetProjectID())
+	if dlErr != nil {
+		log.Printf("[VideoExecutor] ⚠️ 视频下载上传失败，使用原始URL: %v", dlErr)
+		ownVideoURL = videoURL
+	} else {
+		log.Printf("[VideoExecutor] ✅ 视频已保存: original=%s -> ownURL=%s", videoURL, ownVideoURL)
+	}
+
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
 			"mode":     data.Mode,
 			"prompt":   data.Prompt,
-			"videoUrl": videoURL,
+			"videoUrl": ownVideoURL,
 		},
 	}, nil
+}
+
+// downloadAndUpload 下载视频并使用 FileUploadService 上传（复用哈希去重等逻辑）
+func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, nodeID string, projectID string) (string, error) {
+	log.Printf("[VideoExecutor] 开始下载视频: url=%s projectID=%s nodeID=%s", videoURL, projectID, nodeID)
+
+	httpClient := &http.Client{
+		Timeout: 300 * time.Second, // 视频文件较大，超时设为5分钟
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download video: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download video failed: status=%d", resp.StatusCode)
+	}
+
+	videoData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read video data: %w", err)
+	}
+
+	log.Printf("[VideoExecutor] 视频下载成功: size=%d bytes", len(videoData))
+
+	// 从 Content-Type 推断扩展名
+	ext := ".mp4"
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(contentType, "webm") {
+		ext = ".webm"
+	} else if strings.Contains(contentType, "mov") {
+		ext = ".mov"
+	}
+
+	result, err := v.fileUploadService.UploadFromReader(bytes.NewReader(videoData), int64(len(videoData)), "video"+ext, service.UploadOptions{
+		Dir:            "canvas",
+		ProjectID:      projectID,
+		DefaultExt:     ext,
+		ContentTypeFor: service.ContentTypeForVideo,
+	})
+	if err != nil {
+		return "", fmt.Errorf("upload video: %w", err)
+	}
+
+	log.Printf("[VideoExecutor] 视频上传成功: objectName=%s url=%s cached=%v", result.ObjectName, result.URL, result.Cached)
+	return result.URL, nil
 }
 
 // AudioExecutor 音频节点执行器（MVP: 透传，后续接入 TTS）
@@ -1241,7 +1307,7 @@ func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, vid
 	registry.Register("text", NewTextExecutor(llmClient))
 	registry.Register("script", NewScriptExecutor(llmClient))
 	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService))
-	registry.Register("video", NewVideoExecutor(videoClient))
+	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService))
 	registry.Register("audio", &AudioExecutor{})
 	return registry
 }
