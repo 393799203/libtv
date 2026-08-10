@@ -1028,8 +1028,9 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d videoMode=%s generateAudio=%v", node.ID, data.Model, len(data.Prompt), data.Duration, data.VideoMode, generateAudio)
 
-	// 解析 mentions，收集上游图片URL
+	// 解析 mentions，收集上游图片URL和视频URL
 	var imageURLs []string
+	var videoURLs []string
 	var mentions []struct {
 		NodeID   string `json:"nodeId"`
 		NodeType string `json:"nodeType"`
@@ -1046,22 +1047,39 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 						log.Printf("[VideoExecutor] ✅ 参考图: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
 					}
 				}
+			} else if m.NodeType == "video" {
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						VideoUrl string `json:"videoUrl"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil && nd.VideoUrl != "" {
+						videoURLs = append(videoURLs, nd.VideoUrl)
+						log.Printf("[VideoExecutor] ✅ 参考视频: nodeId=%s videoUrl=%s", m.NodeID, nd.VideoUrl)
+					}
+				}
 			}
 		}
 	}
 
-	// fallback: 查找上游连接的图片节点
-	if len(imageURLs) == 0 {
+	// fallback: 查找上游连接的图片/视频节点
+	// 分别补充 mentions 中缺失的图片和视频（避免 mentions 有图片时视频不被收集）
+	if len(imageURLs) == 0 || len(videoURLs) == 0 {
 		upstreamSources := execCtx.GetUpstreamSources(node.ID)
 		for _, sourceNodeID := range upstreamSources {
 			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
 				var nd struct {
 					ImageUrl string `json:"imageUrl"`
+					VideoUrl string `json:"videoUrl"`
 					Type     string `json:"type"`
 				}
-				if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" && nd.Type == "image" {
-					imageURLs = append(imageURLs, nd.ImageUrl)
-					log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
+				if err := json.Unmarshal(raw, &nd); err == nil {
+					if nd.Type == "image" && nd.ImageUrl != "" && len(imageURLs) == 0 {
+						imageURLs = append(imageURLs, nd.ImageUrl)
+						log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
+					} else if nd.Type == "video" && nd.VideoUrl != "" && len(videoURLs) == 0 {
+						videoURLs = append(videoURLs, nd.VideoUrl)
+						log.Printf("[VideoExecutor] ✅ 从上游视频节点获取参考视频: nodeId=%s", sourceNodeID)
+					}
 				}
 			}
 		}
@@ -1091,6 +1109,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		resolution,
 		data.AspectRatio,
 		imageURLs,
+		videoURLs,
 		data.VideoMode,
 		generateAudio,
 	)

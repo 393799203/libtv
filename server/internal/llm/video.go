@@ -48,12 +48,13 @@ func NewVideoClient(cfg config.AIConfig, providerName string) *VideoClient {
 	}
 }
 
-// VideoContentItem 视频生成的参考图条目
-// Role 为空时是参考模式（1张图），非空时是首尾帧模式（first_frame/last_frame）
+// VideoContentItem 视频生成的参考资源条目（图片或视频）
+// Role 为空时是参考模式，非空时是首尾帧模式（first_frame/last_frame）
 type VideoContentItem struct {
-	Type     string            `json:"type"`
-	ImageURL VideoContentImage `json:"image_url"`
-	Role     string            `json:"role,omitempty"` // 参考模式留空；首尾帧模式填 first_frame/last_frame
+	Type     string             `json:"type"`                // "image_url" 或 "video_url"
+	ImageURL *VideoContentImage `json:"image_url,omitempty"` // type=image_url 时使用
+	VideoURL *VideoContentImage `json:"video_url,omitempty"` // type=video_url 时使用
+	Role     string             `json:"role,omitempty"`      // 参考模式留空；首尾帧模式填 first_frame/last_frame
 }
 
 // VideoContentImage 图片URL容器
@@ -111,9 +112,10 @@ type VideoTaskResponse struct {
 }
 
 // GenerateVideo 调用视频生成API
-// imageURLs: 参考图列表。videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=无role
+// imageURLs: 参考图列表。videoURLs: 参考视频列表。
+// videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=无role
 // generateAudio: 是否生成音频（true=生成声音，false=静音）
-func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoMode string, generateAudio bool) (string, error) {
+func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) (string, error) {
 	if resolution == "" {
 		resolution = "1080p"
 	}
@@ -154,7 +156,7 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 		}
 		item := VideoContentItem{
 			Type:     "image_url",
-			ImageURL: VideoContentImage{URL: finalURL},
+			ImageURL: &VideoContentImage{URL: finalURL},
 		}
 		// 仅首尾帧模式设置 role；其他模式（参考/全能参考）无 role
 		if videoMode == "first-last-frame" {
@@ -166,6 +168,25 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 		}
 		metadata.Content = append(metadata.Content, item)
 		log.Printf("[VideoGen] ✅ 参考图[%d]已添加: role=%s urlLen=%d", i, item.Role, len(finalURL))
+	}
+
+	// 处理参考视频（视频参考/全能参考模式）
+	for i, rawURL := range videoURLs {
+		if rawURL == "" {
+			continue
+		}
+		finalURL, err := c.processImageURL(ctx, rawURL) // 复用同一函数处理URL（本地转base64/公网直传）
+		if err != nil {
+			log.Printf("[VideoGen] ⚠️ 参考视频[%d]处理失败，跳过: %v", i, err)
+			continue
+		}
+		item := VideoContentItem{
+			Type:     "video_url",
+			VideoURL: &VideoContentImage{URL: finalURL},
+			Role:     "reference_video", // 视频参考模式必须设置 role
+		}
+		metadata.Content = append(metadata.Content, item)
+		log.Printf("[VideoGen] ✅ 参考视频[%d]已添加: role=%s urlLen=%d", i, item.Role, len(finalURL))
 	}
 
 	// 首尾帧模式限制2张；全能参考最多5张

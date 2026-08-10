@@ -67,7 +67,7 @@ function getUpstreamInputs(
           return {
             nodeId: sourceNode.id,
             nodeType: 'video',
-            label: `视频${num}`,
+            label: d.label || `视频${num}`,
             thumbnail: undefined,
             previewUrl: d.videoUrl,
           };
@@ -290,6 +290,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     () => upstreamInputs.filter((i) => i.nodeType === 'image').length,
     [upstreamInputs]
   );
+  // 上游已连接的视频节点数量（用于控制模式可用性）
+  const upstreamVideoCount = useMemo(
+    () => upstreamInputs.filter((i) => i.nodeType === 'video').length,
+    [upstreamInputs]
+  );
 
   // 音频节点专属：音色和语速
   const [selectedVoice, setSelectedVoice] = useState(
@@ -458,7 +463,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
       {/* 视频节点：模式选择器（根据上游图片数量自动过滤可选模式） */}
       {nodeType === 'video' && (
-        <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} />
+        <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} videoCount={upstreamVideoCount} />
       )}
 
       {/* 第一层：上游输入区 */}
