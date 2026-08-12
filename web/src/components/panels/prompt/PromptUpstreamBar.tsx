@@ -315,7 +315,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
               <div className="absolute inset-0 bg-black/40" onClick={() => setStyleMarketOpen(false)} />
 
               {/* 居中面板 */}
-              <div className="relative w-[900px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
+              <div className="relative w-[700px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
                 {/* 顶部栏：标题 + Tab + 搜索 + 关闭 */}
                 <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 shrink-0">
                   {/* Tab 切换 */}

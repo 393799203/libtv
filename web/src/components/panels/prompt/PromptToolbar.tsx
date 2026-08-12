@@ -258,7 +258,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                             ? 'bg-gray-50 text-gray-300 border border-transparent cursor-not-allowed'
                             : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
                       }`}
-                      onClick={() => !disabled && onResolutionChange(res as ResolutionOption)}
+                      onClick={() => { if (!disabled) { onResolutionChange(res as ResolutionOption); setOpen(false); } }}
                       disabled={disabled}
                     >
                       {res}
@@ -293,7 +293,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                               : 'border border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
                           }`}
                           style={{ minHeight: 52 }}
-                          onClick={() => onAspectRatioChange(item.value)}
+                          onClick={() => { onAspectRatioChange(item.value); setOpen(false); }}
                         >
                           <RatioIcon value={item.value} active={isActive} />
                           <span

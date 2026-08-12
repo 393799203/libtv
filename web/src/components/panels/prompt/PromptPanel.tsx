@@ -466,6 +466,22 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
   }, [nodeType, onUpdate]);
 
+  // 图片/视频节点：长宽比切换后实时同步到节点 data（节点高度需根据比例动态变化）
+  const handleAspectRatioChange = useCallback((ratio: string) => {
+    setSelectedAspectRatio(ratio);
+    if (nodeType === 'image' || nodeType === 'video') {
+      onUpdate({ aspectRatio: ratio } as Partial<LibTVNodeData>);
+    }
+  }, [nodeType, onUpdate]);
+
+  // 图片/视频节点：分辨率切换后实时同步到节点 data
+  const handleResolutionChange = useCallback((res: ResolutionOption) => {
+    setSelectedResolution(res);
+    if (nodeType === 'image' || nodeType === 'video') {
+      onUpdate({ resolution: res } as Partial<LibTVNodeData>);
+    }
+  }, [nodeType, onUpdate]);
+
   // 视频节点：声音开关切换后实时同步到节点 data
   const handleGenerateAudioChange = useCallback((enabled: boolean) => {
     setGenerateAudio(enabled);
@@ -476,7 +492,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[900px] flex flex-col px-2 py-2';
+    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[750px] flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>
@@ -590,9 +606,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
         selectedResolution={selectedResolution}
-        onResolutionChange={setSelectedResolution}
+        onResolutionChange={handleResolutionChange}
         selectedAspectRatio={selectedAspectRatio}
-        onAspectRatioChange={setSelectedAspectRatio}
+        onAspectRatioChange={handleAspectRatioChange}
         selectedQuality={selectedQuality}
         onQualityChange={setSelectedQuality}
         isGenerating={hookIsGenerating}
