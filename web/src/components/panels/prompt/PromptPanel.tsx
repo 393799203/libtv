@@ -141,7 +141,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 手动创建的视频节点：从上游图片节点反查关联分镜的最终提示词
   const importablePrompts = useMemo(() => {
     if (nodeType !== 'video' || nodeId.startsWith('shot-video-')) return [];
-    const result: { label: string; prompt: string }[] = [];
+    const result: { label: string; prompt: string; duration?: number }[] = [];
     for (const input of upstreamInputs) {
       if (input.nodeType !== 'image') continue;
       // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}
@@ -153,7 +153,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       const scriptData = scriptNode.data as ScriptNodeData;
       const shot = (scriptData.shots || []).find((s: ScriptShot) => s.id === shotId);
       if (shot?.finalPrompt) {
-        result.push({ label: `分镜${shot.shotNumber}提示词`, prompt: shot.finalPrompt });
+        // 有上游图片参考时，只需要运动提示词（画面由参考图提供）
+        const prompt = shot.motionPrompt?.trim()
+          ? `视频运动提示词：${shot.motionPrompt.trim()}`
+          : shot.finalPrompt;
+        result.push({ label: `分镜${shot.shotNumber}提示词`, prompt, duration: shot.duration });
       }
     }
     return result;
@@ -161,14 +165,22 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 导入提示词（填充后隐藏按钮）
   const [promptImported, setPromptImported] = useState(false);
-  const handleImportPrompt = useCallback((prompt: string) => {
+  const handleImportPrompt = useCallback((prompt: string, duration?: number) => {
     // 去掉分镜提示词中的 (@类型-名称) 标签
     const cleanPrompt = prompt.replace(/[（(]@[^\）)]+[）)]/g, '').trim();
     setPromptText(cleanPrompt);
     setMentions([]);
     editorRef.current?.setValue(cleanPrompt);
     setPromptImported(true);
-  }, []);
+    // 立即保存到节点 data，确保生成时能读到 prompt
+    const updateData: Partial<LibTVNodeData> = { prompt: cleanPrompt, mentions: [] };
+    if (duration && duration > 0) {
+      const clampedDuration = Math.min(Math.max(duration, 4), 15);
+      setSelectedDuration(clampedDuration);
+      (updateData as Record<string, unknown>).duration = clampedDuration;
+    }
+    onUpdate(updateData);
+  }, [onUpdate]);
 
   // 从节点 data 恢复 prompt + mentions（只取 prompt 字段，不 fallback 到 content）
   // mentions 是 @ 引用的元数据列表，存到 data.mentions 里，与 prompt 中的 [[m:ID]] 占位符一一对应
@@ -502,7 +514,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
               {importablePrompts.map((item) => (
                 <button
                   key={item.label}
-                  onClick={() => handleImportPrompt(item.prompt)}
+                  onClick={() => handleImportPrompt(item.prompt, item.duration)}
                   title={`导入${item.label}`}
                   className="px-2 py-0.5 text-xs rounded bg-black/70 text-white hover:bg-black opacity-60 hover:opacity-100 transition-opacity"
                 >

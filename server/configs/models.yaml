@@ -100,7 +100,6 @@ models:
       max_tokens: 2048
       temperature: 0.7
       description: "通义千问图像2.0（华数TokenHub），适合角色/场景/道具图生成"
-      default: true  # 默认选中此模型
       parameters:
         width: 1920   # ✅ 16:9 比例，适合视频分镜场景
         height: 1080
@@ -158,6 +157,7 @@ models:
       max_tokens: 2048
       temperature: 0.7
       description: "字节豆包Seedream 5.0轻量版（华数TokenHub），生成速度快"
+      default: true  # ✅ 默认选中此模型
 
   # ---------- 视频生成 ----------
   video:

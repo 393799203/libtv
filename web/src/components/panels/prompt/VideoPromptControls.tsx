@@ -14,7 +14,7 @@ export const VIDEO_MODES: Array<{
   { value: 'text-to-video', label: '文生视频', imageRange: [0, 0], videoRange: [0, 0] },
   { value: 'video-ref', label: '视频参考', imageRange: [0, 0], videoRange: [1, 1] },
   { value: 'first-last-frame', label: '首尾帧', imageRange: [2, 2], videoRange: [0, 0] },
-  { value: 'universal-ref', label: '全能参考', imageRange: [0, 5], videoRange: [0, 5] },
+  { value: 'universal-ref', label: '全能参考', imageRange: [0, 9], videoRange: [0, 9] },
 ];
 
 /** 判断某模式在当前图片/视频数量下是否可用 */
@@ -23,10 +23,10 @@ function isModeAvailable(
   videoCount: number,
   mode: typeof VIDEO_MODES[number],
 ): boolean {
-  // 全能参考：图片+视频总数 1-5
+  // 全能参考：图片+视频总数 1-9
   if (mode.value === 'universal-ref') {
     const total = imageCount + videoCount;
-    return total >= 1 && total <= 5;
+    return total >= 1 && total <= 9;
   }
   const [imgMin, imgMax] = mode.imageRange;
   const [vidMin, vidMax] = mode.videoRange;
@@ -48,7 +48,7 @@ function getAutoMode(currentMode: VideoMode, imageCount: number, videoCount: num
 function getModeTooltip(mode: typeof VIDEO_MODES[number], imageCount: number, videoCount: number): string | undefined {
   if (isModeAvailable(imageCount, videoCount, mode)) return undefined;
   if (mode.value === 'universal-ref') {
-    return `需 1-5 个资源（图片或视频，当前 ${imageCount + videoCount} 个）`;
+    return `需 1-9 个资源（图片或视频，当前 ${imageCount + videoCount} 个）`;
   }
   const parts: string[] = [];
   if (mode.imageRange[0] > 0) {

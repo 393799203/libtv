@@ -1076,7 +1076,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					Type     string `json:"type"`
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil {
-					if nd.Type == "image" && nd.ImageUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 5 {
+					if nd.Type == "image" && nd.ImageUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 9 {
 						imageURLs = append(imageURLs, nd.ImageUrl)
 						log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
 					} else if nd.Type == "video" && nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {

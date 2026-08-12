@@ -392,7 +392,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
           // 第三阶段：显示最终提示词按钮
           <Button
             size="small"
-            type="primary"
+            type={record.finalPrompt ? 'default' : 'primary'}
             icon={<MergeCellsOutlined />}
             onClick={() => onMergePrompt(record.id)}
             className="text-[10px]"

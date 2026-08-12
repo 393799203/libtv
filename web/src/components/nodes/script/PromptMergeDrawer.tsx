@@ -427,14 +427,28 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       }
     }, [shot, storyboardPrompt, scriptNodeId, projectId, defaultImageModelId]);
 
-    // 创建分镜视频节点并触发生成（前提：已有画面提示词 + 运动提示词）
+    // 创建分镜视频节点并触发生成
+    // 有图片节点时只需运动提示词；无图片节点时需画面+运动提示词
     const handleGenerateVideo = useCallback(async () => {
       if (!shot) return;
-      if (!storyboardPrompt.trim() || !motionPrompt.trim()) {
-        message.warning('请先生成画面提示词和运动提示词');
-        return;
-      }
       if (!projectId) return;
+
+      // 检查是否已有分镜图片节点（作为参考图）
+      const hasImageNode = !!findShotImageNode(scriptNodeId, shot.id);
+
+      if (hasImageNode) {
+        // 有图片节点：只需要运动提示词
+        if (!motionPrompt.trim()) {
+          message.warning('请先生成运动提示词');
+          return;
+        }
+      } else {
+        // 无图片节点：画面+运动提示词都需要
+        if (!storyboardPrompt.trim() || !motionPrompt.trim()) {
+          message.warning('请先生成画面提示词和运动提示词');
+          return;
+        }
+      }
 
       const existing = findShotVideoNode(scriptNodeId, shot.id);
       if (existing && (existing.data.status === 'running' || existing.data.status === 'pending')) {
@@ -442,8 +456,10 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
         return;
       }
 
-      // 合成最终提示词（画面 + 运动）
-      const combined = `画面提示词：${storyboardPrompt.trim()}\n视频运动提示词：${motionPrompt.trim()}`;
+      // 合成最终提示词：有图片节点时只用运动提示词
+      const combined = hasImageNode
+        ? `视频运动提示词：${motionPrompt.trim()}`
+        : `画面提示词：${storyboardPrompt.trim()}\n视频运动提示词：${motionPrompt.trim()}`;
       setVideoGenerating(true);
       try {
         const node = createShotVideoNode(scriptNodeId, shot, combined, defaultVideoModelId);
