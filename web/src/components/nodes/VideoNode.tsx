@@ -106,6 +106,16 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
 
   const phaseLabel = uploadPhase === 'processing' ? '压缩转码中...' : `上传中 ${uploadPercent}%`;
 
+  // 根据长宽比动态计算视频容器高度（宽度固定 480px）
+  const videoHeight = useMemo(() => {
+    const ratio = (data as { aspectRatio?: string }).aspectRatio || '16:9';
+    if (ratio === 'free') return 270; // 自适应默认 16:9
+    const parts = ratio.split(':').map(Number);
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return 270;
+    const [w, h] = parts;
+    return Math.round(480 * h / w);
+  }, [(data as { aspectRatio?: string }).aspectRatio]);
+
   return (
     <>
       <BaseNode
@@ -114,9 +124,9 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         selected={selected}
         headerRight={headerRight}
         noContentPadding
-        className="!w-[280px]"
+        className="!w-[480px]"
       >
-        <div className="w-[280px] aspect-video">
+        <div className="w-[480px]" style={{ height: `${videoHeight}px` }}>
           {data.videoUrl && showPlayer ? (
             <video
               src={data.videoUrl}

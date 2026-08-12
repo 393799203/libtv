@@ -31,7 +31,7 @@
   .react-flow__node,
   .video-card,
   .project-card {
-    contain: layout style paint; /* CSS containment */
+    contain: layout style; /* CSS containment（去掉 paint，避免裁剪 Handle） */
   }
 }
 
@@ -50,10 +50,12 @@
     cursor: grabbing;
   }
 
-  /* 图片/视频节点固定 280px 宽，覆盖 ReactFlow 动态测量的 inline style width */
-  .react-flow__node-image,
+  /* 图片/视频节点固定宽度，覆盖 ReactFlow 动态测量的 inline style width */
+  .react-flow__node-image {
+    width: 320px !important;
+  }
   .react-flow__node-video {
-    width: 280px !important;
+    width: 480px !important;
   }
 
   .react-flow__node.selected,
@@ -66,14 +68,16 @@
 
 .react-flow__handle {
   transition: all 0.15s ease;
-  width: 8px !important;
-  height: 8px !important;
-  border: none !important;
+  width: 14px !important;
+  height: 14px !important;
+  border: 2px solid #fff !important;
   border-radius: 50% !important;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
 }
 .react-flow__handle:hover {
-  transform: scale(1.3);
+  transform: scale(1.4);
   background-color: #3b82f6 !important;
+  border-color: #fff !important;
 }
 
 /* 基础节点连线区域 - 扩大热区 + 带圈+光标 */

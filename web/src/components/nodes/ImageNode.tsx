@@ -108,11 +108,21 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     );
   }, [data.imageUrl, imageWidth, imageHeight, isStyleNode]);
 
-  // 计算图片容器高度：使用图片的实际尺寸等比例缩放
-  const imageContainerHeight = 
-    (data.imageUrl && imageWidth && imageHeight
-      ? Math.round(280 * imageHeight / imageWidth) // 按节点宽度280px等比例缩放
-      : 190);
+  // 计算图片容器高度：
+  // - 有图片时：使用图片的实际尺寸等比例缩放
+  // - 无图片时：根据用户选择的长宽比计算（宽度固定 320px）
+  const imageContainerHeight = useMemo(() => {
+    if (data.imageUrl && imageWidth && imageHeight) {
+      return Math.round(320 * imageHeight / imageWidth); // 按节点宽度320px等比例缩放
+    }
+    // 无图片时根据 aspectRatio 计算高度
+    const ratio = (data as { aspectRatio?: string }).aspectRatio || '16:9';
+    if (ratio === 'free') return 190; // 自适应保持默认高度
+    const parts = ratio.split(':').map(Number);
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return 190;
+    const [w, h] = parts;
+    return Math.round(320 * h / w);
+  }, [data.imageUrl, imageWidth, imageHeight, (data as { aspectRatio?: string }).aspectRatio]);
 
   return (
     <>
@@ -123,12 +133,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         headerRight={headerRight}
         headerColor={styleColor}
         noContentPadding
-        className="!w-[280px]"
+        className="!w-[320px]"
       >
         {/* 图片区域 */}
         {data.imageUrl ? (
           <div
-            className="relative rounded-lg overflow-hidden bg-gray-100 w-[280px]"
+            className="relative rounded-lg overflow-hidden bg-gray-100 w-[320px]"
             style={{ minHeight: `${imageContainerHeight}px` }}
           >
             <img

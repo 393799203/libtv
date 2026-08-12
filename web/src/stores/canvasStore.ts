@@ -566,7 +566,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const cache = new Map(state._cache);
 
       const projectData: ProjectCanvasData = {
-        nodes: data.nodes,
+        nodes: data.nodes.map((node) => {
+          // 文本节点：确保有最小宽高，避免内容为空时塌陷
+          if (node.type === 'text') {
+            const style = { ...node.style };
+            if (!style.minWidth) style.minWidth = 320;
+            if (!style.minHeight) style.minHeight = 200;
+            return { ...node, style };
+          }
+          return node;
+        }),
         edges: data.edges,
         selectedNodeIds: [],
         selectedEdgeIds: [],

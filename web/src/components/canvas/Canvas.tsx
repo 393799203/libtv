@@ -206,7 +206,7 @@ export const Canvas = memo(function Canvas() {
     // 计算所有节点的边界中心（flow 坐标）
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const node of nodes) {
-      const w = node.measured?.width ?? (node.style?.width as number ?? 280);
+      const w = node.measured?.width ?? (node.style?.width as number ?? 320);
       const h = node.measured?.height ?? (node.style?.height as number ?? 200);
       // nodeOrigin [0.5, 0.5] → position 是节点中心
       minX = Math.min(minX, node.position.x - w / 2);
@@ -329,6 +329,7 @@ export const Canvas = memo(function Canvas() {
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         snapToGrid
         snapGrid={[16, 16]}
+        connectionRadius={40}
         minZoom={0.05}
         maxZoom={4}
         nodesDraggable={!isExecuting}

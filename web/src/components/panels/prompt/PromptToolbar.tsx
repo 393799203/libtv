@@ -228,9 +228,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
         onClick={() => setOpen(!open)}
       >
         <span className="text-[13px]">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="1" y="3" width="12" height="8" rx="1.2" stroke="#6B7280" strokeWidth="1.2" fill="none" />
-          </svg>
+          <RatioIcon value={aspectRatio} active={true} />
         </span>
         <span className="text-[13px] font-medium text-gray-800">{aspectRatio}</span>
         <span className="text-gray-300 text-[13px]">·</span>

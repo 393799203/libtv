@@ -173,15 +173,15 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
         color="#8b5cf6"
         handleStyle={{ width: 8, height: 8 }}
         isVisible={selected}
-        minWidth={200}
-        minHeight={120}
+        minWidth={320}
+        minHeight={200}
       />
 
       <BaseNode
         id={id}
         data={data}
         selected={selected}
-        className={`flex flex-col h-full ${isEditing ? 'nodrag nopan nowheel' : ''}`}
+        className={`flex flex-col h-full min-h-[200px] min-w-[320px] ${isEditing ? 'nodrag nopan nowheel' : ''}`}
       >
         {/* 内容区（绝对定位填满 BaseNode 内容区） */}
         <div
