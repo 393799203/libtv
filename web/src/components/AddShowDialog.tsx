@@ -302,6 +302,7 @@ export default function AddShowDialog({
     try {
       if (updateId) {
         await showApi.update(updateId, {
+          category_id: categoryId,
           title: addShowForm.title.trim(),
           description: addShowForm.description.trim() || undefined,
           video_url: (videoUploadedUrl || addShowForm.video_url.trim()) || undefined,

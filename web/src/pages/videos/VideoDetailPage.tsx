@@ -257,7 +257,7 @@ export default function VideoDetailPage() {
           <video
             ref={videoRef}
             src={videoInfo.videoUrl}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain"
             loop
             preload="metadata"
             onTimeUpdate={handleTimeUpdate}

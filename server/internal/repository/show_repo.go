@@ -100,7 +100,8 @@ func (r *showRepo) ListShows(ctx context.Context, categoryID string, keyword str
 }
 
 func (r *showRepo) UpdateShow(ctx context.Context, show *model.Show) error {
-	return r.db.WithContext(ctx).Save(show).Error
+	// Omit("Category") 避免 Preload 的关联数据覆盖 category_id
+	return r.db.WithContext(ctx).Omit("Category").Save(show).Error
 }
 
 func (r *showRepo) ListPendingShows(ctx context.Context, offset, limit int) ([]*model.Show, int64, error) {

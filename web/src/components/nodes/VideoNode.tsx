@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useMemo } from 'react';
+import { memo, useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import type { NodeProps, Node } from '@xyflow/react';
 import { VideoCameraOutlined, PlayCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { BaseNode } from './BaseNode';
@@ -42,6 +42,23 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         useCanvasStore.getState().updateNodeData(id, {
           videoUrl: res.url,
         } as Partial<VideoNodeData>);
+        // 获取视频实际尺寸和时长，用于按比例适配节点高度和显示时长
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+          const updates: Partial<VideoNodeData> = {};
+          if (video.videoWidth && video.videoHeight) {
+            (updates as any).videoWidth = video.videoWidth;
+            (updates as any).videoHeight = video.videoHeight;
+          }
+          if (video.duration && isFinite(video.duration)) {
+            updates.duration = Math.round(video.duration);
+          }
+          if (Object.keys(updates).length > 0) {
+            useCanvasStore.getState().updateNodeData(id, updates);
+          }
+        };
+        video.src = res.url;
       } catch (err) {
         const message = err instanceof Error ? err.message : '视频上传失败';
         console.error('视频上传失败:', err);
@@ -107,14 +124,44 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
   const phaseLabel = uploadPhase === 'processing' ? '压缩转码中...' : `上传中 ${uploadPercent}%`;
 
   // 根据长宽比动态计算视频容器高度（宽度固定 480px）
+  // - 有视频实际尺寸时：按实际比例计算
+  // - 无视频时：根据用户选择的 aspectRatio 计算
   const videoHeight = useMemo(() => {
+    const vw = (data as { videoWidth?: number }).videoWidth;
+    const vh = (data as { videoHeight?: number }).videoHeight;
+    if (data.videoUrl && vw && vh) {
+      return Math.round(480 * vh / vw); // 按视频实际比例缩放
+    }
+    // 无视频时根据 aspectRatio 计算
     const ratio = (data as { aspectRatio?: string }).aspectRatio || '16:9';
     if (ratio === 'free') return 270; // 自适应默认 16:9
     const parts = ratio.split(':').map(Number);
     if (parts.length !== 2 || !parts[0] || !parts[1]) return 270;
     const [w, h] = parts;
     return Math.round(480 * h / w);
-  }, [(data as { aspectRatio?: string }).aspectRatio]);
+  }, [data.videoUrl, (data as { videoWidth?: number }).videoWidth, (data as { videoHeight?: number }).videoHeight, (data as { aspectRatio?: string }).aspectRatio]);
+
+  // AI 生成视频后，如果没有尺寸或时长信息，通过加载视频获取
+  useEffect(() => {
+    if (data.videoUrl && (!(data as { videoWidth?: number }).videoWidth || !data.duration)) {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        const updates: Partial<VideoNodeData> = {};
+        if (video.videoWidth && video.videoHeight && !(data as { videoWidth?: number }).videoWidth) {
+          (updates as any).videoWidth = video.videoWidth;
+          (updates as any).videoHeight = video.videoHeight;
+        }
+        if (video.duration && isFinite(video.duration) && !data.duration) {
+          updates.duration = Math.round(video.duration);
+        }
+        if (Object.keys(updates).length > 0) {
+          useCanvasStore.getState().updateNodeData(id, updates);
+        }
+      };
+      video.src = data.videoUrl!;
+    }
+  }, [data.videoUrl, (data as { videoWidth?: number }).videoWidth, data.duration, id]);
 
   return (
     <>
