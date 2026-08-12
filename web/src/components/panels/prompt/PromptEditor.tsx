@@ -302,8 +302,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     const spaceNode = document.createTextNode('\u00A0');
     span.after(spaceNode);
 
-    // 光标放到空格后面
-    range.setStartAfter(spaceNode);
+    // 光标放到空格文本节点内部（offset=1，即空格之后）
+    // 不能用 setStartAfter，否则光标在文本节点边界，Chrome 的 IME 组合事件会异常
+    range.setStart(spaceNode, 1);
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
