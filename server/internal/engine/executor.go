@@ -732,7 +732,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	// ✅ 解析 mentions 字段，提取用户明确@引用的节点ID
 	// 根据nodeId从节点data中提取完整imageUrl，而不是直接使用mentions中的imageUrl（前端预览用）
-	var upstreamImageURLs []string
+	var styleImageURLs []string     // 风格图：只提取画风/色彩/视觉风格
+	var referenceImageURLs []string // 普通参考图：保持主体结构进行修改
 	var mentions []struct {
 		NodeID   string `json:"nodeId"`
 		NodeType string `json:"nodeType"`
@@ -754,10 +755,17 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
 					var nd struct {
 						ImageUrl string `json:"imageUrl"`
+						StyleId  string `json:"styleId"`
 					}
 					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-						upstreamImageURLs = append(upstreamImageURLs, nd.ImageUrl)
-						log.Printf("[ImageExecutor] ✅ 从@引用的图片节点提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
+						// 区分风格图（ID以style-开头或有styleId字段）和普通参考图
+						if strings.HasPrefix(m.NodeID, "style-") || nd.StyleId != "" {
+							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
+							log.Printf("[ImageExecutor] 🎨 从@引用的风格图提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
+						} else {
+							referenceImageURLs = append(referenceImageURLs, nd.ImageUrl)
+							log.Printf("[ImageExecutor] ✅ 从@引用的图片节点提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
+						}
 					} else {
 						log.Printf("[ImageExecutor] ❌ @引用的图片节点没有imageUrl: nodeId=%s raw=%s", m.NodeID, string(raw))
 					}
@@ -770,8 +778,11 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] ❌ mentions解析失败: err=%v", err)
 	}
 
+	// 合并所有上游图片URL
+	upstreamImageURLs := append(styleImageURLs, referenceImageURLs...)
+
 	if len(upstreamImageURLs) > 0 {
-		log.Printf("[ImageExecutor] ✅ 最终结果：检测到用户@引用的上游图片: count=%d urls=%v", len(upstreamImageURLs), upstreamImageURLs)
+		log.Printf("[ImageExecutor] ✅ 最终结果：风格图=%d 普通参考图=%d 总计=%d", len(styleImageURLs), len(referenceImageURLs), len(upstreamImageURLs))
 	} else {
 		log.Printf("[ImageExecutor] ⚠️ 没有找到@引用的图片，尝试fallback逻辑（查找上游连接的图片节点）")
 		// ✅ 如果用户没有明确@引用图片，但当前节点有上游连接的图片节点，默认使用第一个上游图片作为参考图
@@ -785,13 +796,20 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				var nd struct {
 					Type     string `json:"type"`     // 节点类型
 					ImageUrl string `json:"imageUrl"` // 图片URL
+					StyleId  string `json:"styleId"`  // 风格图标识
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil {
 					log.Printf("[ImageExecutor] 上游节点数据: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
 					// ✅ 检查是否是图片节点（通过type字段或imageUrl字段判断）
 					if nd.Type == "image" || nd.ImageUrl != "" {
-						upstreamImageURLs = append(upstreamImageURLs, nd.ImageUrl)
-						log.Printf("[ImageExecutor] ✅ 默认使用上游连接的图片作为参考图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
+						// 区分风格图和普通参考图
+						if strings.HasPrefix(sourceNodeID, "style-") || nd.StyleId != "" {
+							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
+							log.Printf("[ImageExecutor] 🎨 默认使用上游风格图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
+						} else {
+							referenceImageURLs = append(referenceImageURLs, nd.ImageUrl)
+							log.Printf("[ImageExecutor] ✅ 默认使用上游连接的图片作为参考图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
+						}
 					} else {
 						log.Printf("[ImageExecutor] ❌ 上游节点不是图片节点: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
 					}
@@ -802,6 +820,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				log.Printf("[ImageExecutor] ❌ 上游节点找不到数据: nodeId=%s", sourceNodeID)
 			}
 		}
+		// fallback 后重新合并
+		upstreamImageURLs = append(styleImageURLs, referenceImageURLs...)
 	}
 
 	// ✅ 最终判断结果
@@ -890,8 +910,19 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var err error
 
 	if len(upstreamImageURLs) > 0 {
-		imageToImagePrompt := fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
-		log.Printf("[ImageExecutor] 使用图生图模式(多图): refImageCount=%d prompt=%s", len(upstreamImageURLs), imageToImagePrompt)
+		// 根据风格图/参考图组合构建不同的提示词
+		var imageToImagePrompt string
+		if len(styleImageURLs) > 0 && len(referenceImageURLs) > 0 {
+			// 既有风格图又有参考图：参考风格图的画风，基于参考图内容修改
+			imageToImagePrompt = fmt.Sprintf("参考风格图的画风、色彩和视觉风格，基于参考图的内容进行修改：%s。请保持参考图的主体结构，同时采用风格图的艺术风格。", finalPrompt)
+		} else if len(styleImageURLs) > 0 {
+			// 只有风格图：仅提取风格元素，严禁复制内容
+			imageToImagePrompt = fmt.Sprintf("仅从风格图中提取以下艺术元素：画风（如油画/水彩/赛博朋克等）、色彩色调、光影氛围、笔触纹理、构图风格。严格禁止复制风格图中的任何具体内容，包括但不限于：人物、角色、物体、场景、建筑、背景。根据用户描述生成全新的画面：%s。生成结果应具有与风格图相同的艺术风格，但内容完全不同。", finalPrompt)
+		} else {
+			// 只有普通参考图：基于参考图修改
+			imageToImagePrompt = fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
+		}
+		log.Printf("[ImageExecutor] 使用图生图模式: styleCount=%d refCount=%d prompt=%s", len(styleImageURLs), len(referenceImageURLs), imageToImagePrompt)
 		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
 		if err != nil {
 			return nil, fmt.Errorf("image-to-image generation failed: %w", err)

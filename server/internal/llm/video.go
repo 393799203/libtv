@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -130,6 +132,31 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	if duration > 15 {
 		duration = 15
 	}
+
+	// 有参考视频时，seedance-2.0-fast 模型要求「参考视频时长 + 生成视频时长 <= 15.2秒」
+	// 超限时提示用户切换到 seedance 2.0（非 fast 版本）
+	if len(videoURLs) > 0 && strings.Contains(model, "fast") {
+		var totalRefDuration float64
+		for _, vURL := range videoURLs {
+			if vURL == "" {
+				continue
+			}
+			refDur, err := getVideoDurationFromURL(ctx, vURL)
+			if err != nil {
+				log.Printf("[VideoGen] ⚠️ 获取参考视频时长失败，跳过检测: %v", err)
+				continue
+			}
+			log.Printf("[VideoGen] 参考视频时长: %.1fs url=%s", refDur, vURL)
+			totalRefDuration += refDur
+		}
+		if totalRefDuration > 0 {
+			totalDuration := totalRefDuration + float64(duration)
+			if totalDuration > 15.2 {
+				return "", fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 seedance-2.0-fast 模型的15秒限制。请将视频模型切换为 seedance 2.0（非 fast 版本）后重试", totalRefDuration, duration, totalDuration)
+			}
+		}
+	}
+
 	if originalDuration != duration {
 		log.Printf("[VideoGen] duration 规范化: %d → %d", originalDuration, duration)
 	}
@@ -379,4 +406,69 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 	}
 
 	return "", fmt.Errorf("poll timeout after %d attempts", maxAttempts)
+}
+
+// findFFprobe 返回 ffprobe 路径
+func findFFprobe() string {
+	localPath := "/usr/local/Cellar/ffmpeg/8.1.1/bin/ffprobe"
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath
+	}
+	return "ffprobe"
+}
+
+// getVideoDurationFromURL 下载视频到临时文件并用 ffprobe 获取时长（秒）
+func getVideoDurationFromURL(ctx context.Context, videoURL string) (float64, error) {
+	// 构造完整 URL
+	fullURL := videoURL
+	if strings.HasPrefix(fullURL, "/") {
+		fullURL = fmt.Sprintf("http://localhost:8080%s", fullURL)
+	}
+
+	// 下载到临时文件
+	tmpFile, err := os.CreateTemp("", "refvideo_*.mp4")
+	if err != nil {
+		return 0, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		tmpFile.Close()
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		tmpFile.Close()
+		return 0, fmt.Errorf("download video: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		tmpFile.Close()
+		return 0, fmt.Errorf("download failed (status=%d)", resp.StatusCode)
+	}
+	_, err = io.Copy(tmpFile, resp.Body)
+	tmpFile.Close()
+	if err != nil {
+		return 0, fmt.Errorf("save video: %w", err)
+	}
+
+	// 用 ffprobe 获取时长
+	cmd := exec.CommandContext(ctx, findFFprobe(),
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		tmpPath,
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe: %w", err)
+	}
+
+	var duration float64
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(output)), "%f", &duration); err != nil {
+		return 0, fmt.Errorf("parse duration: %w", err)
+	}
+	return duration, nil
 }
