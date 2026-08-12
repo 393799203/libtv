@@ -10,14 +10,14 @@ import (
 
 // User 用户模型
 type User struct {
-	ID           string         `gorm:"primaryKey;size:36" json:"id"`
-	Email        string         `gorm:"uniqueIndex;size:255;not null" json:"email"`
-	PasswordHash string         `gorm:"size:255;not null" json:"-"`
-	Nickname     string         `gorm:"size:100" json:"nickname"`
-	AvatarURL    string         `gorm:"size:500" json:"avatar_url"`
-	Role         string         `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID           string    `gorm:"primaryKey;size:36" json:"id"`
+	Email        string    `gorm:"uniqueIndex;size:255;not null" json:"email"`
+	PasswordHash string    `gorm:"size:255;not null" json:"-"`
+	Nickname     string    `gorm:"size:100" json:"nickname"`
+	AvatarURL    string    `gorm:"size:500" json:"avatar_url"`
+	Role         string    `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (User) TableName() string { return "users" }
@@ -32,14 +32,14 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 
 // Project 项目模型
 type Project struct {
-	ID          string         `gorm:"primaryKey;size:36" json:"id"`
-	UserID      string         `gorm:"index;size:36;not null" json:"user_id"`
-	Name        string         `gorm:"size:255;not null" json:"name"`
-	Description string         `gorm:"size:1000" json:"description"`
-	CoverURL    string         `gorm:"size:500" json:"cover_url"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	User        User           `gorm:"foreignKey:UserID" json:"-"`
+	ID          string    `gorm:"primaryKey;size:36" json:"id"`
+	UserID      string    `gorm:"index;size:36;not null" json:"user_id"`
+	Name        string    `gorm:"size:255;not null" json:"name"`
+	Description string    `gorm:"size:1000" json:"description"`
+	CoverURL    string    `gorm:"size:500" json:"cover_url"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	User        User      `gorm:"foreignKey:UserID" json:"-"`
 }
 
 func (Project) TableName() string { return "projects" }
@@ -82,19 +82,19 @@ func (WorkflowExecution) TableName() string { return "workflow_executions" }
 
 // AITask AI 任务记录
 type AITask struct {
-	ID          int64          `gorm:"primaryKey;autoIncrement" json:"id"`
-	ExecutionID int64          `gorm:"index;not null" json:"execution_id"`
-	NodeID      string         `gorm:"size:100;not null" json:"node_id"`
-	NodeType    string         `gorm:"size:20;not null" json:"node_type"` // text/image/video/audio/script
-	ModelName   string         `gorm:"size:100" json:"model_name"`
-	Status      string         `gorm:"size:20;default:pending;index" json:"status"` // pending/running/done/failed
-	Input       datatypes.JSON `gorm:"type:jsonb" json:"input"`
-	Output      datatypes.JSON `gorm:"type:jsonb" json:"output"`
-	CostCredits float64        `gorm:"default:0" json:"cost_credits"`
-	StartedAt   *time.Time     `json:"started_at"`
-	FinishedAt  *time.Time     `json:"finished_at"`
-	ErrorMsg    string         `gorm:"size:1000" json:"error_msg"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID          int64             `gorm:"primaryKey;autoIncrement" json:"id"`
+	ExecutionID int64             `gorm:"index;not null" json:"execution_id"`
+	NodeID      string            `gorm:"size:100;not null" json:"node_id"`
+	NodeType    string            `gorm:"size:20;not null" json:"node_type"` // text/image/video/audio/script
+	ModelName   string            `gorm:"size:100" json:"model_name"`
+	Status      string            `gorm:"size:20;default:pending;index" json:"status"` // pending/running/done/failed
+	Input       datatypes.JSON    `gorm:"type:jsonb" json:"input"`
+	Output      datatypes.JSON    `gorm:"type:jsonb" json:"output"`
+	CostCredits float64           `gorm:"default:0" json:"cost_credits"`
+	StartedAt   *time.Time        `json:"started_at"`
+	FinishedAt  *time.Time        `json:"finished_at"`
+	ErrorMsg    string            `gorm:"size:1000" json:"error_msg"`
+	CreatedAt   time.Time         `json:"created_at"`
 	Execution   WorkflowExecution `gorm:"foreignKey:ExecutionID" json:"-"`
 }
 
@@ -188,12 +188,13 @@ type Show struct {
 	Description  string         `gorm:"size:1000" json:"description"`
 	ThumbnailURL string         `gorm:"size:500" json:"thumbnail_url"`
 	VideoURL     string         `gorm:"size:500;not null" json:"video_url"`
-	Duration     int            `gorm:"default:0" json:"duration"` // 秒
-	AuthorID     string         `gorm:"index;size:36" json:"author_id"`       // 关联用户 ID
-	Author       string         `gorm:"size:100" json:"author"`               // 冗余：作者昵称
-	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`        // 冗余：作者头像
-	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`              // []string
-	SortOrder    int            `gorm:"default:0" json:"sort_order"`          // 同分类内排序
+	Duration     int            `gorm:"default:0" json:"duration"`      // 秒
+	AuthorID     string         `gorm:"index;size:36" json:"author_id"` // 关联用户 ID
+	Author       string         `gorm:"size:100" json:"author"`         // 冗余：作者昵称
+	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`  // 冗余：作者头像
+	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`         // []string
+	SortOrder    int            `gorm:"default:0" json:"sort_order"`    // 同分类内排序
+	Status       string         `gorm:"size:20;index" json:"status"`    // pending / published
 	Views        int            `gorm:"default:0" json:"views"`
 	Likes        int            `gorm:"default:0" json:"likes"`
 	CreatedAt    time.Time      `json:"created_at"`
@@ -206,6 +207,9 @@ func (Show) TableName() string { return "shows" }
 func (s *Show) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
+	}
+	if s.Status == "" {
+		s.Status = "published"
 	}
 	return nil
 }

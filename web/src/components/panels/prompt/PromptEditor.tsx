@@ -18,6 +18,8 @@ export interface PromptEditorHandle {
   insertTextAtCursor: (text: string) => void;
   /** 在光标位置插入 HTML 标签（用于停顿/语气词） */
   insertTagAtCursor: (html: string, text: string) => void;
+  /** 替换整个编辑器内容（用于快捷导入） */
+  setValue: (text: string) => void;
 }
 
 const NODE_TYPE_ICON_TEXT: Record<string, string> = {
@@ -178,6 +180,12 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       insertRange.collapse(false);
       sel.removeAllRanges();
       sel.addRange(insertRange);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    setValue: (text: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      el.innerHTML = escapeHtml(text);
       el.dispatchEvent(new Event('input', { bubbles: true }));
     },
   }), []);

@@ -13,7 +13,7 @@ import (
 )
 
 type ShowHandler struct {
-	showService      *service.ShowService
+	showService       *service.ShowService
 	fileUploadService *service.FileUploadService
 }
 
@@ -150,6 +150,7 @@ type CreateShowRequest struct {
 	AuthorID    string   `json:"author_id"`
 	Tags        []string `json:"tags"`
 	SortOrder   int      `json:"sort_order"`
+	Status      string   `json:"status"` // pending / published，默认 published
 }
 
 type UpdateShowRequest struct {
@@ -180,6 +181,7 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 		Duration:    req.Duration,
 		Tags:        tagsJSON,
 		SortOrder:   req.SortOrder,
+		Status:      req.Status,
 	}
 	h.showService.ResolveAuthor(c.Request.Context(), show, req.AuthorID)
 
@@ -325,6 +327,40 @@ func (h *ShowHandler) DeleteShow(c *gin.Context) {
 		return
 	}
 	response.OKWithMsg(c, "deleted", nil)
+}
+
+// ========== 待审核视频管理（需登录）==========
+
+// ListPendingShows 获取待审核视频列表
+func (h *ShowHandler) ListPendingShows(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	shows, total, err := h.showService.ListPendingShows(c.Request.Context(), page, pageSize)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+
+	response.OK(c, gin.H{
+		"items":     shows,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+// ApproveShow 审核通过视频（将 status 改为 published）
+func (h *ShowHandler) ApproveShow(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.showService.ApproveShow(c.Request.Context(), id); err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OKWithMsg(c, "已审核通过", nil)
 }
 
 // ========== 分类管理（需登录）==========

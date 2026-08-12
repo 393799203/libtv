@@ -52,6 +52,20 @@ func (s *ShowService) ListShows(ctx context.Context, categoryID string, keyword 
 	return s.showRepo.ListShows(ctx, categoryID, keyword, offset, pageSize)
 }
 
+func (s *ShowService) ListPendingShows(ctx context.Context, page, pageSize int) ([]*model.Show, int64, error) {
+	offset := (page - 1) * pageSize
+	return s.showRepo.ListPendingShows(ctx, offset, pageSize)
+}
+
+func (s *ShowService) ApproveShow(ctx context.Context, id string) error {
+	show, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	show.Status = "published"
+	return s.showRepo.UpdateShow(ctx, show)
+}
+
 func (s *ShowService) UpdateShow(ctx context.Context, show *model.Show) error {
 	return s.showRepo.UpdateShow(ctx, show)
 }

@@ -13,6 +13,7 @@ export interface ShowItem {
   author_avatar: string;
   tags: string[];
   sort_order: number;
+  status: string; // pending / published
   views: number;
   likes: number;
   category?: {
@@ -84,6 +85,7 @@ export const showApi = {
     author_id?: string;
     tags?: string[];
     sort_order?: number;
+    status?: string;
   }) =>
     api.post<ShowItem>('/shows', data),
 
@@ -126,4 +128,12 @@ export const showApi = {
   /** 删除视频（需登录） */
   delete: (id: string) =>
     api.delete(`/shows/${id}`),
+
+  /** 获取待审核视频列表（需登录） */
+  listPending: (params?: { page?: number; page_size?: number }) =>
+    api.get<{ items: ShowItem[]; total: number; page: number; page_size: number }>('/shows/pending', { params }),
+
+  /** 审核通过视频（需登录） */
+  approve: (id: string) =>
+    api.put(`/shows/${id}/approve`),
 };

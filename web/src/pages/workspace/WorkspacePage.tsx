@@ -6,6 +6,7 @@ import {
   ArrowLeftOutlined,
   SaveOutlined,
   GlobalOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
 import { useCanvas } from '@/hooks/useCanvas';
@@ -14,6 +15,8 @@ import { useExecutionStore, type ActiveStream } from '@/stores/executionStore';
 import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
+import AddShowDialog from '@/components/AddShowDialog';
+import { showApi, type ShowCategoryItem } from '@/services/showApi';
 
 // 单个 SSE 订阅实例（按 executionId 建立独立 EventSource）
 // 不渲染任何 UI，仅用于 hooks 内部订阅
@@ -67,6 +70,11 @@ function WorkspaceInner() {
   const [isEditingName, setIsEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const projectNameLoadedRef = useRef(false);
+
+  // 提交视频发布弹窗
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [publishCategories, setPublishCategories] = useState<ShowCategoryItem[]>([]);
+  const [prefillVideoUrl, setPrefillVideoUrl] = useState('');
 
   // 同步设置 store 中的 projectId，避免竞态条件
   if (urlProjectId && useCanvasStore.getState().projectId !== urlProjectId) {
@@ -183,6 +191,21 @@ function WorkspaceInner() {
         {isDirty && (
           <span className="text-xs text-orange-500">未保存</span>
         )}
+        <Tooltip title="提交视频发布">
+          <Button
+            type="text"
+            size="small"
+            icon={<VideoCameraOutlined />}
+            onClick={async () => {
+              setPrefillVideoUrl('');
+              try {
+                const cats = await showApi.categories();
+                setPublishCategories(cats || []);
+              } catch {}
+              setShowPublishDialog(true);
+            }}
+          />
+        </Tooltip>
         <Tooltip title={showMiniMap ? '关闭小地图' : '打开小地图'}>
           <Button
             type={showMiniMap ? 'primary' : 'text'}
@@ -208,6 +231,19 @@ function WorkspaceInner() {
           <CanvasWithDrop urlProjectId={urlProjectId} />
         </ReactFlowProvider>
       </div>
+
+      {/* 提交视频发布弹窗 */}
+      <AddShowDialog
+        open={showPublishDialog}
+        onClose={() => setShowPublishDialog(false)}
+        onSuccess={() => {
+          message.success('视频已提交，等待审核');
+          setShowPublishDialog(false);
+        }}
+        categories={publishCategories}
+        prefillVideoUrl={prefillVideoUrl}
+        status="pending"
+      />
     </div>
   );
 }

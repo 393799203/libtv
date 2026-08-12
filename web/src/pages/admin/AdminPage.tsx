@@ -18,9 +18,9 @@ import {
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
-import { uploadVideo } from '@/services/uploadApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
+import AddShowDialog from '@/components/AddShowDialog';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
 
@@ -48,88 +48,6 @@ export default function AdminPage() {
   const [adding, setAdding] = useState(false);
   const [editingStyle, setEditingStyle] = useState<StyleItem | null>(null); // 编辑时传入当前风格数据
   const addFileRef = useRef<HTMLInputElement>(null);
-  const coverPickVideoRef = useRef<HTMLVideoElement>(null);
-
-  // ========== 通用视频处理工具函数 ==========
-
-  /**
-   * 从视频URL截取指定帧，生成缩略图File对象
-   * @param videoUrl 视频URL
-   * @param timeInSeconds 截取时间点（秒），默认取1秒或视频1%位置
-   * @returns { file: File, dataUrl: string } 缩略图文件和DataURL
-   */
-  const captureVideoFrame = async (
-    videoUrl: string,
-    timeInSeconds?: number
-  ): Promise<{ file: File; dataUrl: string }> => {
-    const video = document.createElement('video');
-    video.preload = 'auto';
-    video.muted = true;
-    video.crossOrigin = 'anonymous';
-    video.src = videoUrl;
-
-    // 等待视频数据加载
-    await new Promise<void>((resolve, reject) => {
-      video.onloadeddata = () => resolve();
-      video.onerror = () => reject(new Error('视频加载失败'));
-    });
-
-    // 设置截取时间点
-    video.currentTime = timeInSeconds ?? Math.min(1, video.duration * 0.01 || 1);
-
-    // 等待帧加载完成
-    await new Promise<void>((resolve) => {
-      video.onseeked = () => resolve();
-    });
-
-    // 截取帧到canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    // 生成图片文件
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    const blob = await fetch(dataUrl).then(r => r.blob());
-    const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
-
-    return { file, dataUrl };
-  };
-
-  /**
-   * 获取视频时长（秒）
-   * @param videoUrl 视频URL
-   * @returns 视频时长（秒），失败返回0
-   */
-  const getVideoDuration = async (videoUrl: string): Promise<number> => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-    video.muted = true;
-    video.src = videoUrl;
-
-    return new Promise<number>((resolve) => {
-      video.onloadeddata = () => resolve(Math.round(video.duration) || 0);
-      video.onerror = () => resolve(0);
-    });
-  };
-
-  /**
-   * 从video元素截取当前帧，生成缩略图File对象
-   * @param video HTMLVideoElement元素
-   * @returns { file: File, dataUrl: string } 缩略图文件和DataURL
-   */
-  const captureVideoElementFrame = async (video: HTMLVideoElement): Promise<{ file: File; dataUrl: string }> => {
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    const blob = await fetch(dataUrl).then(r => r.blob());
-    const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
-
-    return { file, dataUrl };
-  };
 
   // ========== 用户管理状态 ==========
   const [users, setUsers] = useState<UserItem[]>([]);
@@ -163,52 +81,23 @@ export default function AdminPage() {
   const [newShowCatName, setNewShowCatName] = useState('');
   const [creatingShowCat, setCreatingShowCat] = useState(false);
   const [showAddShowDialog, setShowAddShowDialog] = useState(false);
-  const [addShowForm, setAddShowForm] = useState({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
-  const [addShowFile, setAddShowFile] = useState<File | null>(null);
-  const [addShowPreviewUrl, setAddShowPreviewUrl] = useState('');
-  const [addShowVideoFile, setAddShowVideoFile] = useState<File | null>(null);
-  const [addShowVideoName, setAddShowVideoName] = useState('');
-  const [videoUploading, setVideoUploading] = useState(false);
-  const [videoUploadProgress, setVideoUploadProgress] = useState(0);
-  const [videoUploadPhase, setVideoUploadPhase] = useState<'uploading' | 'processing' | 'pickCover'>('uploading');
-  const [videoErrorMsg, setVideoErrorMsg] = useState<string>('');
-  const [videoUploadedUrl, setVideoUploadedUrl] = useState('');
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState(''); // 填写地址后用于预览视频
-  const [playingShowId, setPlayingShowId] = useState<string | null>(null); // 列表卡片正在播放的 show ID
-  const [addingShow, setAddingShow] = useState(false);
   const [editingShow, setEditingShow] = useState<ShowItem | null>(null);
+  const [playingShowId, setPlayingShowId] = useState<string | null>(null);
+  // 待审核视频
+  const [showPendingView, setShowPendingView] = useState(false);
+  const [pendingShows, setPendingShows] = useState<ShowItem[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  // 作者搜索（风格弹窗使用）
   const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
   const [authorSearching, setAuthorSearching] = useState(false);
-  const authorFetchIdRef = useRef(0);
-  const authorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 远程搜索作者（防抖 + 请求时序控制）
-  const fetchAuthors = (keyword: string) => {
-    const fetchId = ++authorFetchIdRef.current;
-
-    // 防抖：仅对用户输入生效，首次加载（空keyword）立即执行
-    const needDebounce = keyword.trim().length > 0;
-    if (needDebounce && authorDebounceRef.current) clearTimeout(authorDebounceRef.current);
-
-    const doFetch = async () => {
-      setAuthorSearching(true);
-      try {
-        const res = await userApi.search(keyword.trim());
-        // 只接受最后一次请求的结果
-        if (fetchId === authorFetchIdRef.current) {
-          setAuthorOptions(res.items || []);
-        }
-      } catch {}
-      if (fetchId === authorFetchIdRef.current) {
-        setAuthorSearching(false);
-      }
-    };
-
-    if (needDebounce) {
-      authorDebounceRef.current = setTimeout(doFetch, 300);
-    } else {
-      doFetch();
-    }
+  // 远程搜索作者（供风格弹窗使用）
+  const fetchAuthors = (_keyword?: string) => {
+    setAuthorSearching(true);
+    userApi.list()
+      .then(res => setAuthorOptions(res.items || []))
+      .catch(() => {})
+      .finally(() => setAuthorSearching(false));
   };
 
   // 加载分类
@@ -455,177 +344,29 @@ export default function AdminPage() {
 
   const openAddShowDialog = () => {
     setEditingShow(null);
-    setAddShowForm({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
-    setAddShowFile(null);
-    setAddShowPreviewUrl('');
-    setAddShowVideoFile(null);
-    setAddShowVideoName('');
     setShowAddShowDialog(true);
-    if (authorOptions.length === 0) fetchAuthors('');
   };
 
   const openEditShowDialog = (s: ShowItem) => {
     setEditingShow(s);
-    setAddShowForm({
-      title: s.title,
-      description: s.description || '',
-      video_url: s.video_url,
-      author_id: s.author_id || '',
-      duration: s.duration,
-      tags: (s.tags || []).join(', '),
-    });
-    setAddShowFile(null);
-    setAddShowPreviewUrl(s.thumbnail_url || '');
-    setAddShowVideoFile(null);
-    setAddShowVideoName(s.video_url ? s.video_url.split('/').pop() || '' : '');
-    // 重置视频上传状态
-    setVideoUploadedUrl(s.video_url || '');
-    setVideoUploading(false);
-    setVideoUploadProgress(0);
-    setVideoUploadPhase('uploading');
-    setVideoErrorMsg('');
     setShowAddShowDialog(true);
-    if (authorOptions.length === 0) fetchAuthors('');
   };
 
-  const handleSelectShowFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) { setAddShowFile(file); setAddShowPreviewUrl(URL.createObjectURL(file)); }
-  };
-
-  const handleSelectShowVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setAddShowVideoFile(file);
-    setAddShowVideoName(file.name);
-    setAddShowForm(prev => ({ ...prev, video_url: '' }));
-    setVideoUploadedUrl('');
-    setVideoUploadProgress(0);
-    setVideoUploadPhase('uploading');
-    setVideoErrorMsg('');
-    setAddShowFile(null);
-
-    // 独立上传视频（不依赖 show ID）
+  const loadPendingShows = async () => {
+    setPendingLoading(true);
     try {
-      setVideoUploading(true);
-      setVideoUploadProgress(0);
-      setVideoUploadPhase('uploading');
-      const result = await uploadVideo(file, (pct, phase) => {
-        setVideoUploadProgress(pct);
-        if (phase) setVideoUploadPhase(phase);
-      });
-      // 上传成功：填入表单 + 标记已上传
-      setAddShowForm(prev => ({ ...prev, video_url: result.url }));
-      setVideoUploadedUrl(result.url);
-      if (result.cached) {
-        message.success('视频已存在，直接使用缓存');
-      } else if (result.compressed) {
-        message.success('视频上传并压缩完成');
-      } else {
-        message.success('视频上传完成');
-      }
-
-      // 上传成功：先自动截取第一帧，同时进入封面选择模式（用户可手动替换）
-      setVideoUploadPhase('pickCover');
-
-      // 获取视频时长
-      const dur = await getVideoDuration(result.url);
-      if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-
-      // 自动截取第一帧作为封面
-      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(result.url);
-      setAddShowPreviewUrl(thumbDataUrl);
-      setAddShowFile(thumbFile);
-    } catch (err: any) {
-      console.error('视频上传失败:', err);
-      const msg = err?.response?.data?.msg || err?.message || '视频上传失败';
-      setVideoErrorMsg(msg);
-    } finally {
-      setVideoUploading(false);
-    }
-  };
-
-  // 截取当前视频帧作为封面
-  const handleCaptureCover = async () => {
-    const video = coverPickVideoRef.current;
-    if (!video) return;
-
-    const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoElementFrame(video);
-    setAddShowPreviewUrl(thumbDataUrl);
-    setAddShowFile(thumbFile);
-
-    setVideoUploadPhase('uploading'); // 退出选封面模式，显示最终结果
-    message.success('封面已截取');
-  };
-
-  // 填写视频地址失焦后，加载视频预览 + 自动截取封面
-  const handleVideoUrlBlur = async (url: string) => {
-    if (!url.trim() || videoUploading || addShowVideoFile || videoUploadedUrl) return;
-
-    // 清除之前的预览
-    setVideoPreviewUrl('');
-    const fullUrl = url.trim().startsWith('/') ? url.trim() : url.trim();
-
-    try {
-      // 显示视频预览在上方区域
-      setVideoPreviewUrl(fullUrl);
-
-      // 获取视频时长
-      const dur = await getVideoDuration(fullUrl);
-      if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-
-      // 自动截取第一帧作为封面
-      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(fullUrl);
-      setAddShowPreviewUrl(thumbDataUrl);
-      setAddShowFile(thumbFile);
-    } catch (err) {
-      console.error('视频加载失败:', err);
-      message.error('视频加载失败，请检查URL是否正确');
-    }
-  };
-
-  const handleAddShowSubmit = async () => {
-    if (!addShowForm.title.trim()) return;
-    // 新建模式必须有封面图
-    if (!editingShow && !addShowFile) return;
-    setAddingShow(true);
-    try {
-      if (editingShow) {
-        // 编辑模式（包括选视频时自动创建的记录）：更新信息 + 上传封面
-        await showApi.update(editingShow.id, {
-          title: addShowForm.title.trim(),
-          description: addShowForm.description.trim() || undefined,
-          // 视频已在选择时上传完成，或用户手动填写了地址
-          video_url: (videoUploadedUrl || addShowForm.video_url.trim()) || undefined,
-          author_id: addShowForm.author_id || undefined,
-          duration: addShowForm.duration || undefined,
-          tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
-        });
-        if (addShowFile) {
-          await showApi.uploadThumbnail(editingShow.id, addShowFile);
-        }
-      } else {
-        // 纯手动填写 URL 的创建（没有选择视频文件）
-        const res = await showApi.create({
-          category_id: activeShowCategory,
-          title: addShowForm.title.trim(),
-          description: addShowForm.description.trim() || undefined,
-          video_url: addShowForm.video_url.trim(),
-          author_id: addShowForm.author_id || undefined,
-          duration: addShowForm.duration || undefined,
-          tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
-        });
-        if (addShowFile) {
-          await showApi.uploadThumbnail(res.id, addShowFile);
-        }
-      }
-      setShowAddShowDialog(false);
-      URL.revokeObjectURL(addShowPreviewUrl);
-      loadShows(activeShowCategory);
-      loadShowCategories();
+      const res = await showApi.listPending({ page: 1, page_size: 100 });
+      setPendingShows(res.items || []);
     } catch {}
-    setAddingShow(false);
+    setPendingLoading(false);
+  };
+
+  const handleApproveShow = async (id: string) => {
+    try {
+      await showApi.approve(id);
+      message.success('已审核通过');
+      loadPendingShows();
+    } catch {}
   };
 
   const handleDeleteShow = async (id: string) => {
@@ -869,134 +610,228 @@ export default function AdminPage() {
           <>
             {/* 工具栏 */}
             <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 shrink-0">
-              {(showCategories?.length || 0) === 0 ? (
-                <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
+              {showPendingView ? (
+                <>
+                  <span className="text-[14px] font-medium text-gray-700">待审核视频</span>
+                  <div className="flex-1" />
+                  <button onClick={() => setShowPendingView(false)} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
+                    返回已发布视频列表
+                  </button>
+                </>
               ) : (
-                <div className="flex gap-1.5 overflow-x-auto">
-                  {showCategories.map(cat => (
-                    <button
-                      key={cat.id}
-                      onClick={() => { setActiveShowCategory(cat.id); setPlayingShowId(null); }}
-                      className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
-                        activeShowCategory === cat.id ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
-                      }`}
-                    >
-                      {cat.name}
-                      <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
-                        {cat.show_count}
-                      </span>
+                <>
+                  {(showCategories?.length || 0) === 0 ? (
+                    <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
+                  ) : (
+                    <div className="flex gap-1.5 overflow-x-auto">
+                      {showCategories.map(cat => (
+                        <button
+                          key={cat.id}
+                          onClick={() => { setActiveShowCategory(cat.id); setPlayingShowId(null); }}
+                          className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                            activeShowCategory === cat.id ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+                          }`}
+                        >
+                          {cat.name}
+                          <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                            {cat.show_count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex-1" />
+                  <button onClick={() => setShowNewShowCatDialog(true)} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
+                    <FolderAddOutlined /> 新建标签
+                  </button>
+                  {activeShowCategory && (
+                    <button onClick={openAddShowDialog} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
+                      <PlusOutlined /> 添加视频
                     </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex-1" />
-              <button onClick={() => setShowNewShowCatDialog(true)} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
-                <FolderAddOutlined /> 新建标签
-              </button>
-              {activeShowCategory && (
-                <button onClick={openAddShowDialog} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
-                  <PlusOutlined /> 添加视频
-                </button>
+                  )}
+                  <button onClick={() => { setShowPendingView(true); loadPendingShows(); }} className="flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
+                    待审核视频
+                  </button>
+                </>
               )}
             </div>
 
             {/* 视频列表 */}
             <div className="flex-1 overflow-y-auto p-6">
-              {(!activeShowCategory) && (showCategories?.length || 0) > 0 && (
-                <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                  <FolderAddOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
-                  <div className="text-[14px]">选择一个标签查看或添加视频</div>
-                </div>
-              )}
-              {showsLoading ? (
-                <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
-              ) : activeShowCategory && (shows?.length || 0) === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-                  <UploadOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
-                  <div className="text-[14px] mb-2">「{showCategories?.find(c => c.id === activeShowCategory)?.name}」暂无视频</div>
-                  <button onClick={openAddShowDialog} className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
-                    <PlusOutlined /> 添加第一个视频
-                  </button>
-                </div>
-              ) : activeShowCategory && (shows?.length || 0) > 0 ? (
-                <>
+              {showPendingView ? (
+                <div>
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-[13px] text-gray-500">{shows?.length || 0} 个视频</span>
+                    <span className="text-[13px] text-gray-500">{pendingShows.length} 个待审核视频</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-4">
-                    {shows.map(show => (
-                      <div key={show.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
-                        <div className="aspect-[16/9] relative bg-gray-100">
-                          {playingShowId === show.id ? (
-                            /* 原地播放视频 */
-                            <video
-                              src={show.video_url}
-                              className="w-full h-full object-cover"
-                              autoPlay
-                              controls
-                              playsInline
-                              onEnded={() => setPlayingShowId(null)}
-                            />
-                          ) : (
-                            <>
-                              {show.thumbnail_url ? (
-                                <img src={show.thumbnail_url} alt={show.title} className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-gray-300 text-[12px]">暂无封面</div>
-                              )}
+                  {pendingLoading ? (
+                    <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
+                  ) : pendingShows.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                      <div className="text-[14px]">暂无待审核视频</div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-4">
+                      {pendingShows.map(show => (
+                        <div key={show.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
+                          <div className="aspect-[16/9] relative bg-gray-100">
+                            {playingShowId === show.id ? (
+                              <video src={show.video_url} className="w-full h-full object-cover" autoPlay controls playsInline onEnded={() => setPlayingShowId(null)} />
+                            ) : (
+                              <>
+                                {show.thumbnail_url ? (
+                                  <img src={show.thumbnail_url} alt={show.title} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-gray-300 text-[12px]">暂无封面</div>
+                                )}
 
-                              {/* 播放按钮 */}
-                              {show.video_url && (
-                                <button
-                                  onClick={() => setPlayingShowId(show.id)}
-                                  className="absolute inset-0 m-auto w-10 h-10 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                  title="播放"
-                                >
-                                  <CaretRightOutlined style={{ fontSize: 18, marginLeft: 2 }} />
-                                </button>
-                              )}
+                                {/* 播放按钮 */}
+                                {show.video_url && (
+                                  <button
+                                    onClick={() => setPlayingShowId(show.id)}
+                                    className="absolute inset-0 m-auto w-10 h-10 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                    title="播放"
+                                  >
+                                    <CaretRightOutlined style={{ fontSize: 18, marginLeft: 2 }} />
+                                  </button>
+                                )}
 
-                              {/* 标签 */}
-                              {(show.tags?.length || 0) > 0 && (
+                                {/* 分类标签 */}
                                 <div className="absolute top-2 left-2 flex gap-1 z-10 flex-wrap">
+                                  {show.category?.name && (
+                                    <span className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">{show.category.name}</span>
+                                  )}
                                   {(show.tags || []).slice(0, 2).map(tag => (
                                     <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">{tag}</span>
                                   ))}
                                 </div>
-                              )}
 
-                              {/* 编辑/删除按钮 */}
-                              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                <button onClick={() => openEditShowDialog(show)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-white/90 hover:text-white hover:bg-black/70 cursor-pointer" title="编辑">
-                                  <EditOutlined style={{ fontSize: 11 }} />
-                                </button>
-                                <button onClick={() => handleDeleteShow(show.id)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/50 cursor-pointer" title="删除">
-                                  <DeleteOutlined style={{ fontSize: 11 }} />
-                                </button>
-                              </div>
+                                {/* 审核按钮（hover 显示） */}
+                                <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
+                                  <button onClick={() => handleApproveShow(show.id)} className="px-2.5 py-1 bg-green-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-green-500 transition-colors cursor-pointer font-medium" title="审核通过">
+                                    通过
+                                  </button>
+                                  <button onClick={() => handleDeleteShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="不通过">
+                                    不通过
+                                  </button>
+                                </div>
 
-                              {/* 底部信息遮罩（播放时隐藏） */}
-                              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
-                                <div className="flex items-center justify-between">
-                                  <p className="text-white text-[13px] font-medium truncate drop-shadow flex-1">{show.title}</p>
-                                  <div className="flex items-center gap-1 ml-2">
-                                    <HeartOutlined style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }} />
-                                    <span className="text-white/70 text-[10px]">{show.likes || 0}</span>
+                                {/* 底部信息遮罩 */}
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-white text-[13px] font-medium truncate drop-shadow flex-1">{show.title}</p>
+                                  </div>
+                                  <div className="flex items-center justify-between mt-1">
+                                    {show.author ? <span className="text-white/70 text-[11px] truncate mr-2">{show.author}</span> : <span />}
+                                    <span className="text-white/70 text-[10px]">{show.duration > 0 ? `${Math.floor(show.duration / 60)}:${String(show.duration % 60).padStart(2, '0')}` : ''}</span>
                                   </div>
                                 </div>
-                                <div className="flex items-center justify-between mt-1">
-                                  {show.author ? <span className="text-white/70 text-[11px] truncate mr-2">{show.author}</span> : <span />}
-                                  <span className="text-white/70 text-[10px]">{show.duration > 0 ? `${Math.floor(show.duration / 60)}:${String(show.duration % 60).padStart(2, '0')}` : ''}</span>
-                                </div>
-                              </div>
-                            </>
-                          )}
+                              </>
+                            )}
+                          </div>
                         </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {(!activeShowCategory) && (showCategories?.length || 0) > 0 && (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                      <FolderAddOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
+                      <div className="text-[14px]">选择一个标签查看或添加视频</div>
+                    </div>
+                  )}
+                  {showsLoading ? (
+                    <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
+                  ) : activeShowCategory && (shows?.length || 0) === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                      <UploadOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
+                      <div className="text-[14px] mb-2">「{showCategories?.find(c => c.id === activeShowCategory)?.name}」暂无视频</div>
+                      <button onClick={openAddShowDialog} className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
+                        <PlusOutlined /> 添加第一个视频
+                      </button>
+                    </div>
+                  ) : activeShowCategory && (shows?.length || 0) > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="text-[13px] text-gray-500">{shows?.length || 0} 个视频</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="grid grid-cols-4 gap-4">
+                        {shows.map(show => (
+                          <div key={show.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
+                            <div className="aspect-[16/9] relative bg-gray-100">
+                              {playingShowId === show.id ? (
+                                /* 原地播放视频 */
+                                <video
+                                  src={show.video_url}
+                                  className="w-full h-full object-cover"
+                                  autoPlay
+                                  controls
+                                  playsInline
+                                  onEnded={() => setPlayingShowId(null)}
+                                />
+                              ) : (
+                                <>
+                                  {show.thumbnail_url ? (
+                                    <img src={show.thumbnail_url} alt={show.title} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-gray-300 text-[12px]">暂无封面</div>
+                                  )}
+
+                                  {/* 播放按钮 */}
+                                  {show.video_url && (
+                                    <button
+                                      onClick={() => setPlayingShowId(show.id)}
+                                      className="absolute inset-0 m-auto w-10 h-10 bg-black/50 backdrop-blur-sm rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                      title="播放"
+                                    >
+                                      <CaretRightOutlined style={{ fontSize: 18, marginLeft: 2 }} />
+                                    </button>
+                                  )}
+
+                                  {/* 标签 */}
+                                  {(show.tags?.length || 0) > 0 && (
+                                    <div className="absolute top-2 left-2 flex gap-1 z-10 flex-wrap">
+                                      {(show.tags || []).slice(0, 2).map(tag => (
+                                        <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">{tag}</span>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* 编辑/删除按钮 */}
+                                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-30">
+                                    <button onClick={() => openEditShowDialog(show)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-white/90 hover:text-white hover:bg-black/70 cursor-pointer" title="编辑">
+                                      <EditOutlined style={{ fontSize: 11 }} />
+                                    </button>
+                                    <button onClick={() => handleDeleteShow(show.id)} className="w-7 h-7 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/50 cursor-pointer" title="删除">
+                                      <DeleteOutlined style={{ fontSize: 11 }} />
+                                    </button>
+                                  </div>
+
+                                  {/* 底部信息遮罩（播放时隐藏） */}
+                                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-white text-[13px] font-medium truncate drop-shadow flex-1">{show.title}</p>
+                                      <div className="flex items-center gap-1 ml-2">
+                                        <HeartOutlined style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }} />
+                                        <span className="text-white/70 text-[10px]">{show.likes || 0}</span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1">
+                                      {show.author ? <span className="text-white/70 text-[11px] truncate mr-2">{show.author}</span> : <span />}
+                                      <span className="text-white/70 text-[10px]">{show.duration > 0 ? `${Math.floor(show.duration / 60)}:${String(show.duration % 60).padStart(2, '0')}` : ''}</span>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
                 </>
-              ) : null}
+              )}
             </div>
 
             <div className="px-6 py-2.5 border-t border-gray-100 shrink-0 flex items-center justify-between text-[12px] text-gray-400 bg-white">
@@ -1373,262 +1208,17 @@ export default function AdminPage() {
       )}
 
       {/* ========== 首页管理：添加/编辑视频弹窗 ========== */}
-      {showAddShowDialog && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddShowDialog(false); URL.revokeObjectURL(addShowPreviewUrl); }} />
-          <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 max-h-[85vh] flex flex-col">
-            <div className="px-6 py-4 border-b border-gray-100 shrink-0">
-              <h3 className="text-[15px] font-semibold text-gray-800">{editingShow ? '编辑视频' : '添加视频'}</h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {/* 标题 */}
-              <div>
-                <label className="block text-[12px] text-gray-500 mb-1.5">标题 <span className="text-red-400">*</span></label>
-                <input
-                  value={addShowForm.title}
-                  onChange={e => setAddShowForm(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="输入视频标题"
-                  className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                />
-              </div>
-
-              {/* 描述 */}
-              <div>
-                <label className="block text-[12px] text-gray-500 mb-1.5">描述</label>
-                <textarea
-                  value={addShowForm.description}
-                  onChange={e => setAddShowForm(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="输入视频描述"
-                  rows={2}
-                  className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none resize-none"
-                />
-              </div>
-
-              {/* 视频 + 封面图（同一行） */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* 左：视频预览/上传区域 */}
-                <div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-[12px] text-gray-500">视频 {!editingShow && <span className="text-red-400">*</span>}</label>
-                    {/* 编辑模式 / pickCover 模式：显示操作按钮 */}
-                    {(!videoUploading && videoUploadPhase === 'pickCover' && videoUploadedUrl) || (editingShow && !videoUploading) ? (
-                      <div className="flex gap-1.5">
-                        {videoUploadPhase === 'pickCover' ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleCaptureCover(); }}
-                            className="px-2.5 py-0.5 bg-blue-500 hover:bg-blue-600 text-white text-[11px] rounded shadow transition-colors cursor-pointer"
-                          >
-                            截取封面
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setVideoUploadPhase('pickCover');
-                              // 用当前视频 URL 进入选封面模式
-                              if (!videoUploadedUrl) setVideoUploadedUrl(addShowForm.video_url);
-                            }}
-                            className="px-2.5 py-0.5 bg-green-50 hover:bg-green-100 text-green-600 text-[11px] rounded border border-green-200 transition-colors cursor-pointer"
-                          >
-                            换封面
-                          </button>
-                        )}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); document.getElementById('show-video-input')?.click(); }}
-                          className="px-2.5 py-0.5 bg-orange-50 hover:bg-orange-100 text-orange-600 text-[11px] rounded border border-orange-200 transition-colors cursor-pointer"
-                        >
-                          换视频
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div
-                    onClick={() => {
-                      if (videoUploading) return;
-                      if (editingShow && addShowForm.video_url && !videoUploadedUrl) return; // 编辑模式有视频时点击不触发上传
-                      document.getElementById('show-video-input')?.click();
-                    }}
-                    className={`w-full aspect-video border-2 rounded-lg flex items-center justify-center cursor-pointer transition-colors overflow-hidden relative ${
-                      videoUploading ? 'border-blue-400 bg-blue-50 cursor-wait' :
-                      videoErrorMsg ? 'border-red-300 bg-red-50' :
-                      editingShow && !videoUploading && addShowForm.video_url ? 'border-gray-200' :
-                      'border-dashed border-gray-200 hover:border-blue-300'
-                    }`}
-                  >
-                    {videoUploading ? (
-                      /* 上传/转码进度浮层 */
-                      <>
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
-                          <div className="flex flex-col items-center gap-2 px-4">
-                            <div className={`w-6 h-6 border-2 rounded-full animate-spin ${
-                              videoUploadPhase === 'processing'
-                                ? 'border-orange-200 border-t-orange-500'
-                                : 'border-white/30 border-t-white'
-                            }`} />
-                            <span className={`text-[11px] font-medium ${
-                              videoUploadPhase === 'processing' ? 'text-orange-400' : 'text-white'
-                            }`}>
-                              {videoUploadPhase === 'processing' ? `压缩转码中...` : `上传中 ${videoUploadProgress}%`}
-                            </span>
-                            <div className="w-28 h-1.5 bg-white/20 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-200 ${
-                                  videoUploadPhase === 'processing' ? 'bg-orange-500' : 'bg-blue-500'
-                                }`}
-                                style={{ width: `${videoUploadProgress}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        {videoPreviewUrl && (
-                          <video src={videoPreviewUrl} className="w-full h-full object-contain" muted playsInline />
-                        )}
-                      </>
-                    ) : videoErrorMsg ? (
-                      /* 上传失败 */
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <span className="text-xs text-red-500 text-center px-4">{videoErrorMsg}</span>
-                        <button
-                          className="px-3 py-1 text-[11px] bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors cursor-pointer"
-                          onClick={(e) => { e.stopPropagation(); setVideoErrorMsg(''); document.getElementById('show-video-input')?.click(); }}
-                        >
-                          重新上传
-                        </button>
-                      </div>
-                    ) : !videoUploading && videoUploadPhase === 'pickCover' && videoUploadedUrl ? (
-                      /* 选封面模式：视频播放器（按钮在标题栏） */
-                      <video
-                        ref={coverPickVideoRef}
-                        src={videoUploadedUrl}
-                        className="w-full h-full object-contain"
-                        muted
-                        playsInline
-                        controls
-                        crossOrigin="anonymous"
-                        onClick={e => e.stopPropagation()}
-                      />
-                    ) : editingShow && !videoUploading && addShowForm.video_url ? (
-                      /* 编辑模式：显示已有视频 */
-                      <video
-                        src={addShowForm.video_url}
-                        className="w-full h-full object-contain"
-                        muted
-                        playsInline
-                        controls
-                        crossOrigin="anonymous"
-                        onClick={e => e.stopPropagation()}
-                      />
-                    ) : videoUploadedUrl ? (
-                      /* 上传完成：显示可播放视频 */
-                      <video
-                        src={videoUploadedUrl}
-                        className="w-full h-full object-contain"
-                        muted
-                        playsInline
-                        controls
-                        onClick={e => e.stopPropagation()}
-                      />
-                    ) : videoPreviewUrl ? (
-                      /* 填写地址后的视频预览 */
-                      <video src={videoPreviewUrl} className="w-full h-full object-contain" muted playsInline />
-                    ) : addShowVideoFile ? (
-                      <div className="text-center">
-                        <VideoCameraOutlined style={{ fontSize: 20 }} className="mb-1 block text-blue-500" />
-                        <div className="text-[12px] text-blue-600 truncate max-w-[180px]">{addShowVideoName}</div>
-                      </div>
-                    ) : (
-                      <div className="text-center text-gray-400">
-                        <UploadOutlined style={{ fontSize: 18 }} className="mb-1" />
-                        <div className="text-[11px]">点击上传视频</div>
-                      </div>
-                    )}
-                  </div>
-                  <input id="show-video-input" type="file" accept=".mp4,.webm,.mov,.avi,.mkv,.ts" className="hidden" onChange={handleSelectShowVideo} />
-                </div>
-
-                {/* 右：封面图 */}
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">
-                    封面图
-                    {(videoUploadPhase === 'pickCover') ? <span className="text-blue-500 ml-1">(等待截取)</span> : (videoUploadedUrl || videoPreviewUrl) ? <span className="text-green-500 ml-1">(已截取)</span> : !editingShow ? <span className="text-red-400">*</span> : null}
-                  </label>
-                  <div onClick={() => document.getElementById('show-file-input')?.click()} className="w-full aspect-[16/9] border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-300 transition-colors overflow-hidden">
-                    {addShowPreviewUrl ? (
-                      <img src={addShowPreviewUrl} alt="preview" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="text-center text-gray-400">
-                        <UploadOutlined style={{ fontSize: 20 }} className="mb-1" />
-                        <div className="text-[11px]">点击上传封面</div>
-                      </div>
-                    )}
-                  </div>
-                  <input id="show-file-input" type="file" accept=".jpg,.jpeg,.png,.webp,.gif" className="hidden" onChange={handleSelectShowFile} />
-                </div>
-              </div>
-
-              {/* 视频地址 + 时长（同一行） */}
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <input
-                    value={addShowForm.video_url}
-                    onChange={e => setAddShowForm(prev => ({ ...prev, video_url: e.target.value }))}
-                    onBlur={e => handleVideoUrlBlur(e.target.value)}
-                    placeholder="或填写视频地址（失焦后自动加载预览）"
-                    disabled={!!videoUploading || !!videoUploadedUrl}
-                    className="w-full px-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none disabled:bg-gray-50 disabled:text-gray-400"
-                  />
-                </div>
-                <div className="w-24">
-                  <input
-                    type="number"
-                    value={addShowForm.duration || ''}
-                    onChange={e => setAddShowForm(prev => ({ ...prev, duration: parseInt(e.target.value) || 0 }))}
-                    placeholder="时长(秒)"
-                    className="w-full px-3 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* 作者 + 标签 */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">作者</label>
-                  <Select
-                    value={addShowForm.author_id || undefined}
-                    onChange={val => setAddShowForm(prev => ({ ...prev, author_id: val }))}
-                    onSearch={fetchAuthors}
-                    onOpenChange={(open) => { if (open) fetchAuthors(''); }}
-                    placeholder="点击选择或输入搜索"
-                    showSearch
-                    allowClear
-                    options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.id }))}
-                    notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
-                    filterOption={false}
-                    getPopupContainer={(trigger) => trigger.parentElement!}
-                    style={{ width: '100%', height: 38 }}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] text-gray-500 mb-1.5">标签（逗号分隔）</label>
-                  <input
-                    value={addShowForm.tags}
-                    onChange={e => setAddShowForm(prev => ({ ...prev, tags: e.target.value }))}
-                    placeholder="标签1, 标签2"
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 shrink-0">
-              <button onClick={() => { setShowAddShowDialog(false); URL.revokeObjectURL(addShowPreviewUrl); }} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
-              <button onClick={handleAddShowSubmit} disabled={addingShow || (!editingShow && !addShowFile)} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
-                {addingShow ? '提交中...' : (editingShow ? '保存' : '创建')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AddShowDialog
+        open={showAddShowDialog}
+        onClose={() => setShowAddShowDialog(false)}
+        onSuccess={() => {
+          if (showPendingView) loadPendingShows();
+          else { loadShows(activeShowCategory); loadShowCategories(); }
+        }}
+        categories={showCategories || []}
+        activeCategoryId={activeShowCategory}
+        editingShow={editingShow}
+      />
 
       {/* ========== 新建分类小弹窗 ========== */}
       {showNewCatDialog && (

@@ -16,6 +16,7 @@ type ShowRepo interface {
 	CreateShow(ctx context.Context, show *model.Show) error
 	FindByID(ctx context.Context, id string) (*model.Show, error)
 	ListShows(ctx context.Context, categoryID string, keyword string, offset, limit int) ([]*model.Show, int64, error)
+	ListPendingShows(ctx context.Context, offset, limit int) ([]*model.Show, int64, error)
 	UpdateShow(ctx context.Context, show *model.Show) error
 	DeleteShow(ctx context.Context, id string) error
 	// CountOtherShowsByVideoURL 统计除 excludeID 外引用同一 videoURL 的记录数
@@ -75,6 +76,7 @@ func (r *showRepo) ListShows(ctx context.Context, categoryID string, keyword str
 	var total int64
 
 	applyFilters := func(q *gorm.DB) *gorm.DB {
+		q = q.Where("status = ?", "published")
 		if categoryID != "" && categoryID != "all" {
 			q = q.Where("category_id = ?", categoryID)
 		}
@@ -98,6 +100,19 @@ func (r *showRepo) ListShows(ctx context.Context, categoryID string, keyword str
 
 func (r *showRepo) UpdateShow(ctx context.Context, show *model.Show) error {
 	return r.db.WithContext(ctx).Save(show).Error
+}
+
+func (r *showRepo) ListPendingShows(ctx context.Context, offset, limit int) ([]*model.Show, int64, error) {
+	var shows []*model.Show
+	var total int64
+	q := r.db.WithContext(ctx).Model(&model.Show{}).Where("status = ?", "pending")
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err := q.Preload("Category").Order("created_at DESC").Offset(offset).Limit(limit).Find(&shows).Error; err != nil {
+		return nil, 0, err
+	}
+	return shows, total, nil
 }
 
 func (r *showRepo) DeleteShow(ctx context.Context, id string) error {

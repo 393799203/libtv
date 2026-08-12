@@ -266,10 +266,10 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
                   {/* 提示文字 */}
                   <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                     <span className="text-xs text-gray-500">
-                      分镜表格（只读） - 点击每行的"最终提示词"按钮合成单个镜头的提示词
+                      分镜表格（只读） - 点击每行的"查看提示词"按钮查看单个镜头的提示词
                     </span>
                   </div>
-                  {/* 只读分镜表格（带合成按钮） */}
+                  {/* 只读分镜表格（带查看按钮） */}
                   <div className="flex-1 min-h-0 overflow-auto">
                     <ShotTable
                       shots={data.shots}

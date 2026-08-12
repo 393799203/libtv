@@ -397,7 +397,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
             onClick={() => onMergePrompt(record.id)}
             className="text-[10px]"
           >
-            {record.finalPrompt ? '再次合成' : '最终提示词'}
+            {record.finalPrompt ? '查看提示词' : '生成提示词'}
           </Button>
         ) : !readOnly ? (
           // 第一阶段：显示下拉菜单

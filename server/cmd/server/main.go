@@ -260,7 +260,9 @@ func main() {
 			shows.POST("/:id/thumbnail", showHandler.UploadThumbnail)
 			shows.POST("/:id/video", showHandler.UploadVideo)
 			shows.PUT("/:id", showHandler.UpdateShow)
+			shows.PUT("/:id/approve", showHandler.ApproveShow)
 			shows.DELETE("/:id", showHandler.DeleteShow)
+			shows.GET("/pending", showHandler.ListPendingShows)
 			// 点赞相关
 			shows.POST("/:id/like", showHandler.LikeShow)
 			shows.DELETE("/:id/like", showHandler.UnlikeShow)

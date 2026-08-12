@@ -1062,8 +1062,11 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	// fallback: 查找上游连接的图片/视频节点
-	// 分别补充 mentions 中缺失的图片和视频（避免 mentions 有图片时视频不被收集）
-	if len(imageURLs) == 0 || len(videoURLs) == 0 {
+	// 仅当 mentions 完全没有提供某类资源时，才从上游补充（尊重用户 @mentions 的选择）
+	// 首尾帧模式需要2张图，所以不能只收集1张；video.go 会按模式截断数量
+	mentionsImageCount := len(imageURLs)
+	mentionsVideoCount := len(videoURLs)
+	if mentionsImageCount == 0 || mentionsVideoCount == 0 {
 		upstreamSources := execCtx.GetUpstreamSources(node.ID)
 		for _, sourceNodeID := range upstreamSources {
 			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
@@ -1073,10 +1076,10 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					Type     string `json:"type"`
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil {
-					if nd.Type == "image" && nd.ImageUrl != "" && len(imageURLs) == 0 {
+					if nd.Type == "image" && nd.ImageUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 5 {
 						imageURLs = append(imageURLs, nd.ImageUrl)
 						log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
-					} else if nd.Type == "video" && nd.VideoUrl != "" && len(videoURLs) == 0 {
+					} else if nd.Type == "video" && nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {
 						videoURLs = append(videoURLs, nd.VideoUrl)
 						log.Printf("[VideoExecutor] ✅ 从上游视频节点获取参考视频: nodeId=%s", sourceNodeID)
 					}

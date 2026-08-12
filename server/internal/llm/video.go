@@ -158,13 +158,17 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 			Type:     "image_url",
 			ImageURL: &VideoContentImage{URL: finalURL},
 		}
-		// 仅首尾帧模式设置 role；其他模式（参考/全能参考）无 role
+		// 首尾帧模式: first_frame / last_frame
+		// 全能参考模式: reference_image（API 要求必须指定 role）
+		// 首帧模式（1张图无 mode）: 不填 role
 		if videoMode == "first-last-frame" {
 			if i == 0 {
 				item.Role = "first_frame"
 			} else {
 				item.Role = "last_frame"
 			}
+		} else if videoMode == "universal-ref" {
+			item.Role = "reference_image"
 		}
 		metadata.Content = append(metadata.Content, item)
 		log.Printf("[VideoGen] ✅ 参考图[%d]已添加: role=%s urlLen=%d", i, item.Role, len(finalURL))

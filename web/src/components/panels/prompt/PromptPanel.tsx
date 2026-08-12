@@ -17,7 +17,7 @@ import { PromptToolbar } from './PromptToolbar';
 import { DownstreamConfirmBar } from './DownstreamConfirmBar';
 import { VideoModeSelector } from './VideoPromptControls';
 import { AudioPromptControls, type AudioTagInsert } from './AudioPromptControls';
-import type { VideoMode } from '@/types/canvas';
+import type { VideoMode, ScriptNodeData, ScriptShot } from '@/types/canvas';
 import type { AudioNodeData } from '@/types/canvas';
 
 interface PromptPanelProps {
@@ -137,6 +137,38 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     () => getUpstreamInputs(nodeId, nodes, edges),
     [nodeId, nodes, edges]
   );
+
+  // 手动创建的视频节点：从上游图片节点反查关联分镜的最终提示词
+  const importablePrompts = useMemo(() => {
+    if (nodeType !== 'video' || nodeId.startsWith('shot-video-')) return [];
+    const result: { label: string; prompt: string }[] = [];
+    for (const input of upstreamInputs) {
+      if (input.nodeType !== 'image') continue;
+      // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}
+      const match = input.nodeId.match(/^shot-image-(.+)-(script-.+)$/);
+      if (!match) continue;
+      const [, shotId, scriptNodeId] = match;
+      const scriptNode = nodes.find((n) => n.id === scriptNodeId);
+      if (!scriptNode || scriptNode.type !== 'script') continue;
+      const scriptData = scriptNode.data as ScriptNodeData;
+      const shot = (scriptData.shots || []).find((s: ScriptShot) => s.id === shotId);
+      if (shot?.finalPrompt) {
+        result.push({ label: `分镜${shot.shotNumber}提示词`, prompt: shot.finalPrompt });
+      }
+    }
+    return result;
+  }, [nodeType, nodeId, upstreamInputs, nodes]);
+
+  // 导入提示词（填充后隐藏按钮）
+  const [promptImported, setPromptImported] = useState(false);
+  const handleImportPrompt = useCallback((prompt: string) => {
+    // 去掉分镜提示词中的 (@类型-名称) 标签
+    const cleanPrompt = prompt.replace(/[（(]@[^\）)]+[）)]/g, '').trim();
+    setPromptText(cleanPrompt);
+    setMentions([]);
+    editorRef.current?.setValue(cleanPrompt);
+    setPromptImported(true);
+  }, []);
 
   // 从节点 data 恢复 prompt + mentions（只取 prompt 字段，不 fallback 到 content）
   // mentions 是 @ 引用的元数据列表，存到 data.mentions 里，与 prompt 中的 [[m:ID]] 占位符一一对应
@@ -432,7 +464,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[700px] flex flex-col px-2 py-2';
+    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[900px] flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>
@@ -461,9 +493,25 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         />
       )} */}
 
-      {/* 视频节点：模式选择器（根据上游图片数量自动过滤可选模式） */}
+      {/* 视频节点：模式选择器 + 快捷导入按钮 */}
       {nodeType === 'video' && (
-        <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} videoCount={upstreamVideoCount} />
+        <div className="flex items-center justify-between">
+          <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} videoCount={upstreamVideoCount} />
+          {importablePrompts.length > 0 && !promptImported && (
+            <div className="flex gap-1">
+              {importablePrompts.map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => handleImportPrompt(item.prompt)}
+                  title={`导入${item.label}`}
+                  className="px-2 py-0.5 text-xs rounded bg-black/70 text-white hover:bg-black opacity-60 hover:opacity-100 transition-opacity"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* 第一层：上游输入区 */}
