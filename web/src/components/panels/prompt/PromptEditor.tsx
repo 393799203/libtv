@@ -20,6 +20,8 @@ export interface PromptEditorHandle {
   insertTagAtCursor: (html: string, text: string) => void;
   /** 替换整个编辑器内容（用于快捷导入） */
   setValue: (text: string) => void;
+  /** 获取编辑器当前纯文本（不受防抖延迟影响） */
+  getValue: () => string;
 }
 
 const NODE_TYPE_ICON_TEXT: Record<string, string> = {
@@ -188,6 +190,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       el.innerHTML = escapeHtml(text);
       el.dispatchEvent(new Event('input', { bubbles: true }));
     },
+    getValue: () => {
+      const el = editorRef.current;
+      if (!el) return '';
+      return extractPlainText(el);
+    },
   }), []);
 
   // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
@@ -318,7 +325,19 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     emitTimerRef.current = setTimeout(() => {
       const el = editorRef.current;
       if (!el) return;
-      onChange(extractPlainText(el), mentions);
+      const text = extractPlainText(el);
+      // 只保留文本中仍然存在的 [[m:xxx]] 对应的 mentions
+      // 防止用户通过 Ctrl+A 删除、选中删除等方式删除 mention span 后 mentions 残留
+      const validIds = new Set<string>();
+      const regex = /\[\[m:([^\]]+)\]\]/g;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        validIds.add(match[1]);
+      }
+      const filteredMentions = validIds.size === mentions.length
+        ? mentions
+        : mentions.filter((m) => validIds.has(m.id));
+      onChange(text, filteredMentions);
     }, 150);
   }, [onChange, mentions]);
 

@@ -1,8 +1,8 @@
 import { memo, useState, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Badge, Tooltip } from 'antd';
-import type { NodeExecutionStatus, LibTVNodeData } from '@/types/canvas';
+import { Tooltip } from 'antd';
+import type { LibTVNodeData } from '@/types/canvas';
 import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { NodeLoadingState } from './NodeLoadingState';
@@ -19,14 +19,6 @@ interface BaseNodeProps {
   /** 去掉内容区域 padding */
   noContentPadding?: boolean;
 }
-
-const statusColorMap: Record<NodeExecutionStatus, string> = {
-  idle: 'default',
-  pending: 'processing',
-  running: 'processing',
-  success: 'success',
-  failed: 'error',
-};
 
 export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   id,
@@ -49,15 +41,6 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   const [label, setLabel] = useState(data.label || config.label);
   const labelInputRef = useRef<HTMLInputElement>(null);
 
-  // ✅ 忽略更新：清除stale标志位
-  const handleIgnoreStale = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      updateNodeData(id, { stale: false } as Partial<LibTVNodeData>);
-    },
-    [id, updateNodeData]
-  );
-
   const handleLabelChange = useCallback((val: string) => {
     setLabel(val);
   }, []);
@@ -71,26 +54,14 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
 
   return (
     <div
-      data-stale={data.stale ? 'true' : undefined}
       className={`
         min-w-[200px] w-full rounded-xl bg-white shadow-md border border-gray-200 overflow-visible
         transition-all duration-150 relative flex flex-col pt-8 group
         ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
-        ${data.stale ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
+        ${status === 'failed' ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
         ${className || ''}
       `}
     >
-      {/* ✅ 忽略更新按钮：只在stale状态且hover时显示 */}
-      {data.stale && (
-        <button
-          onClick={handleIgnoreStale}
-          className="absolute top-1 right-1 z-20 px-2 py-1 bg-red-500 text-white text-xs rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-red-600 shadow-sm"
-          title="忽略更新，去除待更新标志"
-        >
-          忽略更新
-        </button>
-      )}
-
       {/* 节点头部 — 负 margin 使其视觉上在节点上方 */}
       <div
         className={`-mt-8 flex items-center justify-between py-1 px-3 text-sm font-medium text-gray-700`}
@@ -127,24 +98,21 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
                 placement="bottom"
                 overlayInnerStyle={{ maxWidth: 400, width: 'auto' }}
               >
-                <Badge status="error" />
+                <span className="inline-block w-3 h-3 rounded-full bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.6)] cursor-help" />
               </Tooltip>
             ) : (
-              <Badge status={statusColorMap[status] as 'default' | 'processing' | 'success' | 'error'} />
+              <span
+                className={`inline-block w-3 h-3 rounded-full ${
+                  status === 'success' ? 'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.5)]' :
+                  status === 'pending' || status === 'running' ? 'bg-blue-500 animate-pulse shadow-[0_0_4px_rgba(59,130,246,0.6)]' :
+                  status === 'failed' ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.6)]' :
+                  'bg-gray-400'
+                }`}
+              />
             )
           )}
         </div>
       </div>
-
-      {/* stale 角标：上游重新生成时提示 */}
-      {data.stale && (
-        <div
-          className="absolute top-1 right-1 z-10 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-medium shadow animate-pulse pointer-events-none"
-          title="上游节点已重新生成，本节点输出可能已过期"
-        >
-          待更新
-        </div>
-      )}
 
       {/* 节点内容 */}
       <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 relative`}>

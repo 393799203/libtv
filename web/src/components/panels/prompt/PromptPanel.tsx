@@ -1,6 +1,5 @@
 import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { useExecutionStore } from '@/stores/executionStore';
 import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
 import { nodeRegistry } from '@/plugins/registry';
@@ -14,7 +13,6 @@ import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canv
 import { PromptUpstreamBar } from './PromptUpstreamBar';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
-import { DownstreamConfirmBar } from './DownstreamConfirmBar';
 import { VideoModeSelector } from './VideoPromptControls';
 import { AudioPromptControls, type AudioTagInsert } from './AudioPromptControls';
 import type { VideoMode, ScriptNodeData, ScriptShot } from '@/types/canvas';
@@ -116,13 +114,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const edges = useCanvasStore((s) => s.edges);
   const projectId = useCanvasStore((s) => s.projectId);
 
-  // 节点生成 hook — 统一入口（处理单点生成 + 下游 stale 标记 + SSE 订阅）
+  // 节点生成 hook — 统一入口（处理单点生成 + SSE 订阅）
   const {
-    downstreamIds,
     isGenerating: hookIsGenerating,
     error: hookError,
     generate,
-    regenerateDownstream,
     clearError,
   } = useNodeGeneration({ nodeId });
 
@@ -301,9 +297,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
   }, [nodeType, selectedModel, availableModels, selectedResolution]);
 
-  // 下游确认条：执行完后弹出
-  const [showDownstreamConfirm, setShowDownstreamConfirm] = useState(false);
-
   // 图片节点专属：摄像机/全景模式
   const [cameraMode, setCameraMode] = useState<'normal' | 'camera' | 'panorama'>('normal');
 
@@ -392,6 +385,36 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     [mentions]
   );
 
+  // 暂存：只保存到 zustand store 内存状态，不持久化到后端
+  // 下次点击节点能取到最新内容，刷新页面回到之前后端持久化的状态
+  const [savedFlash, setSavedFlash] = useState(false);
+  const handleSaveDraft = useCallback(() => {
+    const currentModel = availableModels.find(m => m.value === selectedModel);
+    const modelIdToSave = currentModel?.modelId || selectedModel;
+    // 直接从编辑器 DOM 提取最新文本，避免防抖延迟导致 promptText 为旧值
+    const latestPrompt = editorRef.current?.getValue() ?? promptText;
+    const updateData: Partial<LibTVNodeData> = {
+      prompt: latestPrompt,
+      mentions,
+      model: modelIdToSave,
+    };
+    if (nodeType === 'image' || nodeType === 'video') {
+      (updateData as any).resolution = selectedResolution;
+      (updateData as any).aspectRatio = selectedAspectRatio;
+    }
+    if (nodeType === 'image') {
+      (updateData as any).quality = selectedQuality;
+    }
+    if (nodeType === 'video') {
+      (updateData as any).videoMode = videoMode;
+      (updateData as any).duration = selectedDuration;
+      (updateData as any).generateAudio = generateAudio;
+    }
+    onUpdate(updateData);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1500);
+  }, [availableModels, selectedModel, promptText, mentions, nodeType, selectedResolution, selectedAspectRatio, selectedQuality, videoMode, selectedDuration, generateAudio, onUpdate]);
+
   // 发送生成 — 通过 useNodeGeneration 统一入口
   const handleGenerate = useCallback(async (count?: number) => {
     console.log('[PromptPanel] handleGenerate count=', count);
@@ -408,7 +431,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       const modelIdToSave = currentModel?.modelId || selectedModel;  // ✅ 保存modelId而不是ID
 
       const updateData: Partial<LibTVNodeData> = {
-        prompt: promptText,
+        prompt: editorRef.current?.getValue() ?? promptText,  // 直接从编辑器提取，避免防抖延迟
         mentions,
         model: modelIdToSave,  // ✅ 保存实际的model_id
       };
@@ -431,7 +454,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       onUpdate(updateData);
     }
 
-    // 2) 调统一入口（自动：写下游 stale → 存盘 → 调后端 → 订阅 SSE）
+    // 2) 调统一入口（自动：存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
   }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, onUpdate, generate]);
 
@@ -450,29 +473,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       onUpdate({ generateAudio: enabled } as Partial<LibTVNodeData>);
     }
   }, [nodeType, onUpdate]);
-
-  // 监听节点执行状态：终态时弹出下游确认条
-  const currentExecution = useExecutionStore((s) => s.currentExecution);
-  const nodeExec = currentExecution?.nodes?.find((n) => n.nodeId === nodeId);
-  useEffect(() => {
-    if (nodeExec?.status === 'success' || nodeExec?.status === 'failed') {
-      // 仅当有下游且执行成功时弹确认条
-      if (nodeExec?.status === 'success' && downstreamIds.length > 0) {
-        setShowDownstreamConfirm(true);
-      }
-    }
-  }, [nodeExec?.status, downstreamIds.length]);
-
-  // 点击"重新生成下游"
-  const handleRegenerateDownstream = useCallback(() => {
-    setShowDownstreamConfirm(false);
-    regenerateDownstream();
-  }, [regenerateDownstream]);
-
-  // 关闭下游确认条
-  const handleDismissConfirm = useCallback(() => {
-    setShowDownstreamConfirm(false);
-  }, []);
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
@@ -496,33 +496,62 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         </div>
       )}
 
-      {/* ✅ 移除下游确认条：下游节点标红已经足够提示，不需要额外的文字提示 */}
-      {/* {showDownstreamConfirm && downstreamIds.length > 0 && (
-        <DownstreamConfirmBar
-          count={downstreamIds.length}
-          onRegenerate={handleRegenerateDownstream}
-          onDismiss={handleDismissConfirm}
-        />
-      )} */}
-
-      {/* 视频节点：模式选择器 + 快捷导入按钮 */}
+      {/* 视频节点：模式选择器 + 快捷导入按钮 + 暂存按钮 */}
       {nodeType === 'video' && (
         <div className="flex items-center justify-between">
           <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} videoCount={upstreamVideoCount} />
-          {importablePrompts.length > 0 && !promptImported && (
-            <div className="flex gap-1">
-              {importablePrompts.map((item) => (
-                <button
-                  key={item.label}
-                  onClick={() => handleImportPrompt(item.prompt, item.duration)}
-                  title={`导入${item.label}`}
-                  className="px-2 py-0.5 text-xs rounded bg-black/70 text-white hover:bg-black opacity-60 hover:opacity-100 transition-opacity"
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-1">
+            {importablePrompts.length > 0 && !promptImported && (
+              <div className="flex gap-1">
+                {importablePrompts.map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => handleImportPrompt(item.prompt, item.duration)}
+                    title={`导入${item.label}`}
+                    className="px-2 py-0.5 text-xs rounded bg-black/70 text-white hover:bg-black opacity-60 hover:opacity-100 transition-opacity"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={handleSaveDraft}
+              title="暂存当前提示词"
+              className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${savedFlash ? 'text-green-500' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}
+            >
+              {savedFlash ? (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 3.5C3 2.67 3.67 2 4.5 2H10l3 3v7.5c0 .83-.67 1.5-1.5 1.5h-7C3.67 14 3 13.33 3 12.5v-9zM5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 非视频节点：暂存按钮放在右上角 */}
+      {nodeType !== 'video' && (
+        <div className="flex justify-end px-2">
+          <button
+            onClick={handleSaveDraft}
+            title="暂存当前提示词"
+            className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${savedFlash ? 'text-green-500' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}
+          >
+            {savedFlash ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 3.5C3 2.67 3.67 2 4.5 2H10l3 3v7.5c0 .83-.67 1.5-1.5 1.5h-7C3.67 14 3 13.33 3 12.5v-9zM5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
         </div>
       )}
 

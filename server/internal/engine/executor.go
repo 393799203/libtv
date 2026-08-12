@@ -735,6 +735,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var styleImageURLs []string     // 风格图：只提取画风/色彩/视觉风格
 	var referenceImageURLs []string // 普通参考图：保持主体结构进行修改
 	var mentions []struct {
+		ID       string `json:"id"`
 		NodeID   string `json:"nodeId"`
 		NodeType string `json:"nodeType"`
 		ImageUrl string `json:"imageUrl"` // 前端预览用（后端不使用）
@@ -746,6 +747,18 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	log.Printf("[ImageExecutor] data.Mentions字段: %s", string(data.Mentions))
 
 	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
+		// 防御：只保留 prompt 中实际存在的 [[m:xxx]] 对应的 mentions
+		validMentions := mentions[:0]
+		for _, m := range mentions {
+			marker := fmt.Sprintf("[[m:%s]]", m.ID)
+			if m.ID != "" && !strings.Contains(data.Prompt, marker) {
+				log.Printf("[ImageExecutor] ⚠️ 跳过残留mention: id=%s nodeId=%s type=%s (prompt中不存在)", m.ID, m.NodeID, m.NodeType)
+				continue
+			}
+			validMentions = append(validMentions, m)
+		}
+		mentions = validMentions
+
 		log.Printf("[ImageExecutor] mentions解析成功，找到%d个引用", len(mentions))
 		for idx, m := range mentions {
 			log.Printf("[ImageExecutor] mentions[%d]: nodeId=%s nodeType=%s imageUrl=%s", idx, m.NodeID, m.NodeType, m.ImageUrl)
@@ -1063,10 +1076,24 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var imageURLs []string
 	var videoURLs []string
 	var mentions []struct {
+		ID       string `json:"id"`
 		NodeID   string `json:"nodeId"`
 		NodeType string `json:"nodeType"`
 	}
 	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
+		// 防御：只保留 prompt 中实际存在的 [[m:xxx]] 对应的 mentions
+		// 防止前端残留已删除的 mention 导致错误收集资源
+		validMentions := mentions[:0]
+		for _, m := range mentions {
+			marker := fmt.Sprintf("[[m:%s]]", m.ID)
+			if m.ID != "" && !strings.Contains(data.Prompt, marker) {
+				log.Printf("[VideoExecutor] ⚠️ 跳过残留mention: id=%s nodeId=%s type=%s (prompt中不存在)", m.ID, m.NodeID, m.NodeType)
+				continue
+			}
+			validMentions = append(validMentions, m)
+		}
+		mentions = validMentions
+
 		for _, m := range mentions {
 			if m.NodeType == "image" {
 				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
