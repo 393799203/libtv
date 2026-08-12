@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-
-
 // ---- 提示词生成相关类型定义 ----
 
 // AssetReference 资产引用（角色、场景、道具）
@@ -18,13 +16,13 @@ type AssetReference struct {
 
 // ShotDataForGeneration 用于生成提示词的完整镜头数据
 type ShotDataForGeneration struct {
-	Visual        string `json:"visual"`        // 画面描述
-	ShotSize            string `json:"shotSize"`            // 镜别
-	CameraMovement      string `json:"cameraMovement"`      // 运镜方式（含角度，如"俯视缓慢推镜头"、"仰视快速摇镜头"）
-	Dialogue            string `json:"dialogue"`            // 对白
-	SoundEffect         string `json:"soundEffect"`         // 音效
-	LightingAtmosphere  string `json:"lightingAtmosphere"`  // 光影氛围（如"柔和自然光"、"强烈对比光"、"温暖夕阳光"）
-	ToneHint            string `json:"toneHint"`            // 基调提示
+	Visual             string `json:"visual"`             // 画面描述
+	ShotSize           string `json:"shotSize"`           // 镜别
+	CameraMovement     string `json:"cameraMovement"`     // 运镜方式（含角度，如"俯视缓慢推镜头"、"仰视快速摇镜头"）
+	Dialogue           string `json:"dialogue"`           // 对白
+	SoundEffect        string `json:"soundEffect"`        // 音效
+	LightingAtmosphere string `json:"lightingAtmosphere"` // 光影氛围（如"柔和自然光"、"强烈对比光"、"温暖夕阳光"）
+	ToneHint           string `json:"toneHint"`           // 基调提示
 }
 
 // ---- 提示词生成相关常量 ----
@@ -232,7 +230,7 @@ const ScriptSystemPrompt = `你是一个专业的影视剧本编剧和分镜师�
   - **cameraMovement**: 运镜方式字段需融合拍摄角度和运动方式，格式为"角度+运动方式"，如"俯视缓慢推镜头"、"仰视快速摇镜头"
   - **lightingAtmosphere**: 光影氛围，描述画面的光线特性，如光源类型、光线强度、阴影形态、色调倾向等
   - shotNumber: 镜头序号（从1开始递增）
-  - duration: 时长（秒），建议2-8秒
+  - duration: 时长（秒），建议5-15秒
   - visual: **最重要的字段**，详细描述画面内容、构图、光影、色调
   - shotSize: 镜别（特写/近景/中景/全景/远景/大远景）
   - cameraAngle: 拍摄角度（俯视/仰视/平视/鸟瞰/倾斜）
@@ -273,5 +271,3 @@ func BuildAssetImagePrompt(assetType string, description string) string {
 	// 直接返回描述，保留脚本节点自动添加的视图要求和宫格布局
 	return description
 }
-
-
