@@ -118,9 +118,12 @@ const VideoCard = memo(function VideoCard({
           loading="lazy"
           decoding="async" // 异步解码，避免阻塞主线程
         />
-        {/* 标签 - 移除backdrop-blur，使用简单半透明背景 */}
-        {(item.tags?.length || 0) > 0 && (
+        {/* 标签：分类名称 + 视频自身标签 */}
+        {(item.category || (item.tags?.length || 0) > 0) && (
           <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
+            {item.category && (
+              <span className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{item.category}</span>
+            )}
             {(item.tags || []).slice(0, 2).map(tag => (
               <span key={tag} className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{tag}</span>
             ))}
@@ -355,6 +358,7 @@ export default function VideoListPage() {
         author: item.author || 'LibTV',
         authorId: item.author_id || '',
         tags: item.tags || undefined,
+        category: item.category?.name,
         likes: item.likes || 0,
       }));
       setTvShowVideos(list);
@@ -389,6 +393,7 @@ export default function VideoListPage() {
         author: item.author || 'LibTV',
         authorId: item.author_id || '',
         tags: item.tags || undefined,
+        category: item.category?.name,
         likes: item.likes || 0,
       }));
       setTvShowVideos(prev => [...prev, ...newList]);

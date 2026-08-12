@@ -188,13 +188,14 @@ type Show struct {
 	Description  string         `gorm:"size:1000" json:"description"`
 	ThumbnailURL string         `gorm:"size:500" json:"thumbnail_url"`
 	VideoURL     string         `gorm:"size:500;not null" json:"video_url"`
-	Duration     int            `gorm:"default:0" json:"duration"`      // 秒
-	AuthorID     string         `gorm:"index;size:36" json:"author_id"` // 关联用户 ID
-	Author       string         `gorm:"size:100" json:"author"`         // 冗余：作者昵称
-	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`  // 冗余：作者头像
-	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`         // []string
-	SortOrder    int            `gorm:"default:0" json:"sort_order"`    // 同分类内排序
-	Status       string         `gorm:"size:20;index" json:"status"`    // pending / published
+	Duration     int            `gorm:"default:0" json:"duration"`       // 秒
+	AuthorID     string         `gorm:"index;size:36" json:"author_id"`  // 关联用户 ID
+	Author       string         `gorm:"size:100" json:"author"`          // 冗余：作者昵称
+	AuthorAvatar string         `gorm:"size:500" json:"author_avatar"`   // 冗余：作者头像
+	Tags         datatypes.JSON `gorm:"type:jsonb" json:"tags"`          // []string
+	SortOrder    int            `gorm:"default:0" json:"sort_order"`     // 同分类内排序
+	ProjectID    string         `gorm:"size:36;index" json:"project_id"` // 关联画布项目ID
+	Status       string         `gorm:"size:20;index" json:"status"`     // pending / published / rejected
 	Views        int            `gorm:"default:0" json:"views"`
 	Likes        int            `gorm:"default:0" json:"likes"`
 	CreatedAt    time.Time      `json:"created_at"`

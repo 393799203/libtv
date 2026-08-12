@@ -7,6 +7,7 @@ import (
 
 	"libtv/internal/model"
 	"libtv/internal/pkg/response"
+	"libtv/internal/repository"
 	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -15,10 +16,11 @@ import (
 type ShowHandler struct {
 	showService       *service.ShowService
 	fileUploadService *service.FileUploadService
+	projectRepo       repository.ProjectRepo
 }
 
-func NewShowHandler(showService *service.ShowService, fileUploadService *service.FileUploadService) *ShowHandler {
-	return &ShowHandler{showService: showService, fileUploadService: fileUploadService}
+func NewShowHandler(showService *service.ShowService, fileUploadService *service.FileUploadService, projectRepo repository.ProjectRepo) *ShowHandler {
+	return &ShowHandler{showService: showService, fileUploadService: fileUploadService, projectRepo: projectRepo}
 }
 
 // ========== 公开接口：首页展示 ==========
@@ -150,7 +152,8 @@ type CreateShowRequest struct {
 	AuthorID    string   `json:"author_id"`
 	Tags        []string `json:"tags"`
 	SortOrder   int      `json:"sort_order"`
-	Status      string   `json:"status"` // pending / published，默认 published
+	Status      string   `json:"status"`     // pending / published，默认 published
+	ProjectID   string   `json:"project_id"` // 关联画布项目ID
 }
 
 type UpdateShowRequest struct {
@@ -162,6 +165,7 @@ type UpdateShowRequest struct {
 	Tags        []string `json:"tags"`
 	SortOrder   *int     `json:"sort_order"`
 	CategoryID  *string  `json:"category_id"`
+	Status      *string  `json:"status"`
 }
 
 // CreateShow 创建视频条目（需登录）
@@ -182,6 +186,7 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 		Tags:        tagsJSON,
 		SortOrder:   req.SortOrder,
 		Status:      req.Status,
+		ProjectID:   req.ProjectID,
 	}
 	h.showService.ResolveAuthor(c.Request.Context(), show, req.AuthorID)
 
@@ -221,6 +226,14 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	if err := h.showService.UpdateThumbnail(c.Request.Context(), id, result.URL); err != nil {
 		response.FailWith(c, err)
 		return
+	}
+
+	// 如果 show 关联了项目，同步更新项目封面
+	if show, err := h.showService.GetByID(c.Request.Context(), id); err == nil && show.ProjectID != "" {
+		if project, err := h.projectRepo.FindByID(c.Request.Context(), show.ProjectID); err == nil {
+			project.CoverURL = result.URL
+			_ = h.projectRepo.Update(c.Request.Context(), project)
+		}
 	}
 
 	response.OK(c, gin.H{"url": result.URL})
@@ -308,6 +321,9 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 	if req.CategoryID != nil {
 		show.CategoryID = *req.CategoryID
 	}
+	if req.Status != nil {
+		show.Status = *req.Status
+	}
 
 	if err := h.showService.UpdateShow(c.Request.Context(), show); err != nil {
 		response.FailWith(c, err)
@@ -327,6 +343,17 @@ func (h *ShowHandler) DeleteShow(c *gin.Context) {
 		return
 	}
 	response.OKWithMsg(c, "deleted", nil)
+}
+
+// GetShowByProjectID 按项目ID查询关联的 show（需登录）
+func (h *ShowHandler) GetShowByProjectID(c *gin.Context) {
+	projectID := c.Param("projectId")
+	show, err := h.showService.GetShowByProjectID(c.Request.Context(), projectID)
+	if err != nil {
+		response.OK(c, nil)
+		return
+	}
+	response.OK(c, show)
 }
 
 // ========== 待审核视频管理（需登录）==========
@@ -361,6 +388,16 @@ func (h *ShowHandler) ApproveShow(c *gin.Context) {
 		return
 	}
 	response.OKWithMsg(c, "已审核通过", nil)
+}
+
+// RejectShow 审核不通过视频（将 status 改为 rejected）
+func (h *ShowHandler) RejectShow(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.showService.RejectShow(c.Request.Context(), id); err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OKWithMsg(c, "已标记不通过", nil)
 }
 
 // ========== 分类管理（需登录）==========

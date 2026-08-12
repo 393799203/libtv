@@ -197,7 +197,14 @@ function WorkspaceInner() {
             size="small"
             icon={<VideoCameraOutlined />}
             onClick={async () => {
-              setPrefillVideoUrl('');
+              // 若当前选中了已生成视频的节点，默认带入其视频 URL
+              const { nodes, selectedNodeIds } = useCanvasStore.getState();
+              const selectedVideoUrl = nodes.find(
+                n => selectedNodeIds.includes(n.id)
+                  && n.data?.type === 'video'
+                  && (n.data as { videoUrl?: string }).videoUrl
+              )?.data as { videoUrl?: string } | undefined;
+              setPrefillVideoUrl(selectedVideoUrl?.videoUrl || '');
               try {
                 const cats = await showApi.categories();
                 setPublishCategories(cats || []);
@@ -243,6 +250,8 @@ function WorkspaceInner() {
         categories={publishCategories}
         prefillVideoUrl={prefillVideoUrl}
         status="pending"
+        projectId={urlProjectId || undefined}
+        projectName={projectName}
       />
     </div>
   );

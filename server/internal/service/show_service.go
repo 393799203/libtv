@@ -21,7 +21,7 @@ type ShowService struct {
 
 // sentinel errors（携带 HTTP 状态码，便于 handler 统一映射）
 var (
-	ErrShowNotFound          = apperror.New(1001, http.StatusNotFound, "视频不存在")
+	ErrShowNotFound         = apperror.New(1001, http.StatusNotFound, "视频不存在")
 	ErrShowCategoryNotFound = apperror.New(1002, http.StatusNotFound, "分类不存在")
 	ErrCategoryNameConflict = apperror.New(1003, http.StatusConflict, "分类名已存在")
 )
@@ -47,6 +47,10 @@ func (s *ShowService) GetByID(ctx context.Context, id string) (*model.Show, erro
 	return show, nil
 }
 
+func (s *ShowService) GetShowByProjectID(ctx context.Context, projectID string) (*model.Show, error) {
+	return s.showRepo.GetShowByProjectID(ctx, projectID)
+}
+
 func (s *ShowService) ListShows(ctx context.Context, categoryID string, keyword string, page, pageSize int) ([]*model.Show, int64, error) {
 	offset := (page - 1) * pageSize
 	return s.showRepo.ListShows(ctx, categoryID, keyword, offset, pageSize)
@@ -63,6 +67,15 @@ func (s *ShowService) ApproveShow(ctx context.Context, id string) error {
 		return err
 	}
 	show.Status = "published"
+	return s.showRepo.UpdateShow(ctx, show)
+}
+
+func (s *ShowService) RejectShow(ctx context.Context, id string) error {
+	show, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	show.Status = "rejected"
 	return s.showRepo.UpdateShow(ctx, show)
 }
 

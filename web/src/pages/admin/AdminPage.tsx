@@ -369,8 +369,16 @@ export default function AdminPage() {
     } catch {}
   };
 
+  const handleRejectShow = async (id: string) => {
+    try {
+      await showApi.reject(id);
+      message.success('已标记不通过');
+      loadPendingShows();
+    } catch {}
+  };
+
   const handleDeleteShow = async (id: string) => {
-    const show = shows.find(s => s.id === id);
+    const show = [...shows, ...pendingShows].find(s => s.id === id);
     if (!show) return;
 
     // 使用 antd 的 modal 确认
@@ -385,8 +393,8 @@ export default function AdminPage() {
         try {
           await showApi.delete(id);
           message.success('删除成功');
-          loadShows(activeShowCategory);
-          loadShowCategories();
+          if (showPendingView) loadPendingShows();
+          else { loadShows(activeShowCategory); loadShowCategories(); }
         } catch (err) {
           // HTTP 错误已由 api.ts 拦截器统一 message.error()
           console.error(err);
@@ -707,12 +715,20 @@ export default function AdminPage() {
 
                                 {/* 审核按钮（hover 显示） */}
                                 <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                  <button onClick={() => handleApproveShow(show.id)} className="px-2.5 py-1 bg-green-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-green-500 transition-colors cursor-pointer font-medium" title="审核通过">
-                                    通过
-                                  </button>
-                                  <button onClick={() => handleDeleteShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="不通过">
-                                    不通过
-                                  </button>
+                                  {show.status === 'rejected' ? (
+                                    <button onClick={() => handleDeleteShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="删除">
+                                      删除
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button onClick={() => handleApproveShow(show.id)} className="px-2.5 py-1 bg-green-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-green-500 transition-colors cursor-pointer font-medium" title="审核通过">
+                                        通过
+                                      </button>
+                                      <button onClick={() => handleRejectShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="不通过">
+                                        不通过
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
 
                                 {/* 底部信息遮罩 */}

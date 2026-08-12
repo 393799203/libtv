@@ -17,6 +17,7 @@ type ShowRepo interface {
 	FindByID(ctx context.Context, id string) (*model.Show, error)
 	ListShows(ctx context.Context, categoryID string, keyword string, offset, limit int) ([]*model.Show, int64, error)
 	ListPendingShows(ctx context.Context, offset, limit int) ([]*model.Show, int64, error)
+	GetShowByProjectID(ctx context.Context, projectID string) (*model.Show, error)
 	UpdateShow(ctx context.Context, show *model.Show) error
 	DeleteShow(ctx context.Context, id string) error
 	// CountOtherShowsByVideoURL 统计除 excludeID 外引用同一 videoURL 的记录数
@@ -105,11 +106,11 @@ func (r *showRepo) UpdateShow(ctx context.Context, show *model.Show) error {
 func (r *showRepo) ListPendingShows(ctx context.Context, offset, limit int) ([]*model.Show, int64, error) {
 	var shows []*model.Show
 	var total int64
-	q := r.db.WithContext(ctx).Model(&model.Show{}).Where("status = ?", "pending")
+	q := r.db.WithContext(ctx).Model(&model.Show{}).Where("status IN ?", []string{"pending", "rejected"})
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := q.Preload("Category").Order("created_at DESC").Offset(offset).Limit(limit).Find(&shows).Error; err != nil {
+	if err := q.Preload("Category").Order("CASE WHEN status = 'pending' THEN 0 ELSE 1 END, created_at DESC").Offset(offset).Limit(limit).Find(&shows).Error; err != nil {
 		return nil, 0, err
 	}
 	return shows, total, nil
@@ -117,6 +118,14 @@ func (r *showRepo) ListPendingShows(ctx context.Context, offset, limit int) ([]*
 
 func (r *showRepo) DeleteShow(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Show{}).Error
+}
+
+func (r *showRepo) GetShowByProjectID(ctx context.Context, projectID string) (*model.Show, error) {
+	var show model.Show
+	if err := r.db.WithContext(ctx).Preload("Category").Where("project_id = ?", projectID).Order("updated_at DESC").First(&show).Error; err != nil {
+		return nil, err
+	}
+	return &show, nil
 }
 
 func (r *showRepo) CountOtherShowsByVideoURL(ctx context.Context, videoURL string, excludeID string) (int64, error) {

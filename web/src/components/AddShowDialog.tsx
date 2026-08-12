@@ -20,6 +20,10 @@ export interface AddShowDialogProps {
   status?: string;
   /** 编辑模式时传入已有视频 */
   editingShow?: ShowItem | null;
+  /** 关联画布项目ID */
+  projectId?: string;
+  /** 画布项目名称（用于预填标题） */
+  projectName?: string;
 }
 
 export default function AddShowDialog({
@@ -31,6 +35,8 @@ export default function AddShowDialog({
   prefillVideoUrl,
   status = 'published',
   editingShow = null,
+  projectId,
+  projectName,
 }: AddShowDialogProps) {
   const { message } = App.useApp();
   const coverPickVideoRef = useRef<HTMLVideoElement>(null);
@@ -50,6 +56,7 @@ export default function AddShowDialog({
   const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
   const [authorSearching, setAuthorSearching] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [existingShow, setExistingShow] = useState<ShowItem | null>(null);
 
   // ========== 通用视频处理工具函数 ==========
 
@@ -111,6 +118,24 @@ export default function AddShowDialog({
 
   // ========== 初始化/重置 ==========
 
+  // 预填视频 URL：自动加载预览、获取时长、截取封面
+  const applyPrefillVideo = async (url: string) => {
+    if (!url) return;
+    setAddShowForm(prev => ({ ...prev, video_url: url }));
+    setVideoPreviewUrl(url);
+    setVideoUploadedUrl(url);
+    setAddShowVideoName(url.split('/').pop() || '');
+    try {
+      const dur = await getVideoDuration(url);
+      if (dur) setAddShowForm(prev => ({ ...prev, duration: dur }));
+      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(url);
+      setAddShowPreviewUrl(thumbDataUrl);
+      setAddShowFile(thumbFile);
+    } catch (err) {
+      console.error('预填视频加载失败:', err);
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     if (editingShow) {
@@ -133,7 +158,8 @@ export default function AddShowDialog({
       setVideoErrorMsg('');
       setSelectedCategoryId(editingShow.category_id);
     } else {
-      setAddShowForm({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
+      setExistingShow(null);
+      setAddShowForm({ title: projectName || '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
       setAddShowFile(null);
       setAddShowPreviewUrl('');
       setAddShowVideoFile(null);
@@ -146,22 +172,37 @@ export default function AddShowDialog({
       setVideoPreviewUrl('');
       setSelectedCategoryId(activeCategoryId || '');
 
-      // 预填视频 URL 时自动加载预览和封面
-      if (prefillVideoUrl) {
-        setAddShowForm(prev => ({ ...prev, video_url: prefillVideoUrl }));
-        setVideoPreviewUrl(prefillVideoUrl);
-        // 自动获取时长和截取封面
+      // 如果有 projectId，查询是否已有关联的 show
+      if (projectId) {
         (async () => {
           try {
-            const dur = await getVideoDuration(prefillVideoUrl);
-            if (dur) setAddShowForm(prev => ({ ...prev, duration: dur }));
-            const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(prefillVideoUrl);
-            setAddShowPreviewUrl(thumbDataUrl);
-            setAddShowFile(thumbFile);
-          } catch (err) {
-            console.error('预填视频加载失败:', err);
+            const existing = await showApi.getByProjectId(projectId);
+            if (existing) {
+              // 之前提交过：沿用已提交记录的全部数据（包括视频 URL、封面、时长等）
+              setExistingShow(existing);
+              setAddShowForm({
+                title: existing.title,
+                description: existing.description || '',
+                video_url: existing.video_url,
+                author_id: existing.author_id || '',
+                duration: existing.duration,
+                tags: (existing.tags || []).join(', '),
+              });
+              setAddShowPreviewUrl(existing.thumbnail_url || '');
+              setAddShowVideoName(existing.video_url ? existing.video_url.split('/').pop() || '' : '');
+              setVideoUploadedUrl(existing.video_url || '');
+              setSelectedCategoryId(existing.category_id);
+            } else {
+              // 没提交过：才用选中视频节点的 prefillVideoUrl
+              await applyPrefillVideo(prefillVideoUrl);
+            }
+          } catch {
+            await applyPrefillVideo(prefillVideoUrl);
           }
         })();
+      } else if (prefillVideoUrl) {
+        // 无 projectId，直接用 prefillVideoUrl
+        applyPrefillVideo(prefillVideoUrl);
       }
     }
     if (authorOptions.length === 0) fetchAuthors('');
@@ -249,25 +290,29 @@ export default function AddShowDialog({
 
   const handleAddShowSubmit = async () => {
     if (!addShowForm.title.trim()) return;
-    if (!editingShow && !addShowFile) return;
+    if (!editingShow && !existingShow && !addShowFile) return;
     const categoryId = selectedCategoryId || activeCategoryId;
     if (!categoryId) {
       message.error('请选择标签');
       return;
     }
+    // 管理员编辑 或 画布用户再次提交（更新已有记录）
+    const updateId = editingShow?.id || existingShow?.id;
     setAddingShow(true);
     try {
-      if (editingShow) {
-        await showApi.update(editingShow.id, {
+      if (updateId) {
+        await showApi.update(updateId, {
           title: addShowForm.title.trim(),
           description: addShowForm.description.trim() || undefined,
           video_url: (videoUploadedUrl || addShowForm.video_url.trim()) || undefined,
           author_id: addShowForm.author_id || undefined,
           duration: addShowForm.duration || undefined,
           tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
+          // 从画布再次提交时，重置状态为 pending（让管理员重新审核）
+          ...(status === 'pending' ? { status: 'pending' } : {}),
         });
         if (addShowFile) {
-          await showApi.uploadThumbnail(editingShow.id, addShowFile);
+          await showApi.uploadThumbnail(updateId, addShowFile);
         }
       } else {
         const res = await showApi.create({
@@ -279,6 +324,7 @@ export default function AddShowDialog({
           duration: addShowForm.duration || undefined,
           tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
           status,
+          project_id: projectId,
         });
         if (addShowFile) {
           await showApi.uploadThumbnail(res.id, addShowFile);
@@ -301,8 +347,19 @@ export default function AddShowDialog({
     <div className="fixed inset-0 z-[10000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
       <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 max-h-[85vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-100 shrink-0">
+        <div className="px-6 py-4 border-b border-gray-100 shrink-0 flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-gray-800">{editingShow ? '编辑视频' : status === 'pending' ? '提交视频发布' : '添加视频'}</h3>
+          {existingShow && (
+            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+              existingShow.status === 'pending' ? 'bg-orange-100 text-orange-600' :
+              existingShow.status === 'published' ? 'bg-green-100 text-green-600' :
+              existingShow.status === 'rejected' ? 'bg-red-100 text-red-600' : ''
+            }`}>
+              {existingShow.status === 'pending' ? '待审核' :
+               existingShow.status === 'published' ? '审核通过' :
+               existingShow.status === 'rejected' ? '已拒绝' : existingShow.status}
+            </span>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {/* 标签选择（当有多个分类时显示） */}
@@ -556,7 +613,7 @@ export default function AddShowDialog({
 
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 shrink-0">
           <button onClick={handleClose} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
-          <button onClick={handleAddShowSubmit} disabled={addingShow || (!editingShow && !addShowFile)} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+          <button onClick={handleAddShowSubmit} disabled={addingShow || (!editingShow && !existingShow && !addShowFile)} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
             {addingShow ? '提交中...' : (editingShow ? '保存' : status === 'pending' ? '提交' : '创建')}
           </button>
         </div>

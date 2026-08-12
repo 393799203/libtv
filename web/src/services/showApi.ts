@@ -86,6 +86,7 @@ export const showApi = {
     tags?: string[];
     sort_order?: number;
     status?: string;
+    project_id?: string;
   }) =>
     api.post<ShowItem>('/shows', data),
 
@@ -122,6 +123,7 @@ export const showApi = {
     tags?: string[];
     sort_order?: number;
     category_id?: string;
+    status?: string;
   }) =>
     api.put<ShowItem>(`/shows/${id}`, data),
 
@@ -136,4 +138,12 @@ export const showApi = {
   /** 审核通过视频（需登录） */
   approve: (id: string) =>
     api.put(`/shows/${id}/approve`),
+
+  /** 审核不通过视频（需登录） */
+  reject: (id: string) =>
+    api.put(`/shows/${id}/reject`),
+
+  /** 按项目ID查询关联的 show（需登录） */
+  getByProjectId: (projectId: string) =>
+    api.get<ShowItem | null>(`/shows/by-project/${projectId}`),
 };

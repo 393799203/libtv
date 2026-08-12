@@ -28,5 +28,6 @@ export interface VideoListItem {
   author: string;
   authorId: string;
   tags?: string[];
+  category?: string; // 分类名称
   likes: number;
 }
