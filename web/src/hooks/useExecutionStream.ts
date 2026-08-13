@@ -366,7 +366,12 @@ export function useExecutionStream(
           if (data.imageUrl !== undefined) updates.imageUrl = data.imageUrl;
           if (data.width !== undefined) updates.width = data.width;      // ✅ 保存图片宽度
           if (data.height !== undefined) updates.height = data.height;   // ✅ 保存图片高度
-          if (data.videoUrl !== undefined) updates.videoUrl = data.videoUrl;
+          if (data.videoUrl !== undefined) {
+            updates.videoUrl = data.videoUrl;
+            // ✅ 清除旧的视频尺寸，让 VideoNode useEffect 重新加载新视频的元数据
+            updates.videoWidth = undefined;
+            updates.videoHeight = undefined;
+          }
           if (data.audioUrl !== undefined) updates.audioUrl = data.audioUrl;
           updates.stale = false;
           updates.status = 'success';

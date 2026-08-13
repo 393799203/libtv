@@ -141,27 +141,27 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     return Math.round(480 * h / w);
   }, [data.videoUrl, (data as { videoWidth?: number }).videoWidth, (data as { videoHeight?: number }).videoHeight, (data as { aspectRatio?: string }).aspectRatio]);
 
-  // AI 生成视频后，如果没有尺寸或时长信息，通过加载视频获取
+  // AI 生成视频后，加载视频元数据获取实际尺寸和时长
+  // videoUrl 变化时必须重新加载，否则会沿用上一段视频的尺寸导致比例错误
   useEffect(() => {
-    if (data.videoUrl && (!(data as { videoWidth?: number }).videoWidth || !data.duration)) {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.onloadedmetadata = () => {
-        const updates: Partial<VideoNodeData> = {};
-        if (video.videoWidth && video.videoHeight && !(data as { videoWidth?: number }).videoWidth) {
-          (updates as any).videoWidth = video.videoWidth;
-          (updates as any).videoHeight = video.videoHeight;
-        }
-        if (video.duration && isFinite(video.duration) && !data.duration) {
-          updates.duration = Math.round(video.duration);
-        }
-        if (Object.keys(updates).length > 0) {
-          useCanvasStore.getState().updateNodeData(id, updates);
-        }
-      };
-      video.src = data.videoUrl!;
-    }
-  }, [data.videoUrl, (data as { videoWidth?: number }).videoWidth, data.duration, id]);
+    if (!data.videoUrl) return;
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const updates: Partial<VideoNodeData> = {};
+      if (video.videoWidth && video.videoHeight) {
+        (updates as any).videoWidth = video.videoWidth;
+        (updates as any).videoHeight = video.videoHeight;
+      }
+      if (video.duration && isFinite(video.duration) && !data.duration) {
+        updates.duration = Math.round(video.duration);
+      }
+      if (Object.keys(updates).length > 0) {
+        useCanvasStore.getState().updateNodeData(id, updates);
+      }
+    };
+    video.src = data.videoUrl;
+  }, [data.videoUrl, id]);
 
   return (
     <>
