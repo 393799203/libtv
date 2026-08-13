@@ -333,12 +333,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     [upstreamInputs]
   );
 
-  // 音频节点专属：音色和语速
+  // 音频节点专属：音色、语速、风格
   const [selectedVoice, setSelectedVoice] = useState(
     nodeType === 'audio' ? ((data as AudioNodeData).voice || 'default') : 'default'
   );
   const [selectedSpeed, setSelectedSpeed] = useState(
     nodeType === 'audio' ? ((data as AudioNodeData).speed || 1.0) : 1.0
+  );
+  const [selectedStyle, setSelectedStyle] = useState(
+    nodeType === 'audio' ? (((data as any).style as string) || '') : ''
   );
 
   // 提示词文本变化
@@ -450,13 +453,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         (updateData as any).duration = selectedDuration;  // 视频时长（4-15秒）
         (updateData as any).generateAudio = generateAudio;  // 是否生成音频
       }
+      if (nodeType === 'audio') {
+        (updateData as any).voice = selectedVoice;  // ✅ 同步音色
+        (updateData as any).speed = selectedSpeed;   // ✅ 同步语速
+        (updateData as any).style = selectedStyle;   // ✅ 同步风格
+      }
 
       onUpdate(updateData);
     }
 
     // 2) 调统一入口（自动：存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, onUpdate, generate]);
+  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, onUpdate, generate]);
 
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
   const handleDurationChange = useCallback((duration: number) => {
@@ -620,6 +628,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onVoiceChange={setSelectedVoice}
         selectedSpeed={selectedSpeed}
         onSpeedChange={setSelectedSpeed}
+        selectedStyle={selectedStyle}
+        onStyleChange={setSelectedStyle}
         selectedDuration={selectedDuration}
         onDurationChange={handleDurationChange}
         generateAudio={generateAudio}

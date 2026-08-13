@@ -235,7 +235,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     );
     // 语气词标签：(label) → 渲染为橙色标签（排除已处理的 mention marker）
     html = html.replace(/\(([^)\ufffc]+?)\)/g, (_match, label) => {
-      if (['笑声', '轻笑', '咳嗽', '清嗓子', '正常换气', '喘气'].includes(label)) {
+      if (['笑声', '轻笑', '咳嗽', '清嗓子', '正常换气', '喘气', '叹气', '抽泣', '哭腔', '打哈欠', '惊讶', '低语', '呐喊', '嘟囔'].includes(label)) {
         return `<span class="libtv-audio-tag libtv-audio-tone" contenteditable="false" data-tag-type="tone"><span class="libtv-audio-tag-icon">(${label})</span></span>`;
       }
       return _match;

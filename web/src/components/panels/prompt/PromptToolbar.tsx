@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   LinkOutlined,
   BarChartOutlined,
@@ -41,11 +41,13 @@ interface PromptToolbarProps {
   nodeType?: NodeType;
   cameraMode?: 'normal' | 'camera' | 'panorama';
   onCameraModeChange?: (mode: 'normal' | 'camera' | 'panorama') => void;
-  // 音频节点专属：音色和语速
+  // 音频节点专属：音色、语速、风格
   selectedVoice?: string;
   onVoiceChange?: (voice: string) => void;
   selectedSpeed?: number;
   onSpeedChange?: (speed: number) => void;
+  selectedStyle?: string;
+  onStyleChange?: (style: string) => void;
   // 视频节点专属：时长（秒）
   selectedDuration?: number;
   onDurationChange?: (duration: number) => void;
@@ -338,6 +340,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onVoiceChange,
   selectedSpeed = 1.0,
   onSpeedChange,
+  selectedStyle = '',
+  onStyleChange,
   selectedDuration = 5,
   onDurationChange,
   generateAudio = true,
@@ -354,14 +358,43 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   const durationOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
   const [durationOpen, setDurationOpen] = useState(false);
 
-  // 音色选项
+  // 音色选项（Qwen3-TTS-Instruct-Flash 支持的音色，来自阿里云百炼官方音色列表）
   const VOICE_OPTIONS = [
-    { value: 'default', label: '默认音色' },
-    { value: 'male-young', label: '青年男声' },
-    { value: 'female-young', label: '青年女声' },
-    { value: 'male-mature', label: '成熟男声' },
-    { value: 'female-mature', label: '成熟女声' },
-    { value: 'child', label: '童声' },
+    // —— 普通话女声 ——
+    { value: 'Cherry', label: '芊悦（阳光女声）', group: '普通话·女声' },
+    { value: 'Serena', label: '苏瑶（温柔女声）', group: '普通话·女声' },
+    { value: 'Maia', label: '四月（知性女声）', group: '普通话·女声' },
+    { value: 'Chelsie', label: '千雪（二次元女声）', group: '普通话·女声' },
+    { value: 'Momo', label: '茉兔（撒娇女声）', group: '普通话·女声' },
+    { value: 'Vivian', label: '十三（可爱女声）', group: '普通话·女声' },
+    { value: 'Bella', label: '萌宝（萝莉女声）', group: '普通话·女声' },
+    { value: 'Mia', label: '乖小妹（温顺女声）', group: '普通话·女声' },
+    { value: 'Katerina', label: '卡捷琳娜（御姐女声）', group: '普通话·女声' },
+    { value: 'Nini', label: '邻家妹妹（软萌女声）', group: '普通话·女声' },
+    { value: 'Stella', label: '少女阿月（甜妹女声）', group: '普通话·女声' },
+    // —— 普通话男声 ——
+    { value: 'Ethan', label: '晨煦（阳光男声）', group: '普通话·男声' },
+    { value: 'Moon', label: '月白（帅气男声）', group: '普通话·男声' },
+    { value: 'Kai', label: '凯（沉稳男声）', group: '普通话·男声' },
+    { value: 'Nofish', label: '不吃鱼（男声）', group: '普通话·男声' },
+    { value: 'Ryan', label: '甜茶（戏感男声）', group: '普通话·男声' },
+    { value: 'Aiden', label: '艾登（活力男声）', group: '普通话·男声' },
+    { value: 'Neil', label: '阿闻（新闻男声）', group: '普通话·男声' },
+    { value: 'Andre', label: '安德雷（磁性男声）', group: '普通话·男声' },
+    // —— 角色扮演音色 ——
+    { value: 'Eldric Sage', label: '沧明子（睿智老者）', group: '角色扮演' },
+    { value: 'Bellona', label: '铁铮莺（热血女将）', group: '角色扮演' },
+    { value: 'Vincent', label: '田叔（沙哑烟嗓）', group: '角色扮演' },
+    { value: 'Arthur', label: '徐大爷（质朴乡音）', group: '角色扮演' },
+    // —— 方言 ——
+    { value: 'Jada', label: '阿珍（上海话）', group: '方言' },
+    { value: 'Dylan', label: '晓东（北京话）', group: '方言' },
+    { value: 'Sunny', label: '晴儿（四川话）', group: '方言' },
+    { value: 'Peter', label: '李彼得（天津话）', group: '方言' },
+    { value: 'Rocky', label: '阿强（粤语）', group: '方言' },
+    { value: 'Kiki', label: '阿清（粤语女声）', group: '方言' },
+    { value: 'Marcus', label: '秦川（陕西话）', group: '方言' },
+    { value: 'Roy', label: '阿杰（闽南话）', group: '方言' },
   ];
 
   // 语速选项
@@ -374,10 +407,37 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     { value: 2.0, label: '2.0x' },
   ];
 
+  // 风格选项（写入 instructions，由 Qwen3-TTS Instruct 模型解析）
+  const STYLE_OPTIONS = [
+    { value: '', label: '默认' },
+    { value: '情感温暖、亲切自然', label: '温暖亲切' },
+    { value: '沉稳庄重、正式播报', label: '沉稳正式' },
+    { value: '活泼开朗、充满活力', label: '活泼开朗' },
+    { value: '深情悲伤、低沉缓慢', label: '深情悲伤' },
+    { value: '神秘紧张、悬疑感', label: '神秘紧张' },
+    { value: '幽默诙谐、轻松愉快', label: '幽默诙谐' },
+    { value: '慷慨激昂、热血振奋', label: '慷慨激昂' },
+    { value: '温柔舒缓、治愈安慰', label: '温柔治愈' },
+    { value: '新闻播报、字正腔圆', label: '新闻播报' },
+    { value: '旁白叙事、娓娓道来', label: '旁白叙事' },
+  ];
+
   // 音色选择器状态
   const [voiceOpen, setVoiceOpen] = useState(false);
   // 语速选择器状态
   const [speedOpen, setSpeedOpen] = useState(false);
+  // 风格选择器状态
+  const [styleOpen, setStyleOpen] = useState(false);
+
+  // 按分组整理音色
+  const voiceGroups = useMemo(() => {
+    const map = new Map<string, typeof VOICE_OPTIONS>();
+    for (const v of VOICE_OPTIONS) {
+      if (!map.has(v.group)) map.set(v.group, []);
+      map.get(v.group)!.push(v);
+    }
+    return Array.from(map.entries());
+  }, []);
 
   return (
     <div className="flex items-center gap-0.5 pt-2.5 mt-0.5 border-t border-gray-100">
@@ -391,7 +451,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       {/* 分隔 */}
       <span className="w-px h-4 bg-gray-200 mx-0.5" />
 
-      {/* 音色选择器（仅音频节点） */}
+      {/* 音色选择器（仅音频节点，分组显示） */}
       {isAudio && (
         <div className="relative">
           <button
@@ -407,17 +467,22 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           {voiceOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setVoiceOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[140px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
-                {VOICE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                      selectedVoice === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                    }`}
-                    onClick={() => { onVoiceChange?.(opt.value); setVoiceOpen(false); }}
-                  >
-                    {opt.label}
-                  </button>
+              <div className="absolute bottom-full left-0 mb-2 w-[160px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-200 z-30">
+                {voiceGroups.map(([groupName, voices]) => (
+                  <div key={groupName}>
+                    <div className="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0">{groupName}</div>
+                    {voices.map((opt) => (
+                      <button
+                        key={opt.value}
+                        className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                          selectedVoice === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
+                        }`}
+                        onClick={() => { onVoiceChange?.(opt.value); setVoiceOpen(false); }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             </>
@@ -446,6 +511,39 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
                       selectedSpeed === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
                     }`}
                     onClick={() => { onSpeedChange?.(opt.value); setSpeedOpen(false); }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 风格选择器（仅音频节点，写入 instructions） */}
+      {isAudio && (
+        <div className="relative">
+          <button
+            onClick={() => setStyleOpen(!styleOpen)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+          >
+            <span className="text-gray-800 font-medium">
+              {STYLE_OPTIONS.find((s) => s.value === selectedStyle)?.label || '风格'}
+            </span>
+            <span className="text-[10px] text-gray-400">^</span>
+          </button>
+          {styleOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setStyleOpen(false)} />
+              <div className="absolute bottom-full left-0 mb-2 w-[130px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+                {STYLE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                      selectedStyle === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => { onStyleChange?.(opt.value); setStyleOpen(false); }}
                   >
                     {opt.label}
                   </button>

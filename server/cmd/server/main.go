@@ -100,7 +100,7 @@ func main() {
 	fileUploadService := service.NewFileUploadService(appStorage)
 
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, modelManager, fileUploadService)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, modelManager, fileUploadService, config.C.AI)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）

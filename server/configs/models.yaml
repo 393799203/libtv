@@ -176,13 +176,14 @@ models:
       description: "字节豆包Seedance 2.0快速版（华数TokenHub），生成速度更快"
       resolutions: ["480p", "720p"]
 
-  # ---------- 音频 / TTS（预留）----------
+  # ---------- 音频 / TTS ----------
   audio:
-    - id: edge-tts
-      name: "Edge TTS"
-      provider: edge_tts
-      model_id: "edge-tts"
+    - id: qwen3-tts-instruct-flash
+      name: "Qwen3 TTS Flash"
+      provider: wasu
+      model_id: "qwen3-tts-instruct-flash"
       usage: [audio]
+      description: "通义千问Qwen3 TTS指令版快速模型（华数TokenHub），支持多音色语音合成"
 
 
 # ============================================

@@ -92,7 +92,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         label: '音频',
         prompt: '',
         text: '',
-        voice: 'default',
+        voice: 'Cherry',
         speed: 1.0,
         model: '',
         duration: 0,
