@@ -41,13 +41,15 @@ interface PromptToolbarProps {
   nodeType?: NodeType;
   cameraMode?: 'normal' | 'camera' | 'panorama';
   onCameraModeChange?: (mode: 'normal' | 'camera' | 'panorama') => void;
-  // 音频节点专属：音色、语速、风格
+  // 音频节点专属：音色、语速、风格、语气词
   selectedVoice?: string;
   onVoiceChange?: (voice: string) => void;
   selectedSpeed?: number;
   onSpeedChange?: (speed: number) => void;
   selectedStyle?: string;
   onStyleChange?: (style: string) => void;
+  selectedTone?: string;
+  onToneChange?: (tone: string) => void;
   // 视频节点专属：时长（秒）
   selectedDuration?: number;
   onDurationChange?: (duration: number) => void;
@@ -342,6 +344,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onSpeedChange,
   selectedStyle = '',
   onStyleChange,
+  selectedTone = '',
+  onToneChange,
   selectedDuration = 5,
   onDurationChange,
   generateAudio = true,
@@ -358,9 +362,11 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   const durationOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
   const [durationOpen, setDurationOpen] = useState(false);
 
-  // 音色选项（Qwen3-TTS-Instruct-Flash 支持的音色，来自阿里云百炼官方音色列表）
+  // 音色选项（仅列出 qwen3-tts-instruct-flash 支持的音色，来自阿里云百炼官方非实时音色列表）
+  // 不支持的音色（Katerina/Ryan/Aiden/Andre 及全部方言）已移除，
+  // 后端对旧数据有 qwen3-tts-flash 回退兜底
   const VOICE_OPTIONS = [
-    // —— 普通话女声 ——
+    // —— 普通话·女声 ——
     { value: 'Cherry', label: '芊悦（阳光女声）', group: '普通话·女声' },
     { value: 'Serena', label: '苏瑶（温柔女声）', group: '普通话·女声' },
     { value: 'Maia', label: '四月（知性女声）', group: '普通话·女声' },
@@ -369,32 +375,24 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     { value: 'Vivian', label: '十三（可爱女声）', group: '普通话·女声' },
     { value: 'Bella', label: '萌宝（萝莉女声）', group: '普通话·女声' },
     { value: 'Mia', label: '乖小妹（温顺女声）', group: '普通话·女声' },
-    { value: 'Katerina', label: '卡捷琳娜（御姐女声）', group: '普通话·女声' },
     { value: 'Nini', label: '邻家妹妹（软萌女声）', group: '普通话·女声' },
     { value: 'Stella', label: '少女阿月（甜妹女声）', group: '普通话·女声' },
-    // —— 普通话男声 ——
+    { value: 'Bunny', label: '萌小姬（萝莉女声）', group: '普通话·女声' },
+    { value: 'Seren', label: '小婉（助眠女声）', group: '普通话·女声' },
+    { value: 'Elias', label: '墨讲师（知性女声）', group: '普通话·女声' },
+    // —— 普通话·男声 ——
     { value: 'Ethan', label: '晨煦（阳光男声）', group: '普通话·男声' },
     { value: 'Moon', label: '月白（帅气男声）', group: '普通话·男声' },
     { value: 'Kai', label: '凯（沉稳男声）', group: '普通话·男声' },
-    { value: 'Nofish', label: '不吃鱼（男声）', group: '普通话·男声' },
-    { value: 'Ryan', label: '甜茶（戏感男声）', group: '普通话·男声' },
-    { value: 'Aiden', label: '艾登（活力男声）', group: '普通话·男声' },
+    { value: 'Nofish', label: '不吃鱼（设计师男声）', group: '普通话·男声' },
     { value: 'Neil', label: '阿闻（新闻男声）', group: '普通话·男声' },
-    { value: 'Andre', label: '安德雷（磁性男声）', group: '普通话·男声' },
-    // —— 角色扮演音色 ——
+    { value: 'Mochi', label: '沙小弥（童声男声）', group: '普通话·男声' },
+    { value: 'Pip', label: '顽屁小孩（调皮童声）', group: '普通话·男声' },
+    // —— 角色扮演 ——
     { value: 'Eldric Sage', label: '沧明子（睿智老者）', group: '角色扮演' },
-    { value: 'Bellona', label: '铁铮莺（热血女将）', group: '角色扮演' },
+    { value: 'Bellona', label: '燕铮莺（热血女将）', group: '角色扮演' },
     { value: 'Vincent', label: '田叔（沙哑烟嗓）', group: '角色扮演' },
     { value: 'Arthur', label: '徐大爷（质朴乡音）', group: '角色扮演' },
-    // —— 方言 ——
-    { value: 'Jada', label: '阿珍（上海话）', group: '方言' },
-    { value: 'Dylan', label: '晓东（北京话）', group: '方言' },
-    { value: 'Sunny', label: '晴儿（四川话）', group: '方言' },
-    { value: 'Peter', label: '李彼得（天津话）', group: '方言' },
-    { value: 'Rocky', label: '阿强（粤语）', group: '方言' },
-    { value: 'Kiki', label: '阿清（粤语女声）', group: '方言' },
-    { value: 'Marcus', label: '秦川（陕西话）', group: '方言' },
-    { value: 'Roy', label: '阿杰（闽南话）', group: '方言' },
   ];
 
   // 语速选项
@@ -422,12 +420,48 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     { value: '旁白叙事、娓娓道来', label: '旁白叙事' },
   ];
 
+  // 语气词选项（写入 instructions，不再插入提示词）
+  // 拆分为"情绪"与"语态"两组，均为可全局生效的语气描述词，
+  // 后端会拼成"带有X的语气"写入 TTS instructions
+  const TONE_OPTIONS = [
+    { value: '', label: '默认', group: '' },
+    // —— 情绪 ——
+    { value: '喜悦', label: '喜悦', group: '情绪' },
+    { value: '悲伤', label: '悲伤', group: '情绪' },
+    { value: '愤怒', label: '愤怒', group: '情绪' },
+    { value: '惊讶', label: '惊讶', group: '情绪' },
+    { value: '恐惧', label: '恐惧', group: '情绪' },
+    { value: '厌恶', label: '厌恶', group: '情绪' },
+    { value: '期待', label: '期待', group: '情绪' },
+    { value: '失落', label: '失落', group: '情绪' },
+    { value: '焦急', label: '焦急', group: '情绪' },
+    { value: '羞涩', label: '羞涩', group: '情绪' },
+    { value: '得意', label: '得意', group: '情绪' },
+    { value: '疑惑', label: '疑惑', group: '情绪' },
+    { value: '嘲讽', label: '嘲讽', group: '情绪' },
+    { value: '冷漠', label: '冷漠', group: '情绪' },
+    // —— 语态 ——
+    { value: '坚定', label: '坚定', group: '语态' },
+    { value: '镇定', label: '镇定', group: '语态' },
+    { value: '犹豫', label: '犹豫', group: '语态' },
+    { value: '严肃', label: '严肃', group: '语态' },
+    { value: '俏皮', label: '俏皮', group: '语态' },
+    { value: '低语', label: '低语', group: '语态' },
+    { value: '呐喊', label: '呐喊', group: '语态' },
+    { value: '哭腔', label: '哭腔', group: '语态' },
+    { value: '笑腔', label: '笑腔', group: '语态' },
+    { value: '叹息', label: '叹息', group: '语态' },
+    { value: '嘟囔', label: '嘟囔', group: '语态' },
+  ];
+
   // 音色选择器状态
   const [voiceOpen, setVoiceOpen] = useState(false);
   // 语速选择器状态
   const [speedOpen, setSpeedOpen] = useState(false);
   // 风格选择器状态
   const [styleOpen, setStyleOpen] = useState(false);
+  // 语气词选择器状态
+  const [toneOpen, setToneOpen] = useState(false);
 
   // 按分组整理音色
   const voiceGroups = useMemo(() => {
@@ -435,6 +469,17 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     for (const v of VOICE_OPTIONS) {
       if (!map.has(v.group)) map.set(v.group, []);
       map.get(v.group)!.push(v);
+    }
+    return Array.from(map.entries());
+  }, []);
+
+  // 按分组整理语气词（默认项单独渲染，不进分组）
+  const toneGroups = useMemo(() => {
+    const map = new Map<string, typeof TONE_OPTIONS>();
+    for (const t of TONE_OPTIONS) {
+      if (!t.group) continue;
+      if (!map.has(t.group)) map.set(t.group, []);
+      map.get(t.group)!.push(t);
     }
     return Array.from(map.entries());
   }, []);
@@ -547,6 +592,54 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
                   >
                     {opt.label}
                   </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 语气词选择器（仅音频节点，紧邻风格选择器，写入 instructions，不再插入提示词） */}
+      {isAudio && (
+        <div className="relative">
+          <button
+            onClick={() => setToneOpen(!toneOpen)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+          >
+            <span className="font-mono text-[10px] text-orange-500">（）</span>
+            <span className="text-gray-800 font-medium">
+              {TONE_OPTIONS.find((t) => t.value === selectedTone)?.label || '语气词'}
+            </span>
+            <span className="text-[10px] text-gray-400">^</span>
+          </button>
+          {toneOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setToneOpen(false)} />
+              <div className="absolute bottom-full left-0 mb-2 w-[128px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-200 z-30">
+                {/* 默认项 */}
+                <button
+                  className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                    selectedTone === '' ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
+                  }`}
+                  onClick={() => { onToneChange?.(''); setToneOpen(false); }}
+                >
+                  默认
+                </button>
+                {toneGroups.map(([groupName, tones]) => (
+                  <div key={groupName}>
+                    <div className="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0">{groupName}</div>
+                    {tones.map((opt) => (
+                      <button
+                        key={opt.value}
+                        className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
+                          selectedTone === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
+                        }`}
+                        onClick={() => { onToneChange?.(opt.value); setToneOpen(false); }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             </>

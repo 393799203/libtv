@@ -73,6 +73,7 @@ export interface AudioNodeData extends BaseNodeFields, Record<string, unknown> {
   voice: string;           // 音色/语音模型
   speed: number;           // 语速
   style?: string;          // 风格描述（写入 TTS instructions）
+  tone?: string;           // 语气词（如"笑声"/"叹息"，写入 TTS instructions，不再插入提示词）
   model: string;           // 音频生成模型
   duration: number;        // 音频时长（秒）
   audioUrl?: string;       // 音频文件 URL

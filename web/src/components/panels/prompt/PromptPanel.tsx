@@ -14,7 +14,6 @@ import { PromptUpstreamBar } from './PromptUpstreamBar';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
 import { VideoModeSelector } from './VideoPromptControls';
-import { AudioPromptControls, type AudioTagInsert } from './AudioPromptControls';
 import type { VideoMode, ScriptNodeData, ScriptShot } from '@/types/canvas';
 import type { AudioNodeData } from '@/types/canvas';
 
@@ -105,7 +104,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 }) {
   const [isFullscreen] = useState(false);
 
-  // 编辑器 ref，用于插入停顿/语气词
+  // 编辑器 ref，用于快捷导入/提取最新文本
   const editorRef = useRef<PromptEditorHandle>(null);
 
   // 从全局 store 获取节点和边，用于计算上游输入
@@ -253,6 +252,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       const gaVal = ga !== false;
       setGenerateAudio(prev => prev !== gaVal ? gaVal : prev);
     }
+
+    // 音频节点：恢复节点数据中的音色、语速、风格、语气词
+    if (nodeType === 'audio') {
+      const v = (data as AudioNodeData).voice;
+      if (v) setSelectedVoice(prev => prev !== v ? v : prev);
+      const s = (data as AudioNodeData).speed;
+      if (s) setSelectedSpeed(prev => prev !== s ? s : prev);
+      const st = ((data as any).style as string) || '';
+      setSelectedStyle(prev => prev !== st ? st : prev);
+      const tn = ((data as any).tone as string) || '';
+      setSelectedTone(prev => prev !== tn ? tn : prev);
+    }
   }, [nodeId, data, nodeType, availableModels]);
 
   // 当模型列表加载完成时，自动选择默认模型或合适的模型
@@ -342,6 +353,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   );
   const [selectedStyle, setSelectedStyle] = useState(
     nodeType === 'audio' ? (((data as any).style as string) || '') : ''
+  );
+  // 音频节点专属：语气词（不再插入提示词，而是独立写入 TTS instructions）
+  const [selectedTone, setSelectedTone] = useState(
+    nodeType === 'audio' ? (((data as any).tone as string) || '') : ''
   );
 
   // 提示词文本变化
@@ -457,6 +472,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         (updateData as any).voice = selectedVoice;  // ✅ 同步音色
         (updateData as any).speed = selectedSpeed;   // ✅ 同步语速
         (updateData as any).style = selectedStyle;   // ✅ 同步风格
+        (updateData as any).tone = selectedTone;    // ✅ 同步语气词
       }
 
       onUpdate(updateData);
@@ -464,7 +480,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
     // 2) 调统一入口（自动：存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, onUpdate, generate]);
+  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone, onUpdate, generate]);
 
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
   const handleDurationChange = useCallback((duration: number) => {
@@ -603,11 +619,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         />
       </div>
 
-      {/* 音频节点：停顿 + 语气词控件 */}
-      {nodeType === 'audio' && (
-        <AudioPromptControls onInsertTag={(tag: AudioTagInsert) => editorRef.current?.insertTagAtCursor(tag.html, tag.text)} />
-      )}
-
       {/* 第三层：底部工具栏 */}
       <PromptToolbar
         models={availableModels}
@@ -630,6 +641,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onSpeedChange={setSelectedSpeed}
         selectedStyle={selectedStyle}
         onStyleChange={setSelectedStyle}
+        selectedTone={selectedTone}
+        onToneChange={setSelectedTone}
         selectedDuration={selectedDuration}
         onDurationChange={handleDurationChange}
         generateAudio={generateAudio}

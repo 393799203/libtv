@@ -1285,6 +1285,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		Voice    string          `json:"voice"`
 		Speed    float64         `json:"speed"`
 		Style    string          `json:"style"`
+		Tone     string          `json:"tone"`
 		Prompt   string          `json:"prompt"`
 		Mentions json.RawMessage `json:"mentions"`
 	}
@@ -1338,10 +1339,10 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}, nil
 	}
 
-	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, len(inputText))
+	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
 
 	// 调用 TTS API
-	audioData, err := a.callTTS(ctx, model, inputText, voice, data.Speed, data.Style)
+	audioData, err := a.callTTS(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
 		return &NodeOutput{
@@ -1400,9 +1401,9 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 // convertTTSTags 清理前端自定义标签，返回纯文本 + instructions
 //   - 停顿标签 <#1.2#>：直接移除
-//   - 语气词（咳嗽）/（笑声）等：从文本移除，收集到 instructions
-//   - speed（语速倍率）和 style（风格描述）：写入 instructions，由 Qwen3-TTS Instruct 模型解析
-func convertTTSTags(input string, speed float64, style string) (string, string) {
+//   - 语气词（咳嗽）/（笑声）等：从文本移除，收集到 instructions（兼容旧数据）
+//   - tone（语气词字段）、speed（语速倍率）和 style（风格描述）：写入 instructions，由 Qwen3-TTS Instruct 模型解析
+func convertTTSTags(input string, speed float64, style string, tone string) (string, string) {
 	text := input
 
 	// 1. 移除停顿标签 <#1.2#>
@@ -1450,8 +1451,11 @@ func convertTTSTags(input string, speed float64, style string) (string, string) 
 		parts = append(parts, strings.TrimSpace(style))
 	}
 
-	// 语气词
-	if len(toneHints) > 0 {
+	// 语气词：优先使用 tone 字段（前端独立选择，不再插入提示词）
+	// 兼容旧数据：若 prompt 文本内嵌 (笑声) 等语气词标签，上面 text-extraction 会收集到 toneHints
+	if strings.TrimSpace(tone) != "" {
+		parts = append(parts, fmt.Sprintf("带有%s的语气", strings.TrimSpace(tone)))
+	} else if len(toneHints) > 0 {
 		parts = append(parts, fmt.Sprintf("在对应位置带有%s的语气", strings.Join(toneHints, "、")))
 	}
 
@@ -1462,9 +1466,9 @@ func convertTTSTags(input string, speed float64, style string) (string, string) 
 }
 
 // callTTS 调用 /v1/audio/speech API 获取二进制音频
-func (a *AudioExecutor) callTTS(ctx context.Context, model, input, voice string, speed float64, style string) ([]byte, error) {
+func (a *AudioExecutor) callTTS(ctx context.Context, model, input, voice string, speed float64, style string, tone string) ([]byte, error) {
 	// 清理前端自定义标签，构建 instructions（含语速/风格/语气词）
-	processedInput, instructions := convertTTSTags(input, speed, style)
+	processedInput, instructions := convertTTSTags(input, speed, style, tone)
 
 	reqBody := map[string]interface{}{
 		"model":           model,
