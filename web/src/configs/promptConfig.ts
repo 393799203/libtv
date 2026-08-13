@@ -61,8 +61,8 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   video: {
     acceptedInputs: ['image', 'video', 'text', 'script', 'audio'],
     defaultModel: 'doubao-seedance-2.0-fast',  // 默认模型 ID（seedance2.0 fast）
-    defaultResolution: '1080p',
-    defaultAspectRatio: '9:16',
+    defaultResolution: '720p',
+    defaultAspectRatio: '16:9',
     availableModels: [],
     toolbarControls: ['model', 'aspectRatio', 'camera', 'viewMode', 'duration', 'count', 'tokenCount'],
     placeholder: '描述视频内容、运镜方式、风格，可 @ 引用上游素材...',

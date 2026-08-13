@@ -80,6 +80,8 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         model: '',
         duration: 5,
         fps: 24,
+        resolution: '720p',
+        aspectRatio: '16:9',
         videoUrl: undefined,
         generateAudio: true,  // 默认开启声音生成
       };
