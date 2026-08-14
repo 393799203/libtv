@@ -43,7 +43,7 @@ func init() {
 			AccessKey:      cfg.MinIO.AccessKey,
 			SecretKey:      cfg.MinIO.SecretKey,
 			Bucket:         cfg.MinIO.Bucket,
-			UseSSL:          cfg.MinIO.UseSSL,
+			UseSSL:         cfg.MinIO.UseSSL,
 			PublicEndpoint: cfg.MinIO.PublicEndpoint,
 			CheckInterval:  parseCheckInterval(cfg.MinIO.CheckInterval),
 		})
@@ -148,14 +148,13 @@ func (f *FallbackStorage) GetObjectRange(objectName string, start, end int64) (i
 }
 
 // DeleteObject 删除文件（两个存储都删除）
+// 注意：MinIO 删除不受健康检查开关限制——否则探测瞬时不可用会导致文件静默泄漏
 func (f *FallbackStorage) DeleteObject(objectName string) error {
 	var errors []error
 
-	// 删除MinIO中的文件
-	if f.Primary.IsAvailable() {
-		if err := f.Primary.DeleteObject(objectName); err != nil {
-			errors = append(errors, fmt.Errorf("MinIO删除失败: %w", err))
-		}
+	// 删除MinIO中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
+	if err := f.Primary.DeleteObject(objectName); err != nil {
+		errors = append(errors, fmt.Errorf("MinIO删除失败: %w", err))
 	}
 
 	// 删除本地存储中的文件
@@ -223,19 +222,18 @@ func (f *FallbackStorage) ListObjects(prefix string) ([]string, error) {
 }
 
 // DeleteObjectsByPrefix 删除指定前缀的所有文件（两个存储都删除）
+// 注意：MinIO 删除不受健康检查开关限制——否则探测瞬时不可用会导致目录静默泄漏
 func (f *FallbackStorage) DeleteObjectsByPrefix(prefix string) error {
 	var errors []error
 
 	log.Printf("[FallbackStorage] 开始删除目录: prefix=%s", prefix)
 
-	// 删除MinIO中的文件
-	if f.Primary.IsAvailable() {
-		if err := f.Primary.DeleteObjectsByPrefix(prefix); err != nil {
-			errors = append(errors, fmt.Errorf("MinIO删除目录失败: %w", err))
-			log.Printf("[FallbackStorage] MinIO删除失败: prefix=%s err=%v", prefix, err)
-		} else {
-			log.Printf("[FallbackStorage] MinIO删除成功: prefix=%s", prefix)
-		}
+	// 删除MinIO中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
+	if err := f.Primary.DeleteObjectsByPrefix(prefix); err != nil {
+		errors = append(errors, fmt.Errorf("MinIO删除目录失败: %w", err))
+		log.Printf("[FallbackStorage] MinIO删除失败: prefix=%s err=%v", prefix, err)
+	} else {
+		log.Printf("[FallbackStorage] MinIO删除成功: prefix=%s", prefix)
 	}
 
 	// 删除本地存储中的文件
@@ -330,11 +328,11 @@ func (f *FallbackStorage) syncPendingFiles() {
 // GetStatus 获取存储状态
 func (f *FallbackStorage) GetStatus() map[string]interface{} {
 	return map[string]interface{}{
-		"primary_available":   f.Primary.IsAvailable(),
-		"fallback_available":  f.Fallback.IsAvailable(),
-		"current_type":        f.GetType(),
-		"primary_type":        f.Primary.GetType(),
-		"fallback_type":       f.Fallback.GetType(),
-		"pending_sync_count":  len(f.syncQueue),
+		"primary_available":  f.Primary.IsAvailable(),
+		"fallback_available": f.Fallback.IsAvailable(),
+		"current_type":       f.GetType(),
+		"primary_type":       f.Primary.GetType(),
+		"fallback_type":      f.Fallback.GetType(),
+		"pending_sync_count": len(f.syncQueue),
 	}
 }

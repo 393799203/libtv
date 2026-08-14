@@ -28,14 +28,14 @@ type MinIOStorage struct {
 
 // MinIOConfig MinIO配置
 type MinIOConfig struct {
-	Endpoint        string
-	AccessKey       string
-	SecretKey       string
-	Bucket          string
-	UseSSL          bool
-	PublicEndpoint  string
-	CheckInterval   time.Duration
-	CheckTimeout    time.Duration
+	Endpoint       string
+	AccessKey      string
+	SecretKey      string
+	Bucket         string
+	UseSSL         bool
+	PublicEndpoint string
+	CheckInterval  time.Duration
+	CheckTimeout   time.Duration
 }
 
 // NewMinIOStorage 创建MinIO存储
@@ -180,6 +180,13 @@ func (m *MinIOStorage) GetObject(objectName string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("MinIO获取文件失败: %w", err)
 	}
 
+	// minio-go 的 GetObject 返回惰性 reader（读取时才报错），
+	// 先 Stat 立即校验对象存在性，否则不存在的对象会让调用方拿到中途断流的 reader
+	if _, err := object.Stat(); err != nil {
+		object.Close()
+		return nil, fmt.Errorf("MinIO获取文件失败: %w", err)
+	}
+
 	return object, nil
 }
 
@@ -200,15 +207,17 @@ func (m *MinIOStorage) GetObjectRange(objectName string, start, end int64) (io.R
 		return nil, fmt.Errorf("MinIO获取文件范围失败: %w", err)
 	}
 
+	// 同上：惰性 reader 需先 Stat 立即校验，避免对象不存在时中途断流
+	if _, err := object.Stat(); err != nil {
+		object.Close()
+		return nil, fmt.Errorf("MinIO获取文件范围失败: %w", err)
+	}
+
 	return object, nil
 }
 
-// DeleteObject 删除文件
+// DeleteObject 删除文件（不受健康检查开关限制，直接尝试删除，避免瞬时探测不可用导致泄漏）
 func (m *MinIOStorage) DeleteObject(objectName string) error {
-	if !m.IsAvailable() {
-		return fmt.Errorf("MinIO不可用")
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -221,12 +230,8 @@ func (m *MinIOStorage) DeleteObject(objectName string) error {
 	return nil
 }
 
-// ListObjects 列出指定前缀的所有文件
+// ListObjects 列出指定前缀的所有文件（不受健康检查开关限制，列举失败会返回具体错误）
 func (m *MinIOStorage) ListObjects(prefix string) ([]string, error) {
-	if !m.IsAvailable() {
-		return nil, fmt.Errorf("MinIO不可用")
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -247,11 +252,8 @@ func (m *MinIOStorage) ListObjects(prefix string) ([]string, error) {
 }
 
 // DeleteObjectsByPrefix 删除指定前缀的所有文件（用于删除目录）
+// 不受健康检查开关限制，直接尝试列举删除，避免瞬时探测不可用导致目录泄漏
 func (m *MinIOStorage) DeleteObjectsByPrefix(prefix string) error {
-	if !m.IsAvailable() {
-		return fmt.Errorf("MinIO不可用")
-	}
-
 	// 1. 列出所有匹配前缀的文件
 	objects, err := m.ListObjects(prefix)
 	if err != nil {

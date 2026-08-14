@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	_ "image/gif"  // ✅ 只导入副作用：自动注册 GIF 解码器
@@ -15,6 +16,7 @@ import (
 
 	"libtv/internal/middleware"
 	"libtv/internal/pkg/response"
+	"libtv/internal/repository"
 	"libtv/internal/service"
 	"libtv/internal/storage"
 
@@ -26,11 +28,26 @@ type UploadHandler struct {
 	storage           storage.Storage
 	fileUploadService *service.FileUploadService
 	transcodeService  *service.TranscodeService
+	projectRepo       repository.ProjectRepo
 }
 
 // NewUploadHandler 创建上传处理器
-func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService, transcodeService *service.TranscodeService) *UploadHandler {
-	return &UploadHandler{storage: s, fileUploadService: fileUploadService, transcodeService: transcodeService}
+func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService, transcodeService *service.TranscodeService, projectRepo repository.ProjectRepo) *UploadHandler {
+	return &UploadHandler{storage: s, fileUploadService: fileUploadService, transcodeService: transcodeService, projectRepo: projectRepo}
+}
+
+// canvasDirForProject 返回画布文件的存储目录前缀：
+// 按项目属主存 users/<userID>/canvas（删用户时级联清理）；项目不存在时降级公共 canvas 目录
+func (h *UploadHandler) canvasDirForProject(projectID string) string {
+	if projectID == "" {
+		return ""
+	}
+	project, err := h.projectRepo.FindByID(context.Background(), projectID)
+	if err != nil || project == nil || project.UserID == "" {
+		log.Printf("[UploadHandler] 项目不存在或无属主，降级存公共 canvas 目录: projectID=%s err=%v", projectID, err)
+		return "canvas"
+	}
+	return "users/" + project.UserID + "/canvas"
 }
 
 // UploadVideo 上传视频（哈希去重，按项目ID分文件夹，TS自动转MP4）
@@ -43,10 +60,10 @@ func (h *UploadHandler) UploadVideo(c *gin.Context) {
 
 	projectID := c.PostForm("project_id")
 
-	// 目录选择：有项目ID存到 canvas/<projectID>/，否则存到 videos/
+	// 目录选择：有项目ID存到 users/<userID>/canvas/<projectID>/，否则存到 videos/
 	dir := "videos"
 	if projectID != "" {
-		dir = "canvas"
+		dir = h.canvasDirForProject(projectID)
 	}
 
 	result, err := h.fileUploadService.UploadVideoWithTranscode(header, service.UploadOptions{
@@ -93,8 +110,14 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 
 	projectID := c.PostForm("project_id")
 
+	// 无项目ID时存公共 canvas 目录，有项目ID时存 users/<userID>/canvas/项目ID/
+	dir := h.canvasDirForProject(projectID)
+	if dir == "" {
+		dir = "canvas"
+	}
+
 	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
-		Dir:            "canvas",
+		Dir:            dir,
 		ProjectID:      projectID,
 		DefaultExt:     ".png",
 		AllowedExts:    service.ImageExts(),
@@ -114,7 +137,7 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 }
 
 // UploadImage 通用图片上传（哈希去重）
-// 如果传递 project_id 参数，存储到 canvas/项目ID/ 目录
+// 如果传递 project_id 参数，存储到 users/<userID>/canvas/项目ID/ 目录
 // 如果不传递 project_id，存储到 images/ 目录
 func (h *UploadHandler) UploadImage(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
@@ -146,10 +169,10 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		log.Printf("[UploadImage] 图片解码成功: filename=%s format=%s size=%d bytes dimensions=%d×%d", header.Filename, format, len(imageData), width, height)
 	}
 
-	// 没有项目ID时存到 images/，有项目ID时存到 canvas/项目ID/
+	// 没有项目ID时存到 images/，有项目ID时存到 users/<userID>/canvas/项目ID/
 	dir := "images"
 	if projectID != "" {
-		dir = "canvas"
+		dir = h.canvasDirForProject(projectID)
 	}
 
 	// ✅ 使用 bytes.NewReader 重新创建 reader（因为前面的 ReadAll 已经读完了）
@@ -219,10 +242,10 @@ func (h *UploadHandler) UploadAudio(c *gin.Context) {
 
 	projectID := c.PostForm("project_id")
 
-	// 有项目ID时存到 canvas/项目ID/，否则存到 audio/
+	// 有项目ID时存到 users/<userID>/canvas/项目ID/，否则存到 audio/
 	dir := "audio"
 	if projectID != "" {
-		dir = "canvas"
+		dir = h.canvasDirForProject(projectID)
 	}
 
 	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
@@ -402,11 +425,16 @@ func (h *UploadHandler) DeleteCanvasDir(c *gin.Context) {
 		return
 	}
 
-	// 删除整个canvas目录下的projectID文件夹
-	prefix := "canvas/" + projectID + "/"
-	if err := h.storage.DeleteObjectsByPrefix(prefix); err != nil {
-		response.Fail(c, http.StatusInternalServerError, fmt.Sprintf("删除目录失败: %v", err))
-		return
+	// 新路径 users/<userID>/canvas/<projectID>/；旧路径 canvas/<projectID>/ 一并清理（历史数据兼容）
+	prefixes := []string{"canvas/" + projectID + "/"}
+	if dir := h.canvasDirForProject(projectID); dir != "canvas" && dir != "" {
+		prefixes = append(prefixes, dir+"/"+projectID+"/")
+	}
+	for _, prefix := range prefixes {
+		if err := h.storage.DeleteObjectsByPrefix(prefix); err != nil {
+			response.Fail(c, http.StatusInternalServerError, fmt.Sprintf("删除目录失败: %v", err))
+			return
+		}
 	}
 
 	response.OKWithMsg(c, "目录已删除", nil)

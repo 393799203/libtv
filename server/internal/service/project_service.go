@@ -85,6 +85,12 @@ func (s *ProjectService) Update(ctx context.Context, id string, name, descriptio
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
 	log.Printf("[ProjectService] 开始删除项目: projectID=%s", id)
 
+	// 0. 先查项目拿属主用户ID（画布文件存于 users/<userID>/canvas/<projectID>/，需在删除项目记录前获取）
+	ownerUserID := ""
+	if project, err := s.projectRepo.FindByID(ctx, id); err == nil && project != nil {
+		ownerUserID = project.UserID
+	}
+
 	// 1. 查询项目的所有 WorkflowExecution 记录
 	executions, err := s.executionRepo.ListByProjectID(ctx, id)
 	if err != nil {
@@ -115,13 +121,19 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 	}
 	log.Printf("[ProjectService] 删除 Canvas 记录")
 
-	// 5. 删除存储中的项目目录（canvas/{projectID}/）
-	prefix := "canvas/" + id + "/"
-	if err := s.storage.DeleteObjectsByPrefix(prefix); err != nil {
-		log.Printf("[ProjectService] 删除存储目录失败: prefix=%s err=%v", prefix, err)
-		// 不中断流程，继续删除项目记录
-	} else {
-		log.Printf("[ProjectService] 删除存储目录成功: prefix=%s", prefix)
+	// 5. 删除存储中的项目目录：新路径 users/<userID>/canvas/<projectID>/，
+	// 旧路径 canvas/<projectID>/ 一并清理（历史数据兼容）
+	prefixes := []string{"canvas/" + id + "/"}
+	if ownerUserID != "" {
+		prefixes = append(prefixes, "users/"+ownerUserID+"/canvas/"+id+"/")
+	}
+	for _, prefix := range prefixes {
+		if err := s.storage.DeleteObjectsByPrefix(prefix); err != nil {
+			log.Printf("[ProjectService] 删除存储目录失败: prefix=%s err=%v", prefix, err)
+			// 不中断流程，继续删除项目记录
+		} else {
+			log.Printf("[ProjectService] 删除存储目录成功: prefix=%s", prefix)
+		}
 	}
 
 	// 6. 删除项目记录

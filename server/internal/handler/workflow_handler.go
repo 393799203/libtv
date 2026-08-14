@@ -22,26 +22,29 @@ import (
 )
 
 type WorkflowHandler struct {
-	execRepo   repository.ExecutionRepo
-	aiTaskRepo repository.AITaskRepo
-	canvasRepo repository.CanvasRepo
-	engine     *engine.WorkflowEngine
-	registry   *engine.ExecutorRegistry
+	execRepo    repository.ExecutionRepo
+	aiTaskRepo  repository.AITaskRepo
+	canvasRepo  repository.CanvasRepo
+	projectRepo repository.ProjectRepo
+	engine      *engine.WorkflowEngine
+	registry    *engine.ExecutorRegistry
 }
 
 func NewWorkflowHandler(
 	execRepo repository.ExecutionRepo,
 	aiTaskRepo repository.AITaskRepo,
 	canvasRepo repository.CanvasRepo,
+	projectRepo repository.ProjectRepo,
 	eng *engine.WorkflowEngine,
 	registry *engine.ExecutorRegistry,
 ) *WorkflowHandler {
 	return &WorkflowHandler{
-		execRepo:   execRepo,
-		aiTaskRepo: aiTaskRepo,
-		canvasRepo: canvasRepo,
-		engine:     eng,
-		registry:   registry,
+		execRepo:    execRepo,
+		aiTaskRepo:  aiTaskRepo,
+		canvasRepo:  canvasRepo,
+		projectRepo: projectRepo,
+		engine:      eng,
+		registry:    registry,
 	}
 }
 
@@ -93,6 +96,12 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		return
 	}
 	canvasData := []byte(canvas.Content)
+
+	// 查项目属主用户ID（生成文件存到 users/<userID>/canvas/<projectID>/；查不到时执行器降级存 canvas/<projectID>/）
+	ownerUserID := ""
+	if project, pErr := h.projectRepo.FindByID(c.Request.Context(), projectID); pErr == nil && project != nil {
+		ownerUserID = project.UserID
+	}
 
 	// 解析 → 校验 → 拓扑排序
 	schema, err := engine.Parse(canvasData)
@@ -148,7 +157,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		err := h.engine.Execute(ctx, plan, exec.ID, projectID)
+		err := h.engine.Execute(ctx, plan, exec.ID, projectID, ownerUserID)
 		if err != nil {
 			log.Printf("[Handler] engine.Execute returned error: %v", err)
 		} else {
@@ -220,7 +229,9 @@ func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 
 // StreamExecution SSE 流式订阅工作流执行事件
 // 鉴权：原生 EventSource 不支持自定义 header，token 走 query (?t=xxx)；
-//      也兼容标准 Authorization 头（Postman/curl 测试时方便）
+//
+//	也兼容标准 Authorization 头（Postman/curl 测试时方便）
+//
 // 路径: GET /api/projects/:id/workflows/:execId/stream
 func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	// 1) 鉴权：query token 优先，header 次之
@@ -278,7 +289,7 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 			eventType = "execution_started"
 		}
 		statusEvent := map[string]interface{}{
-			"type":        eventType,      // ✅ 添加type字段，前端需要这个字段识别事件类型
+			"type":        eventType, // ✅ 添加type字段，前端需要这个字段识别事件类型
 			"executionId": execID,
 			"status":      exec.Status,
 			"errorMsg":    exec.ErrorMsg,

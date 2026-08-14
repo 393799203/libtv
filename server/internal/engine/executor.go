@@ -39,6 +39,8 @@ type ExecutionContext struct {
 	nodeDataByID map[string]json.RawMessage
 	// projectID 项目ID，用于确定存储路径
 	projectID string
+	// userID 项目属主用户ID，画布文件存到 users/<userID>/canvas/<projectID>/
+	userID string
 }
 
 func NewExecutionContext() *ExecutionContext {
@@ -47,6 +49,7 @@ func NewExecutionContext() *ExecutionContext {
 		upstreamByTarget: make(map[string][]string),
 		nodeDataByID:     make(map[string]json.RawMessage),
 		projectID:        "",
+		userID:           "",
 	}
 }
 
@@ -109,6 +112,25 @@ func (ec *ExecutionContext) GetProjectID() string {
 	ec.mu.RLock()
 	defer ec.mu.RUnlock()
 	return ec.projectID
+}
+
+// SetUserID 设置项目属主用户ID
+func (ec *ExecutionContext) SetUserID(userID string) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.userID = userID
+}
+
+// GetCanvasDir 返回画布文件的存储目录前缀：
+// 有 userID 时存 users/<userID>/canvas（落到用户目录，删用户时级联清理），
+// 否则降级存公共 canvas 目录（历史兼容）
+func (ec *ExecutionContext) GetCanvasDir() string {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	if ec.userID != "" {
+		return "users/" + ec.userID + "/canvas"
+	}
+	return "canvas"
 }
 
 // NodeExecutor 节点执行器接口
@@ -196,13 +218,14 @@ func (e *WorkflowEngine) LastOutputs() map[string]*NodeOutput {
 	return out
 }
 
-// Execute 执行工作流
-func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, executionID int64, projectID string) error {
-	log.Printf("[Engine] Execute start: executionID=%d, projectID=%s, plan levels=%d, totalNodes=%d", executionID, projectID, len(plan.Levels), len(plan.Schema.Nodes))
+// Execute 执行工作流（userID 为项目属主，画布文件存到 users/<userID>/canvas/<projectID>/）
+func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, executionID int64, projectID string, userID string) error {
+	log.Printf("[Engine] Execute start: executionID=%d, projectID=%s, userID=%s, plan levels=%d, totalNodes=%d", executionID, projectID, userID, len(plan.Levels), len(plan.Schema.Nodes))
 	execCtx := NewExecutionContext()
 
-	// 设置项目ID，供节点执行器使用（如ImageExecutor需要确定存储路径）
+	// 设置项目ID与属主用户ID，供节点执行器使用（确定存储路径）
 	execCtx.SetProjectID(projectID)
+	execCtx.SetUserID(userID)
 
 	// 构造上游映射表（target -> [source, ...]），供 ScriptExecutor 等需要读上游的节点使用
 	upstreamByTarget := make(map[string][]string, len(plan.Schema.Connections))
@@ -954,7 +977,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 失败的图片回退使用原始 URL，确保功能可用
 	ownURLs := make([]string, 0, len(generatedURLs))
 	for idx, generatedURL := range generatedURLs {
-		imageInfo, dlErr := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetProjectID(), width, height)
+		imageInfo, dlErr := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID(), width, height)
 		if dlErr != nil {
 			log.Printf("[ImageExecutor] 下载上传失败(idx=%d)，使用原始URL: %v", idx, dlErr)
 			ownURLs = append(ownURLs, generatedURL)
@@ -990,8 +1013,8 @@ type imageInfo struct {
 }
 
 // downloadAndUpload 下载图片并使用 FileUploadService 上传（复用哈希去重等逻辑）
-func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, nodeID string, projectID string, width int, height int) (*imageInfo, error) {
-	log.Printf("[ImageExecutor] 开始下载图片: url=%s projectID=%s nodeID=%s", imageURL, projectID, nodeID)
+func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, nodeID string, canvasDir string, projectID string, width int, height int) (*imageInfo, error) {
+	log.Printf("[ImageExecutor] 开始下载图片: url=%s dir=%s projectID=%s nodeID=%s", imageURL, canvasDir, projectID, nodeID)
 
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
@@ -1015,7 +1038,7 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 	log.Printf("[ImageExecutor] 图片下载成功: size=%d bytes, 使用生成尺寸: %dx%d", len(imageData), width, height)
 
 	result, err := i.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), "image.png", service.UploadOptions{
-		Dir:            "canvas",
+		Dir:            canvasDir,
 		ProjectID:      projectID,
 		DefaultExt:     ".png",
 		ContentTypeFor: service.ContentTypeForImage,
@@ -1187,8 +1210,8 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[VideoExecutor] ✅ 视频生成成功: nodeId=%s videoUrl=%s", node.ID, videoURL)
 
-	// 下载视频并使用 FileUploadService 上传到 canvas/{projectID}/（与图片保存机制一致）
-	ownVideoURL, dlErr := v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetProjectID())
+	// 下载视频并使用 FileUploadService 上传到 users/<userID>/canvas/<projectID>/（与图片保存机制一致）
+	ownVideoURL, dlErr := v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID())
 	if dlErr != nil {
 		log.Printf("[VideoExecutor] ⚠️ 视频下载上传失败，使用原始URL: %v", dlErr)
 		ownVideoURL = videoURL
@@ -1208,8 +1231,8 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 }
 
 // downloadAndUpload 下载视频并使用 FileUploadService 上传（复用哈希去重等逻辑）
-func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, nodeID string, projectID string) (string, error) {
-	log.Printf("[VideoExecutor] 开始下载视频: url=%s projectID=%s nodeID=%s", videoURL, projectID, nodeID)
+func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, nodeID string, canvasDir string, projectID string) (string, error) {
+	log.Printf("[VideoExecutor] 开始下载视频: url=%s dir=%s projectID=%s nodeID=%s", videoURL, canvasDir, projectID, nodeID)
 
 	httpClient := &http.Client{
 		Timeout: 300 * time.Second, // 视频文件较大，超时设为5分钟
@@ -1246,7 +1269,7 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 	}
 
 	result, err := v.fileUploadService.UploadFromReader(bytes.NewReader(videoData), int64(len(videoData)), "video"+ext, service.UploadOptions{
-		Dir:            "canvas",
+		Dir:            canvasDir,
 		ProjectID:      projectID,
 		DefaultExt:     ext,
 		ContentTypeFor: service.ContentTypeForVideo,
@@ -1352,14 +1375,14 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[AudioExecutor] ✅ TTS生成成功: nodeId=%s audioBytes=%d", node.ID, len(audioData))
 
-	// 上传到 canvas/{projectID}/
+	// 上传到 users/<userID>/canvas/<projectID>/（无 userID 时降级 canvas/<projectID>/）
 	projectID := execCtx.GetProjectID()
 	result, err := a.fileUploadService.UploadFromReader(
 		bytes.NewReader(audioData),
 		int64(len(audioData)),
 		fmt.Sprintf("%s.wav", node.ID),
 		service.UploadOptions{
-			Dir:         "canvas",
+			Dir:         execCtx.GetCanvasDir(),
 			ProjectID:   projectID,
 			AllowedExts: map[string]bool{".wav": true, ".mp3": true},
 			DefaultExt:  ".wav",

@@ -121,6 +121,10 @@ func (r *userRepo) CascadeDelete(ctx context.Context, userID string) error {
 		if err := tx.Where("user_id = ?", userID).Delete(&model.StyleFavorite{}).Error; err != nil {
 			return err
 		}
+		// 6.5 删除 user_assets（个人资产库记录；文件已随 users/<userID>/ 目录一并清理）
+		if err := tx.Where("user_id = ?", userID).Delete(&model.UserAsset{}).Error; err != nil {
+			return err
+		}
 		// 7. 删除 user
 		return tx.Delete(&model.User{}, "id = ?", userID).Error
 	})
