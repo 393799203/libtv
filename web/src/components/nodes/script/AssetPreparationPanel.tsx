@@ -5,7 +5,7 @@ import type {
   ScriptScene,
   ScriptProp,
 } from '@/types/canvas';
-import { AssetEditDrawer } from './AssetEditDrawer';
+import { AssetEditModal } from './AssetEditModal';
 import { NodeAssociateModal } from './NodeAssociateModal';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
@@ -25,7 +25,7 @@ interface AssetCardProps<T extends { name: string; description: string }> {
   assetType: 'character' | 'scene' | 'prop';
   onAdd?: () => void; // 仅最后一个卡片显示"添加"
   showAdd?: boolean;
-  /** 卡片点击回调（用于弹出编辑侧屏） */
+  /** 卡片点击回调（用于弹出编辑弹窗） */
   onClick?: () => void;
   /** "关联已有节点"按钮回调 */
   onAssociateClick?: () => void;
@@ -95,9 +95,9 @@ function AssetCard<T extends { name: string; description: string }>({
         </div>
       )}
 
-      {/* 悬浮操作按钮（非"添加"卡片）：上传或生成 / 关联已有节点 */}
+      {/* 悬浮操作按钮（非"添加"卡片）：上传或生成 / 关联已有节点（上下排列） */}
       {!showAdd && (
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
           <button
             className="px-2 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
             onClick={handleCardClick}
@@ -464,8 +464,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           </div>
         )}
 
-        {/* 角色编辑侧屏 */}
-        <AssetEditDrawer
+        {/* 角色编辑弹窗 */}
+        <AssetEditModal
           open={!!editingCharacter}
           scriptNodeId={scriptNodeId}
           assetType="character"
@@ -475,8 +475,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           onDescriptionChange={handleCharacterDescriptionChange}
         />
 
-        {/* 场景编辑侧屏 */}
-        <AssetEditDrawer
+        {/* 场景编辑弹窗 */}
+        <AssetEditModal
           open={!!editingScene}
           scriptNodeId={scriptNodeId}
           assetType="scene"
@@ -486,8 +486,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           onDescriptionChange={handleSceneDescriptionChange}
         />
 
-        {/* 道具编辑侧屏 */}
-        <AssetEditDrawer
+        {/* 道具编辑弹窗 */}
+        <AssetEditModal
           open={!!editingProp}
           scriptNodeId={scriptNodeId}
           assetType="prop"

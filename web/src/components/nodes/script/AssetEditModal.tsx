@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useCallback, useEffect } from 'react';
-import { Drawer, message } from 'antd';
+import { Modal, message } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 import type {
   ScriptCharacter,
@@ -25,7 +25,7 @@ type Asset = ScriptCharacter | ScriptScene | ScriptProp;
 // 从 hook 动态获取图像生成模型选项
 // IMAGE_MODEL_OPTIONS 将在组件中使用 useModels hook 获取
 
-interface AssetEditDrawerProps {
+interface AssetEditModalProps {
   open: boolean;
   scriptNodeId: string;
   assetType: AssetType;
@@ -38,13 +38,13 @@ interface AssetEditDrawerProps {
 }
 
 /**
- * 通用资产编辑侧屏（角色/场景/道具）
+ * 通用资产编辑弹窗（角色/场景/道具）
  * - 顶部大图区域，可点击上传 / 右上角按钮基于描述生成视图
  * - 资产名称只读、资产描述可编辑（失焦自动保存）
  * - 根据资产类型显示不同的额外属性
  */
-export const AssetEditDrawer = memo<AssetEditDrawerProps>(
-  function AssetEditDrawer({
+export const AssetEditModal = memo<AssetEditModalProps>(
+  function AssetEditModal({
     open,
     scriptNodeId,
     assetType,
@@ -443,24 +443,35 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
     };
 
     return (
-      <Drawer
+      <Modal
         title={getTitle()}
-        placement="right"
         open={open}
-        onClose={onClose}
-        width={500}
+        onCancel={onClose}
+        width={900}
+        footer={null}
         destroyOnClose
-        styles={{ body: { padding: '16px 20px' } }}
+        styles={{ body: { padding: '16px 20px', height: '66vh', minHeight: 480 } }}
       >
         {asset ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex gap-5 h-full">
+            {/* 左列：图片 + 名称 */}
+            <div className="w-[380px] shrink-0 flex flex-col gap-4">
+            {/* 资产名称 */}
+            <div>
+              <div className="text-xs font-medium text-gray-700 mb-2">
+                名称
+              </div>
+              <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
+                {asset.name}
+              </div>
+            </div>
             {/* 图片区域 */}
             <div>
               <div className="text-xs font-medium text-gray-700 mb-2">
                 {getImageLabel()}
               </div>
               <div
-                className="relative w-full h-[260px] rounded-lg border border-gray-200 bg-gray-50 group"
+                className="relative w-full h-[300px] rounded-lg border border-gray-200 bg-gray-50 group"
                 onClick={handleImageClick}
               >
                 {imageUrl ? (
@@ -487,100 +498,6 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
                   </div>
                 )}
 
-                {/* 右上角生成按钮 + 模型选择 */}
-                {asset.description && (
-                  <div className="absolute top-2 right-2 flex items-center gap-1">
-                    {/* 模型选择下拉 */}
-                    <div className="relative">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setModelDropdownOpen(!modelDropdownOpen);
-                        }}
-                        className="px-2 h-8 rounded-md bg-gray-700/80 hover:bg-gray-800 text-white text-xs font-medium flex items-center gap-1 cursor-pointer transition-colors"
-                        title="选择生成模型"
-                      >
-                        <span className="leading-none truncate max-w-[80px]">
-                          {IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel}
-                        </span>
-                        <span className="text-[10px]">▼</span>
-                      </button>
-
-                      {/* 下拉面板 */}
-                      {modelDropdownOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-20"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setModelDropdownOpen(false);
-                            }}
-                          />
-                          <div
-                            className="absolute top-full right-0 mt-1 w-[240px] max-h-[280px] overflow-y-auto bg-white rounded-lg shadow-xl border border-gray-200 z-30"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {IMAGE_MODEL_OPTIONS.map((model) => (
-                              <button
-                                key={model.value}
-                                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
-                                  selectedModel === model.modelId ? 'bg-gray-100' : 'hover:bg-gray-50'
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedModel(model.modelId);
-                                  setModelDropdownOpen(false);
-                                }}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-xs font-medium text-gray-800 truncate">
-                                      {model.label}
-                                    </span>
-                                    {model.tag && (
-                                      <span
-                                        className="px-1 py-0.5 rounded text-[10px] font-medium leading-none"
-                                        style={{
-                                          backgroundColor: `${model.tagColor || '#10b981'}20`,
-                                          color: model.tagColor || '#10b981',
-                                        }}
-                                      >
-                                        {model.tag}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {model.description && (
-                                    <div className="text-[11px] text-gray-400 mt-0.5 truncate">
-                                      {model.description}
-                                    </div>
-                                  )}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    {/* AI生成按钮 */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleGenerate();
-                      }}
-                      disabled={generating || uploading}
-                      className="px-3 h-8 rounded-md bg-gray-800/80 hover:bg-gray-900 text-white text-xs font-medium flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
-                      title={`基于描述生成${assetType === 'character' ? '三视图' : assetType === 'scene' ? '四视图' : '六视图'}`}
-                    >
-                      {generating ? (
-                        <LoadingOutlined className="text-xs animate-spin" />
-                      ) : (
-                        <span className="leading-none">AI生成</span>
-                      )}
-                    </button>
-                  </div>
-                )}
-
                 {/* 隐藏的文件 input */}
                 <input
                   ref={fileInputRef}
@@ -590,23 +507,99 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
                   onChange={handleFileChange}
                 />
               </div>
+
+              {/* 图片下方：模型选择 + AI生成按钮 */}
+              {asset.description && (
+                <div className="flex items-center gap-2 mt-3">
+                  {/* 模型选择下拉 */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+                      className="px-2 h-8 rounded-md bg-gray-100 hover:bg-gray-200 border border-gray-200 text-gray-800 text-xs font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                      title="选择生成模型"
+                    >
+                      <span className="leading-none truncate max-w-[120px]">
+                        {IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel}
+                      </span>
+                      <span className="text-[10px]">▼</span>
+                    </button>
+
+                    {/* 下拉面板 */}
+                    {modelDropdownOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setModelDropdownOpen(false)}
+                        />
+                        <div
+                          className="absolute top-full left-0 mt-1 w-[240px] max-h-[280px] overflow-y-auto bg-white rounded-lg shadow-xl border border-gray-200 z-30"
+                        >
+                          {IMAGE_MODEL_OPTIONS.map((model) => (
+                            <button
+                              key={model.value}
+                              className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
+                                selectedModel === model.modelId ? 'bg-gray-100' : 'hover:bg-gray-50'
+                              }`}
+                              onClick={() => {
+                                setSelectedModel(model.modelId);
+                                setModelDropdownOpen(false);
+                              }}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs font-medium text-gray-800 truncate">
+                                    {model.label}
+                                  </span>
+                                  {model.tag && (
+                                    <span
+                                      className="px-1 py-0.5 rounded text-[10px] font-medium leading-none"
+                                      style={{
+                                        backgroundColor: `${model.tagColor || '#10b981'}20`,
+                                        color: model.tagColor || '#10b981',
+                                      }}
+                                    >
+                                      {model.tag}
+                                    </span>
+                                  )}
+                                </div>
+                                {model.description && (
+                                  <div className="text-[11px] text-gray-400 mt-0.5 truncate">
+                                    {model.description}
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* AI生成按钮 */}
+                  <button
+                    onClick={() => handleGenerate()}
+                    disabled={generating || uploading}
+                    className="flex-1 h-8 rounded-md bg-gray-800 hover:bg-gray-900 text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                    title={`基于描述生成${assetType === 'character' ? '三视图' : assetType === 'scene' ? '四视图' : '六视图'}`}
+                  >
+                    {generating ? (
+                      <LoadingOutlined className="text-xs animate-spin" />
+                    ) : (
+                      <span className="leading-none">AI生成</span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
             </div>
 
-            {/* 资产名称 */}
-            <div>
-              <div className="text-xs font-medium text-gray-700 mb-2">
-                名称
-              </div>
-              <div className="px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-800">
-                {asset.name}
-              </div>
-            </div>
-
+            {/* 右列：描述（弹性撑满）+ 资产特定属性 */}
+            <div className="flex-1 min-w-0 flex flex-col gap-4">
             {/* 资产描述 — 可编辑 textarea，失焦自动保存 */}
-            <div>
+            <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-gray-700">
-                  描述
+                  提示词描述
                 </span>
                 {descriptionDraft !== savedDescription && (
                   <span className="text-[10px] text-amber-500">
@@ -619,16 +612,17 @@ export const AssetEditDrawer = memo<AssetEditDrawerProps>(
                 onChange={handleDescriptionChange}
                 onBlur={handleDescriptionBlur}
                 placeholder={getDescriptionPlaceholder()}
-                className="w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-xs text-gray-700 leading-relaxed min-h-[280px] max-h-[340px] resize-y focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
+                className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-xs text-gray-700 leading-relaxed resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
                 style={{ whiteSpace: 'pre-wrap' }}
               />
             </div>
 
             {/* 资产特定属性 */}
             {renderExtraFields()}
+            </div>
           </div>
         ) : null}
-      </Drawer>
+      </Modal>
     );
   }
 );
