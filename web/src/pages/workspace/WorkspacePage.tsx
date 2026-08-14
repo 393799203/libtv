@@ -7,6 +7,7 @@ import {
   SaveOutlined,
   GlobalOutlined,
   VideoCameraOutlined,
+  GoldOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
 import { useCanvas } from '@/hooks/useCanvas';
@@ -16,6 +17,7 @@ import { useExecutionStream } from '@/hooks/useExecutionStream';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 import AddShowDialog from '@/components/AddShowDialog';
+import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { showApi, type ShowCategoryItem } from '@/services/showApi';
 
 // 单个 SSE 订阅实例（按 executionId 建立独立 EventSource）
@@ -75,6 +77,8 @@ function WorkspaceInner() {
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [publishCategories, setPublishCategories] = useState<ShowCategoryItem[]>([]);
   const [prefillVideoUrl, setPrefillVideoUrl] = useState('');
+  // 个人资产库弹窗
+  const [showAssetLibrary, setShowAssetLibrary] = useState(false);
 
   // 同步设置 store 中的 projectId，避免竞态条件
   if (urlProjectId && useCanvasStore.getState().projectId !== urlProjectId) {
@@ -221,6 +225,14 @@ function WorkspaceInner() {
             onClick={() => useCanvasStore.getState().toggleMiniMap()}
           />
         </Tooltip>
+        <Tooltip title="个人资产库">
+          <Button
+            type="text"
+            size="small"
+            icon={<GoldOutlined />}
+            onClick={() => setShowAssetLibrary(true)}
+          />
+        </Tooltip>
         <Tooltip title="保存 (Ctrl+S)">
           <Button
             type="text"
@@ -238,6 +250,11 @@ function WorkspaceInner() {
           <CanvasWithDrop urlProjectId={urlProjectId} />
         </ReactFlowProvider>
       </div>
+
+      {/* 个人资产库弹窗 */}
+      {showAssetLibrary && (
+        <AssetLibraryModal onClose={() => setShowAssetLibrary(false)} />
+      )}
 
       {/* 提交视频发布弹窗 */}
       <AddShowDialog

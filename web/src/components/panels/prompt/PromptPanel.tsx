@@ -308,9 +308,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
   }, [nodeType, selectedModel, availableModels, selectedResolution]);
 
-  // 图片节点专属：摄像机/全景模式
-  const [cameraMode, setCameraMode] = useState<'normal' | 'camera' | 'panorama'>('normal');
-
   // 视频节点专属：生成模式（根据上游图片数量自动过滤可选模式）
   const [videoMode, setVideoMode] = useState<VideoMode>(
     nodeType === 'video' ? ((data as { videoMode?: VideoMode }).videoMode || 'text-to-video') : 'text-to-video'
@@ -578,7 +575,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           upstreamInputs={upstreamInputs}
           syncKey={nodeId}
           onChange={handlePromptChange}
-          prefixTag={cameraMode === 'panorama' ? { label: '720全景', icon: '720' } : undefined}
           ref={editorRef}
         />
         <button
@@ -612,8 +608,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         isGenerating={hookIsGenerating}
         onGenerate={handleGenerate}
         nodeType={nodeType}
-        cameraMode={cameraMode}
-        onCameraModeChange={setCameraMode}
         selectedVoice={selectedVoice}
         onVoiceChange={setSelectedVoice}
         selectedSpeed={selectedSpeed}

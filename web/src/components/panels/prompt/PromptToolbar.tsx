@@ -39,8 +39,6 @@ interface PromptToolbarProps {
   isGenerating?: boolean;
   onGenerate?: (count?: number) => void;
   nodeType?: NodeType;
-  cameraMode?: 'normal' | 'camera' | 'panorama';
-  onCameraModeChange?: (mode: 'normal' | 'camera' | 'panorama') => void;
   // 音频节点专属：音色、语速、风格、语气词
   selectedVoice?: string;
   onVoiceChange?: (voice: string) => void;
@@ -336,8 +334,6 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   isGenerating = false,
   onGenerate,
   nodeType = 'image',
-  cameraMode = 'normal',
-  onCameraModeChange,
   selectedVoice = 'default',
   onVoiceChange,
   selectedSpeed = 1.0,
@@ -662,35 +658,9 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         />
       )}
 
-      {/* 分隔（仅图片/视频节点） */}
-      {(nodeType === 'image' || nodeType === 'video') && (
+      {/* 分隔（仅视频节点，图片节点已移除摄像机/全景按钮） */}
+      {nodeType === 'video' && (
         <span className="w-px h-4 bg-gray-200 mx-0.5" />
-      )}
-
-      {/* 摄像机（仅图片节点） */}
-      {nodeType === 'image' && (
-        <button
-          onClick={() => onCameraModeChange?.(cameraMode === 'camera' ? 'normal' : 'camera')}
-          className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer text-[13px] ${
-            cameraMode === 'camera' ? 'bg-gray-200 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-100/80'
-          }`}
-        >
-          <span>📷</span>
-          <span>摄像机</span>
-        </button>
-      )}
-
-      {/* 全景（仅图片节点） */}
-      {nodeType === 'image' && (
-        <button
-          onClick={() => onCameraModeChange?.(cameraMode === 'panorama' ? 'normal' : 'panorama')}
-          className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer text-[13px] ${
-            cameraMode === 'panorama' ? 'bg-blue-100 text-blue-700 font-medium border border-blue-300' : 'text-gray-600 hover:bg-gray-100/80'
-          }`}
-        >
-          <span>🖼</span>
-          <span>全景</span>
-        </button>
       )}
 
       {/* 右侧区域 */}
