@@ -536,7 +536,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         </div>
       )}
 
-      {/* 视频节点：模式选择器 + 快捷导入按钮 + 暂存按钮 */}
+      {/* 视频节点：模式选择器 + 快捷导入按钮 */}
       {nodeType === 'video' && (
         <div className="flex items-center justify-between">
           <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} videoCount={upstreamVideoCount} />
@@ -555,43 +555,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
                 ))}
               </div>
             )}
-            <button
-              onClick={handleSaveDraft}
-              title="暂存当前提示词"
-              className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${savedFlash ? 'text-green-500' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}
-            >
-              {savedFlash ? (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M3 3.5C3 2.67 3.67 2 4.5 2H10l3 3v7.5c0 .83-.67 1.5-1.5 1.5h-7C3.67 14 3 13.33 3 12.5v-9zM5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </button>
           </div>
-        </div>
-      )}
-
-      {/* 非视频节点：暂存按钮放在右上角 */}
-      {nodeType !== 'video' && (
-        <div className="flex justify-end px-2">
-          <button
-            onClick={handleSaveDraft}
-            title="暂存当前提示词"
-            className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${savedFlash ? 'text-green-500' : 'text-gray-500 hover:text-black hover:bg-gray-100'}`}
-          >
-            {savedFlash ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M3 3.5C3 2.67 3.67 2 4.5 2H10l3 3v7.5c0 .83-.67 1.5-1.5 1.5h-7C3.67 14 3 13.33 3 12.5v-9zM5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </button>
         </div>
       )}
 
@@ -604,8 +568,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         showStyleSelector={nodeType === 'image'}
       />
 
-      {/* 第二层：提示词编辑区 */}
-      <div className="flex-1 min-w-0 px-2">
+      {/* 第二层：提示词编辑区（暂存按钮悬浮在右下角） */}
+      <div className="flex-1 min-w-0 px-2 relative">
         <PromptEditor
           value={promptText}
           mentions={mentions}
@@ -617,6 +581,21 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           prefixTag={cameraMode === 'panorama' ? { label: '720全景', icon: '720' } : undefined}
           ref={editorRef}
         />
+        <button
+          onClick={handleSaveDraft}
+          title="暂存当前提示词"
+          className={`absolute bottom-2 right-3 flex items-center justify-center w-6 h-6 rounded-md bg-white/80 backdrop-blur-sm transition-colors ${savedFlash ? 'text-green-500' : 'text-gray-400 hover:text-black hover:bg-gray-100'}`}
+        >
+          {savedFlash ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3.5C3 2.67 3.67 2 4.5 2H10l3 3v7.5c0 .83-.67 1.5-1.5 1.5h-7C3.67 14 3 13.33 3 12.5v-9zM5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </button>
       </div>
 
       {/* 第三层：底部工具栏 */}

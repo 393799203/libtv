@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Drawer, Button, message, Input, Select } from 'antd';
+import { Modal, Button, message, Select } from 'antd';
 import { ReloadOutlined, CopyOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import type { ScriptShot, ScriptNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -16,7 +16,7 @@ import {
   generateShotImageNodeId,
 } from '@/utils/shotNodeSync';
 
-interface PromptMergeDrawerProps {
+interface PromptMergeModalProps {
   open: boolean;
   scriptNodeId: string;
   shot: ScriptShot | null; // 单个镜头数据
@@ -26,13 +26,13 @@ interface PromptMergeDrawerProps {
 }
 
 /**
- * 提示词生成侧屏（单镜头）
+ * 提示词生成弹窗（单镜头）
  * - 一次调用同时生成画面提示词和运动提示词
  * - 使用 @ 符号引用准备好的资产（角色、场景、道具）
  * - 实时显示最终提示词（画面 + 运动）
  */
-export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
-  function PromptMergeDrawer({
+export const PromptMergeModal = memo<PromptMergeModalProps>(
+  function PromptMergeModal({
     open,
     scriptNodeId,
     shot,
@@ -163,13 +163,13 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
       }
     }, [open]);
 
-    // ✅ 动画性能优化：Drawer 打开后延迟 150ms 再渲染重型组件
-    // 让 Drawer 滑出动画先完成，避免动画卡顿
+    // ✅ 动画性能优化：弹窗打开后延迟 150ms 再渲染重型组件
+    // 让弹窗打开动画先完成，避免动画卡顿
     useEffect(() => {
       if (open) {
         const timer = setTimeout(() => {
           setContentReady(true);
-        }, 150); // Ant Design Drawer 默认动画时长约 300ms，150ms 后开始渲染内容
+        }, 150); // 弹窗动画完成后再渲染内容
         return () => clearTimeout(timer);
       }
     }, [open]);
@@ -475,159 +475,147 @@ export const PromptMergeDrawer = memo<PromptMergeDrawerProps>(
     }, [shot, storyboardPrompt, motionPrompt, scriptNodeId, projectId, defaultVideoModelId]);
 
     return (
-      <Drawer
+      <Modal
         title={`镜头 ${shot?.shotNumber || ''} - 提示词生成`}
-        placement="right"
         open={open}
-        onClose={onClose}
-        width={700}
-        // ✅ 动画性能优化：禁用 forceRender，避免打开时立即渲染所有内容
-        forceRender={false}
-        // ✅ 遮罩层性能优化：简化样式，避免复杂视觉效果
-        maskStyle={{ backgroundColor: 'rgba(0,0,0,0.3)' }}
-        styles={{
-          body: {
-            padding: 24,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 24,
-          },
-        }}
+        onCancel={onClose}
+        width={1000}
+        footer={null}
+        destroyOnClose
+        styles={{ body: { padding: '16px 20px', height: '68vh', minHeight: 520 } }}
       >
-        {/* ✅ 动画性能优化：延迟渲染重型组件，等待 Drawer 滑出动画完成 */}
+        {/* ✅ 动画性能优化：延迟渲染重型组件，等待弹窗打开动画完成 */}
         {!contentReady ? (
           // 动画进行中：显示轻量级占位符
           <div className="flex items-center justify-center h-full">
             <div className="text-gray-400 text-sm">加载中...</div>
           </div>
         ) : (
-          // 动画完成后：渲染实际内容
-          <>
-            {/* 模型选择 */}
-            <div>
-              <div className="text-sm font-medium text-gray-700 mb-2">文本模型</div>
+          <div className="flex flex-col h-full gap-3">
+            {/* 顶部：模型选择 + 生成按钮 */}
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-sm font-medium text-gray-700 shrink-0">文本模型</span>
               <Select
                 value={selectedModel}
                 onChange={setSelectedModel}
                 options={textModels}
                 placeholder="选择文本模型"
-                className="w-full"
+                className="flex-1"
               />
-            </div>
-
-            {/* 画面提示词 */}
-            <div>
-              <div className="text-sm font-medium text-gray-700 mb-2">画面提示词</div>
-              {/* 识别到的 @ 引用标签 */}
-              {/* ✅ 性能优化：延迟渲染，确保Drawer动画完成后才执行@匹配 */}
-              {contentReady && storyboardPrompt.trim() && (
-                <div className="mb-2">
-                  <PromptReferenceTags
-                    prompt={storyboardPrompt}
-                    characters={charactersRef.current}
-                    scenes={scenesRef.current}
-                    props={propsRef.current}
-                    delayMs={100}
-                  />
-                </div>
-              )}
-              <Input.TextArea
-                value={storyboardPrompt}
-                onChange={handleStoryboardChange}
-            onBlur={handleAutoSave}
-            placeholder="点击AI生成按钮或手动输入画面提示词，可使用括号形式引用资产（如：南方（@角色-南方））"
-            rows={6}
-                className="text-sm"
-              />
-            </div>
-
-            {/* 运动提示词 */}
-            <div>
-              <div className="text-sm font-medium text-gray-700 mb-2">运动提示词</div>
-              <Input.TextArea
-                value={motionPrompt}
-                onChange={handleMotionChange}
-                onBlur={handleAutoSave}
-                placeholder="点击AI生成按钮或手动输入运动提示词"
-                rows={5}
-                className="text-sm"
-              />
-            </div>
-
-            {/* 最终提示词 */}
-            <div>
-              <div className="text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
-                <span>最终提示词</span>
-                {finalPrompt.trim() && (
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={handleCopyFinalPrompt}
-                    className="text-blue-600 hover:text-blue-800"
-                  >
-                    复制
-                  </Button>
-                )}
-              </div>
-              <Input.TextArea
-                value={finalPrompt}
-                placeholder="画面提示词 + 运动提示词自动合成"
-                rows={8}
-                className="text-sm"
-                disabled
-              />
-            </div>
-
-            {/* 底部按钮区域 */}
-            <div className="pt-4 border-t border-gray-200">
               <Button
                 type="primary"
-                size="large"
-                block
                 onClick={handleGenerate}
                 disabled={!shot || !selectedModel}
                 loading={generating}
                 icon={<ReloadOutlined />}
               >
-                {generating ? '生成中...' : storyboardPrompt ? '重新生成提示词' : '生成提示词'}
+                {generating ? '生成中...' : storyboardPrompt ? '重新生成' : '生成提示词'}
               </Button>
+            </div>
 
-              {/* 生成提示词资产节点（仅在有提示词时显示） */}
-              {storyboardPrompt.trim() && (
-                <div className="flex gap-2 mt-2">
-                  {!imageNodeExists && (
-                    <Button
-                      block
-                      onClick={handleGenerateImage}
-                      loading={imageGenerating}
-                      disabled={!shot}
-                      icon={<PictureOutlined />}
-                    >
-                      生成提示词图片
-                    </Button>
+            {/* 中部：左侧提示词编辑区 + 右侧最终提示词 */}
+            <div className="flex gap-4 flex-1 min-h-0">
+              {/* 左列：画面提示词 + 运动提示词 */}
+              <div className="flex-1 min-w-0 flex flex-col gap-3">
+                {/* 画面提示词 */}
+                <div className="flex-[6] min-h-0 flex flex-col">
+                  <div className="text-sm font-medium text-gray-700 mb-1 shrink-0">画面提示词</div>
+                  {/* 识别到的 @ 引用标签 */}
+                  {storyboardPrompt.trim() && (
+                    <div className="mb-1 shrink-0">
+                      <PromptReferenceTags
+                        prompt={storyboardPrompt}
+                        characters={charactersRef.current}
+                        scenes={scenesRef.current}
+                        props={propsRef.current}
+                        delayMs={100}
+                      />
+                    </div>
                   )}
-                  {motionPrompt.trim() && (
+                  <div className="flex-1 min-h-0 flex">
+                    <textarea
+                      value={storyboardPrompt}
+                      onChange={handleStoryboardChange}
+                      onBlur={handleAutoSave}
+                      placeholder="点击AI生成按钮或手动输入画面提示词，可使用括号形式引用资产（如：南方（@角色-南方））"
+                      className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-gray-700 leading-relaxed resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* 运动提示词 */}
+                <div className="flex-[4] min-h-0 flex flex-col">
+                  <div className="text-sm font-medium text-gray-700 mb-1 shrink-0">运动提示词</div>
+                  <div className="flex-1 min-h-0 flex">
+                    <textarea
+                      value={motionPrompt}
+                      onChange={handleMotionChange}
+                      onBlur={handleAutoSave}
+                      placeholder="点击AI生成按钮或手动输入运动提示词"
+                      className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-gray-700 leading-relaxed resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 右列：最终提示词 */}
+              <div className="w-[360px] shrink-0 flex flex-col">
+                <div className="text-sm font-medium text-gray-700 mb-1 shrink-0 flex items-center justify-between">
+                  <span>最终提示词</span>
+                  {finalPrompt.trim() && (
                     <Button
-                      block
-                      onClick={handleGenerateVideo}
-                      loading={videoGenerating}
-                      disabled={!shot}
-                      icon={<VideoCameraOutlined />}
+                      type="text"
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={handleCopyFinalPrompt}
+                      className="text-blue-600 hover:text-blue-800"
                     >
-                      生成提示词视频
+                      复制
                     </Button>
                   )}
                 </div>
-              )}
+                <div className="flex-1 min-h-0 flex">
+                  <textarea
+                    value={finalPrompt}
+                    placeholder="画面提示词 + 运动提示词自动合成"
+                    className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-700 leading-relaxed resize-none focus:outline-none"
+                    readOnly
+                  />
+                </div>
+              </div>
+            </div>
 
-              <div className="text-xs text-gray-500 mt-2 text-center">
+            {/* 底部：创建分镜资产节点（仅在有提示词时显示） */}
+            <div className="shrink-0 pt-3 border-t border-gray-200">
+              <div className="flex items-center justify-center gap-2">
+                {storyboardPrompt.trim() && !imageNodeExists && (
+                  <Button
+                    onClick={handleGenerateImage}
+                    loading={imageGenerating}
+                    disabled={!shot}
+                    icon={<PictureOutlined />}
+                  >
+                    创建分镜图片节点
+                  </Button>
+                )}
+                {storyboardPrompt.trim() && motionPrompt.trim() && (
+                  <Button
+                    onClick={handleGenerateVideo}
+                    loading={videoGenerating}
+                    disabled={!shot}
+                    icon={<VideoCameraOutlined />}
+                  >
+                    创建分镜视频节点
+                  </Button>
+                )}
+              </div>
+              <div className="text-xs text-gray-400 mt-2 text-center">
                 输入框失去焦点会自动保存
               </div>
             </div>
-          </>
+          </div>
         )}
-      </Drawer>
+      </Modal>
     );
   }
 );

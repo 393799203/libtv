@@ -5,7 +5,7 @@ import type { ScriptNodeData, ScriptShot } from '@/types/canvas';
 import { ShotHeader } from './ShotHeader';
 import { ShotTable } from './ShotTable';
 import { AssetPreparationPanel } from './AssetPreparationPanel';
-import { PromptMergeDrawer } from './PromptMergeDrawer';
+import { PromptMergeModal } from './PromptMergeModal';
 
 interface ScriptDetailPanelProps {
   open: boolean;
@@ -289,8 +289,8 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
                 </div>
               )}
 
-              {/* 合成提示词侧屏 - 嵌套在主 Drawer 内部，这样能推开主 Drawer */}
-              <PromptMergeDrawer
+              {/* 提示词生成弹窗 */}
+              <PromptMergeModal
                 open={mergeDrawerOpen}
                 scriptNodeId={scriptNodeId}
                 shot={selectedShot} // ✅ 使用缓存的shot对象
