@@ -14,6 +14,8 @@ type UserAssetRepo interface {
 	FindByID(ctx context.Context, id string) (*model.UserAsset, error)
 	// ListByUser 按用户 + 类型查询；assetType 为空表示不过滤
 	ListByUser(ctx context.Context, userID, assetType string) ([]*model.UserAsset, error)
+	// CountByURLAndUser 统计同一用户引用同一 URL 的记录数（用于删除时的引用计数）
+	CountByURLAndUser(ctx context.Context, userID, url string) (int64, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -49,4 +51,11 @@ func (r *userAssetRepo) ListByUser(ctx context.Context, userID, assetType string
 
 func (r *userAssetRepo) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&model.UserAsset{}, "id = ?", id).Error
+}
+
+func (r *userAssetRepo) CountByURLAndUser(ctx context.Context, userID, url string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.UserAsset{}).
+		Where("user_id = ? AND url = ?", userID, url).Count(&count).Error
+	return count, err
 }

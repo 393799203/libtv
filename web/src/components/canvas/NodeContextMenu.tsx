@@ -50,13 +50,15 @@ export const NodeContextMenu = memo(function NodeContextMenu({
     if (saving) return;
     setSaving(true);
     try {
-      await assetApi.create({ type: nodeType, url, name });
+      await assetApi.create({ type: nodeType, url, name }, { silentError: true });
       message.success(`已存入个人资产库`);
       onClose();
     } catch (err) {
       console.error('保存资产失败:', err);
-      // HTTP 错误已由 api.ts 拦截器统一提示，此处仅兜底
-      if (!(err instanceof Error) || !err.message) {
+      // 重复保存：温和提示已保存；其他错误兜底提示
+      if (err instanceof Error && err.message.includes('已保存')) {
+        message.warning('当前资产已保存');
+      } else {
         message.error('保存失败，请重试');
       }
     } finally {

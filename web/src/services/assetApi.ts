@@ -16,9 +16,9 @@ export const assetApi = {
   list: (type: UserAssetType) =>
     api.get<UserAsset[]>(`/user-assets?type=${type}`),
 
-  /** 保存资产到个人资产库（图片/视频 URL 引用） */
-  create: (data: { type: UserAssetType; url: string; name?: string }) =>
-    api.post<UserAsset>('/user-assets', data),
+  /** 保存资产到个人资产库（图片/视频 URL 引用）；silentError 时拦截器不弹错误提示，由调用方处理 */
+  create: (data: { type: UserAssetType; url: string; name?: string }, config?: { silentError?: boolean }) =>
+    api.post<UserAsset>('/user-assets', data, config),
 
   /** 删除资产（仅限本人） */
   delete: (id: string) =>

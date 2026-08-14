@@ -79,14 +79,16 @@ api.interceptors.response.use(
       return Promise.reject(new Error('登录已失效，请重新登录'));
     }
 
-    // 统一提取错误消息并展示
+    // 统一提取错误消息并展示（请求配置 silentError 时由调用方自行处理提示）
     const errData = error.response?.data;
     const errMsg =
       (errData && (errData.message || errData.msg || errData.error)) ||
       DEFAULT_ERROR_MESSAGES[error.response?.status] ||
       error.message ||
       '请求失败';
-    message.error(errMsg);
+    if (!(error.config as any)?.silentError) {
+      message.error(errMsg);
+    }
 
     return Promise.reject(new Error(errMsg));
   }
