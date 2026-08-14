@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"libtv/internal/config"
 	"libtv/internal/llm"
 	"libtv/internal/service"
 )
@@ -1262,17 +1261,14 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 
 // AudioExecutor 音频节点执行器
 type AudioExecutor struct {
-	apiKey            string
-	baseURL           string
+	audioClient       *llm.AudioClient
 	fileUploadService *service.FileUploadService
 }
 
 // NewAudioExecutor 创建音频执行器
-func NewAudioExecutor(cfg config.AIConfig, providerName string, fileUploadService *service.FileUploadService) *AudioExecutor {
-	p := cfg.Providers[providerName]
+func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService) *AudioExecutor {
 	return &AudioExecutor{
-		apiKey:            p.APIKey,
-		baseURL:           p.BaseURL,
+		audioClient:       audioClient,
 		fileUploadService: fileUploadService,
 	}
 }
@@ -1342,7 +1338,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
 
 	// 调用 TTS API
-	audioData, err := a.callTTS(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
+	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
 		return &NodeOutput{
@@ -1397,136 +1393,6 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			"audioUrl": result.URL,
 		},
 	}, nil
-}
-
-// convertTTSTags 清理前端自定义标签，返回纯文本 + instructions
-//   - 停顿标签 <#1.2#>：直接移除
-//   - 语气词（咳嗽）/（笑声）等：从文本移除，收集到 instructions（兼容旧数据）
-//   - tone（语气词字段）、speed（语速倍率）和 style（风格描述）：写入 instructions，由 Qwen3-TTS Instruct 模型解析
-func convertTTSTags(input string, speed float64, style string, tone string) (string, string) {
-	text := input
-
-	// 1. 移除停顿标签 <#1.2#>
-	pauseRegex := regexp.MustCompile(`<#[\d.]+#>`)
-	text = pauseRegex.ReplaceAllString(text, "")
-
-	// 2. 提取语气词（中文全角括号或英文半角括号），从文本移除
-	var toneHints []string
-	cnParenRe := regexp.MustCompile(`（([^（）]+)）`)
-	text = cnParenRe.ReplaceAllStringFunc(text, func(match string) string {
-		if sub := cnParenRe.FindStringSubmatch(match); len(sub) >= 2 {
-			toneHints = append(toneHints, sub[1])
-		}
-		return ""
-	})
-	enParenRe := regexp.MustCompile(`\(([^()]+)\)`)
-	text = enParenRe.ReplaceAllStringFunc(text, func(match string) string {
-		if sub := enParenRe.FindStringSubmatch(match); len(sub) >= 2 {
-			toneHints = append(toneHints, sub[1])
-		}
-		return ""
-	})
-
-	// 清理多余空格
-	text = strings.TrimSpace(text)
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
-
-	// 构建 instructions：语速 + 风格 + 语气词
-	var parts []string
-	parts = append(parts, "语气自然")
-
-	// 语速：speed=1.0 为正常，<1 慢速，>1 快速
-	if speed > 0 && speed != 1.0 {
-		if speed < 1.0 {
-			parts = append(parts, fmt.Sprintf("语速放慢，约正常速度的%.0f%%", speed*100))
-		} else {
-			parts = append(parts, fmt.Sprintf("语速加快，约正常速度的%.0f%%", speed*100))
-		}
-	} else {
-		parts = append(parts, "语速适中")
-	}
-
-	// 风格
-	if strings.TrimSpace(style) != "" {
-		parts = append(parts, strings.TrimSpace(style))
-	}
-
-	// 语气词：优先使用 tone 字段（前端独立选择，不再插入提示词）
-	// 兼容旧数据：若 prompt 文本内嵌 (笑声) 等语气词标签，上面 text-extraction 会收集到 toneHints
-	if strings.TrimSpace(tone) != "" {
-		parts = append(parts, fmt.Sprintf("带有%s的语气", strings.TrimSpace(tone)))
-	} else if len(toneHints) > 0 {
-		parts = append(parts, fmt.Sprintf("在对应位置带有%s的语气", strings.Join(toneHints, "、")))
-	}
-
-	instructions := strings.Join(parts, "，")
-
-	log.Printf("[AudioExecutor] 标签转换: original=%q processed=%q toneHints=%v instructions=%s", input, text, toneHints, instructions)
-	return text, instructions
-}
-
-// callTTS 调用 /v1/audio/speech API 获取二进制音频
-func (a *AudioExecutor) callTTS(ctx context.Context, model, input, voice string, speed float64, style string, tone string) ([]byte, error) {
-	// 清理前端自定义标签，构建 instructions（含语速/风格/语气词）
-	processedInput, instructions := convertTTSTags(input, speed, style, tone)
-
-	reqBody := map[string]interface{}{
-		"model":           model,
-		"voice":           voice,
-		"input":           processedInput,
-		"instructions":    instructions,
-		"response_format": "wav",
-		"audio_options": map[string]interface{}{
-			"language_hints": []string{"zh"},
-		},
-	}
-
-	payload, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal tts request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/audio/speech", a.baseURL)
-	log.Printf("[AudioExecutor] TTS请求: model=%s voice=%s url=%s inputLen=%d processedLen=%d", model, voice, url, len(input), len(processedInput))
-	log.Printf("[AudioExecutor] TTS payload: %s", string(payload))
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("create tts request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
-
-	httpCli := &http.Client{
-		Timeout: 5 * time.Minute,
-		Transport: &http.Transport{
-			DisableKeepAlives:     true,
-			IdleConnTimeout:       1 * time.Second,
-			ResponseHeaderTimeout: 5 * time.Minute,
-		},
-	}
-
-	resp, err := httpCli.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("tts http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("TTS API error (status=%d): %s", resp.StatusCode, string(body))
-	}
-
-	audioData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read tts audio data: %w", err)
-	}
-
-	if len(audioData) == 0 {
-		return nil, fmt.Errorf("TTS API 返回空音频数据")
-	}
-
-	return audioData, nil
 }
 
 // calculateSizeFromResolutionAndRatio 根据分辨率和比例计算图片尺寸
@@ -1625,12 +1491,12 @@ func roundTo8(n int) int {
 }
 
 // NewDefaultRegistry 创建默认执行器注册表
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, aiCfg config.AIConfig) *ExecutorRegistry {
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient))
 	registry.Register("script", NewScriptExecutor(llmClient))
 	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService))
 	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService))
-	registry.Register("audio", NewAudioExecutor(aiCfg, "wasu", fileUploadService))
+	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService))
 	return registry
 }

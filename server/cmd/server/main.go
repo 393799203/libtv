@@ -96,11 +96,14 @@ func main() {
 	// 初始化视频生成客户端（华数TokenHub doubao-seedance）
 	videoClient := llm.NewVideoClient(config.C.AI, "wasu")
 
+	// 初始化音频生成客户端（TTS）
+	audioClient := llm.NewAudioClient(config.C.AI, "wasu")
+
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)
 
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, modelManager, fileUploadService, config.C.AI)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
