@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography,
@@ -42,6 +42,8 @@ export default function VideoDetailPage() {
   const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const volumeTrackRef = useRef<HTMLDivElement>(null);
   const [buffered, setBuffered] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [videoInfo, setVideoInfo] = useState<Video | null>(null);
@@ -176,6 +178,47 @@ export default function VideoDetailPage() {
       videoRef.current.muted = isMuted;
     }
   }, [isMuted]);
+
+  // 音量调整：同步到 video 元素，滑到 0 时自动静音，从 0 拉回时自动取消静音
+  const handleVolumeChange = (value: number) => {
+    const v = Math.min(Math.max(value, 0), 1);
+    setVolume(v);
+    if (videoRef.current) {
+      videoRef.current.volume = v;
+      if (v > 0 && videoRef.current.muted) {
+        videoRef.current.muted = false;
+        setIsMuted(false);
+      } else if (v === 0 && !videoRef.current.muted) {
+        videoRef.current.muted = true;
+        setIsMuted(true);
+      }
+    }
+  };
+
+  // 音量条点击定位
+  const handleVolumeClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    handleVolumeChange((e.clientX - rect.left) / rect.width);
+  };
+
+  // 音量条拖动
+  const handleVolumeDragStart = (e: ReactMouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const track = volumeTrackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const update = (clientX: number) => {
+      handleVolumeChange((clientX - rect.left) / rect.width);
+    };
+    const onMove = (ev: MouseEvent) => update(ev.clientX);
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    update(e.clientX);
+  };
 
   const handleProgress = () => {
     if (videoRef.current && videoRef.current.duration > 0) {
@@ -400,12 +443,33 @@ export default function VideoDetailPage() {
               <span style={{ fontSize: '12px' }}>{formatTime(currentTime)} / {formatTime(duration)}</span>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                type="text"
-                icon={isMuted ? <MutedOutlined style={{ fontSize: '20px' }} /> : <SoundOutlined style={{ fontSize: '20px' }} />}
-                onClick={toggleMute}
-                style={{ color: 'white', border: 'none', padding: 0 }}
-              />
+              {/* 音量控制：点击图标切换静音，悬停展开音量滑条 */}
+              <div className="group/volume flex items-center">
+                <Button
+                  type="text"
+                  icon={isMuted || volume === 0 ? <MutedOutlined style={{ fontSize: '20px' }} /> : <SoundOutlined style={{ fontSize: '20px' }} />}
+                  onClick={toggleMute}
+                  style={{ color: 'white', border: 'none', padding: 0 }}
+                />
+                <div className="w-0 overflow-hidden group-hover/volume:w-24 transition-all duration-200 flex items-center">
+                  <div
+                    ref={volumeTrackRef}
+                    className="relative h-1.5 w-20 ml-2 mr-1 bg-white/30 rounded-full cursor-pointer"
+                    onClick={handleVolumeClick}
+                    onMouseDown={handleVolumeDragStart}
+                  >
+                    <div
+                      className="absolute top-0 left-0 h-full bg-white rounded-full"
+                      style={{ width: `${(isMuted ? 0 : volume) * 100}%` }}
+                    />
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg"
+                      style={{ left: `${(isMuted ? 0 : volume) * 100}%`, marginLeft: '-6px' }}
+                    />
+                  </div>
+                  <span className="text-white text-[12px] w-8 text-right select-none">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+                </div>
+              </div>
               <Button
                 type="text"
                 icon={isFullscreen ? <FullscreenExitOutlined style={{ fontSize: '20px' }} /> : <FullscreenOutlined style={{ fontSize: '20px' }} />}
