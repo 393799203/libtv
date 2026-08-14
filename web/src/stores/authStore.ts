@@ -16,6 +16,7 @@ interface AuthState {
 
   // Actions
   setAuth: (response: AuthResponse) => void;
+  setUser: (user: Partial<AuthResponse['user']>) => void;
   logout: () => void;
   initialize: () => void;
   openLoginModal: (mode?: 'login' | 'register') => void;
@@ -44,6 +45,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
+  // 更新当前用户信息（个人资料修改后同步到内存与 localStorage）
+  setUser: (partial) => {
+    const current = get().user;
+    if (!current) return;
+    const merged = { ...current, ...partial };
+    const stored = localStorage.getItem(AUTH_KEY);
+    if (stored) {
+      try {
+        const data = JSON.parse(stored) as AuthResponse;
+        data.user = merged;
+        localStorage.setItem(AUTH_KEY, JSON.stringify(data));
+      } catch {
+        // localStorage 数据损坏时忽略
+      }
+    }
+    set({ user: merged });
+  },
+
   logout: () => {
     localStorage.removeItem(AUTH_KEY);
     set({ token: null, user: null, isAuthenticated: false });
@@ -65,7 +84,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // 临时设置 token 以便请求携带
         set({ token: data.token });
 
-        const me = await api.get('/auth/me') as { id: number; email: string; nickname: string; avatar_url: string; role?: string };
+        const me = await api.get('/auth/me') as { id: string; email: string; nickname: string; avatar_url: string; role?: string };
         // token 有效
         set({
           user: { id: me.id, email: me.email, nickname: me.nickname, avatarUrl: me.avatar_url, role: me.role },

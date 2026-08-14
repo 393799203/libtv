@@ -40,6 +40,11 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// 401 统一处理去重：token 失效瞬间往往有多个在途请求并发返回 401，
+// 窗口期内只提示一次、只触发一次登出+弹登录框，避免 toast 轰炸
+const UNAUTH_DEDUP_MS = 2000;
+let lastUnauthHandledAt = 0;
+
 // 响应拦截器：统一错误处理
 api.interceptors.response.use(
   (response) => {
@@ -52,17 +57,26 @@ api.interceptors.response.use(
     return data;
   },
   (error) => {
-    if (error.response?.status === 401) {
-      const { isAuthenticated, initializing, logout, openLoginModal } = useAuthStore.getState();
-      if (isAuthenticated && !initializing) {
-        logout();
-        // 延迟弹窗，避免初始化验证时弹出
-        setTimeout(() => {
-          if (!useAuthStore.getState().isAuthenticated) {
-            openLoginModal();
-          }
-        }, 100);
+    const isUnauthenticated = error.response?.status === 401;
+
+    // 401 在窗口期内只处理一次：登出 + 弹登录框，后续并发 401 静默拒绝
+    if (isUnauthenticated) {
+      const now = Date.now();
+      if (now - lastUnauthHandledAt > UNAUTH_DEDUP_MS) {
+        const { isAuthenticated, initializing, logout, openLoginModal } = useAuthStore.getState();
+        if (isAuthenticated && !initializing) {
+          lastUnauthHandledAt = now;
+          logout();
+          message.error('登录已失效，请重新登录');
+          // 延迟弹窗，避免初始化验证时弹出
+          setTimeout(() => {
+            if (!useAuthStore.getState().isAuthenticated) {
+              openLoginModal();
+            }
+          }, 100);
+        }
       }
+      return Promise.reject(new Error('登录已失效，请重新登录'));
     }
 
     // 统一提取错误消息并展示

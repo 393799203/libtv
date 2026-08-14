@@ -36,6 +36,21 @@ export async function uploadImage(
 }
 
 /**
+ * 上传当前登录用户头像（需登录），存到用户专属目录 users/{userID}/avatar/
+ * @param file 头像图片文件
+ * @returns 头像 URL
+ */
+export async function uploadAvatar(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await api.post<{ url: string }>('/upload/avatar', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.url;
+}
+
+/**
  * 查询视频转码任务状态
  */
 export async function getVideoTaskStatus(taskId: string): Promise<VideoTaskResult> {

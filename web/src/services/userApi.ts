@@ -9,6 +9,14 @@ export interface UserItem {
 }
 
 export const userApi = {
+  /** 更新当前用户个人资料（昵称/头像，字段可选，不传表示不修改） */
+  updateProfile: (data: { nickname?: string; avatar_url?: string }) =>
+    api.put<{ id: string; email: string; nickname: string; avatar_url: string; role: string }>('/auth/profile', data),
+
+  /** 修改当前用户密码（需验证原密码） */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }),
+
   /** 获取所有用户列表（管理员） */
   list: () =>
     api.get('/users').then((res: any) => res),

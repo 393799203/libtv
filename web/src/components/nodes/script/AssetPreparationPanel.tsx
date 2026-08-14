@@ -6,6 +6,7 @@ import type {
   ScriptProp,
 } from '@/types/canvas';
 import { AssetEditDrawer } from './AssetEditDrawer';
+import { NodeAssociateModal } from './NodeAssociateModal';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
 import {
@@ -13,6 +14,7 @@ import {
   createAssetImageNode,
   generateAssetImageNodeId,
   getAssetImageNodeId,
+  associateExistingImageNode,
 } from '@/utils/assetImageSync';
 
 // ---- 单个资产卡片（角色/场景/道具通用）----
@@ -25,6 +27,8 @@ interface AssetCardProps<T extends { name: string; description: string }> {
   showAdd?: boolean;
   /** 卡片点击回调（用于弹出编辑侧屏） */
   onClick?: () => void;
+  /** "关联已有节点"按钮回调 */
+  onAssociateClick?: () => void;
 }
 
 function AssetCard<T extends { name: string; description: string }>({
@@ -34,6 +38,7 @@ function AssetCard<T extends { name: string; description: string }>({
   onAdd,
   showAdd,
   onClick,
+  onAssociateClick,
 }: AssetCardProps<T>) {
   // ✅ 从画布图片节点实时读取 imageUrl（不再依赖脚本节点 data）
   const nodes = useCanvasStore((s) => s.nodes);
@@ -53,6 +58,14 @@ function AssetCard<T extends { name: string; description: string }>({
     [onClick, onAdd, showAdd]
   );
 
+  const handleAssociateClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onAssociateClick?.();
+    },
+    [onAssociateClick]
+  );
+
   return (
     <div
       className="relative w-[160px] h-[120px] rounded-lg border border-gray-200 bg-white overflow-hidden group hover:border-blue-400 transition-colors cursor-pointer"
@@ -60,22 +73,11 @@ function AssetCard<T extends { name: string; description: string }>({
     >
       {/* 图片区域 */}
       {imageUrl ? (
-        <div className="w-full h-full relative">
-          <img
-            src={imageUrl}
-            alt={item.name}
-            className="w-full h-full object-cover"
-          />
-          {/* 悬浮替换按钮 */}
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <button
-              className="px-3 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
-              onClick={handleCardClick}
-            >
-              替换图片
-            </button>
-          </div>
-        </div>
+        <img
+          src={imageUrl}
+          alt={item.name}
+          className="w-full h-full object-cover"
+        />
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center gap-1">
           {showAdd && onAdd ? (
@@ -85,11 +87,29 @@ function AssetCard<T extends { name: string; description: string }>({
               <span className="text-[10px]">添加</span>
             </div>
           ) : (
-            /* 上传占位 */
+            /* 空状态占位 */
             <div className="flex flex-col items-center gap-1 text-gray-400 group-hover:text-blue-500 transition-colors">
-              <span className="text-[10px]">生成或上传参考图</span>
+              <span className="text-[10px]">暂无参考图</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 悬浮操作按钮（非"添加"卡片）：上传或生成 / 关联已有节点 */}
+      {!showAdd && (
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+          <button
+            className="px-2 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            onClick={handleCardClick}
+          >
+            上传或生成
+          </button>
+          <button
+            className="px-2 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            onClick={handleAssociateClick}
+          >
+            关联已有节点
+          </button>
         </div>
       )}
 
@@ -112,6 +132,8 @@ interface AssetSectionProps<
   onAdd?: () => void;
   /** 卡片点击回调（用于角色编辑等场景） */
   onCardClick?: (item: T) => void;
+  /** 卡片"关联已有节点"回调 */
+  onCardAssociate?: (item: T) => void;
 }
 
 function AssetSection<
@@ -123,6 +145,7 @@ function AssetSection<
   assetType,
   onAdd,
   onCardClick,
+  onCardAssociate,
 }: AssetSectionProps<T>) {
   return (
     <div className="mb-8">
@@ -139,6 +162,7 @@ function AssetSection<
             scriptNodeId={scriptNodeId}
             assetType={assetType}
             onClick={onCardClick ? () => onCardClick(item) : undefined}
+            onAssociateClick={onCardAssociate ? () => onCardAssociate(item) : undefined}
           />
         ))}
         {/* 添加按钮（作为最后一个空卡片） */}
@@ -193,6 +217,12 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
     const [editingScene, setEditingScene] = useState<ScriptScene | null>(null);
     const [editingProp, setEditingProp] = useState<ScriptProp | null>(null);
 
+    // 正在"关联已有节点"的资产（弹出选择弹窗）
+    const [associating, setAssociating] = useState<{
+      assetType: 'character' | 'scene' | 'prop';
+      name: string;
+    } | null>(null);
+
     // ✅ 通用的画布实时保存函数（避免代码重复）
     const saveCanvasRealtime = useCallback(async () => {
       const store = useCanvasStore.getState();
@@ -246,6 +276,36 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         await saveCanvasRealtime();
       },
       [data.characters, onUpdate, scriptNodeId, saveCanvasRealtime]
+    );
+
+    // ✅ 关联画布上已有的图片节点到指定资产（写 nodeId + 连边 + 同步 imageUrl + 保存画布）
+    const handleAssociateNode = useCallback(
+      async (assetType: 'character' | 'scene' | 'prop', name: string, nodeId: string) => {
+        const ok = associateExistingImageNode(scriptNodeId, assetType, name, nodeId);
+        if (!ok) return;
+
+        // 若关联节点已有图片，同步到资产的 imageUrl（与上传参考图行为一致）
+        // ⚠️ 必须从 store 重新读取最新资产数组（已含刚写入的 nodeId），
+        // 不能用 props 里的旧 data，否则 onUpdate 会把 nodeId 覆盖丢失
+        const node = useCanvasStore.getState().nodes.find(n => n.id === nodeId);
+        const nodeImageUrl = (node?.data as { imageUrl?: string })?.imageUrl;
+        if (nodeImageUrl) {
+          const typeMap = { character: 'characters', scene: 'scenes', prop: 'props' } as const;
+          const key = typeMap[assetType];
+          const scriptNode = useCanvasStore.getState().nodes.find(n => n.id === scriptNodeId);
+          const latestAssets = (scriptNode?.data as Record<string, Array<{ name: string }>>)?.[key];
+          if (latestAssets) {
+            const updated = latestAssets.map(a =>
+              a.name === name ? { ...a, imageUrl: nodeImageUrl } : a
+            );
+            onUpdate({ [key]: updated } as Partial<AssetPreparationData>);
+          }
+        }
+
+        // 实时保存画布（后端执行时才能读到新关联）
+        await saveCanvasRealtime();
+      },
+      [scriptNodeId, onUpdate, saveCanvasRealtime]
     );
 
     // 角色描述变更（失焦时自动保存）
@@ -372,6 +432,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           scriptNodeId={scriptNodeId}
           assetType="character"
           onCardClick={(item) => setEditingCharacter(item as ScriptCharacter)}
+          onCardAssociate={(item) => setAssociating({ assetType: 'character', name: item.name })}
         />
 
         {/* 场景 */}
@@ -381,6 +442,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           scriptNodeId={scriptNodeId}
           assetType="scene"
           onCardClick={(item) => setEditingScene(item as ScriptScene)}
+          onCardAssociate={(item) => setAssociating({ assetType: 'scene', name: item.name })}
         />
 
         {/* 道具 */}
@@ -390,6 +452,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           scriptNodeId={scriptNodeId}
           assetType="prop"
           onCardClick={(item) => setEditingProp(item as ScriptProp)}
+          onCardAssociate={(item) => setAssociating({ assetType: 'prop', name: item.name })}
         />
 
         {/* 底部提示 */}
@@ -432,6 +495,23 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           onClose={() => setEditingProp(null)}
           onUpload={handlePropUpload}
           onDescriptionChange={handlePropDescriptionChange}
+        />
+
+        {/* 关联已有图片节点弹窗 */}
+        <NodeAssociateModal
+          open={!!associating}
+          assetName={associating?.name || ''}
+          currentNodeId={
+            associating
+              ? getAssetImageNodeId(scriptNodeId, associating.assetType, associating.name)
+              : null
+          }
+          onAssociate={(nodeId) => {
+            if (associating) {
+              handleAssociateNode(associating.assetType, associating.name, nodeId);
+            }
+          }}
+          onClose={() => setAssociating(null)}
         />
       </div>
     );

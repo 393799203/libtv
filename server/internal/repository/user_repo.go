@@ -15,6 +15,10 @@ type UserRepo interface {
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	List(ctx context.Context, keyword string) ([]model.User, error)
 	UpdateRole(ctx context.Context, id, role string) error
+	// UpdateProfile 更新用户昵称/头像（零值字段不更新）
+	UpdateProfile(ctx context.Context, id string, fields map[string]interface{}) error
+	// UpdatePasswordHash 更新密码哈希并将密码版本号 +1（使旧 JWT 全部失效）
+	UpdatePasswordHash(ctx context.Context, id, passwordHash string) error
 	// CascadeDelete 级联删除用户及其关联数据（项目/画布/工作流执行/AI任务/风格收藏）
 	// 在一个事务内完成
 	CascadeDelete(ctx context.Context, userID string) error
@@ -60,6 +64,17 @@ func (r *userRepo) List(ctx context.Context, keyword string) ([]model.User, erro
 
 func (r *userRepo) UpdateRole(ctx context.Context, id, role string) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("role", role).Error
+}
+
+func (r *userRepo) UpdateProfile(ctx context.Context, id string, fields map[string]interface{}) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Updates(fields).Error
+}
+
+func (r *userRepo) UpdatePasswordHash(ctx context.Context, id, passwordHash string) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"password_hash":    passwordHash,
+		"password_version": gorm.Expr("password_version + 1"),
+	}).Error
 }
 
 // CascadeDelete 在一个事务内级联删除用户关联数据

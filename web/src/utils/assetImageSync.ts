@@ -231,6 +231,51 @@ function updateAssetImageNodeId(
 }
 
 /**
+ * 把画布上已存在的图片节点关联到指定资产
+ * - 写入资产的 nodeId 字段（关联的本质字段，节点 ID 无需符合 角色-/场景-/道具- 命名规则）
+ * - 自动补建 dataFlow 边（图片节点 → 脚本节点，非必须但利于上游展示与 fallback）
+ * 注意：画布持久化由调用方负责（保存画布后后端才能读到新关联）
+ *
+ * @returns 是否关联成功
+ */
+export function associateExistingImageNode(
+  scriptNodeId: string,
+  assetType: AssetType,
+  assetName: string,
+  imageNodeId: string
+): boolean {
+  const store = useCanvasStore.getState();
+
+  const imageNode = store.nodes.find(n => n.id === imageNodeId);
+  if (!imageNode) {
+    console.error('[AssetImageSync] 待关联的图片节点不存在:', imageNodeId);
+    return false;
+  }
+
+  // 写入资产 nodeId
+  updateAssetImageNodeId(scriptNodeId, assetType, assetName, imageNodeId);
+
+  // 补建连接边（已存在则跳过）
+  const edgeId = `e-${imageNodeId}-${scriptNodeId}`;
+  if (!store.edges.some(e => e.id === edgeId)) {
+    store.addEdge({
+      id: edgeId,
+      source: imageNodeId,
+      target: scriptNodeId,
+      type: 'dataFlow',
+    });
+  }
+
+  console.log('[AssetImageSync] 关联已有图片节点成功:', {
+    scriptNodeId,
+    assetType,
+    assetName,
+    imageNodeId,
+  });
+  return true;
+}
+
+/**
  * 删除资产图片节点并清除关联
  * - 删除图片节点
  * - 删除连接边

@@ -18,7 +18,7 @@ export function LoginModal() {
 
   const [form] = Form.useForm<LoginRequest & RegisterRequest>();
 
-  const handleLogin = async (values: LoginRequest) => {
+  const handleLogin = async (values: LoginRequest & RegisterRequest) => {
     setLoading(true);
     try {
       const response = await authApi.login(values);
@@ -38,7 +38,7 @@ export function LoginModal() {
     }
   };
 
-  const handleRegister = async (values: RegisterRequest) => {
+  const handleRegister = async (values: LoginRequest & RegisterRequest) => {
     setLoading(true);
     try {
       const response = await authApi.register(values);
@@ -109,7 +109,7 @@ export function LoginModal() {
           </div>
 
           {authMode === 'login' ? (
-            <Form form={form} layout="vertical" onFinish={handleLogin} requiredMark={false}>
+            <Form<LoginRequest & RegisterRequest> form={form} layout="vertical" onFinish={handleLogin} requiredMark={false}>
               <Form.Item
                 name="email"
                 rules={[
@@ -152,7 +152,7 @@ export function LoginModal() {
               </Form.Item>
             </Form>
           ) : (
-            <Form form={form} layout="vertical" onFinish={handleRegister} requiredMark={false}>
+            <Form<LoginRequest & RegisterRequest> form={form} layout="vertical" onFinish={handleRegister} requiredMark={false}>
               <Form.Item
                 name="email"
                 rules={[

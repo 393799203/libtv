@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"libtv/internal/middleware"
 	"libtv/internal/pkg/response"
 	"libtv/internal/service"
 	"libtv/internal/storage"
@@ -169,8 +170,42 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		"storage_type": result.StorageType,
 		"filename":     result.ObjectName,
 		"cached":       result.Cached,
-		"width":        width,   // ✅ 图片宽度
-		"height":       height,  // ✅ 图片高度
+		"width":        width,  // ✅ 图片宽度
+		"height":       height, // ✅ 图片高度
+	})
+}
+
+// UploadAvatar 上传当前登录用户的头像（哈希去重）
+// 存储到用户专属目录 users/<userID>/avatar/，不再占用公共 images/ 目录
+// （用户存储目录约定：users/<userID>/avatar/ 头像；users/<userID>/assets/ 用户资产）
+func (h *UploadHandler) UploadAvatar(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Fail(c, http.StatusUnauthorized, "未登录")
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "获取文件失败")
+		return
+	}
+
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            "users/" + userID + "/avatar",
+		AllowedExts:    service.ImageExts(),
+		ContentTypeFor: service.ContentTypeForImage,
+	})
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.OKWithMsg(c, "上传成功", gin.H{
+		"url":          result.URL,
+		"storage_type": result.StorageType,
+		"filename":     result.ObjectName,
+		"cached":       result.Cached,
 	})
 }
 
@@ -191,9 +226,9 @@ func (h *UploadHandler) UploadAudio(c *gin.Context) {
 	}
 
 	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
-		Dir:            dir,
-		ProjectID:      projectID,
-		DefaultExt:     ".mp3",
+		Dir:        dir,
+		ProjectID:  projectID,
+		DefaultExt: ".mp3",
 		AllowedExts: map[string]bool{
 			".mp3": true, ".wav": true, ".ogg": true, ".m4a": true, ".flac": true,
 		},

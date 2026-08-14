@@ -10,14 +10,16 @@ import (
 
 // User 用户模型
 type User struct {
-	ID           string    `gorm:"primaryKey;size:36" json:"id"`
-	Email        string    `gorm:"uniqueIndex;size:255;not null" json:"email"`
-	PasswordHash string    `gorm:"size:255;not null" json:"-"`
-	Nickname     string    `gorm:"size:100" json:"nickname"`
-	AvatarURL    string    `gorm:"size:500" json:"avatar_url"`
-	Role         string    `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string `gorm:"primaryKey;size:36" json:"id"`
+	Email        string `gorm:"uniqueIndex;size:255;not null" json:"email"`
+	PasswordHash string `gorm:"size:255;not null" json:"-"`
+	Nickname     string `gorm:"size:100" json:"nickname"`
+	AvatarURL    string `gorm:"size:500" json:"avatar_url"`
+	// PasswordVersion 密码版本号：每次改密码 +1，写入 JWT，使旧 token 全部失效
+	PasswordVersion int       `gorm:"not null;default:0" json:"-"`
+	Role            string    `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func (User) TableName() string { return "users" }

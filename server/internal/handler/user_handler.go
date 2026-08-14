@@ -79,6 +79,51 @@ func (h *UserHandler) Me(c *gin.Context) {
 	response.OK(c, user)
 }
 
+// UpdateProfileRequest 更新个人资料请求（字段可选，不传表示不修改）
+type UpdateProfileRequest struct {
+	Nickname  *string `json:"nickname"`
+	AvatarURL *string `json:"avatar_url"`
+}
+
+// UpdateProfile 更新当前用户个人资料（昵称/头像）
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	var req UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	user, err := h.userService.UpdateProfile(c.Request.Context(), userID, req.Nickname, req.AvatarURL)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OK(c, user)
+}
+
+// ChangePasswordRequest 修改密码请求
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+// ChangePassword 修改当前用户密码
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "新密码至少6位")
+		return
+	}
+
+	if err := h.userService.ChangePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OKWithMsg(c, "密码修改成功", nil)
+}
+
 // List 获取所有用户列表（管理员）
 func (h *UserHandler) List(c *gin.Context) {
 	users, err := h.userService.List(c.Request.Context(), c.Query("keyword"))

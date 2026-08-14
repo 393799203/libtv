@@ -1,13 +1,16 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Dropdown, Space, Button, App } from 'antd';
 import {
   VideoCameraOutlined,
   LogoutOutlined,
   ControlOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
+import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
+import { getUserAvatarSrc } from '@/utils/avatar';
 
 const { Header: AntHeader, Content } = Layout;
 
@@ -20,6 +23,7 @@ export function AppLayout() {
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
   const navigate = useNavigate();
   const location = useLocation();
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -27,6 +31,7 @@ export function AppLayout() {
   };
 
   const userMenuItems: MenuProps['items'] = [
+    { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
   ];
@@ -86,7 +91,7 @@ export function AppLayout() {
               <Button type="text" size="small">
                 <Space>
                   <img 
-                    src={`https://picsum.photos/32/32?random=${user?.id || user?.nickname || 'user'}`} 
+                    src={getUserAvatarSrc(user)} 
                     alt="" 
                     className="w-6 h-6 rounded-full border border-gray-200" 
                   />
@@ -94,6 +99,9 @@ export function AppLayout() {
                 </Space>
               </Button>
             </Dropdown>
+
+            {/* 个人设置弹窗（条件挂载，打开时重新初始化表单） */}
+            {showProfileSettings && <ProfileSettingsModal onClose={() => setShowProfileSettings(false)} />}
           </div>
         ) : (
           <button

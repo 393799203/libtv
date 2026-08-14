@@ -81,7 +81,7 @@ func main() {
 	appStorage := initStorage()
 
 	// 初始化 Service
-	userService := service.NewUserService(userRepo)
+	userService := service.NewUserService(userRepo, appStorage)
 	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
@@ -182,9 +182,9 @@ func main() {
 	// 公开存储状态监控
 	r.GET("/api/storage/status", uploadHandler.GetStorageStatus)
 
-	// 需要认证的路由
+	// 需要认证的路由（Auth 传入 userService 校验密码版本号，改密码后旧 token 失效）
 	api := r.Group("/api")
-	api.Use(middleware.Auth())
+	api.Use(middleware.Auth(userService))
 	{
 		// 删除项目 canvas 文件夹（需认证）
 		api.DELETE("/upload/canvas/:projectId", uploadHandler.DeleteCanvasDir)
@@ -194,9 +194,12 @@ func main() {
 
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
-		api.GET("/users", userHandler.List)                // 管理员：获取所有用户
-		api.PUT("/users/:id/role", userHandler.UpdateRole) // 管理员：更新用户角色
-		api.DELETE("/users/:id", userHandler.Delete)       // 管理员：删除用户
+		api.PUT("/auth/profile", userHandler.UpdateProfile)    // 更新当前用户个人资料（昵称/头像）
+		api.PUT("/auth/password", userHandler.ChangePassword)  // 修改当前用户密码
+		api.POST("/upload/avatar", uploadHandler.UploadAvatar) // 上传头像（存 users/<userID>/avatar/）
+		api.GET("/users", userHandler.List)                    // 管理员：获取所有用户
+		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
+		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
 
 		// 项目 + 画布
 		projects := api.Group("/projects")
