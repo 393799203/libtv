@@ -1,9 +1,11 @@
 import { memo, useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import type { NodeProps, Node } from '@xyflow/react';
-import { VideoCameraOutlined, PlayCircleOutlined, UploadOutlined } from '@ant-design/icons';
+import { VideoCameraOutlined, PlayCircleOutlined, UploadOutlined, ImportOutlined } from '@ant-design/icons';
 import { BaseNode } from './BaseNode';
 import type { VideoNodeData } from '@/types/canvas';
+import type { UserAsset } from '@/services/assetApi';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { uploadVideo } from '@/services/uploadApi';
 
 type VideoNodeType = Node<VideoNodeData, 'video'>;
@@ -18,6 +20,8 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
   const [uploadPercent, setUploadPercent] = useState(0);
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('uploading');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  // 从资产库导入视频弹窗
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
 
   // 视频上传
   const handleUpload = useCallback(
@@ -88,36 +92,65 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     return `${m}:${String(s).padStart(2, '0')}`;
   }, [data.duration]);
 
+  // 从资产库选中视频：替换节点视频（清掉旧尺寸/时长，由元数据加载重新计算）
+  const handlePickAsset = useCallback(
+    (asset: UserAsset) => {
+      useCanvasStore.getState().updateNodeData(id, {
+        videoUrl: asset.url,
+        duration: undefined,
+        videoWidth: undefined,
+        videoHeight: undefined,
+      } as Partial<VideoNodeData>);
+    },
+    [id]
+  );
+
   const headerRight = useMemo(() => {
+    // 图标按钮：上传/重传 + 从资产库导入
+    const iconBtnCls = 'flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer';
     if (data.videoUrl) {
       return (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-0.5">
           {durationLabel && (
             <span className="px-1.5 py-1 rounded bg-gray-100 text-gray-600 text-[11px] font-medium leading-none">
               {durationLabel}
             </span>
           )}
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[11px] text-white transition-colors cursor-pointer"
-            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+            className={iconBtnCls}
             title="重新上传视频"
+            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
           >
-            <UploadOutlined className="text-[10px]" />
-            重传
+            <UploadOutlined className="text-[12px]" />
+          </button>
+          <button
+            className={iconBtnCls}
+            title="从个人资产库导入"
+            onClick={(e) => { e.stopPropagation(); setShowAssetPicker(true); }}
+          >
+            <ImportOutlined className="text-[12px]" />
           </button>
         </div>
       );
     }
     return (
-      <button
-        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[12px] text-white transition-colors cursor-pointer flex-shrink-0 ${
-          uploading ? 'bg-blue-300 cursor-wait' : 'bg-blue-500 hover:bg-blue-600'
-        }`}
-        onClick={(e) => { e.stopPropagation(); if (!uploading) fileInputRef.current?.click(); }}
-      >
-        <UploadOutlined className="text-[11px]" />
-        {uploading ? `${uploadPercent}%` : '上传'}
-      </button>
+      <div className="flex items-center gap-0.5 flex-shrink-0">
+        {uploading && <span className="text-[11px] text-blue-500 mr-1">{uploadPercent}%</span>}
+        <button
+          className={`${iconBtnCls} ${uploading ? 'opacity-50 cursor-wait' : ''}`}
+          title="上传视频"
+          onClick={(e) => { e.stopPropagation(); if (!uploading) fileInputRef.current?.click(); }}
+        >
+          <UploadOutlined className="text-[12px]" />
+        </button>
+        <button
+          className={iconBtnCls}
+          title="从个人资产库导入"
+          onClick={(e) => { e.stopPropagation(); setShowAssetPicker(true); }}
+        >
+          <ImportOutlined className="text-[12px]" />
+        </button>
+      </div>
     );
   }, [data.videoUrl, uploading, uploadPercent, durationLabel]);
 
@@ -244,6 +277,15 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         className="hidden"
         onChange={handleUpload}
       />
+
+      {/* 从资产库导入视频（Modal 默认 portal 到 body，不受画布 transform 影响） */}
+      {showAssetPicker && (
+        <AssetLibraryModal
+          pickType="video"
+          onClose={() => setShowAssetPicker(false)}
+          onPick={handlePickAsset}
+        />
+      )}
     </>
   );
 });

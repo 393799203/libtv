@@ -1,6 +1,7 @@
 import { memo, useMemo, useState, useEffect } from 'react';
 import { Tag, Tooltip } from 'antd';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { normalizeAssetName } from '@/utils/assetRef';
 import type { ScriptCharacter, ScriptScene, ScriptProp } from '@/types/canvas';
 
 // ✅ 性能优化：只接收必要的资产数据，而不是完整的 ScriptNodeData
@@ -107,8 +108,19 @@ export const PromptReferenceTags = memo<PromptReferenceTagsProps>(
         }
         seenAssets.set(key, true);
 
-        // 从assetMap查找对应资产
-        const assetInfo = assetMap.get(name);
+        // 从 assetMap 查找对应资产：精确匹配优先
+        let assetInfo = assetMap.get(name);
+        if (!assetInfo || assetInfo.type !== type) {
+          // ✅ 模糊兜底：名字轻微变化（多/少字）也能命中，避免误报"未找到"
+          const norm = normalizeAssetName(name);
+          for (const [key, info] of assetMap) {
+            const k = normalizeAssetName(key);
+            if (info.type === type && norm.length >= 2 && k.length >= 2 && (k.includes(norm) || norm.includes(k))) {
+              assetInfo = info;
+              break;
+            }
+          }
+        }
         if (assetInfo && assetInfo.type === type) {
           refs.push({
             fullText,

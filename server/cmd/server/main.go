@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -76,6 +76,7 @@ func main() {
 	styleRepo := repository.NewStyleRepo(db)
 	categoryRepo := repository.NewCategoryRepo(db)
 	styleFavoriteRepo := repository.NewStyleFavoriteRepo(db)
+	userAssetRepo := repository.NewUserAssetRepo(db)
 
 	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
 	appStorage := initStorage()
@@ -86,6 +87,7 @@ func main() {
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
+	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
 
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
@@ -125,6 +127,7 @@ func main() {
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager)
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager)
+	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -290,6 +293,14 @@ func main() {
 		prompt := api.Group("/prompt")
 		{
 			prompt.POST("/generate", promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
+		}
+
+		// 用户个人资产库（需登录）
+		userAssets := api.Group("/user-assets")
+		{
+			userAssets.GET("", userAssetHandler.List)          // 列出当前用户资产（?type=image|video）
+			userAssets.POST("", userAssetHandler.Create)       // 保存资产（图片/视频 URL 引用）
+			userAssets.DELETE("/:id", userAssetHandler.Delete) // 删除资产（仅限本人）
 		}
 	}
 

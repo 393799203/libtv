@@ -259,3 +259,25 @@ func (b *Banner) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// ========== 用户个人资产库 ==========
+
+// UserAsset 用户个人资产（从画布节点收藏进来的图片/视频，
+// 文件副本存于存储的 users/<userID>/assets/ 目录）
+type UserAsset struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	UserID    string    `gorm:"size:36;not null;index:idx_user_asset_type,priority:1" json:"user_id"`
+	Type      string    `gorm:"size:20;not null;index:idx_user_asset_type,priority:2" json:"type"` // image / video
+	URL       string    `gorm:"size:500;not null" json:"url"`
+	Name      string    `gorm:"size:255" json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (UserAsset) TableName() string { return "user_assets" }
+
+func (a *UserAsset) BeforeCreate(tx *gorm.DB) error {
+	if a.ID == "" {
+		a.ID = uuid.New().String()
+	}
+	return nil
+}

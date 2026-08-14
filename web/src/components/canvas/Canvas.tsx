@@ -34,6 +34,7 @@ import { PromptCompose } from '@/components/panels/prompt';
 import { nodeTypes } from '@/components/nodes';
 import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
 import { CanvasContextMenu } from './CanvasContextMenu';
+import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { createNode } from '@/utils/nodeFactory';
 
@@ -59,6 +60,14 @@ export const Canvas = memo(function Canvas() {
   const lastViewportUpdate = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  // 图片/视频节点右键菜单状态（下载 / 存到个人资产库）
+  const [nodeMenu, setNodeMenu] = useState<{
+    x: number;
+    y: number;
+    nodeType: 'image' | 'video';
+    url: string;
+    name: string;
+  } | null>(null);
   const [nodeSelectPopup, setNodeSelectPopup] = useState<{
     position: { x: number; y: number };
     sourceNodeId: string;
@@ -119,6 +128,7 @@ export const Canvas = memo(function Canvas() {
 
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
+    setNodeMenu(null);
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -127,6 +137,26 @@ export const Canvas = memo(function Canvas() {
 
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null);
+  }, []);
+
+  // 节点右键：一律阻止冒泡到容器的空白区右键菜单（所有节点类型）；
+  // 图片/视频节点有媒体内容时额外弹出下载 / 存到个人资产库菜单
+  const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: LibTVNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu(null);
+    if (node.type !== 'image' && node.type !== 'video') return;
+    const url = node.type === 'image'
+      ? (node.data.imageUrl as string)
+      : (node.data.videoUrl as string);
+    if (!url) return;
+    setNodeMenu({
+      x: event.clientX,
+      y: event.clientY,
+      nodeType: node.type,
+      url,
+      name: (node.data.label as string) || '',
+    });
   }, []);
 
   // 连线释放到空白区域时，弹出节点选择菜单（参考官方 add-node-on-edge-drop 示例）
@@ -316,9 +346,11 @@ export const Canvas = memo(function Canvas() {
             suppressPromptRef.current = true;
           }
         }}
+        onNodeContextMenu={handleNodeContextMenu}
         onViewportChange={onViewportChange}
         onPaneClick={() => {
           handleCloseContextMenu();
+          setNodeMenu(null);
           if (!connectingRef.current) setNodeSelectPopup(null);
         }}
         nodeTypes={nodeTypes}
@@ -401,6 +433,17 @@ export const Canvas = memo(function Canvas() {
         <CanvasContextMenu
           position={contextMenu}
           onClose={handleCloseContextMenu}
+        />
+      )}
+
+      {/* 图片/视频节点右键菜单 */}
+      {nodeMenu && (
+        <NodeContextMenu
+          position={{ x: nodeMenu.x, y: nodeMenu.y }}
+          nodeType={nodeMenu.nodeType}
+          url={nodeMenu.url}
+          name={nodeMenu.name}
+          onClose={() => setNodeMenu(null)}
         />
       )}
 

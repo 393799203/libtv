@@ -20,47 +20,59 @@ import type {
   VideoNodeData,
 } from '@/types/canvas';
 import type { MentionMarker } from '@/types/prompt';
+import { extractPromptRefTokens, tokenMatchesAsset, normalizeAssetName, type PromptRefToken } from '@/utils/assetRef';
+
+/** 脚本资产及其对应的画布图片节点引用（以 nodeId 为锚点） */
+interface AssetRef {
+  mention: MentionMarker;
+  assetType: '角色' | '场景' | '道具';
+  assetName: string;
+}
 
 /**
- * 从脚本节点的资产（角色/场景/道具）中收集已准备参考图的 mentions
- * 后端 ImageExecutor 会通过 mentions 查找参考图节点并提取 imageUrl（当前取第一个作为图生图参考）
+ * 从脚本节点的资产（角色/场景/道具）中收集已准备参考图的资产引用
+ * 后端 ImageExecutor 会通过 mentions 中的 nodeId 查找参考图节点并提取 imageUrl
  * 注意：资产图片节点无需通过边连接到分镜图片节点，后端通过 nodeDataByID 全图查找
  */
-function buildAssetMentions(scriptNodeId: string, promptText?: string): MentionMarker[] {
+function buildAssetRefs(scriptNodeId: string): AssetRef[] {
   const store = useCanvasStore.getState();
   const scriptNode = store.nodes.find(n => n.id === scriptNodeId);
   if (!scriptNode || scriptNode.type !== 'script') {
-    console.warn('[ShotNodeSync] buildAssetMentions: 脚本节点未找到或类型非 script:', scriptNodeId);
+    console.warn('[ShotNodeSync] buildAssetRefs: 脚本节点未找到或类型非 script:', scriptNodeId);
     return [];
   }
 
   const scriptData = scriptNode.data as ScriptNodeData;
-  const mentions: MentionMarker[] = [];
+  const refs: AssetRef[] = [];
 
-  const collect = (assets: { name: string; nodeId?: string }[], fallbackLabel: string) => {
+  const collect = (assets: { name: string; nodeId?: string }[], assetType: '角色' | '场景' | '道具') => {
     for (const a of assets) {
       if (!a.nodeId) {
-        console.log(`[ShotNodeSync] 资产[${fallbackLabel}] "${a.name}" 无 nodeId（未生成/上传图片），跳过`);
+        console.log(`[ShotNodeSync] 资产[${assetType}] "${a.name}" 无 nodeId（未生成/上传图片），跳过`);
         continue;
       }
       const imgNode = store.nodes.find(n => n.id === a.nodeId);
       if (!imgNode) {
-        console.warn(`[ShotNodeSync] 资产[${fallbackLabel}] "${a.name}" nodeId=${a.nodeId} 在画布中找不到对应节点`);
+        console.warn(`[ShotNodeSync] 资产[${assetType}] "${a.name}" nodeId=${a.nodeId} 在画布中找不到对应节点`);
         continue;
       }
       const imageUrl = (imgNode.data as { imageUrl?: string }).imageUrl;
       if (!imageUrl) {
-        console.warn(`[ShotNodeSync] 资产[${fallbackLabel}] "${a.name}" 节点 ${a.nodeId} 的 imageUrl 为空`);
+        console.warn(`[ShotNodeSync] 资产[${assetType}] "${a.name}" 节点 ${a.nodeId} 的 imageUrl 为空`);
         continue;
       }
-      console.log(`[ShotNodeSync] 资产[${fallbackLabel}] "${a.name}" 命中: nodeId=${a.nodeId} imageUrl=${imageUrl.slice(0, 60)}`);
-      // ✅ label 用节点 label（如"场景-御花园"），与 prompt 中的 (@场景-御花园) 模式匹配
-      const nodeLabel = (imgNode.data.label as string) || `${fallbackLabel}-${a.name}`;
-      mentions.push({
-        id: a.nodeId,
-        nodeId: a.nodeId,
-        label: nodeLabel,
-        nodeType: 'image',
+      console.log(`[ShotNodeSync] 资产[${assetType}] "${a.name}" 命中: nodeId=${a.nodeId} imageUrl=${imageUrl.slice(0, 60)}`);
+      // ✅ label 用脚本资产的标准格式（类型-名称），与 LLM 生成的 (@类型-名称) 格式对齐；
+      // 不用画布节点 label，避免用户重命名节点后关联失效
+      refs.push({
+        mention: {
+          id: a.nodeId,
+          nodeId: a.nodeId,
+          label: `${assetType}-${a.name}`,
+          nodeType: 'image',
+        },
+        assetType,
+        assetName: a.name,
       });
     }
   };
@@ -70,40 +82,53 @@ function buildAssetMentions(scriptNodeId: string, promptText?: string): MentionM
   collect(scriptData.scenes || [], '场景');
   collect(scriptData.props || [], '道具');
 
-  console.log(`[ShotNodeSync] buildAssetMentions: 全部资产 ${mentions.length} 条（角色=${scriptData.characters?.length || 0} 场景=${scriptData.scenes?.length || 0} 道具=${scriptData.props?.length || 0}）`);
-
-  // ✅ 如果传了 promptText，只保留 prompt 中实际以 (@类型-名称) 引用的资产
-  if (promptText) {
-    const referenced = mentions.filter(m => {
-      if (!m.label) return false;
-      const regex = new RegExp(`[（(]@${escapeRegex(m.label)}[）)]`);
-      return regex.test(promptText);
-    });
-    console.log(`[ShotNodeSync] buildAssetMentions: prompt 实际引用 ${referenced.length}/${mentions.length} 个资产`, referenced.map(m => m.label));
-    return referenced;
-  }
-
-  return mentions;
-}
-
-/** 转义正则特殊字符 */
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  console.log(`[ShotNodeSync] buildAssetRefs: 全部资产 ${refs.length} 条（角色=${scriptData.characters?.length || 0} 场景=${scriptData.scenes?.length || 0} 道具=${scriptData.props?.length || 0}）`);
+  return refs;
 }
 
 /**
- * 将 prompt 中的 (@类型-名称) / （@类型-名称）模式转换为 [[m:<id>]] 占位符
- * 这样 PromptEditor 的 buildHtml 能识别并渲染为可视化的 @引用标签
+ * 解析 token 对应的资产引用：精确名字匹配优先，其次模糊包含匹配
  */
-function convertPromptMentions(prompt: string, mentions: MentionMarker[]): string {
-  let result = prompt;
-  for (const m of mentions) {
-    if (!m.label) continue;
-    // 匹配 (@类型-名称) 或 （@类型-名称），如 (@场景-御花园)
-    const regex = new RegExp(`[（(]@${escapeRegex(m.label)}[）)]`, 'g');
-    result = result.replace(regex, `[[m:${m.id}]]`);
+function resolveTokenRef(token: PromptRefToken, refs: AssetRef[]): AssetRef | null {
+  const t = normalizeAssetName(token.name);
+  for (const r of refs) {
+    if (r.assetType === token.type && normalizeAssetName(r.assetName) === t) return r;
   }
-  return result;
+  for (const r of refs) {
+    if (tokenMatchesAsset(token, r.assetType, r.assetName)) return r;
+  }
+  return null;
+}
+
+/**
+ * 解析分镜提示词中的资产引用（一次性完成筛选 + 占位符转换）
+ * - mentions 以资产 nodeId 为锚点（后端按 ID 查参考图，与名字无关）
+ * - 名字解析采用精确优先 + 模糊包含兜底，名字轻微变化（多/少字、空格差异）也能关联
+ * - prompt 中的 (@类型-名称) 转为 [[m:<nodeId>]] 占位符，让 PromptEditor 渲染为 @标签
+ */
+function resolveShotAssetRefs(scriptNodeId: string, promptText: string): {
+  mentions: MentionMarker[];
+  convertedPrompt: string;
+} {
+  const refs = buildAssetRefs(scriptNodeId);
+  const tokens = extractPromptRefTokens(promptText);
+
+  // 只保留 prompt 中实际引用到的资产（模糊匹配）
+  const matched = refs.filter(r => tokens.some(t => tokenMatchesAsset(t, r.assetType, r.assetName)));
+  console.log(`[ShotNodeSync] prompt 实际引用 ${matched.length}/${refs.length} 个资产`, matched.map(r => r.assetName));
+
+  // 将每个引用 token 替换为 [[m:<nodeId>]]；解析不出对应资产的 token 保留原文
+  let convertedPrompt = promptText;
+  for (const t of tokens) {
+    const ref = resolveTokenRef(t, matched);
+    if (ref) {
+      convertedPrompt = convertedPrompt.split(t.raw).join(`[[m:${ref.mention.id}]]`);
+    } else {
+      console.warn(`[ShotNodeSync] 引用 "${t.raw}" 未解析到任何资产，保留原文`);
+    }
+  }
+
+  return { mentions: matched.map(r => r.mention), convertedPrompt };
 }
 
 /**
@@ -168,9 +193,8 @@ export function createShotImageNode(
   }
 
   const imageNodeId = generateShotImageNodeId(shot.id, scriptNodeId);
-  const assetMentions = buildAssetMentions(scriptNodeId, storyboardPrompt);
-  // ✅ 将 prompt 中的 (@类型-名称) 转为 [[m:<id>]] 占位符，让 PromptEditor 渲染为 @标签
-  const convertedPrompt = convertPromptMentions(storyboardPrompt, assetMentions);
+  // ✅ 解析资产引用：mentions 以 nodeId 锚定，名字模糊匹配兜底；prompt 中 (@类型-名称) 转 [[m:<id>]]
+  const { mentions: assetMentions, convertedPrompt } = resolveShotAssetRefs(scriptNodeId, storyboardPrompt);
   const existing = store.nodes.find(n => n.id === imageNodeId);
   if (existing) {
     // 已存在：更新提示词，复用节点
@@ -237,7 +261,7 @@ export function createShotVideoNode(
 
   const videoNodeId = generateShotVideoNodeId(shot.id, scriptNodeId);
   // 视频节点不需要资产引用，去掉提示词中的 (@类型-名称) 标签
-  const cleanPrompt = finalPrompt.replace(/[（(]@[^\）)]+[）)]/g, '');
+  const cleanPrompt = finalPrompt.replace(/[（(]@[^）)]+[）)]/g, '');
 
   // 查找已存在的分镜图片节点
   const imageNode = findShotImageNode(scriptNodeId, shot.id);

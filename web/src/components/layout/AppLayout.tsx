@@ -6,10 +6,12 @@ import {
   LogoutOutlined,
   ControlOutlined,
   SettingOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
 import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
+import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { getUserAvatarSrc } from '@/utils/avatar';
 
 const { Header: AntHeader, Content } = Layout;
@@ -24,6 +26,7 @@ export function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [showAssetLibrary, setShowAssetLibrary] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -32,6 +35,7 @@ export function AppLayout() {
 
   const userMenuItems: MenuProps['items'] = [
     { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
+    { key: 'assets', icon: <FolderOpenOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
   ];
@@ -102,6 +106,9 @@ export function AppLayout() {
 
             {/* 个人设置弹窗（条件挂载，打开时重新初始化表单） */}
             {showProfileSettings && <ProfileSettingsModal onClose={() => setShowProfileSettings(false)} />}
+
+            {/* 个人资产库弹窗 */}
+            {showAssetLibrary && <AssetLibraryModal onClose={() => setShowAssetLibrary(false)} />}
           </div>
         ) : (
           <button

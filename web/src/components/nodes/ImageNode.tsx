@@ -3,12 +3,15 @@ import type { NodeProps, Node } from '@xyflow/react';
 import {
   PictureOutlined,
   UploadOutlined,
+  ImportOutlined,
   ExperimentOutlined,
 } from '@ant-design/icons';
 import { message } from 'antd';
 import type { ImageNodeData } from '@/types/canvas';
+import type { UserAsset } from '@/services/assetApi';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { BaseNode } from './BaseNode';
+import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { uploadImage } from '@/services/uploadApi';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
@@ -20,6 +23,8 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectId = useCanvasStore((s) => s.projectId);
+  // 从资产库导入图片弹窗
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
 
   // 是否为风格图片节点
   const isStyleNode = id.startsWith('style-');
@@ -79,6 +84,18 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     [id, projectId]
   );
 
+  // 从资产库选中图片：替换节点图片（清掉旧尺寸，由加载 fallback 重新计算）
+  const handlePickAsset = useCallback(
+    (asset: UserAsset) => {
+      useCanvasStore.getState().updateNodeData(id, {
+        imageUrl: asset.url,
+        width: undefined,
+        height: undefined,
+      } as Partial<ImageNodeData>);
+    },
+    [id]
+  );
+
   // 标题栏右侧内容 — useMemo 避免每次渲染重建 JSX 导致 BaseNode 无效重渲染
   const headerRight = useMemo(() => {
     if (isStyleNode) {
@@ -90,21 +107,30 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         </span>
       );
     }
-    if (data.imageUrl && imageWidth && imageHeight) {
-      return (
-        <span className="text-[11px] text-gray-400 flex-shrink-0 ml-2">
-          {imageWidth} × {imageHeight}
-        </span>
-      );
-    }
+    // 图标按钮：上传/重传 + 从资产库导入
+    const iconBtnCls = 'flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer';
     return (
-      <button
-        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500 hover:bg-blue-600 text-[12px] text-white transition-colors cursor-pointer flex-shrink-0"
-        onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-      >
-        <UploadOutlined className="text-[11px]" />
-        上传
-      </button>
+      <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+        {data.imageUrl && imageWidth && imageHeight && (
+          <span className="text-[11px] text-gray-400 mr-1">
+            {imageWidth} × {imageHeight}
+          </span>
+        )}
+        <button
+          className={iconBtnCls}
+          title={data.imageUrl ? '重新上传图片' : '上传图片'}
+          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+        >
+          <UploadOutlined className="text-[12px]" />
+        </button>
+        <button
+          className={iconBtnCls}
+          title="从个人资产库导入"
+          onClick={(e) => { e.stopPropagation(); setShowAssetPicker(true); }}
+        >
+          <ImportOutlined className="text-[12px]" />
+        </button>
+      </div>
     );
   }, [data.imageUrl, imageWidth, imageHeight, isStyleNode]);
 
@@ -167,6 +193,15 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
           onChange={handleUpload}
         />
       </BaseNode>
+
+      {/* 从资产库导入图片（Modal 默认 portal 到 body，不受画布 transform 影响） */}
+      {showAssetPicker && (
+        <AssetLibraryModal
+          pickType="image"
+          onClose={() => setShowAssetPicker(false)}
+          onPick={handlePickAsset}
+        />
+      )}
     </>
   );
 });

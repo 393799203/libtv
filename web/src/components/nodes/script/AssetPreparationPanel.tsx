@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useRef, useState } from 'react';
 import { PlusOutlined } from '@ant-design/icons';
 import type {
   ScriptCharacter,
@@ -7,6 +7,9 @@ import type {
 } from '@/types/canvas';
 import { AssetEditModal } from './AssetEditModal';
 import { NodeAssociateModal } from './NodeAssociateModal';
+import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
+import type { UserAsset } from '@/services/assetApi';
+import { uploadImage } from '@/services/uploadApi';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
 import {
@@ -17,17 +20,23 @@ import {
   associateExistingImageNode,
 } from '@/utils/assetImageSync';
 
+type AssetType = 'character' | 'scene' | 'prop';
+
 // ---- 单个资产卡片（角色/场景/道具通用）----
 interface AssetCardProps<T extends { name: string; description: string }> {
   item: T;
   index: number;
   scriptNodeId: string;
-  assetType: 'character' | 'scene' | 'prop';
+  assetType: AssetType;
   onAdd?: () => void; // 仅最后一个卡片显示"添加"
   showAdd?: boolean;
   /** 卡片点击回调（用于弹出编辑弹窗） */
   onClick?: () => void;
-  /** "关联已有节点"按钮回调 */
+  /** "上传图片"按钮回调 */
+  onUploadImageClick?: () => void;
+  /** "导入资产"按钮回调 */
+  onImportAssetClick?: () => void;
+  /** "关联已有"按钮回调 */
   onAssociateClick?: () => void;
 }
 
@@ -38,6 +47,8 @@ function AssetCard<T extends { name: string; description: string }>({
   onAdd,
   showAdd,
   onClick,
+  onUploadImageClick,
+  onImportAssetClick,
   onAssociateClick,
 }: AssetCardProps<T>) {
   // ✅ 从画布图片节点实时读取 imageUrl（不再依赖脚本节点 data）
@@ -56,6 +67,22 @@ function AssetCard<T extends { name: string; description: string }>({
       onClick?.();
     },
     [onClick, onAdd, showAdd]
+  );
+
+  const handleUploadImageClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onUploadImageClick?.();
+    },
+    [onUploadImageClick]
+  );
+
+  const handleImportAssetClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onImportAssetClick?.();
+    },
+    [onImportAssetClick]
   );
 
   const handleAssociateClick = useCallback(
@@ -95,20 +122,26 @@ function AssetCard<T extends { name: string; description: string }>({
         </div>
       )}
 
-      {/* 悬浮操作按钮（非"添加"卡片）：上传或生成 / 关联已有节点（上下排列） */}
+      {/* 悬浮操作按钮（非"添加"卡片）：上传图片 / 导入资产 / 关联已有（上下排列） */}
       {!showAdd && (
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
           <button
-            className="px-2 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
-            onClick={handleCardClick}
+            className="px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            onClick={handleUploadImageClick}
           >
-            上传或生成
+            上传图片
           </button>
           <button
-            className="px-2 py-1.5 bg-white text-xs rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            className="px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            onClick={handleImportAssetClick}
+          >
+            导入资产
+          </button>
+          <button
+            className="px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50"
             onClick={handleAssociateClick}
           >
-            关联已有节点
+            关联已有
           </button>
         </div>
       )}
@@ -128,11 +161,15 @@ interface AssetSectionProps<
   title: string;
   items: T[];
   scriptNodeId: string;
-  assetType: 'character' | 'scene' | 'prop';
+  assetType: AssetType;
   onAdd?: () => void;
   /** 卡片点击回调（用于角色编辑等场景） */
   onCardClick?: (item: T) => void;
-  /** 卡片"关联已有节点"回调 */
+  /** 卡片"上传图片"回调 */
+  onCardUploadImage?: (item: T) => void;
+  /** 卡片"导入资产"回调 */
+  onCardImportAsset?: (item: T) => void;
+  /** 卡片"关联已有"回调 */
   onCardAssociate?: (item: T) => void;
 }
 
@@ -145,6 +182,8 @@ function AssetSection<
   assetType,
   onAdd,
   onCardClick,
+  onCardUploadImage,
+  onCardImportAsset,
   onCardAssociate,
 }: AssetSectionProps<T>) {
   return (
@@ -162,6 +201,8 @@ function AssetSection<
             scriptNodeId={scriptNodeId}
             assetType={assetType}
             onClick={onCardClick ? () => onCardClick(item) : undefined}
+            onUploadImageClick={onCardUploadImage ? () => onCardUploadImage(item) : undefined}
+            onImportAssetClick={onCardImportAsset ? () => onCardImportAsset(item) : undefined}
             onAssociateClick={onCardAssociate ? () => onCardAssociate(item) : undefined}
           />
         ))}
@@ -219,9 +260,15 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
 
     // 正在"关联已有节点"的资产（弹出选择弹窗）
     const [associating, setAssociating] = useState<{
-      assetType: 'character' | 'scene' | 'prop';
+      assetType: AssetType;
       name: string;
     } | null>(null);
+
+    // 正在"上传图片"的资产（隐藏 file input 选完文件后上传）
+    const [uploadTarget, setUploadTarget] = useState<{ assetType: AssetType; name: string } | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    // 正在"导入资产"的资产（弹出资产库选择弹窗）
+    const [importTarget, setImportTarget] = useState<{ assetType: AssetType; name: string } | null>(null);
 
     // ✅ 通用的画布实时保存函数（避免代码重复）
     const saveCanvasRealtime = useCallback(async () => {
@@ -280,7 +327,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
 
     // ✅ 关联画布上已有的图片节点到指定资产（写 nodeId + 连边 + 同步 imageUrl + 保存画布）
     const handleAssociateNode = useCallback(
-      async (assetType: 'character' | 'scene' | 'prop', name: string, nodeId: string) => {
+      async (assetType: AssetType, name: string, nodeId: string) => {
         const ok = associateExistingImageNode(scriptNodeId, assetType, name, nodeId);
         if (!ok) return;
 
@@ -423,6 +470,62 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
       [data.props, onUpdate]
     );
 
+    // ✅ 将图片 URL 写入指定资产（上传图片 / 导入资产的公共分发入口，
+    // 复用各类型已有的 handle*Upload：同步脚本数据 + 图片节点 + 实时保存画布）
+    const dispatchAssetImageUrl = useCallback(
+      (assetType: AssetType, name: string, url: string) => {
+        if (assetType === 'character') {
+          void handleCharacterUpload(name, url);
+        } else if (assetType === 'scene') {
+          void handleSceneUpload(name, url);
+        } else {
+          void handlePropUpload(name, url);
+        }
+      },
+      [handleCharacterUpload, handleSceneUpload, handlePropUpload]
+    );
+
+    // 卡片"上传图片"：记录目标资产并唤起文件选择
+    const handleCardUploadImage = useCallback((assetType: AssetType, name: string) => {
+      setUploadTarget({ assetType, name });
+      fileInputRef.current?.click();
+    }, []);
+
+    // 文件选中后上传，完成后走公共分发
+    const handleFileChange = useCallback(
+      async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        const target = uploadTarget;
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (!file || !target) return;
+        try {
+          const projectId = useCanvasStore.getState().projectId;
+          const result = await uploadImage(file, projectId || undefined);
+          dispatchAssetImageUrl(target.assetType, target.name, result.url);
+        } catch (err) {
+          console.error('[AssetPreparationPanel] 图片上传失败:', err);
+        } finally {
+          setUploadTarget(null);
+        }
+      },
+      [uploadTarget, dispatchAssetImageUrl]
+    );
+
+    // 卡片"导入资产"：记录目标资产，弹出资产库选择弹窗
+    const handleCardImportAsset = useCallback((assetType: AssetType, name: string) => {
+      setImportTarget({ assetType, name });
+    }, []);
+
+    // 资产库选中图片：直接用资产 URL 走公共分发（无需重复上传）
+    const handlePickAsset = useCallback(
+      (asset: UserAsset) => {
+        if (importTarget) {
+          dispatchAssetImageUrl(importTarget.assetType, importTarget.name, asset.url);
+        }
+      },
+      [importTarget, dispatchAssetImageUrl]
+    );
+
     return (
       <div className="px-5 py-4 overflow-y-auto">
         {/* 角色 */}
@@ -432,6 +535,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           scriptNodeId={scriptNodeId}
           assetType="character"
           onCardClick={(item) => setEditingCharacter(item as ScriptCharacter)}
+          onCardUploadImage={(item) => handleCardUploadImage('character', item.name)}
+          onCardImportAsset={(item) => handleCardImportAsset('character', item.name)}
           onCardAssociate={(item) => setAssociating({ assetType: 'character', name: item.name })}
         />
 
@@ -442,6 +547,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           scriptNodeId={scriptNodeId}
           assetType="scene"
           onCardClick={(item) => setEditingScene(item as ScriptScene)}
+          onCardUploadImage={(item) => handleCardUploadImage('scene', item.name)}
+          onCardImportAsset={(item) => handleCardImportAsset('scene', item.name)}
           onCardAssociate={(item) => setAssociating({ assetType: 'scene', name: item.name })}
         />
 
@@ -452,6 +559,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           scriptNodeId={scriptNodeId}
           assetType="prop"
           onCardClick={(item) => setEditingProp(item as ScriptProp)}
+          onCardUploadImage={(item) => handleCardUploadImage('prop', item.name)}
+          onCardImportAsset={(item) => handleCardImportAsset('prop', item.name)}
           onCardAssociate={(item) => setAssociating({ assetType: 'prop', name: item.name })}
         />
 
@@ -513,6 +622,24 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           }}
           onClose={() => setAssociating(null)}
         />
+
+        {/* 隐藏的图片上传 input（卡片"上传图片"用） */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+
+        {/* 从资产库导入图片（卡片"导入资产"用，Modal portal 到 body 不受画布 transform 影响） */}
+        {importTarget && (
+          <AssetLibraryModal
+            pickType="image"
+            onClose={() => setImportTarget(null)}
+            onPick={handlePickAsset}
+          />
+        )}
       </div>
     );
   }

@@ -247,30 +247,20 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
     setCurrentTime(audio.currentTime);
   }, [data.audioUrl]);
 
-  // ====== 头部右侧：上传按钮 ======
+  // ====== 头部右侧：图标按钮（与图片/视频节点统一） ======
   const headerRight = useMemo(() => {
-    if (data.audioUrl) {
-      return (
-        <button
-          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-[11px] text-white transition-colors cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-          title="重新上传音频"
-        >
-          <UploadOutlined className="text-[10px]" />
-          重传
-        </button>
-      );
-    }
+    const iconBtnCls = `flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer ${uploading ? 'opacity-50 cursor-wait' : ''}`;
     return (
-      <button
-        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[12px] text-white transition-colors cursor-pointer flex-shrink-0 ${
-          uploading ? 'bg-emerald-300 cursor-wait' : 'bg-emerald-500 hover:bg-emerald-600'
-        }`}
-        onClick={(e) => { e.stopPropagation(); if (!uploading) fileInputRef.current?.click(); }}
-      >
-        <UploadOutlined className="text-[11px]" />
-        {uploading ? `${uploadPercent}%` : '上传'}
-      </button>
+      <div className="flex items-center gap-0.5 flex-shrink-0">
+        {uploading && <span className="text-[11px] text-emerald-500 mr-1">{uploadPercent}%</span>}
+        <button
+          className={iconBtnCls}
+          title={data.audioUrl ? '重新上传音频' : '上传音频'}
+          onClick={(e) => { e.stopPropagation(); if (!uploading) fileInputRef.current?.click(); }}
+        >
+          <UploadOutlined className="text-[12px]" />
+        </button>
+      </div>
     );
   }, [data.audioUrl, uploading, uploadPercent]);
 
