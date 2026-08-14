@@ -272,8 +272,8 @@ export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryMod
             setActiveTab(type);
           }}
           items={[
-            { key: 'image', label: `图片资产（${images.length}）` },
-            { key: 'video', label: `视频资产（${videos.length}）` },
+            { key: 'image', label: '图片资产' },
+            { key: 'video', label: '视频资产' },
           ]}
         />
       )}
