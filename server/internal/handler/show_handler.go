@@ -188,6 +188,15 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 		Status:      req.Status,
 		ProjectID:   req.ProjectID,
 	}
+
+	// 同一项目已存在审核通过的 show 时，禁止从画布侧重复提交审核
+	if req.ProjectID != "" {
+		if existing, err := h.showService.GetShowByProjectID(c.Request.Context(), req.ProjectID); err == nil && existing != nil && existing.Status == "published" {
+			response.Fail(c, http.StatusForbidden, "该项目视频已审核通过，不能重复提交审核")
+			return
+		}
+	}
+
 	h.showService.ResolveAuthor(c.Request.Context(), show, req.AuthorID)
 
 	if err := h.showService.CreateShow(c.Request.Context(), show); err != nil {
@@ -201,7 +210,8 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 // UploadThumbnail 上传封面图并关联到视频记录
 func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	id := c.Param("id")
-	if _, err := h.showService.GetByID(c.Request.Context(), id); err != nil {
+	show, err := h.showService.GetByID(c.Request.Context(), id)
+	if err != nil {
 		response.FailWith(c, err)
 		return
 	}
@@ -212,12 +222,24 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 		return
 	}
 
-	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+	// 存储目录：
+	// - 已发布（published）的视频换封面直接存对外 shows/ 目录（已对外展示，无需再走审核复制）
+	// - 待审核/已拒绝的封面暂存用户画布目录 users/<userID>/canvas/<projectID>/，审核通过时才复制到 shows/
+	// - 无项目关联时降级公共 shows/ 目录
+	opts := service.UploadOptions{
 		Dir:            "shows",
 		AllowedExts:    service.ImageExts(),
 		MaxSize:        10 * 1024 * 1024,
 		ContentTypeFor: service.ContentTypeForImage,
-	})
+	}
+	if show.ProjectID != "" && show.Status != "published" {
+		if project, err := h.projectRepo.FindByID(c.Request.Context(), show.ProjectID); err == nil && project != nil && project.UserID != "" {
+			opts.Dir = "users/" + project.UserID + "/canvas"
+			opts.ProjectID = show.ProjectID
+		}
+	}
+
+	result, err := h.fileUploadService.Upload(file, header, opts)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
@@ -322,6 +344,11 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 		show.CategoryID = *req.CategoryID
 	}
 	if req.Status != nil {
+		// 已审核通过（published）的 show 不允许被改回待审核，避免画布侧重复提交绕过审核
+		if show.Status == "published" && *req.Status != "published" {
+			response.Fail(c, http.StatusForbidden, "该视频已审核通过，不能重新提交审核")
+			return
+		}
 		show.Status = *req.Status
 	}
 

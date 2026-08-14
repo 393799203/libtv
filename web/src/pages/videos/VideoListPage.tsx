@@ -135,9 +135,13 @@ const VideoCard = memo(function VideoCard({
         </div>
         {/* 时长和作者信息 - 合并到一个叠加层，减少absolute元素 */}
         <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between z-20">
-          {/* 作者信息 */}
+          {/* 作者信息：优先用作者真实头像，缺失时用作者首字占位 */}
           <div className="flex items-center gap-1">
-            <img src={`https://picsum.photos/32/32?random=${item.authorId}`} alt="" className="w-4 h-4 rounded-full border border-white/50" loading="lazy" decoding="async" />
+            {item.authorAvatar ? (
+              <img src={item.authorAvatar} alt="" className="w-4 h-4 rounded-full border border-white/50 object-cover" loading="lazy" decoding="async" />
+            ) : (
+              <div className="w-4 h-4 rounded-full border border-white/50 bg-gray-500 text-white text-[8px] flex items-center justify-center">{item.author.slice(0, 1)}</div>
+            )}
             <span className="text-white text-[11px] drop-shadow-sm truncate max-w-[100px]">{item.author}</span>
           </div>
           {/* 时长 */}
@@ -357,6 +361,7 @@ export default function VideoListPage() {
         duration: item.duration,
         author: item.author || 'LibTV',
         authorId: item.author_id || '',
+        authorAvatar: item.author_avatar || '',
         tags: item.tags || undefined,
         category: item.category?.name,
         likes: item.likes || 0,
@@ -392,6 +397,7 @@ export default function VideoListPage() {
         duration: item.duration,
         author: item.author || 'LibTV',
         authorId: item.author_id || '',
+        authorAvatar: item.author_avatar || '',
         tags: item.tags || undefined,
         category: item.category?.name,
         likes: item.likes || 0,

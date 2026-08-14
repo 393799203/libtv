@@ -236,7 +236,7 @@ export default function AddShowDialog({
       const result = await uploadVideo(file, (pct, phase) => {
         setVideoUploadProgress(pct);
         if (phase) setVideoUploadPhase(phase);
-      });
+      }, projectId);
       setAddShowForm(prev => ({ ...prev, video_url: result.url }));
       setVideoUploadedUrl(result.url);
       if (result.cached) {
@@ -289,6 +289,10 @@ export default function AddShowDialog({
   };
 
   const handleAddShowSubmit = async () => {
+    if (alreadyApproved) {
+      message.warning('该视频已审核通过，不能重复提交审核');
+      return;
+    }
     if (!addShowForm.title.trim()) return;
     if (!editingShow && !existingShow && !addShowFile) return;
     const categoryId = selectedCategoryId || activeCategoryId;
@@ -342,6 +346,9 @@ export default function AddShowDialog({
     onClose();
   };
 
+  // 画布侧提交时，关联的 show 已审核通过：不允许再次提交审核
+  const alreadyApproved = status === 'pending' && existingShow?.status === 'published';
+
   if (!open) return null;
 
   return (
@@ -363,6 +370,12 @@ export default function AddShowDialog({
           )}
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* 已审核通过提示：画布侧不能再次提交 */}
+          {alreadyApproved && (
+            <div className="px-3 py-2 bg-green-50 border border-green-200 text-green-700 text-[12px] rounded-lg">
+              该视频已审核通过并对外发布，无需再次提交审核
+            </div>
+          )}
           {/* 标签选择（当有多个分类时显示） */}
           {categories.length > 0 && (
             <div>
@@ -614,8 +627,8 @@ export default function AddShowDialog({
 
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 shrink-0">
           <button onClick={handleClose} className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer">取消</button>
-          <button onClick={handleAddShowSubmit} disabled={addingShow || (!editingShow && !existingShow && !addShowFile)} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
-            {addingShow ? '提交中...' : (editingShow ? '保存' : status === 'pending' ? '提交' : '创建')}
+          <button onClick={handleAddShowSubmit} disabled={addingShow || alreadyApproved || (!editingShow && !existingShow && !addShowFile)} className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+            {addingShow ? '提交中...' : alreadyApproved ? '已审核通过' : (editingShow ? '保存' : status === 'pending' ? '提交' : '创建')}
           </button>
         </div>
       </div>

@@ -14,6 +14,7 @@ import {
   UserOutlined,
   VideoCameraOutlined,
   CaretRightOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
@@ -57,12 +58,12 @@ export default function AdminPage() {
   const [banners, setBanners] = useState<BannerItem[]>([]);
   const [bannersLoading, setBannersLoading] = useState(false);
   const [showAddBannerDialog, setShowAddBannerDialog] = useState(false);
-  const [addBannerForm, setAddBannerForm] = useState({ 
-    title: '', 
-    description: '', 
-    link_url: '', 
-    sort_order: 0, 
-    is_active: true 
+  const [addBannerForm, setAddBannerForm] = useState({
+    title: '',
+    description: '',
+    link_url: '',
+    sort_order: 0,
+    is_active: true
   });
   const [addBannerFile, setAddBannerFile] = useState<File | null>(null);
   const [addBannerPreviewUrl, setAddBannerPreviewUrl] = useState('');
@@ -87,6 +88,8 @@ export default function AdminPage() {
   const [showPendingView, setShowPendingView] = useState(false);
   const [pendingShows, setPendingShows] = useState<ShowItem[]>([]);
   const [pendingLoading, setPendingLoading] = useState(false);
+  // 正在审核中的视频（审批需要复制文件到对外目录，可能较慢，期间按钮显示 loading）
+  const [reviewingShow, setReviewingShow] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
   // 作者搜索（风格弹窗使用）
   const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
   const [authorSearching, setAuthorSearching] = useState(false);
@@ -233,7 +236,7 @@ export default function AdminPage() {
       message.error('请填写标题');
       return;
     }
-    
+
     setAddingBanner(true);
     try {
       if (editingBanner) {
@@ -266,7 +269,7 @@ export default function AdminPage() {
         console.log('版图创建成功，ID:', res.id);
         message.success('版图创建成功');
       }
-      
+
       setShowAddBannerDialog(false);
       if (addBannerPreviewUrl && addBannerPreviewUrl.startsWith('blob:')) {
         URL.revokeObjectURL(addBannerPreviewUrl);
@@ -362,19 +365,29 @@ export default function AdminPage() {
   };
 
   const handleApproveShow = async (id: string) => {
+    if (reviewingShow) return;
+    setReviewingShow({ id, action: 'approve' });
     try {
       await showApi.approve(id);
       message.success('已审核通过');
       loadPendingShows();
-    } catch {}
+    } catch {
+    } finally {
+      setReviewingShow(null);
+    }
   };
 
   const handleRejectShow = async (id: string) => {
+    if (reviewingShow) return;
+    setReviewingShow({ id, action: 'reject' });
     try {
       await showApi.reject(id);
       message.success('已标记不通过');
       loadPendingShows();
-    } catch {}
+    } catch {
+    } finally {
+      setReviewingShow(null);
+    }
   };
 
   const handleDeleteShow = async (id: string) => {
@@ -713,24 +726,6 @@ export default function AdminPage() {
                                   ))}
                                 </div>
 
-                                {/* 审核按钮（hover 显示） */}
-                                <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                  {show.status === 'rejected' ? (
-                                    <button onClick={() => handleDeleteShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="删除">
-                                      删除
-                                    </button>
-                                  ) : (
-                                    <>
-                                      <button onClick={() => handleApproveShow(show.id)} className="px-2.5 py-1 bg-green-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-green-500 transition-colors cursor-pointer font-medium" title="审核通过">
-                                        通过
-                                      </button>
-                                      <button onClick={() => handleRejectShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="不通过">
-                                        不通过
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-
                                 {/* 底部信息遮罩 */}
                                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-8 pb-2.5 z-10">
                                   <div className="flex items-center justify-between">
@@ -743,6 +738,24 @@ export default function AdminPage() {
                                 </div>
                               </>
                             )}
+
+                            {/* 审核按钮：非播放时 hover 显示，播放中常驻显示（供看完直接审批） */}
+                            <div className={`absolute top-2 right-2 flex gap-1.5 transition-opacity z-30 ${playingShowId === show.id ? '' : 'opacity-0 group-hover:opacity-100'}`}>
+                              {show.status === 'rejected' ? (
+                                <button onClick={() => handleDeleteShow(show.id)} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer font-medium" title="删除">
+                                  删除
+                                </button>
+                              ) : (
+                                <>
+                                  <button onClick={() => handleApproveShow(show.id)} disabled={reviewingShow !== null} className="px-2.5 py-1 bg-green-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-green-500 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-medium inline-flex items-center gap-1" title="审核通过">
+                                    {reviewingShow?.id === show.id && reviewingShow.action === 'approve' ? (<><LoadingOutlined spin />处理中</>) : '通过'}
+                                  </button>
+                                  <button onClick={() => handleRejectShow(show.id)} disabled={reviewingShow !== null} className="px-2.5 py-1 bg-red-500/80 backdrop-blur-sm text-white text-[11px] rounded-md hover:bg-red-500 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-medium inline-flex items-center gap-1" title="不通过">
+                                    {reviewingShow?.id === show.id && reviewingShow.action === 'reject' ? (<><LoadingOutlined spin />处理中</>) : '不通过'}
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -1129,19 +1142,19 @@ export default function AdminPage() {
                               <UploadOutlined style={{ fontSize: 20 }} />
                             </div>
                           )}
-                          
+
                           {/* 悬浮遮罩层：标题+操作按钮 */}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
                             {/* 标题 */}
                             <h3 className="text-[13px] font-medium text-white truncate mb-2">{banner.title}</h3>
-                            
+
                             {/* 操作按钮 */}
                             <div className="flex items-center gap-1.5">
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleToggleBannerActive(banner); }}
                                 className={`flex-1 px-2 py-1 text-[11px] rounded transition-colors cursor-pointer ${
-                                  banner.is_active 
-                                    ? 'bg-white/20 text-white hover:bg-white/30' 
+                                  banner.is_active
+                                    ? 'bg-white/20 text-white hover:bg-white/30'
                                     : 'bg-green-500/80 text-white hover:bg-green-500'
                                 }`}
                               >
@@ -1161,14 +1174,14 @@ export default function AdminPage() {
                               </button>
                             </div>
                           </div>
-                          
+
                           {/* 状态标签 */}
                           <div className={`absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-medium ${
                             banner.is_active ? 'bg-green-500 text-white' : 'bg-gray-500 text-white'
                           }`}>
                             {banner.is_active ? '启用' : '禁用'}
                           </div>
-                          
+
                           {/* 排序标签 */}
                           <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/50 text-white rounded text-[10px]">
                             #{banner.sort_order}
@@ -1331,8 +1344,8 @@ export default function AdminPage() {
                 <label className="block text-[12px] text-gray-500 mb-1.5">
                   版图图片 {!editingBanner && <span className="text-red-400">*</span>}
                 </label>
-                <div 
-                  onClick={() => !bannerImageUploading && addBannerFileRef.current?.click()} 
+                <div
+                  onClick={() => !bannerImageUploading && addBannerFileRef.current?.click()}
                   className={`w-full aspect-[16/9] border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-blue-300 transition-colors overflow-hidden relative ${bannerImageUploading ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   {bannerImageUploading ? (
@@ -1352,12 +1365,12 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
-                <input 
-                  ref={addBannerFileRef} 
-                  type="file" 
-                  accept=".jpg,.jpeg,.png,.webp,.gif" 
-                  className="hidden" 
-                  onChange={handleSelectBannerFile} 
+                <input
+                  ref={addBannerFileRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.gif"
+                  className="hidden"
+                  onChange={handleSelectBannerFile}
                 />
               </div>
 
@@ -1425,15 +1438,15 @@ export default function AdminPage() {
             </div>
 
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 shrink-0">
-              <button 
-                onClick={() => { setShowAddBannerDialog(false); URL.revokeObjectURL(addBannerPreviewUrl); }} 
+              <button
+                onClick={() => { setShowAddBannerDialog(false); URL.revokeObjectURL(addBannerPreviewUrl); }}
                 className="px-4 py-1.5 text-[13px] text-gray-500 hover:bg-gray-100 rounded-lg cursor-pointer"
               >
                 取消
               </button>
-              <button 
-                onClick={handleAddBannerSubmit} 
-                disabled={addingBanner || (!editingBanner && !addBannerFile) || !addBannerForm.title.trim()} 
+              <button
+                onClick={handleAddBannerSubmit}
+                disabled={addingBanner || (!editingBanner && !addBannerFile) || !addBannerForm.title.trim()}
                 className="px-4 py-1.5 text-[13px] bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
               >
                 {addingBanner ? '提交中...' : (editingBanner ? '保存' : '创建')}

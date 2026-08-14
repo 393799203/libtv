@@ -27,6 +27,7 @@ export interface VideoListItem {
   duration: number;
   author: string;
   authorId: string;
+  authorAvatar?: string;
   tags?: string[];
   category?: string; // 分类名称
   likes: number;

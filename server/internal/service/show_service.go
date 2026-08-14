@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"path"
+	"strings"
 
 	"libtv/internal/model"
 	"libtv/internal/pkg/apperror"
@@ -66,8 +69,68 @@ func (s *ShowService) ApproveShow(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+
+	// 审核通过时把视频复制到对外公布的 videos/ 目录，封面复制到 shows/ 目录，
+	// 发布后对外展示的是副本，不再直接引用用户画布目录里的源文件
+	if show.VideoURL != "" {
+		newURL, err := s.copyToPublicDir(show.VideoURL, "videos")
+		if err != nil {
+			return fmt.Errorf("复制视频到对外目录失败: %w", err)
+		}
+		show.VideoURL = newURL
+	}
+	if show.ThumbnailURL != "" {
+		newURL, err := s.copyToPublicDir(show.ThumbnailURL, "shows")
+		if err != nil {
+			return fmt.Errorf("复制封面到对外目录失败: %w", err)
+		}
+		show.ThumbnailURL = newURL
+	}
+
 	show.Status = "published"
 	return s.showRepo.UpdateShow(ctx, show)
+}
+
+// copyToPublicDir 把存储内的文件复制到对外目录（videos/ 或 shows/），返回新 URL。
+// 幂等：已在目标目录的直接返回；目标已存在同名文件时复用；不归本存储管辖的外部 URL 保持原样
+func (s *ShowService) copyToPublicDir(url, dir string) (string, error) {
+	objectName, ok := s.storage.ParseObjectName(url)
+	if !ok {
+		return url, nil
+	}
+	if strings.HasPrefix(objectName, dir+"/") {
+		return url, nil
+	}
+
+	targetName := dir + "/" + path.Base(objectName)
+	if _, err := s.storage.StatObject(targetName); err == nil {
+		return s.storage.GetURL(targetName), nil
+	}
+
+	info, err := s.storage.StatObject(objectName)
+	if err != nil {
+		return "", fmt.Errorf("源文件不存在: %s", objectName)
+	}
+	reader, err := s.storage.GetObject(objectName)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	contentType := info.ContentType
+	if contentType == "" {
+		// StatObject 返回空时按扩展名兜底
+		ext := strings.ToLower(path.Ext(objectName))
+		if dir == "videos" {
+			contentType = ContentTypeForVideo(ext)
+		} else {
+			contentType = ContentTypeForImage(ext)
+		}
+	}
+	if err := s.storage.PutObject(targetName, reader, info.Size, contentType); err != nil {
+		return "", err
+	}
+	log.Printf("[ShowService] 已复制到对外目录: %s -> %s", objectName, targetName)
+	return s.storage.GetURL(targetName), nil
 }
 
 func (s *ShowService) RejectShow(ctx context.Context, id string) error {
@@ -98,6 +161,7 @@ func (s *ShowService) ResolveAuthor(ctx context.Context, show *model.Show, autho
 	} else {
 		show.Author = user.Email
 	}
+	show.AuthorAvatar = user.AvatarURL
 }
 
 // UpdateThumbnail 更新视频封面，并清理旧封面文件
