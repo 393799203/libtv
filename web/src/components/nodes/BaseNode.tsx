@@ -129,20 +129,18 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         )}
       </div>
 
-      {/* 输入 Handle */}
+      {/* 输入 Handle（左耳）：锚定在节点左边缘中心（连线从边框连出），hover 节点时 ease 弹出 */}
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-[var(--node-color)] libtv-handle"
-        style={{ '--node-color': effectiveColor } as React.CSSProperties}
+        className="libtv-handle libtv-handle-left"
       />
 
-      {/* 输出 Handle */}
+      {/* 输出 Handle（右耳）：锚定在节点右边缘中心 */}
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-[var(--node-color)] libtv-handle"
-        style={{ '--node-color': effectiveColor } as React.CSSProperties}
+        className="libtv-handle libtv-handle-right"
       />
     </div>
   );

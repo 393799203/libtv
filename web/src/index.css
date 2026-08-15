@@ -66,30 +66,89 @@
   }
 }
 
-.react-flow__handle {
-  transition: all 0.15s ease;
-  width: 14px !important;
-  height: 14px !important;
-  border: 2px solid #fff !important;
-  border-radius: 50% !important;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+/* 节点连接点（左右耳朵）：Handle 元素本身锚定在节点左右边缘中心（连线从边缘中心连出，不脱离节点），
+   视觉圆圈用伪元素绘制，hover 节点时从边缘中心 ease 弹出，停留在节点外侧 12px */
+.react-flow__handle.libtv-handle {
+  top: 50%;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
-.react-flow__handle:hover {
-  transform: scale(1.4);
-  background-color: #3b82f6 !important;
-  border-color: #fff !important;
+.react-flow__handle-left.libtv-handle {
+  left: 0;
+  transform: translate(-50%, -50%);
+}
+.react-flow__handle-right.libtv-handle {
+  left: 100%;
+  right: auto;
+  transform: translate(-50%, -50%);
 }
 
-/* 基础节点连线区域 - 扩大热区 + 带圈+光标 */
-.libtv-handle {
-  position: relative;
-}
-.libtv-handle::after {
-  content: '';
+/* 耳朵视觉元素：外圆圈 + 加号，隐藏态收在边缘中心（缩小透明） */
+.react-flow__handle.libtv-handle::before,
+.react-flow__handle.libtv-handle::after {
   position: absolute;
-  inset: -14px;
-  cursor: cell;
+  left: 50%;
+  top: 50%;
+  transition: transform 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.react-flow__handle.libtv-handle::before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
   border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  transform: translate(-50%, -50%) scale(0.4);
+}
+.react-flow__handle.libtv-handle::after {
+  content: '+';
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  color: #6b7280;
+  transform: translate(-50%, -52%) scale(0.4);
+}
+
+/* hover 节点时弹出：圆圈从边缘中心 ease 滑出，停留在节点外侧 12px */
+.react-flow__node:hover .react-flow__handle.libtv-handle {
+  opacity: 1;
+  pointer-events: all;
+}
+.react-flow__node:hover .react-flow__handle-left.libtv-handle::before {
+  transform: translate(-50%, -50%) translateX(-12px) scale(1);
+}
+.react-flow__node:hover .react-flow__handle-left.libtv-handle::after {
+  transform: translate(-50%, -52%) translateX(-12px) scale(1);
+}
+.react-flow__node:hover .react-flow__handle-right.libtv-handle::before {
+  transform: translate(-50%, -50%) translateX(12px) scale(1);
+}
+.react-flow__node:hover .react-flow__handle-right.libtv-handle::after {
+  transform: translate(-50%, -52%) translateX(12px) scale(1);
+}
+
+/* 耳朵自身的 hover 反馈 */
+.react-flow__node:hover .react-flow__handle-left.libtv-handle:hover::before {
+  border-color: #3b82f6;
+  transform: translate(-50%, -50%) translateX(-12px) scale(1.1);
+}
+.react-flow__node:hover .react-flow__handle-right.libtv-handle:hover::before {
+  border-color: #3b82f6;
+  transform: translate(-50%, -50%) translateX(12px) scale(1.1);
+}
+.react-flow__handle.libtv-handle:hover::after {
+  color: #3b82f6;
+}
+
+/* 拖拽连线悬停到目标节点：卡片微微放大 + 蓝色高亮 outline，释放后恢复原样 */
+.react-flow__node.libtv-connect-target > div {
+  transform: scale(1.03);
+  box-shadow: 0 0 0 2px #3b82f6, 0 8px 24px rgba(59, 130, 246, 0.3) !important;
 }
 
 /* 连线默认实线（不强制覆盖，由组件控制） */

@@ -9,6 +9,7 @@ import {
   type OnNodesChange,
   type OnEdgesChange,
   type OnConnect,
+  type OnConnectStart,
   type NodeOrigin,
   type DefaultEdgeOptions,
   type Viewport,
@@ -77,6 +78,9 @@ export const Canvas = memo(function Canvas() {
   const suppressPromptRef = useRef(false);
   // 防止 onPaneClick 在连线释放时误关弹窗
   const connectingRef = useRef(false);
+  // 拖拽连线中：源节点 ID + 当前悬停的目标节点 ID（目标节点放大 + 高亮 outline）
+  const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  const [connectTargetId, setConnectTargetId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
@@ -126,6 +130,36 @@ export const Canvas = memo(function Canvas() {
   const handleEdgesChange: OnEdgesChange<LibTVEdge> = onEdgesChange;
   const handleConnect: OnConnect = onConnect;
 
+  // 开始拖拽连线：记录源节点
+  const handleConnectStart: OnConnectStart = useCallback((_, params) => {
+    setConnectingFrom(params.nodeId ?? null);
+    setConnectTargetId(null);
+  }, []);
+
+  // 连线拖动中悬停到节点：高亮目标节点（排除源节点自身）
+  const handleNodeMouseEnter = useCallback(
+    (_: React.MouseEvent, node: LibTVNode) => {
+      if (connectingFrom && node.id !== connectingFrom) {
+        setConnectTargetId(node.id);
+      }
+    },
+    [connectingFrom]
+  );
+
+  const handleNodeMouseLeave = useCallback(() => {
+    setConnectTargetId(null);
+  }, []);
+
+  // 给拖拽连线悬停的目标节点附加高亮类名（放大 + 蓝色 outline）
+  const displayNodes = useMemo(() => {
+    if (!connectTargetId) return nodes;
+    return nodes.map((n) =>
+      n.id === connectTargetId
+        ? { ...n, className: `${n.className || ''} libtv-connect-target`.trim() }
+        : n
+    );
+  }, [nodes, connectTargetId]);
+
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     setNodeMenu(null);
@@ -159,7 +193,8 @@ export const Canvas = memo(function Canvas() {
     });
   }, []);
 
-  // 连线释放到空白区域时，弹出节点选择菜单（参考官方 add-node-on-edge-drop 示例）
+  // 连线释放：落在对方节点任意位置即完成连线（无需精确对准连接点）；
+  // 释放在空白区域时弹出节点选择菜单（参考官方 add-node-on-edge-drop 示例）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent, connectionState?: any) => {
@@ -167,20 +202,47 @@ export const Canvas = memo(function Canvas() {
       connectingRef.current = true;
       // 短暂延迟后重置，让 onPaneClick 有机会读取
       setTimeout(() => { connectingRef.current = false; }, 50);
+      // 结束连线状态：目标节点高亮恢复原样
+      setConnectingFrom(null);
+      setConnectTargetId(null);
 
-      // 释放到空白区域时 isValid 为 false，此时弹出选择菜单
-      if (!connectionState?.isValid) {
-        const { clientX, clientY } = 'changedTouches' in event
-          ? event.changedTouches[0]
-          : event as MouseEvent;
-        setNodeSelectPopup({
-          position: { x: clientX, y: clientY },
-          sourceNodeId: connectionState.fromNode?.id,
-          sourceHandle: connectionState.fromHandle?.id ?? null,
-        });
+      // 已精确落在有效连接点上，onConnect 已处理
+      if (connectionState?.isValid) return;
+
+      const { clientX, clientY } = 'changedTouches' in event
+        ? event.changedTouches[0]
+        : event as MouseEvent;
+
+      // 命中检测：释放点下如果有节点（不要求落在连接点上），直接建立连线
+      const sourceId = connectionState?.fromNode?.id as string | undefined;
+      const hitEl = document.elementFromPoint(clientX, clientY);
+      const nodeEl = hitEl instanceof Element ? hitEl.closest('.react-flow__node') : null;
+      const targetId = nodeEl?.getAttribute('data-id') || null;
+      if (sourceId && targetId && targetId !== sourceId) {
+        const { edges: latestEdges } = useCanvasStore.getState();
+        const duplicated = latestEdges.some(
+          (e) => e.source === sourceId && e.target === targetId
+        );
+        if (!duplicated) {
+          addEdge({
+            id: `e-${sourceId}-${targetId}`,
+            source: sourceId,
+            target: targetId,
+            type: 'dataFlow',
+            sourceHandle: connectionState?.fromHandle?.id ?? undefined,
+          });
+        }
+        return;
       }
+
+      // 释放到空白区域时弹出选择菜单
+      setNodeSelectPopup({
+        position: { x: clientX, y: clientY },
+        sourceNodeId: connectionState?.fromNode?.id,
+        sourceHandle: connectionState?.fromHandle?.id ?? null,
+      });
     },
-    []
+    [addEdge]
   );
 
   // 从选择菜单选中节点类型后：创建新节点 + 建立连线
@@ -332,12 +394,15 @@ export const Canvas = memo(function Canvas() {
         </div>
       ) : (
       <ReactFlow
-        nodes={nodes}
+        nodes={displayNodes}
         edges={edges}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onConnectStart={handleConnectStart}
         onConnectEnd={handleConnectEnd}
+        onNodeMouseEnter={handleNodeMouseEnter}
+        onNodeMouseLeave={handleNodeMouseLeave}
         onNodeDragStart={() => { suppressPromptRef.current = true; }}
         onNodeClick={() => { suppressPromptRef.current = false; }}
         onMouseDown={(e) => {
