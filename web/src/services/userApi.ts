@@ -6,6 +6,12 @@ export interface UserItem {
   nickname: string;
   role: string; // 'admin' | 'user'
   created_at: string;
+  /** 项目数（管理员列表接口返回） */
+  project_count?: number;
+  /** 图片资产数（管理员列表接口返回） */
+  asset_image_count?: number;
+  /** 视频资产数（管理员列表接口返回） */
+  asset_video_count?: number;
 }
 
 export const userApi = {

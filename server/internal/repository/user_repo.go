@@ -8,12 +8,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// UserStats 单个用户的聚合统计（项目数 + 分类型资产数）
+type UserStats struct {
+	ProjectCount    int64
+	AssetImageCount int64
+	AssetVideoCount int64
+}
+
 // UserRepo 用户数据访问
 type UserRepo interface {
 	Create(ctx context.Context, user *model.User) error
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	List(ctx context.Context, keyword string) ([]model.User, error)
+	// StatsByUserIDs 批量统计指定用户的项目数与分类型资产数（管理员列表展示用）
+	StatsByUserIDs(ctx context.Context, userIDs []string) (map[string]UserStats, error)
 	UpdateRole(ctx context.Context, id, role string) error
 	// UpdateProfile 更新用户昵称/头像（零值字段不更新）
 	UpdateProfile(ctx context.Context, id string, fields map[string]interface{}) error
@@ -60,6 +69,57 @@ func (r *userRepo) List(ctx context.Context, keyword string) ([]model.User, erro
 	}
 	err := q.Find(&users).Error
 	return users, err
+}
+
+// StatsByUserIDs 批量统计：两条 GROUP BY 查询，避免逐用户查询的 N+1 问题
+func (r *userRepo) StatsByUserIDs(ctx context.Context, userIDs []string) (map[string]UserStats, error) {
+	stats := make(map[string]UserStats, len(userIDs))
+	if len(userIDs) == 0 {
+		return stats, nil
+	}
+
+	// 项目数
+	var projectRows []struct {
+		UserID string
+		Count  int64
+	}
+	if err := r.db.WithContext(ctx).Model(&model.Project{}).
+		Select("user_id, COUNT(*) AS count").
+		Where("user_id IN ?", userIDs).
+		Group("user_id").
+		Scan(&projectRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range projectRows {
+		s := stats[row.UserID]
+		s.ProjectCount = row.Count
+		stats[row.UserID] = s
+	}
+
+	// 资产数（按类型分组：image / video）
+	var assetRows []struct {
+		UserID string
+		Type   string
+		Count  int64
+	}
+	if err := r.db.WithContext(ctx).Model(&model.UserAsset{}).
+		Select("user_id, type, COUNT(*) AS count").
+		Where("user_id IN ?", userIDs).
+		Group("user_id, type").
+		Scan(&assetRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range assetRows {
+		s := stats[row.UserID]
+		if row.Type == "image" {
+			s.AssetImageCount = row.Count
+		} else if row.Type == "video" {
+			s.AssetVideoCount = row.Count
+		}
+		stats[row.UserID] = s
+	}
+
+	return stats, nil
 }
 
 func (r *userRepo) UpdateRole(ctx context.Context, id, role string) error {

@@ -124,16 +124,16 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	response.OKWithMsg(c, "密码修改成功", nil)
 }
 
-// List 获取所有用户列表（管理员）
+// List 获取所有用户列表（管理员，附带项目数/资产数统计）
 func (h *UserHandler) List(c *gin.Context) {
-	users, err := h.userService.List(c.Request.Context(), c.Query("keyword"))
+	items, err := h.userService.ListWithStats(c.Request.Context(), c.Query("keyword"))
 	if err != nil {
 		response.FailWith(c, err)
 		return
 	}
 	response.OK(c, gin.H{
-		"items": users,
-		"total": len(users),
+		"items": items,
+		"total": len(items),
 	})
 }
 

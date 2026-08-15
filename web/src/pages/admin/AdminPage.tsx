@@ -1009,6 +1009,7 @@ export default function AdminPage() {
                         <th className="px-4 py-3 text-left font-medium text-gray-600">ID</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">邮箱</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">昵称</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
@@ -1022,6 +1023,13 @@ export default function AdminPage() {
                             <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{user.id}</td>
                             <td className="px-4 py-3 text-gray-800">{user.email}</td>
                             <td className="px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
+                            <td className="px-4 py-3 text-gray-500 text-[12px]">
+                              <span>项目 {user.project_count || 0}</span>
+                              <span className="text-gray-300 mx-1.5">|</span>
+                              <span>图片 {user.asset_image_count || 0}</span>
+                              <span className="text-gray-300 mx-1.5">·</span>
+                              <span>视频 {user.asset_video_count || 0}</span>
+                            </td>
                             <td className="px-4 py-3">
                               <Select
                                 value={user.role}

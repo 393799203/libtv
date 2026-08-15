@@ -91,6 +91,41 @@ func (s *UserService) List(ctx context.Context, keyword string) ([]model.User, e
 	return s.userRepo.List(ctx, keyword)
 }
 
+// UserListItem 用户列表条目（附带项目数与分类型资产数统计）
+type UserListItem struct {
+	model.User
+	ProjectCount    int64 `json:"project_count"`
+	AssetImageCount int64 `json:"asset_image_count"`
+	AssetVideoCount int64 `json:"asset_video_count"`
+}
+
+// ListWithStats 用户列表 + 项目/资产统计（管理员列表展示用）
+func (s *UserService) ListWithStats(ctx context.Context, keyword string) ([]UserListItem, error) {
+	users, err := s.userRepo.List(ctx, keyword)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.ID)
+	}
+	stats, err := s.userRepo.StatsByUserIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]UserListItem, 0, len(users))
+	for _, u := range users {
+		item := UserListItem{User: u}
+		if st, ok := stats[u.ID]; ok {
+			item.ProjectCount = st.ProjectCount
+			item.AssetImageCount = st.AssetImageCount
+			item.AssetVideoCount = st.AssetVideoCount
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 // Delete 删除用户（含级联删除关联数据 + 用户存储目录）
 // operatorID 为当前操作者用户 ID，用于禁止删除自己
 func (s *UserService) Delete(ctx context.Context, id, operatorID string) error {
