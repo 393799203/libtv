@@ -89,20 +89,18 @@ const VideoCard = memo(function VideoCard({
   onNavigate: (id: string) => void;
   isVisible: boolean; // 是否在可视区域
 }) {
-  // 只在可见时渲染完整内容，否则只渲染占位符
+  // 只在可见时渲染完整内容，否则只渲染占位符（占位符与卡片同为固定高度，避免布局偏移）
   if (!isVisible) {
     return (
-      <div className="h-40 bg-gray-100 rounded-lg animate-pulse" style={{ minHeight: '220px' }}>
-        {/* 占位符，不渲染图片和内容 */}
-      </div>
+      <div className="w-full h-full bg-gray-100 rounded-lg animate-pulse" />
     );
   }
 
   return (
     <Card
       hoverable
-      className="!rounded-lg overflow-hidden cursor-pointer"
-      styles={{ body: { padding: 0 } }}
+      className="!rounded-lg overflow-hidden cursor-pointer h-full"
+      styles={{ body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' } }}
       onClick={() => onNavigate(item.id)}
     >
       <div
@@ -152,7 +150,7 @@ const VideoCard = memo(function VideoCard({
           )}
         </div>
       </div>
-      <div className="p-3">
+      <div className="p-3 flex-1">
         <div className="flex items-start justify-between">
           <p className="!text-sm font-medium truncate flex-1">
             {item.title}
@@ -174,39 +172,40 @@ function useIntersectionObserver(threshold = 0.1) {
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   useEffect(() => {
-    observerRef.current = new IntersectionObserver(
+    const observer = new IntersectionObserver(
       (entries) => {
-        const newVisibleItems = new Set(visibleItems);
+        const toAdd: number[] = [];
         entries.forEach((entry) => {
-          const index = Number(entry.target.getAttribute('data-index'));
           if (entry.isIntersecting) {
-            newVisibleItems.add(index);
-          } else {
-            // 保持已渲染的项，避免频繁卸载/重新加载
-            // newVisibleItems.delete(index);
+            toAdd.push(Number(entry.target.getAttribute('data-index')));
           }
         });
-        setVisibleItems(newVisibleItems);
+        if (toAdd.length === 0) return;
+        // 只在确有新增可见项时更新，避免连锁重渲染
+        setVisibleItems(prev => {
+          if (!toAdd.some(i => !prev.has(i))) return prev;
+          const next = new Set(prev);
+          toAdd.forEach(i => next.add(i));
+          return next;
+        });
       },
       {
         threshold,
         rootMargin: '100px', // 提前100px开始渲染
       }
     );
+    observerRef.current = observer;
 
     // 观察所有item
     itemRefs.current.forEach((ref) => {
-      if (ref && observerRef.current) {
-        observerRef.current.observe(ref);
-      }
+      if (ref) observer.observe(ref);
     });
 
     return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
-      }
+      observer.disconnect();
+      observerRef.current = null;
     };
-  }, [threshold, visibleItems]);
+  }, [threshold]); // observer 只创建一次，不依赖 visibleItems
 
   const setItemRef = useCallback((index: number, el: HTMLDivElement | null) => {
     if (el) {
@@ -219,7 +218,13 @@ function useIntersectionObserver(threshold = 0.1) {
     }
   }, []);
 
-  return { visibleItems, setItemRef };
+  // 重置可见状态（切换标签时使用，避免旧索引残留）；可同时预标记前 seedCount 项为可见，避免占位符闪现一帧
+  const resetVisibleItems = useCallback((seedCount = 0) => {
+    itemRefs.current.clear();
+    setVisibleItems(new Set(Array.from({ length: seedCount }, (_, i) => i)));
+  }, []);
+
+  return { visibleItems, setItemRef, resetVisibleItems };
 }
 
 export default function VideoListPage() {
@@ -249,9 +254,11 @@ export default function VideoListPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const PAGE_SIZE = 12; // 每页加载12条（4列×3行）
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const tvSectionRef = useRef<HTMLElement>(null);
+  const loadSeqRef = useRef(0); // 请求序号：快速切换标签时使过期请求的响应作废，避免旧数据闪回列表
 
   // Intersection Observer - 检测视频列表中哪些项在可视区域
-  const { visibleItems, setItemRef } = useIntersectionObserver(0.05);
+  const { visibleItems, setItemRef, resetVisibleItems } = useIntersectionObserver(0.05);
 
   // Banner图片加载处理（使用ref，不触发重渲染）
   const handleBannerImageLoad = useCallback((bannerId: string) => {
@@ -343,6 +350,7 @@ export default function VideoListPage() {
 
   // 加载视频列表：从 shows API 获取（支持分类筛选 + 关键词后端搜索）
   const loadVideos = useCallback(async (keyword?: string) => {
+    const seq = ++loadSeqRef.current;
     setVideosLoading(true);
     setCurrentPage(1);
     setHasMore(true);
@@ -353,6 +361,7 @@ export default function VideoListPage() {
         page: 1,
         page_size: PAGE_SIZE,
       });
+      if (seq !== loadSeqRef.current) return; // 已有更新的请求，丢弃过期响应
       const list: VideoListItem[] = (data.items || []).map(item => ({
         id: item.id,
         title: item.title,
@@ -369,10 +378,11 @@ export default function VideoListPage() {
       setTvShowVideos(list);
       // 判断是否还有更多数据
       setHasMore(list.length >= PAGE_SIZE);
+      setVideosLoading(false);
     } catch {
+      if (seq !== loadSeqRef.current) return;
       setTvShowVideos([]);
       setHasMore(false);
-    } finally {
       setVideosLoading(false);
     }
   }, [activeCategory]);
@@ -380,6 +390,7 @@ export default function VideoListPage() {
   // 加载更多视频（无限滚动）
   const loadMoreVideos = useCallback(async () => {
     if (loadingMore || !hasMore || videosLoading) return;
+    const seq = loadSeqRef.current;
     setLoadingMore(true);
     const nextPage = currentPage + 1;
     try {
@@ -389,6 +400,8 @@ export default function VideoListPage() {
         page: nextPage,
         page_size: PAGE_SIZE,
       });
+      // 期间切换了标签/搜索：旧分类的追加结果作废，避免串数据
+      if (seq !== loadSeqRef.current) return;
       const newList: VideoListItem[] = (data.items || []).map(item => ({
         id: item.id,
         title: item.title,
@@ -407,7 +420,7 @@ export default function VideoListPage() {
       // 如果返回的数据少于每页数量，说明没有更多了
       setHasMore(newList.length >= PAGE_SIZE);
     } catch {
-      setHasMore(false);
+      if (seq === loadSeqRef.current) setHasMore(false);
     } finally {
       setLoadingMore(false);
     }
@@ -430,6 +443,18 @@ export default function VideoListPage() {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [loadMoreVideos]);
+
+  // 切换标签：同一帧立即拉起 loading 遮罩，数据返回后再整体替换，避免遮罩出现前旧列表裸闪
+  const handleCategoryChange = useCallback((key: string) => {
+    if (key === activeCategory) return;
+    setVideosLoading(true); // 同步置位，与标签切换同一帧渲染出遮罩
+    resetVisibleItems(PAGE_SIZE); // 预标记首屏为可见，数据替换后占位符不闪现
+    setTvShowVideos(prev => prev.slice(0, PAGE_SIZE)); // 丢弃旧分类滚动加载的多余数据
+    setActiveCategory(key);
+    requestAnimationFrame(() => {
+      tvSectionRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    });
+  }, [activeCategory, resetVisibleItems]);
 
   // 搜索防抖
   const handleSearchChange = useCallback((value: string) => {
@@ -761,7 +786,7 @@ export default function VideoListPage() {
       </section>
 
       {/* TV Show 分类 */}
-      <section className="max-w-7xl mx-auto px-6">
+      <section ref={tvSectionRef} className="max-w-7xl mx-auto px-6 scroll-mt-4">
         <Text className="text-gray-600 font-medium text-lg mb-3 block">TV Show</Text>
         <div className="flex items-center gap-4 mb-4">
           <div className="flex items-center gap-2 flex-wrap flex-1">
@@ -770,7 +795,7 @@ export default function VideoListPage() {
                 key={cat.key}
                 color={activeCategory === cat.key ? 'blue' : undefined}
                 className={`cursor-pointer text-xs`}
-                onClick={() => setActiveCategory(cat.key)}
+                onClick={() => handleCategoryChange(cat.key)}
               >
                 {cat.label}
               </Tag>
@@ -795,51 +820,55 @@ export default function VideoListPage() {
           </div>
         </div>
 
-        {/* TV Show 网格 - 使用Intersection Observer懒渲染 */}
+        {/* TV Show 网格 - 切换时遮罩 loading，数据返回后整体替换；固定最小高度放在总容器上，切换时内容区不塌陷 */}
         <Spin spinning={videosLoading}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {videoListData.map((item, index) => (
-            <div
-              key={item.id}
-              ref={(el) => setItemRef(index, el)}
-              data-index={index}
-              style={{
-                minHeight: '220px', // 保持高度一致，避免滚动跳动
-              }}
-            >
-              <VideoCard
-                item={item}
-                onNavigate={(id) => navigate(`/videos/${id}`)}
-                isVisible={visibleItems.has(index)} // 传递可见状态
-              />
+          <div style={{ minHeight: '440px' }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {videoListData.map((item, index) => (
+              <div
+                key={item.id}
+                ref={(el) => setItemRef(index, el)}
+                data-index={index}
+                style={{
+                  height: '212px', // 固定高度，与占位符完全一致，避免布局偏移
+                }}
+              >
+                <VideoCard
+                  item={item}
+                  onNavigate={(id) => navigate(`/videos/${id}`)}
+                  isVisible={visibleItems.has(index)} // 传递可见状态
+                />
+              </div>
+            ))}
             </div>
-          ))}
-        </div>
 
-          {/* 无限滚动哨兵元素 + 加载状态 */}
-          {!videosLoading && tvShowVideos.length > 0 && (
-            <div ref={sentinelRef} className="flex items-center justify-center py-8">
-              {loadingMore ? (
-                <div className="flex items-center gap-2 text-gray-500">
-                  <Spin size="small" />
-                  <span className="text-sm">加载更多...</span>
-                </div>
-              ) : hasMore ? (
-                <div className="text-gray-300 text-sm h-8" />
-              ) : (
+            {/* 无限滚动哨兵元素 + 加载状态 */}
+            {!videosLoading && tvShowVideos.length > 0 && (
+              <div ref={sentinelRef} className="flex items-center justify-center py-8">
+                {loadingMore ? (
+                  <div className="flex items-center gap-2 text-gray-500">
+                    <Spin size="small" />
+                    <span className="text-sm">加载更多...</span>
+                  </div>
+                ) : hasMore ? (
+                  <div className="text-gray-300 text-sm h-8" />
+                ) : (
+                  <div className="text-gray-400 text-sm">
+                    <span className="text-gray-300">—</span> 已加载全部 <span className="text-gray-300">—</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 空状态：在固定高度容器内居中，文案样式与“已加载全部”一致 */}
+            {!videosLoading && tvShowVideos.length === 0 && (
+              <div className="h-[440px] flex items-center justify-center">
                 <div className="text-gray-400 text-sm">
-                  <span className="text-gray-300">—</span> 已加载全部 <span className="text-gray-300">—</span>
+                  <span className="text-gray-300">—</span> 暂无视频内容 <span className="text-gray-300">—</span>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* 空状态 */}
-          {!videosLoading && tvShowVideos.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-              <Text className="text-gray-400">暂无视频内容</Text>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </Spin>
       </section>
     </div>
