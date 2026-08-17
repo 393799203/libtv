@@ -73,77 +73,82 @@ export const GenerationHistoryModal = memo(function GenerationHistoryModal({
         body: { padding: '16px 20px 20px' },
       }}
     >
-      <Spin spinning={loading}>
+      {/* 内容区域：固定高度避免抖动 */}
+      <div className="h-[520px] flex flex-col">
         {items.length === 0 && !loading ? (
-          <Empty description={`暂无${typeLabel}生成记录`} />
+          <div className="flex-1 flex items-center justify-center">
+            <Empty description={`暂无${typeLabel}生成记录`} />
+          </div>
         ) : (
-          <>
-            <div className="grid grid-cols-4 gap-3 mb-4 max-h-[60vh] overflow-y-auto">
-              {items.map((item) => {
-                const isCurrent = item.result_url === currentUrl;
-                return (
-                  <div
-                    key={item.id}
-                    className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
-                      isCurrent
-                        ? 'border-blue-500 ring-2 ring-blue-200'
-                        : 'border-transparent hover:border-blue-300'
-                    }`}
-                    onClick={() => handleSelect(item.result_url)}
-                  >
-                    {nodeType === 'image' ? (
-                      <img
-                        src={item.result_url}
-                        alt="Generated"
-                        className="w-full aspect-square object-cover"
-                      />
-                    ) : (
-                      <video
-                        src={item.result_url}
-                        className="w-full aspect-video object-cover"
-                        muted
-                        preload="metadata"
-                      />
-                    )}
-                    {/* 当前选中标志 */}
-                    {isCurrent && (
-                      <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
-                        <CheckOutlined className="text-white text-xs" />
+          <Spin spinning={loading} className="flex-1 flex flex-col">
+            <div className="flex-1 overflow-y-auto mb-4">
+              <div className="grid grid-cols-4 gap-3">
+                  {items.map((item) => {
+                    const isCurrent = item.result_url === currentUrl;
+                    return (
+                      <div
+                        key={item.id}
+                        className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                          isCurrent
+                            ? 'border-blue-500 ring-2 ring-blue-200'
+                            : 'border-transparent hover:border-blue-300'
+                        }`}
+                        onClick={() => handleSelect(item.result_url)}
+                      >
+                        {nodeType === 'image' ? (
+                          <img
+                            src={item.result_url}
+                            alt="Generated"
+                            className="w-full aspect-square object-cover"
+                          />
+                        ) : (
+                          <video
+                            src={item.result_url}
+                            className="w-full aspect-video object-cover"
+                            muted
+                            preload="metadata"
+                          />
+                        )}
+                        {/* 当前选中标志 */}
+                        {isCurrent && (
+                          <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                            <CheckOutlined className="text-white text-xs" />
+                          </div>
+                        )}
+                        {/* 悬浮遮罩：时间 + 提示 */}
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
+                          <div className="flex items-center gap-1 text-white text-[10px]">
+                            <ClockCircleOutlined />
+                            {dayjs(item.created_at).format('MM-DD HH:mm')}
+                          </div>
+                          <div className="text-white text-[10px] mt-0.5 truncate">
+                            {item.prompt || '无提示词'}
+                          </div>
+                          {!isCurrent && (
+                            <div className="text-white/80 text-[10px] mt-1">点击使用此{typeLabel}</div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    {/* 悬浮遮罩：时间 + 提示 */}
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2">
-                      <div className="flex items-center gap-1 text-white text-[10px]">
-                        <ClockCircleOutlined />
-                        {dayjs(item.created_at).format('MM-DD HH:mm')}
-                      </div>
-                      <div className="text-white text-[10px] mt-0.5 truncate">
-                        {item.prompt || '无提示词'}
-                      </div>
-                      {!isCurrent && (
-                        <div className="text-white/80 text-[10px] mt-1">点击使用此{typeLabel}</div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {total > pageSize && (
-              <div className="flex justify-center">
-                <Pagination
-                  current={page}
-                  total={total}
-                  pageSize={pageSize}
-                  onChange={setPage}
-                  showSizeChanger={false}
-                  showTotal={(t) => `共 ${t} 条`}
-                  size="small"
-                />
+                    );
+                  })}
+                </div>
               </div>
-            )}
-          </>
+              {total > pageSize && (
+                <div className="flex justify-center pt-4 border-t border-gray-100">
+                  <Pagination
+                    current={page}
+                    total={total}
+                    pageSize={pageSize}
+                    onChange={setPage}
+                    showSizeChanger={false}
+                    showTotal={(t) => `共 ${t} 条`}
+                    size="small"
+                  />
+                </div>
+              )}
+          </Spin>
         )}
-      </Spin>
+      </div>
     </Modal>
   );
 });
