@@ -341,6 +341,20 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     [upstreamInputs]
   );
 
+  // 音频节点：计算输入字符数（用于费用预估）
+  // 包括提示词文本 + 上游文本节点内容
+  const audioCharCount = useMemo(() => {
+    if (nodeType !== 'audio') return 0;
+    let total = promptText.length;
+    // 加上上游文本节点的内容
+    for (const input of upstreamInputs) {
+      if (input.nodeType === 'text' && input.textSnippet) {
+        total += input.textSnippet.length;
+      }
+    }
+    return total;
+  }, [nodeType, promptText, upstreamInputs]);
+
   // 音频节点专属：音色、语速、风格
   const [selectedVoice, setSelectedVoice] = useState(
     nodeType === 'audio' ? ((data as AudioNodeData).voice || 'default') : 'default'
@@ -620,6 +634,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onDurationChange={handleDurationChange}
         generateAudio={generateAudio}
         onGenerateAudioChange={handleGenerateAudioChange}
+        charCount={audioCharCount}
       />
     </div>
   );

@@ -22,7 +22,8 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
 /**
  * 价格管理：展示各节点下不同模型的价格设置
  * - 文本 / 剧本 / 图片模型：按次价格（积分/次）
- * - 视频 / 语音模型：按秒单价（积分/秒）
+ * - 视频模型：按秒单价（积分/秒）
+ * - 语音模型：按字单价（积分/100字）
  * - 价格按（节点 + 模型）维度独立配置：同一模型在不同节点可设不同价格
  */
 export default function PricingManagement() {
@@ -81,7 +82,7 @@ export default function PricingManagement() {
         <div>
           <div className="text-[14px] font-medium text-gray-800">价格管理</div>
           <div className="text-[11px] text-gray-400 mt-0.5">
-            文本 / 图片模型按次计费，视频 / 语音模型按秒计费；价格为 0 表示暂不扣费
+            文本 / 图片模型按次计费，视频模型按秒计费，语音模型按字计费（每 100 字）；价格为 0 表示暂不扣费
           </div>
         </div>
         <div className="flex-1" />
@@ -123,11 +124,13 @@ export default function PricingManagement() {
                 <span className="text-[13px] font-semibold text-gray-800">{node.node_name}</span>
                 {node.billing_type === 'per_call' ? (
                   <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[11px] font-medium">按次计费</span>
+                ) : node.billing_type === 'per_char' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 text-[11px] font-medium">按字计费</span>
                 ) : (
                   <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 text-[11px] font-medium">按秒计费</span>
                 )}
                 <span className="text-[11px] text-gray-400">
-                  {node.billing_type === 'per_call' ? '单价单位：积分 / 次' : '单价单位：积分 / 秒'}
+                  {node.billing_type === 'per_call' ? '单价单位：积分 / 次' : node.billing_type === 'per_char' ? '单价单位：积分 / 100字' : '单价单位：积分 / 秒'}
                 </span>
               </div>
 
@@ -166,8 +169,8 @@ export default function PricingManagement() {
                           }}
                           className="w-28"
                         />
-                        <span className="text-[12px] text-gray-500 w-16">
-                          {node.billing_type === 'per_call' ? '积分 / 次' : '积分 / 秒'}
+                        <span className="text-[12px] text-gray-500 w-20">
+                          {node.billing_type === 'per_call' ? '积分 / 次' : node.billing_type === 'per_char' ? '积分 / 100字' : '积分 / 秒'}
                         </span>
                       </div>
                     </div>

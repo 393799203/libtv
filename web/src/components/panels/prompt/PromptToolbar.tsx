@@ -55,6 +55,8 @@ interface PromptToolbarProps {
   // 视频节点专属：是否生成音频
   generateAudio?: boolean;
   onGenerateAudioChange?: (enabled: boolean) => void;
+  // 音频节点专属：输入字符数（用于计算费用）
+  charCount?: number;
 }
 
 // ==================== 模型选择器（截图2）====================
@@ -347,6 +349,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onDurationChange,
   generateAudio = true,
   onGenerateAudioChange,
+  charCount = 0,
 }) {
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
@@ -481,14 +484,18 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     if (!modelPrice) return null;
     const price = modelPrice.price;
     if (price === 0) return 0;
-    // 按秒计费：视频/音频节点，费用 = 单价 × 时长
+    // 按秒计费：视频节点，费用 = 单价 × 时长
     if (nodeGroup.billing_type === 'per_second') {
-      const duration = nodeType === 'video' ? selectedDuration : 1;
-      return Math.ceil(price * duration);
+      return Math.ceil(price * selectedDuration);
+    }
+    // 按字计费：音频节点，费用 = 单价 × (字符数 / 100)
+    if (nodeGroup.billing_type === 'per_char') {
+      if (charCount <= 0) return 0;
+      return Math.ceil(price * charCount / 100);
     }
     // 按次计费：直接返回单价
     return price;
-  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration]);
+  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, charCount]);
 
   // 按分组整理音色
   const voiceGroups = useMemo(() => {

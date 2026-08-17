@@ -1,7 +1,7 @@
 import api from './api';
 
 // 计费类型：per_call=按次（积分/次），per_second=按秒（积分/秒）
-export type BillingType = 'per_call' | 'per_second';
+export type BillingType = 'per_call' | 'per_second' | 'per_char';
 
 // 单个模型的价格条目
 export interface PriceModelItem {

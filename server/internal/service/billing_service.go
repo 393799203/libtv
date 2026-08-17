@@ -144,6 +144,18 @@ func (s *BillingService) ChargeByDuration(ctx context.Context, userID, action, m
 	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
 }
 
+// ChargeByChars 按字符数计费（音频）：费用 = 单价 × (字符数 / 100)（向上取整）
+// 单价表示每 100 字的积分，返回本次实际扣减的积分
+func (s *BillingService) ChargeByChars(ctx context.Context, userID, action, modelID, scene string, chars int) (int64, error) {
+	if chars <= 0 {
+		return 0, nil
+	}
+	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
+	// 单价是每 100 字的价格，计算实际费用
+	cost := int64(math.Ceil(unit * float64(chars) / 100.0))
+	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+}
+
 // chargeCost 扣费 + 记账：
 // 费用 <= 0 → 不扣费但仍写入一条 0 积分记录（便于验证扣费链路）；
 // 积分不足 → ErrInsufficientCredits；

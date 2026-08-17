@@ -1446,10 +1446,21 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
 
-	// 调用 TTS API（语音模型按秒计费，需生成后按实际音频时长扣费）
+	// 扣费校验：按输入字符数计费（每 100 字为单位），通过后才调用 TTS API
+	charCount := len([]rune(inputText))
+	chargedAmount, err := a.biller.ChargeByChars(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成", charCount)
+	if err != nil {
+		return nil, err
+	}
+
+	// 调用 TTS API
 	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
+		// API调用失败，退还已扣费用
+		if refundErr := a.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionAudio, model, "音频生成"); refundErr != nil {
+			log.Printf("[AudioExecutor] 退费失败: %v", refundErr)
+		}
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "failed",
@@ -1460,16 +1471,6 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	log.Printf("[AudioExecutor] ✅ TTS生成成功: nodeId=%s audioBytes=%d", node.ID, len(audioData))
-
-	// 扣费：按实际音频时长计费（WAV 头解析失败时按文本长度估算，约 4 字/秒）
-	durationSeconds := wavDurationSeconds(audioData)
-	if durationSeconds <= 0 {
-		durationSeconds = (len([]rune(inputText)) + 3) / 4
-		log.Printf("[AudioExecutor] ⚠️ WAV时长解析失败，按文本长度估算: %d秒", durationSeconds)
-	}
-	if _, err := a.biller.ChargeByDuration(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成", durationSeconds); err != nil {
-		return nil, err
-	}
 
 	// 上传到 users/<userID>/canvas/<projectID>/（无 userID 时降级 canvas/<projectID>/）
 	projectID := execCtx.GetProjectID()

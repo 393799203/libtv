@@ -12,10 +12,11 @@ import (
 	"libtv/internal/repository"
 )
 
-// 计费类型：文本 / 图片模型按次，视频 / 语音模型按秒
+// 计费类型：文本 / 图片模型按次，视频模型按秒，语音模型按字
 const (
 	BillingTypePerCall   = "per_call"   // 按次计费（积分/次）
 	BillingTypePerSecond = "per_second" // 按秒计费（积分/秒）
+	BillingTypePerChar   = "per_char"   // 按字计费（积分/100字）
 )
 
 // priceNodeDef 价格管理的节点分组定义：
@@ -29,13 +30,13 @@ type priceNodeDef struct {
 	Usage       string
 }
 
-// priceNodeDefs 价格管理页签的节点顺序（文本/剧本/图片按次，视频/语音按秒）
+// priceNodeDefs 价格管理页签的节点顺序（文本/剧本/图片按次，视频按秒，语音按字）
 var priceNodeDefs = []priceNodeDef{
 	{NodeType: "text", NodeName: "文本节点", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "text"},
 	{NodeType: "script", NodeName: "剧本节点", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script"},
 	{NodeType: "image", NodeName: "图片节点", ModelGroup: "image", BillingType: BillingTypePerCall, Usage: "image"},
 	{NodeType: "video", NodeName: "视频节点", ModelGroup: "video", BillingType: BillingTypePerSecond, Usage: "video"},
-	{NodeType: "audio", NodeName: "语音节点", ModelGroup: "audio", BillingType: BillingTypePerSecond, Usage: "audio"},
+	{NodeType: "audio", NodeName: "语音节点", ModelGroup: "audio", BillingType: BillingTypePerChar, Usage: "audio"},
 }
 
 // ErrInvalidPriceConfig 价格配置参数非法（HTTP 400）
