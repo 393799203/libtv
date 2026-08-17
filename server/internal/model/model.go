@@ -16,10 +16,12 @@ type User struct {
 	Nickname     string `gorm:"size:100" json:"nickname"`
 	AvatarURL    string `gorm:"size:500" json:"avatar_url"`
 	// PasswordVersion 密码版本号：每次改密码 +1，写入 JWT，使旧 token 全部失效
-	PasswordVersion int       `gorm:"not null;default:0" json:"-"`
-	Role            string    `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	PasswordVersion int    `gorm:"not null;default:0" json:"-"`
+	Role            string `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
+	// Credits 剩余积分：AI 调用前由扣费中间件校验并原子扣减（见 service/billing_service.go）
+	Credits   int64     `gorm:"not null;default:0" json:"credits"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (User) TableName() string { return "users" }
@@ -274,6 +276,29 @@ type UserAsset struct {
 }
 
 func (UserAsset) TableName() string { return "user_assets" }
+
+// BillingRecord 积分账单明细（扣费 / 退款 / 充值）
+type BillingRecord struct {
+	ID     int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID string `gorm:"size:36;not null;index" json:"user_id"`
+	// Type 账单类型：deduct 扣费 / refund 退款 / recharge 充值
+	Type string `gorm:"size:20;not null" json:"type"`
+	// Amount 变动积分数（正数，方向由 Type 决定）
+	Amount int64 `gorm:"not null" json:"amount"`
+	// Action 计费动作（prompt.generate / workflow.execute 等，充值时为空）
+	Action string `gorm:"size:50" json:"action"`
+	// Model 调用的模型 ID（如 doubao-seedance-2.0-fast，非模型调用时为空）
+	Model string `gorm:"size:100" json:"model"`
+	// Scene 扣费场景（如 图片生成 / 视频生成 / 提示词生成）
+	Scene string `gorm:"size:50" json:"scene"`
+	// Remark 描述（展示给用户看的文案）
+	Remark string `gorm:"size:255" json:"remark"`
+	// BalanceAfter 本次变动后的剩余积分
+	BalanceAfter int64     `gorm:"not null;default:0" json:"balance_after"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+func (BillingRecord) TableName() string { return "billing_records" }
 
 func (a *UserAsset) BeforeCreate(tx *gorm.DB) error {
 	if a.ID == "" {

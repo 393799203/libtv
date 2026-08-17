@@ -7,11 +7,13 @@ import {
   ControlOutlined,
   SettingOutlined,
   GoldOutlined,
+  AccountBookOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
 import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
+import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { getUserAvatarSrc } from '@/utils/avatar';
 
 const { Header: AntHeader, Content } = Layout;
@@ -27,6 +29,7 @@ export function AppLayout() {
   const location = useLocation();
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [showAssetLibrary, setShowAssetLibrary] = useState(false);
+  const [showBillingRecords, setShowBillingRecords] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -36,6 +39,7 @@ export function AppLayout() {
   const userMenuItems: MenuProps['items'] = [
     { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
     { key: 'assets', icon: <GoldOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
+    { key: 'billing', icon: <AccountBookOutlined />, label: '费用明细', onClick: () => setShowBillingRecords(true) },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
   ];
@@ -100,6 +104,10 @@ export function AppLayout() {
                     className="w-6 h-6 rounded-full border border-gray-200" 
                   />
                   <span className="text-sm">{user?.nickname ?? '用户'}</span>
+                  <span className="text-[12px] text-amber-500 font-medium">
+                    <GoldOutlined className="mr-0.5" />
+                    {user?.credits ?? 0} 积分
+                  </span>
                 </Space>
               </Button>
             </Dropdown>
@@ -109,6 +117,9 @@ export function AppLayout() {
 
             {/* 个人资产库弹窗 */}
             {showAssetLibrary && <AssetLibraryModal onClose={() => setShowAssetLibrary(false)} />}
+
+            {/* 费用明细弹窗 */}
+            {showBillingRecords && <BillingRecordsModal onClose={() => setShowBillingRecords(false)} />}
           </div>
         ) : (
           <button

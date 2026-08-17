@@ -191,7 +191,7 @@ function PickCard({ asset, onPick }: { asset: UserAsset; onPick: (asset: UserAss
 /**
  * 个人资产库弹窗
  * - 两个 Tab：图片资产 / 视频资产
- * - 图片 / 视频统一横屏 16:9 展示，一行 3 列
+ * - 图片 / 视频统一横屏 16:9 展示，一行 4 列
  * - 选择模式（pickType + onPick）：画布节点导入资产用，点击卡片即选中
  */
 export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryModalProps) {
@@ -256,9 +256,9 @@ export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryMod
       open
       onCancel={onClose}
       footer={null}
-      width={960}
+      width={1200}
       destroyOnClose
-      styles={{ body: { padding: '8px 20px 20px', height: '68vh', overflowY: 'auto' } }}
+      styles={{ body: { padding: '4px 12px 12px', height: '68vh', overflowY: 'auto' } }}
     >
       {!isPickMode && (
         <Tabs
@@ -286,8 +286,8 @@ export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryMod
           className="py-12"
         />
       ) : activeTab === 'image' ? (
-        // 图片：3 列网格，横屏 16:9 展示
-        <div className="grid grid-cols-3 gap-4">
+        // 图片：4 列网格，横屏 16:9 展示
+        <div className="grid grid-cols-4 gap-3">
           {images.map((asset) =>
             isPickMode ? (
               <PickCard key={asset.id} asset={asset} onPick={handlePick} />
@@ -304,8 +304,8 @@ export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryMod
           )}
         </div>
       ) : (
-        // 视频：3 列网格，横屏 16:9 展示
-        <div className="grid grid-cols-3 gap-4">
+        // 视频：4 列网格，横屏 16:9 展示
+        <div className="grid grid-cols-4 gap-3">
           {videos.map((asset) =>
             isPickMode ? (
               <PickCard key={asset.id} asset={asset} onPick={handlePick} />

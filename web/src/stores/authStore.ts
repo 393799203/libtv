@@ -84,10 +84,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // 临时设置 token 以便请求携带
         set({ token: data.token });
 
-        const me = await api.get('/auth/me') as { id: string; email: string; nickname: string; avatar_url: string; role?: string };
+        const me = await api.get('/auth/me') as { id: string; email: string; nickname: string; avatar_url: string; role?: string; credits?: number };
         // token 有效
         set({
-          user: { id: me.id, email: me.email, nickname: me.nickname, avatarUrl: me.avatar_url, role: me.role },
+          user: { id: me.id, email: me.email, nickname: me.nickname, avatarUrl: me.avatar_url, role: me.role, credits: me.credits },
           isAuthenticated: true,
           isInitialized: true,
           initializing: false,

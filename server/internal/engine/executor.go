@@ -121,6 +121,13 @@ func (ec *ExecutionContext) SetUserID(userID string) {
 	ec.userID = userID
 }
 
+// GetUserID 获取项目属主用户ID（执行器扣费用）
+func (ec *ExecutionContext) GetUserID() string {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	return ec.userID
+}
+
 // GetCanvasDir 返回画布文件的存储目录前缀：
 // 有 userID 时存 users/<userID>/canvas（落到用户目录，删用户时级联清理），
 // 否则降级存公共 canvas 目录（历史兼容）
@@ -486,11 +493,12 @@ func eventTypeToWSName(t EventType) string {
 // TextExecutor 文本节点执行器（调用 LLM 生成故事剧本文本）
 type TextExecutor struct {
 	llmClient *llm.Client
+	biller    *service.BillingService
 }
 
 // NewTextExecutor 创建文本执行器
-func NewTextExecutor(client *llm.Client) *TextExecutor {
-	return &TextExecutor{llmClient: client}
+func NewTextExecutor(client *llm.Client, biller *service.BillingService) *TextExecutor {
+	return &TextExecutor{llmClient: client, biller: biller}
 }
 
 func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -518,6 +526,11 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 		}, nil
 	}
 
+	// 扣费校验：通过后才调用 LLM（账单记录模型与场景）
+	if _, err := t.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成"); err != nil {
+		return nil, err
+	}
+
 	// 调用 LLM 生成故事文本（直接使用data.Model作为model_id）
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
@@ -534,11 +547,12 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 // ScriptExecutor 脚本节点执行器：用户输入 prompt + 上游文本 → LLM 生成分镜剧本
 type ScriptExecutor struct {
 	llmClient *llm.Client
+	biller    *service.BillingService
 }
 
 // NewScriptExecutor 创建脚本执行器
-func NewScriptExecutor(client *llm.Client) *ScriptExecutor {
-	return &ScriptExecutor{llmClient: client}
+func NewScriptExecutor(client *llm.Client, biller *service.BillingService) *ScriptExecutor {
+	return &ScriptExecutor{llmClient: client, biller: biller}
 }
 
 func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -658,6 +672,10 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	}
 
 	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d model=%s", node.ID, len(material), len(cleanedPrompt), len(fullInput), data.Model)
+	// 扣费校验：通过后才调用 LLM（账单记录模型与场景）
+	if _, err := s.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成"); err != nil {
+		return nil, err
+	}
 	// 调用 LLM 生成分镜剧本（直接使用data.Model作为model_id）
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
@@ -727,14 +745,16 @@ type ImageExecutor struct {
 	imageClient       *llm.ImageClient
 	modelManager      *llm.ModelManager
 	fileUploadService *service.FileUploadService
+	biller            *service.BillingService
 }
 
 // NewImageExecutor 创建图像执行器
-func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ImageExecutor {
+func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService) *ImageExecutor {
 	return &ImageExecutor{
 		imageClient:       client,
 		modelManager:      modelManager,
 		fileUploadService: fileUploadService,
+		biller:            biller,
 	}
 }
 
@@ -940,6 +960,11 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 	log.Printf("[ImageExecutor] 生成数量: data.Count=%d -> 实际count=%d", data.Count, count)
 
+	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景）
+	if _, err := i.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成"); err != nil {
+		return nil, err
+	}
+
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
 	// 返回所有生成图片的 URL 列表（N>1 时有多个）
 	var generatedURLs []string
@@ -1060,13 +1085,15 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 type VideoExecutor struct {
 	videoClient       *llm.VideoClient
 	fileUploadService *service.FileUploadService
+	biller            *service.BillingService
 }
 
 // NewVideoExecutor 创建视频执行器
-func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService) *VideoExecutor {
+func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *service.BillingService) *VideoExecutor {
 	return &VideoExecutor{
 		videoClient:       videoClient,
 		fileUploadService: fileUploadService,
+		biller:            biller,
 	}
 }
 
@@ -1184,6 +1211,11 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		resolution = "4k"
 	}
 
+	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景）
+	if _, err := v.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成"); err != nil {
+		return nil, err
+	}
+
 	// 调用视频生成API
 	videoURL, err := v.videoClient.GenerateVideo(
 		ctx,
@@ -1286,13 +1318,15 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 type AudioExecutor struct {
 	audioClient       *llm.AudioClient
 	fileUploadService *service.FileUploadService
+	biller            *service.BillingService
 }
 
 // NewAudioExecutor 创建音频执行器
-func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService) *AudioExecutor {
+func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService, biller *service.BillingService) *AudioExecutor {
 	return &AudioExecutor{
 		audioClient:       audioClient,
 		fileUploadService: fileUploadService,
+		biller:            biller,
 	}
 }
 
@@ -1359,6 +1393,11 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
+
+	// 扣费校验：通过后才调用 TTS API（账单记录模型与场景）
+	if _, err := a.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成"); err != nil {
+		return nil, err
+	}
 
 	// 调用 TTS API
 	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
@@ -1513,13 +1552,13 @@ func roundTo8(n int) int {
 	return ((n + 4) / 8) * 8
 }
 
-// NewDefaultRegistry 创建默认执行器注册表
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService) *ExecutorRegistry {
+// NewDefaultRegistry 创建默认执行器注册表（biller 为积分扣费服务，各执行器在真实 AI 调用前扣费并记账）
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
-	registry.Register("text", NewTextExecutor(llmClient))
-	registry.Register("script", NewScriptExecutor(llmClient))
-	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService))
-	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService))
-	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService))
+	registry.Register("text", NewTextExecutor(llmClient, biller))
+	registry.Register("script", NewScriptExecutor(llmClient, biller))
+	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller))
+	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller))
+	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller))
 	return registry
 }

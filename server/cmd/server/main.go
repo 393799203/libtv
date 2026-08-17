@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -77,6 +77,7 @@ func main() {
 	categoryRepo := repository.NewCategoryRepo(db)
 	styleFavoriteRepo := repository.NewStyleFavoriteRepo(db)
 	userAssetRepo := repository.NewUserAssetRepo(db)
+	billingRepo := repository.NewBillingRepo(db)
 
 	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
 	appStorage := initStorage()
@@ -88,6 +89,8 @@ func main() {
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
+	// 积分扣费服务（AI 调用前置校验；具体扣费策略在 billing_service 的 defaultPrices 中配置）
+	billingService := service.NewBillingService(userRepo, billingRepo)
 
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
@@ -105,7 +108,7 @@ func main() {
 	fileUploadService := service.NewFileUploadService(appStorage)
 
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
@@ -126,8 +129,9 @@ func main() {
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager)
-	promptHandler := handler.NewPromptHandler(llmClient, modelManager)
+	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
+	billingHandler := handler.NewBillingHandler(billingRepo)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -214,8 +218,8 @@ func main() {
 			projects.DELETE("/:id", projectHandler.Delete)
 			projects.GET("/:id/canvas", canvasHandler.Get)
 			projects.PUT("/:id/canvas", canvasHandler.Save)
-			// 工作流（路径对齐前端 api/services/workflowApi.ts）
-			projects.POST("/:id/workflows/execute", workflowHandler.Execute)
+			// 工作流（路径对齐前端 api/services/workflowApi.ts）；AI 调用入口，先过扣费中间件
+			projects.POST("/:id/workflows/execute", middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
 			projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)
 			// SSE 流式订阅工作流执行进度（必须单独注册在 r 上，不能走 Auth 中间件：
 			//   原生 EventSource 不支持自定义 header，token 只能放 query ，
@@ -225,10 +229,10 @@ func main() {
 		// SSE 工作流流（独立鉴权：query 传 token）
 		r.GET("/api/projects/:id/workflows/:execId/stream", workflowHandler.StreamExecution)
 
-		// 工作流（兼容旧路由 /api/workflow/*）
+		// 工作流（兼容旧路由 /api/workflow/*）；AI 调用入口，先过扣费中间件
 		workflow := api.Group("/workflow")
 		{
-			workflow.POST("/execute", workflowHandler.Execute)
+			workflow.POST("/execute", middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
 			workflow.GET("/executions/:id", workflowHandler.GetExecution)
 		}
 
@@ -289,10 +293,10 @@ func main() {
 			banners.DELETE("/:id", bannerHandler.DeleteBanner)
 		}
 
-		// 提示词生成（需登录）
+		// 提示词生成（需登录）；AI 调用入口，先过扣费中间件
 		prompt := api.Group("/prompt")
 		{
-			prompt.POST("/generate", promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
+			prompt.POST("/generate", middleware.Billing(billingService, service.BillingActionPromptGenerate), promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
 		}
 
 		// 用户个人资产库（需登录）
@@ -302,6 +306,9 @@ func main() {
 			userAssets.POST("", userAssetHandler.Create)       // 保存资产（图片/视频 URL 引用）
 			userAssets.DELETE("/:id", userAssetHandler.Delete) // 删除资产（仅限本人）
 		}
+
+		// 积分费用明细（需登录）
+		api.GET("/billing/records", billingHandler.List) // 当前用户的扣费/退款/充值明细
 	}
 
 	// 启动服务

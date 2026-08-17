@@ -2,7 +2,10 @@ package handler
 
 import (
 	"libtv/internal/llm"
+	"libtv/internal/middleware"
+	"libtv/internal/pkg/apperror"
 	"libtv/internal/pkg/response"
+	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -10,23 +13,25 @@ import (
 type PromptHandler struct {
 	llmClient    *llm.Client
 	modelManager *llm.ModelManager
+	biller       *service.BillingService
 }
 
-func NewPromptHandler(llmClient *llm.Client, modelManager *llm.ModelManager) *PromptHandler {
+func NewPromptHandler(llmClient *llm.Client, modelManager *llm.ModelManager, biller *service.BillingService) *PromptHandler {
 	return &PromptHandler{
 		llmClient:    llmClient,
 		modelManager: modelManager,
+		biller:       biller,
 	}
 }
 
 // GeneratePromptRequest 生成提示词请求（画面 + 运动一起生成）
 type GeneratePromptRequest struct {
-	Model      string                    `json:"model" binding:"required"`     // 文本模型 ID
-	ShotID     string                    `json:"shotId" binding:"required"`    // 镜头 ID
-	ShotData   llm.ShotDataForGeneration `json:"shotData" binding:"required"`  // 镜头数据
-	Characters []llm.AssetReference      `json:"characters"`                   // 角色列表
-	Scenes     []llm.AssetReference      `json:"scenes"`                       // 场景列表
-	Props      []llm.AssetReference      `json:"props"`                        // 道具列表
+	Model      string                    `json:"model" binding:"required"`    // 文本模型 ID
+	ShotID     string                    `json:"shotId" binding:"required"`   // 镜头 ID
+	ShotData   llm.ShotDataForGeneration `json:"shotData" binding:"required"` // 镜头数据
+	Characters []llm.AssetReference      `json:"characters"`                  // 角色列表
+	Scenes     []llm.AssetReference      `json:"scenes"`                      // 场景列表
+	Props      []llm.AssetReference      `json:"props"`                       // 道具列表
 }
 
 // GeneratePromptResponse 生成提示词响应（画面 + 运动）
@@ -86,6 +91,15 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	modelConfig := h.modelManager.FindModelByID(req.Model)
 	if modelConfig == nil {
 		response.Fail(c, 400, "模型不存在: "+req.Model)
+		return
+	}
+
+	// 扣费校验：通过后才调用 LLM（账单记录模型与场景）
+	if _, err := h.biller.Charge(c.Request.Context(), middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成"); err != nil {
+		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
+			"code": apperror.CodeFromError(err),
+			"msg":  apperror.MsgFromError(err),
+		})
 		return
 	}
 

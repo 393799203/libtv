@@ -6,6 +6,8 @@ export interface UserItem {
   nickname: string;
   role: string; // 'admin' | 'user'
   created_at: string;
+  /** 剩余积分（AI 调用扣费用） */
+  credits?: number;
   /** 项目数（管理员列表接口返回） */
   project_count?: number;
   /** 图片资产数（管理员列表接口返回） */

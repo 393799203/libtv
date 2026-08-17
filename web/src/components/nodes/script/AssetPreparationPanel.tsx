@@ -30,7 +30,7 @@ interface AssetCardProps<T extends { name: string; description: string }> {
   assetType: AssetType;
   onAdd?: () => void; // 仅最后一个卡片显示"添加"
   showAdd?: boolean;
-  /** 卡片点击回调（用于弹出编辑弹窗） */
+  /** 卡片点击回调（仅"添加"卡片使用；普通卡片操作走悬浮按钮） */
   onClick?: () => void;
   /** "上传图片"按钮回调 */
   onUploadImageClick?: () => void;
@@ -64,9 +64,9 @@ function AssetCard<T extends { name: string; description: string }>({
         onAdd();
         return;
       }
-      onClick?.();
+      // 普通卡片点击不再弹出编辑弹窗，操作统一走悬浮按钮
     },
-    [onClick, onAdd, showAdd]
+    [onAdd, showAdd]
   );
 
   const handleUploadImageClick = useCallback(
@@ -93,9 +93,18 @@ function AssetCard<T extends { name: string; description: string }>({
     [onAssociateClick]
   );
 
+  // "AI生成"：复用卡片点击逻辑（弹出 AssetEditModal，即 AI 生成弹窗）
+  const handleAiGenerateClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onClick?.();
+    },
+    [onClick]
+  );
+
   return (
     <div
-      className="relative w-[160px] h-[120px] rounded-lg border border-gray-200 bg-white overflow-hidden group hover:border-blue-400 transition-colors cursor-pointer"
+      className={`relative w-[160px] h-[120px] rounded-lg border border-gray-200 bg-white overflow-hidden group hover:border-blue-400 transition-colors ${showAdd ? 'cursor-pointer' : ''}`}
       onClick={handleCardClick}
     >
       {/* 图片区域 */}
@@ -122,23 +131,29 @@ function AssetCard<T extends { name: string; description: string }>({
         </div>
       )}
 
-      {/* 悬浮操作按钮（非"添加"卡片）：上传图片 / 导入资产 / 关联已有（上下排列） */}
+      {/* 悬浮操作按钮（非"添加"卡片）：AI生成 / 上传图片 / 导入资产 / 关联已有（2×2 排列） */}
       {!showAdd && (
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity grid grid-cols-2 gap-1 content-center px-3">
           <button
-            className="px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            className="w-full px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            onClick={handleAiGenerateClick}
+          >
+            AI生成
+          </button>
+          <button
+            className="w-full px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
             onClick={handleUploadImageClick}
           >
             上传图片
           </button>
           <button
-            className="px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            className="w-full px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
             onClick={handleImportAssetClick}
           >
             导入资产
           </button>
           <button
-            className="px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50"
+            className="w-full px-2 py-1 bg-white text-[11px] rounded-md font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
             onClick={handleAssociateClick}
           >
             关联已有

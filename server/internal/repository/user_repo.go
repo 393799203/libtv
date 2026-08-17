@@ -28,6 +28,13 @@ type UserRepo interface {
 	UpdateProfile(ctx context.Context, id string, fields map[string]interface{}) error
 	// UpdatePasswordHash 更新密码哈希并将密码版本号 +1（使旧 JWT 全部失效）
 	UpdatePasswordHash(ctx context.Context, id, passwordHash string) error
+	// GetCredits 查询用户剩余积分
+	GetCredits(ctx context.Context, userID string) (int64, error)
+	// DeductCredits 条件原子扣减积分（仅当 credits >= amount 时扣减），
+	// 返回是否扣减成功（false = 积分不足），避免并发下扣成负数
+	DeductCredits(ctx context.Context, userID string, amount int64) (bool, error)
+	// AddCredits 增加积分（退款 / 充值）
+	AddCredits(ctx context.Context, userID string, amount int64) error
 	// CascadeDelete 级联删除用户及其关联数据（项目/画布/工作流执行/AI任务/风格收藏）
 	// 在一个事务内完成
 	CascadeDelete(ctx context.Context, userID string) error
@@ -135,6 +142,32 @@ func (r *userRepo) UpdatePasswordHash(ctx context.Context, id, passwordHash stri
 		"password_hash":    passwordHash,
 		"password_version": gorm.Expr("password_version + 1"),
 	}).Error
+}
+
+func (r *userRepo) GetCredits(ctx context.Context, userID string) (int64, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Select("credits").Where("id = ?", userID).First(&user).Error; err != nil {
+		return 0, err
+	}
+	return user.Credits, nil
+}
+
+// DeductCredits 条件更新：WHERE credits >= amount 保证不会扣成负数，
+// RowsAffected == 0 即积分不足（或用户不存在）
+func (r *userRepo) DeductCredits(ctx context.Context, userID string, amount int64) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ? AND credits >= ?", userID, amount).
+		UpdateColumn("credits", gorm.Expr("credits - ?", amount))
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+func (r *userRepo) AddCredits(ctx context.Context, userID string, amount int64) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ?", userID).
+		UpdateColumn("credits", gorm.Expr("credits + ?", amount)).Error
 }
 
 // CascadeDelete 在一个事务内级联删除用户关联数据

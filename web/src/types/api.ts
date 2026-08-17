@@ -41,5 +41,7 @@ export interface AuthResponse {
     nickname: string;
     avatarUrl?: string;
     role?: string;
+    /** 剩余积分（AI 调用扣费用） */
+    credits?: number;
   };
 }
