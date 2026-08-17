@@ -80,7 +80,6 @@ export default function PricingManagement() {
       {/* 工具栏 */}
       <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 sticky top-0 z-10">
         <div>
-          <div className="text-[14px] font-medium text-gray-800">价格管理</div>
           <div className="text-[11px] text-gray-400 mt-0.5">
             文本 / 图片模型按次计费，视频模型按秒计费，语音模型按字计费（每 100 字）；价格为 0 表示暂不扣费
           </div>
