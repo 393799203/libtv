@@ -2,11 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
+	"math"
 
+	"libtv/internal/llm"
 	"libtv/internal/model"
 	"libtv/internal/pkg/apperror"
 	"libtv/internal/repository"
+
+	"gorm.io/gorm"
 )
 
 // 计费动作（扣费维度）：细分到每次真实 AI 调用，账单可精确到模型与场景
@@ -33,8 +38,8 @@ var actionRemarks = map[string]string{
 	BillingActionAudio:          "音频生成",
 }
 
-// defaultPrices 扣费策略表（TODO: 具体扣费策略后续补充）
-// key = 计费动作，value = 单次调用消耗积分；0 或未配置表示暂不扣费
+// defaultPrices 动作级兜底策略表（仅 EnsureBalance 前置校验用，当前全部为 0 即放行）
+// 真实扣费单价以 model_prices 表（运营后台价格管理）为准，按（节点 + 模型）维度计费
 var defaultPrices = map[string]int64{
 	BillingActionPromptGenerate: 0,
 	BillingActionStory:          0,
@@ -44,50 +49,105 @@ var defaultPrices = map[string]int64{
 	BillingActionAudio:          0,
 }
 
+// actionNodeTypes 扣费 action → 定价节点映射：价格按（节点 + 模型）维度配置，
+// 同一模型在不同节点可设不同价格（如 llm 模型在文本 / 剧本节点分开定价）
+var actionNodeTypes = map[string]string{
+	BillingActionPromptGenerate: "text", // 提示词生成使用文本节点的模型列表
+	BillingActionStory:          "text",
+	BillingActionScript:         "script",
+	BillingActionImage:          "image",
+	BillingActionVideo:          "video",
+	BillingActionAudio:          "audio",
+}
+
 // BillingService 积分扣费服务：
 //  1. EnsureBalance 实现 middleware.CreditBiller，供扣费中间件在 AI 入口做余额校验（只校验不扣费）
-//  2. Charge 在真实 AI 调用点扣费并写入账单明细（含模型 / 场景 / 扣费后余额）
+//  2. ChargeByModel / ChargeByDuration 在真实 AI 调用点扣费并写入账单明细：
+//     单价来自 model_prices 表（运营后台「价格管理」维护，保存后即时生效）：
+//     文本/图片模型按次计费（积分/次），视频/语音模型按秒计费（积分/秒）
 //  3. Refund / Recharge 退款 / 充值，同样写入账单明细
-//  4. 具体扣费策略（每个动作的单价）统一在 defaultPrices 配置，当前全部为 0
 type BillingService struct {
-	userRepo    repository.UserRepo
-	billingRepo repository.BillingRepo
-	prices      map[string]int64
+	userRepo     repository.UserRepo
+	billingRepo  repository.BillingRepo
+	priceRepo    repository.ModelPriceRepo // 模型价格配置（nil 时全部按 0 处理）
+	modelManager *llm.ModelManager         // 用于把调用方传入的 model_id 归一到配置 ID（nil 时按原值查）
+	prices       map[string]int64
 }
 
-func NewBillingService(userRepo repository.UserRepo, billingRepo repository.BillingRepo) *BillingService {
-	return &BillingService{userRepo: userRepo, billingRepo: billingRepo, prices: defaultPrices}
+func NewBillingService(userRepo repository.UserRepo, billingRepo repository.BillingRepo, priceRepo repository.ModelPriceRepo, modelManager *llm.ModelManager) *BillingService {
+	return &BillingService{
+		userRepo:     userRepo,
+		billingRepo:  billingRepo,
+		priceRepo:    priceRepo,
+		modelManager: modelManager,
+		prices:       defaultPrices,
+	}
 }
 
-// Price 返回指定动作单次调用消耗的积分
+// Price 返回指定动作单次调用消耗的积分（仅动作级前置校验用）
 func (s *BillingService) Price(action string) int64 {
 	return s.prices[action]
 }
 
-// EnsureBalance AI 入口余额校验（中间件用，只校验不扣费不记账）：
-// 单价 <= 0 → 直接放行；余额不足 → ErrInsufficientCredits
-func (s *BillingService) EnsureBalance(ctx context.Context, userID, action string) error {
-	cost := s.Price(action)
-	if cost <= 0 {
-		return nil
+// modelUnitPrice 返回指定节点下模型的单价（按次模型=积分/次，按秒模型=积分/秒）；
+// 未配置或查询失败时返回 0（暂不扣费）。每次调用实时查库，后台改价即时生效
+func (s *BillingService) modelUnitPrice(ctx context.Context, nodeType, modelID string) float64 {
+	if s.priceRepo == nil || modelID == "" {
+		return 0
 	}
-	balance, err := s.userRepo.GetCredits(ctx, userID)
+	// 归一：调用方可能传配置 ID（id）也可能传 API 模型 ID（model_id），统一映射到配置 ID 查价
+	lookupID := modelID
+	if s.modelManager != nil {
+		if cfg := s.modelManager.FindModelByID(modelID); cfg != nil {
+			lookupID = cfg.ID
+		} else {
+			for _, models := range s.modelManager.ListModels() {
+				for _, m := range models {
+					if m.ModelID == modelID {
+						lookupID = m.ID
+						break
+					}
+				}
+			}
+		}
+	}
+	record, err := s.priceRepo.GetByNodeModel(ctx, nodeType, lookupID)
 	if err != nil {
-		return err
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("[Billing] 查询模型价格失败: nodeType=%s modelID=%s err=%v", nodeType, modelID, err)
+		}
+		return 0
 	}
-	if balance < cost {
-		return ErrInsufficientCredits
-	}
-	return nil
+	return record.Price
 }
 
-// Charge 真实 AI 调用点扣费 + 记账：
-// 单价 <= 0 → 不扣费但仍写入一条 0 积分记录（便于验证扣费链路）；
-// 积分不足 → ErrInsufficientCredits；
-// 账单记录模型（model）、场景（scene）与扣费后剩余积分（balance_after）。
+// ChargeByModel 按次计费（文本/剧本/图片/提示词）：费用 = 单价 × 次数（四舍五入取整）
 // 返回本次实际扣减的积分（供调用失败时通过 Refund 退还）
-func (s *BillingService) Charge(ctx context.Context, userID, action, modelName, scene string) (int64, error) {
-	cost := s.Price(action)
+func (s *BillingService) ChargeByModel(ctx context.Context, userID, action, modelID, scene string, count int) (int64, error) {
+	if count <= 0 {
+		count = 1
+	}
+	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
+	cost := int64(math.Round(unit * float64(count)))
+	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+}
+
+// ChargeByDuration 按秒计费（视频/语音）：费用 = 单价 × 秒数（向上取整，不足 1 秒按 1 秒计）
+// 返回本次实际扣减的积分
+func (s *BillingService) ChargeByDuration(ctx context.Context, userID, action, modelID, scene string, seconds int) (int64, error) {
+	if seconds <= 0 {
+		seconds = 1
+	}
+	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
+	cost := int64(math.Ceil(unit * float64(seconds)))
+	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+}
+
+// chargeCost 扣费 + 记账：
+// 费用 <= 0 → 不扣费但仍写入一条 0 积分记录（便于验证扣费链路）；
+// 积分不足 → ErrInsufficientCredits；
+// 账单记录模型（model）、场景（scene）与扣费后剩余积分（balance_after）
+func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelName, scene string, cost int64) (int64, error) {
 	if cost > 0 {
 		ok, err := s.userRepo.DeductCredits(ctx, userID, cost)
 		if err != nil {
@@ -112,6 +172,23 @@ func (s *BillingService) Charge(ctx context.Context, userID, action, modelName, 
 		BalanceAfter: balance,
 	})
 	return cost, nil
+}
+
+// EnsureBalance AI 入口余额校验（中间件用，只校验不扣费不记账）：
+// 单价 <= 0 → 直接放行；余额不足 → ErrInsufficientCredits
+func (s *BillingService) EnsureBalance(ctx context.Context, userID, action string) error {
+	cost := s.Price(action)
+	if cost <= 0 {
+		return nil
+	}
+	balance, err := s.userRepo.GetCredits(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if balance < cost {
+		return ErrInsufficientCredits
+	}
+	return nil
 }
 
 // Refund 退还积分（AI 调用失败时退回已扣金额）

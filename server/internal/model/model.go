@@ -300,6 +300,23 @@ type BillingRecord struct {
 
 func (BillingRecord) TableName() string { return "billing_records" }
 
+// ========== 模型计费价格配置 ==========
+
+// ModelPrice 模型价格配置（运营后台「价格管理」维护）
+// 以（节点 + 模型）为维度存储单价：同一模型在不同节点可配置不同价格（如 llm 模型在文本/剧本节点分开定价）
+// 计费类型由节点推导：文本 / 图片节点按次计费（per_call），视频 / 语音节点按秒计费（per_second）
+type ModelPrice struct {
+	ID       int64   `gorm:"primaryKey;autoIncrement" json:"id"`
+	NodeType string  `gorm:"size:20;not null;uniqueIndex:idx_price_node_model,priority:1" json:"node_type"` // 节点类型：text/script/image/video/audio
+	ModelID  string  `gorm:"size:100;not null;uniqueIndex:idx_price_node_model,priority:2" json:"model_id"` // 模型 ID（对应 models.yaml 的 id）
+	Price    float64 `gorm:"not null;default:0" json:"price"`                                               // 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (ModelPrice) TableName() string { return "model_prices" }
+
 func (a *UserAsset) BeforeCreate(tx *gorm.DB) error {
 	if a.ID == "" {
 		a.ID = uuid.New().String()

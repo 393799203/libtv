@@ -22,7 +22,27 @@ export interface BillingRecord {
   created_at: string;
 }
 
+/** 费用明细查询参数 */
+export interface BillingListParams {
+  page?: number;
+  page_size?: number;
+  type?: BillingType | '';
+  scene?: string;
+  model?: string;
+  start_time?: string; // YYYY-MM-DD
+  end_time?: string; // YYYY-MM-DD
+}
+
+/** 费用明细分页响应 */
+export interface BillingListResponse {
+  items: BillingRecord[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export const billingApi = {
-  /** 当前用户的费用明细（按时间倒序） */
-  list: () => api.get<BillingRecord[]>('/billing/records'),
+  /** 当前用户的费用明细（分页 + 筛选，按时间倒序） */
+  list: (params?: BillingListParams) =>
+    api.get<BillingListResponse>('/billing/records', { params }),
 };

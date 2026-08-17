@@ -17,8 +17,8 @@ type CreditBiller interface {
 
 // Billing 积分扣费中间件：必须挂载在 Auth 之后（依赖 Auth 写入的 user_id）。
 // 只做入口余额校验（不扣费不记账）：余额不足直接拒绝（HTTP 402，code=4002）。
-// 真实扣费 + 账单记录在 AI 调用点完成（engine 各执行器 / prompt handler 调 BillingService.Charge），
-// 这样才能把调用的模型与场景写进账单明细。
+// 真实扣费 + 账单记录在 AI 调用点完成（engine 各执行器 / prompt handler 调
+// BillingService.ChargeByModel / ChargeByDuration），这样才能把调用的模型与场景写进账单明细。
 func Billing(biller CreditBiller, action string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := GetUserID(c)

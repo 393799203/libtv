@@ -37,6 +37,18 @@ func NewUserService(userRepo repository.UserRepo, s storage.Storage) *UserServic
 	return &UserService{userRepo: userRepo, storage: s}
 }
 
+// GetUserRole 查询用户角色（供 RequireAdmin 中间件鉴权使用）
+func (s *UserService) GetUserRole(ctx context.Context, userID string) (string, error) {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrUserNotFound
+		}
+		return "", err
+	}
+	return user.Role, nil
+}
+
 func (s *UserService) Register(ctx context.Context, email, password, nickname string) (*model.User, error) {
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

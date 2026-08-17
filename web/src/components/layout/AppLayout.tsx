@@ -8,6 +8,7 @@ import {
   SettingOutlined,
   GoldOutlined,
   AccountBookOutlined,
+  FileOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
@@ -38,7 +39,7 @@ export function AppLayout() {
 
   const userMenuItems: MenuProps['items'] = [
     { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
-    { key: 'assets', icon: <GoldOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
+    { key: 'assets', icon: <FileOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
     { key: 'billing', icon: <AccountBookOutlined />, label: '费用明细', onClick: () => setShowBillingRecords(true) },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },

@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -526,8 +527,8 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 		}, nil
 	}
 
-	// 扣费校验：通过后才调用 LLM（账单记录模型与场景）
-	if _, err := t.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成"); err != nil {
+	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
+	if _, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成", 1); err != nil {
 		return nil, err
 	}
 
@@ -672,8 +673,8 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	}
 
 	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d model=%s", node.ID, len(material), len(cleanedPrompt), len(fullInput), data.Model)
-	// 扣费校验：通过后才调用 LLM（账单记录模型与场景）
-	if _, err := s.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成"); err != nil {
+	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；剧本使用文本模型按次计费）
+	if _, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成", 1); err != nil {
 		return nil, err
 	}
 	// 调用 LLM 生成分镜剧本（直接使用data.Model作为model_id）
@@ -960,8 +961,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 	log.Printf("[ImageExecutor] 生成数量: data.Count=%d -> 实际count=%d", data.Count, count)
 
-	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景）
-	if _, err := i.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成"); err != nil {
+	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景；图片模型按次计费，按生成张数计）
+	if _, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成", count); err != nil {
 		return nil, err
 	}
 
@@ -1211,8 +1212,8 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		resolution = "4k"
 	}
 
-	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景）
-	if _, err := v.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成"); err != nil {
+	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按节点配置的生成时长计）
+	if _, err := v.biller.ChargeByDuration(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", data.Duration); err != nil {
 		return nil, err
 	}
 
@@ -1394,12 +1395,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
 
-	// 扣费校验：通过后才调用 TTS API（账单记录模型与场景）
-	if _, err := a.biller.Charge(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成"); err != nil {
-		return nil, err
-	}
-
-	// 调用 TTS API
+	// 调用 TTS API（语音模型按秒计费，需生成后按实际音频时长扣费）
 	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
@@ -1413,6 +1409,16 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	log.Printf("[AudioExecutor] ✅ TTS生成成功: nodeId=%s audioBytes=%d", node.ID, len(audioData))
+
+	// 扣费：按实际音频时长计费（WAV 头解析失败时按文本长度估算，约 4 字/秒）
+	durationSeconds := wavDurationSeconds(audioData)
+	if durationSeconds <= 0 {
+		durationSeconds = (len([]rune(inputText)) + 3) / 4
+		log.Printf("[AudioExecutor] ⚠️ WAV时长解析失败，按文本长度估算: %d秒", durationSeconds)
+	}
+	if _, err := a.biller.ChargeByDuration(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成", durationSeconds); err != nil {
+		return nil, err
+	}
 
 	// 上传到 users/<userID>/canvas/<projectID>/（无 userID 时降级 canvas/<projectID>/）
 	projectID := execCtx.GetProjectID()
@@ -1455,6 +1461,35 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			"audioUrl": result.URL,
 		},
 	}, nil
+}
+
+// wavDurationSeconds 从 WAV 字节流解析音频时长（秒，向上取整）；非标准 WAV 或解析失败返回 0
+func wavDurationSeconds(data []byte) int {
+	if len(data) < 44 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+		return 0
+	}
+	var byteRate, dataSize uint32
+	for i := 12; i+8 <= len(data); {
+		chunkID := string(data[i : i+4])
+		chunkSize := binary.LittleEndian.Uint32(data[i+4 : i+8])
+		switch chunkID {
+		case "fmt ":
+			// fmt 块数据布局：audioFormat(2) numChannels(2) sampleRate(4) byteRate(4)...
+			if i+20 <= len(data) {
+				byteRate = binary.LittleEndian.Uint32(data[i+16 : i+20])
+			}
+		case "data":
+			dataSize = chunkSize
+		}
+		i += 8 + int(chunkSize)
+		if chunkSize%2 == 1 {
+			i++ // 奇数长度块有 1 字节填充
+		}
+	}
+	if byteRate == 0 || dataSize == 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(dataSize) / float64(byteRate)))
 }
 
 // calculateSizeFromResolutionAndRatio 根据分辨率和比例计算图片尺寸

@@ -22,6 +22,7 @@ import { userApi, type UserItem } from '@/services/userApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import AddShowDialog from '@/components/AddShowDialog';
+import PricingManagement from './PricingManagement';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
 
@@ -93,6 +94,10 @@ export default function AdminPage() {
   // 作者搜索（风格弹窗使用）
   const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
   const [authorSearching, setAuthorSearching] = useState(false);
+
+  // ========== 系统设置状态 ==========
+  // 系统设置页内子页签（当前：价格管理）
+  const [settingsSubTab, setSettingsSubTab] = useState<'pricing'>('pricing');
 
   // 远程搜索作者（供风格弹窗使用）
   const fetchAuthors = (_keyword?: string) => {
@@ -1209,13 +1214,25 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* ========== 系统设置 Tab（占位）========== */}
+        {/* ========== 系统设置 Tab ========== */}
         {activeTab === 'settings' && (
-          <div className="flex-1 overflow-y-auto p-6 flex items-center justify-center text-gray-400">
-            <div className="text-center">
-              <SettingOutlined style={{ fontSize: 40 }} className="mb-3 opacity-40" />
-              <div className="text-[14px]">系统设置功能开发中...</div>
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {/* 子页签栏 */}
+            <div className="bg-white px-6 border-b border-gray-100 shrink-0 flex items-center gap-1">
+              <button
+                onClick={() => setSettingsSubTab('pricing')}
+                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
+                  settingsSubTab === 'pricing'
+                    ? 'border-blue-600 text-blue-700 font-medium'
+                    : 'border-transparent text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                价格管理
+              </button>
             </div>
+
+            {/* 价格管理页签 */}
+            {settingsSubTab === 'pricing' && <PricingManagement />}
           </div>
         )}
       </main>

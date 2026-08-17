@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -78,6 +78,7 @@ func main() {
 	styleFavoriteRepo := repository.NewStyleFavoriteRepo(db)
 	userAssetRepo := repository.NewUserAssetRepo(db)
 	billingRepo := repository.NewBillingRepo(db)
+	modelPriceRepo := repository.NewModelPriceRepo(db)
 
 	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
 	appStorage := initStorage()
@@ -89,8 +90,10 @@ func main() {
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
-	// 积分扣费服务（AI 调用前置校验；具体扣费策略在 billing_service 的 defaultPrices 中配置）
-	billingService := service.NewBillingService(userRepo, billingRepo)
+	// 模型价格配置服务（运营后台价格管理；模型清单来自 models.yaml，价格存 model_prices 表）
+	pricingService := service.NewPricingService(modelManager, modelPriceRepo)
+	// 积分扣费服务（AI 调用前置校验；真实单价来自 model_prices 表，运营后台价格管理维护）
+	billingService := service.NewBillingService(userRepo, billingRepo, modelPriceRepo, modelManager)
 
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
@@ -132,6 +135,7 @@ func main() {
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo)
+	pricingHandler := handler.NewPricingHandler(pricingService)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -309,6 +313,10 @@ func main() {
 
 		// 积分费用明细（需登录）
 		api.GET("/billing/records", billingHandler.List) // 当前用户的扣费/退款/充值明细
+
+		// 模型价格配置（查询需登录；保存仅管理员）
+		api.GET("/pricing", pricingHandler.List)
+		api.PUT("/pricing", middleware.RequireAdmin(userService), pricingHandler.Save)
 	}
 
 	// 启动服务

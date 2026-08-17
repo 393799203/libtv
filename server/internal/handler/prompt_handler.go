@@ -94,8 +94,8 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		return
 	}
 
-	// 扣费校验：通过后才调用 LLM（账单记录模型与场景）
-	if _, err := h.biller.Charge(c.Request.Context(), middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成"); err != nil {
+	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
+	if _, err := h.biller.ChargeByModel(c.Request.Context(), middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", 1); err != nil {
 		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
 			"code": apperror.CodeFromError(err),
 			"msg":  apperror.MsgFromError(err),
