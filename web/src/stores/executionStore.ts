@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { message } from 'antd';  // ✅ 导入Ant Design message组件用于全局错误提示
 import type { WorkflowExecution, NodeExecution, WSEvent, WorkflowStatus } from '@/types/workflow';
 
 // 活跃 SSE 订阅信息（与组件生命周期解耦，避免节点失焦导致 SSE 被关闭）
@@ -151,8 +150,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           });
         }
 
-        // ✅ 调用message.error显示全局错误提示（红色提示条）
-        message.error(errMsg, 8);  // 显示8秒，给用户足够时间阅读完整错误消息
+        // ✅ 不再此处显示错误提示，由 useExecutionStream.ts 统一处理错误显示，避免重复弹窗
         break;
       }
     }

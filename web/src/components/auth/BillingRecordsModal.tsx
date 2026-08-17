@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Modal, Empty, Tag, Select, DatePicker, Button, Pagination } from 'antd';
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Modal, Empty, Tag, Select, DatePicker, Button, Pagination, Tooltip } from 'antd';
+import { SearchOutlined, ReloadOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { billingApi, type BillingRecord, type BillingType } from '@/services/billingApi';
 import { pricingApi } from '@/services/pricingApi';
@@ -203,7 +203,14 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                   <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="py-2.5 text-gray-500 text-[12px] whitespace-nowrap">{formatTime(r.created_at)}</td>
                     <td className="py-2.5">
-                      <Tag color={meta.color} className="!m-0">{meta.label}</Tag>
+                      <div className="flex items-center gap-1">
+                        <Tag color={meta.color} className="!m-0">{meta.label}</Tag>
+                        {r.type === 'refund' && r.remark && (
+                          <Tooltip title={r.remark}>
+                            <QuestionCircleOutlined className="text-gray-400 text-[12px] cursor-help" />
+                          </Tooltip>
+                        )}
+                      </div>
                     </td>
                     <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
                     <td className="py-2.5 text-gray-500 text-[12px]">{r.model || '-'}</td>

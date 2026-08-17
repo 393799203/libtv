@@ -528,13 +528,18 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	}
 
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
-	if _, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成", 1); err != nil {
+	chargedAmount, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成", 1)
+	if err != nil {
 		return nil, err
 	}
 
 	// 调用 LLM 生成故事文本（直接使用data.Model作为model_id）
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
+		// LLM调用失败，退还已扣费用
+		if refundErr := t.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionStory, data.Model, "故事生成"); refundErr != nil {
+			log.Printf("[TextExecutor] 退费失败: %v", refundErr)
+		}
 		return nil, fmt.Errorf("generate story: %w", err)
 	}
 
@@ -674,12 +679,17 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 
 	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d model=%s", node.ID, len(material), len(cleanedPrompt), len(fullInput), data.Model)
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；剧本使用文本模型按次计费）
-	if _, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成", 1); err != nil {
+	chargedAmount, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成", 1)
+	if err != nil {
 		return nil, err
 	}
 	// 调用 LLM 生成分镜剧本（直接使用data.Model作为model_id）
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
+		// LLM调用失败，退还已扣费用
+		if refundErr := s.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionScript, data.Model, "分镜剧本生成"); refundErr != nil {
+			log.Printf("[ScriptExecutor] 退费失败: %v", refundErr)
+		}
 		return nil, fmt.Errorf("generate script: %w", err)
 	}
 
@@ -964,14 +974,14 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	log.Printf("[ImageExecutor] 生成数量: data.Count=%d -> 实际count=%d", data.Count, count)
 
 	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景；图片模型按次计费，按生成张数计）
-	if _, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成", count); err != nil {
+	chargedAmount, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成", count)
+	if err != nil {
 		return nil, err
 	}
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
 	// 返回所有生成图片的 URL 列表（N>1 时有多个）
 	var generatedURLs []string
-	var err error
 
 	if len(upstreamImageURLs) > 0 {
 		// 根据风格图/参考图组合构建不同的提示词
@@ -989,12 +999,20 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 使用图生图模式: styleCount=%d refCount=%d prompt=%s", len(styleImageURLs), len(referenceImageURLs), imageToImagePrompt)
 		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
 		if err != nil {
+			// API调用失败，退还已扣费用
+			if refundErr := i.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成"); refundErr != nil {
+				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
+			}
 			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
 		}
 	} else {
 		log.Printf("[ImageExecutor] 使用文生图模式")
 		generatedURLs, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size, count)
 		if err != nil {
+			// API调用失败，退还已扣费用
+			if refundErr := i.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成"); refundErr != nil {
+				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
+			}
 			return nil, fmt.Errorf("generate image: %w", err)
 		}
 	}
@@ -1230,7 +1248,8 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按节点配置的生成时长计）
-	if _, err := v.biller.ChargeByDuration(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", data.Duration); err != nil {
+	chargedAmount, err := v.biller.ChargeByDuration(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", data.Duration)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1249,6 +1268,10 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	)
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
+		// API调用失败，退还已扣费用
+		if refundErr := v.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成"); refundErr != nil {
+			log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
+		}
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "failed",

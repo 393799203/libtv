@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 
@@ -192,7 +193,7 @@ func (s *BillingService) EnsureBalance(ctx context.Context, userID, action strin
 }
 
 // Refund 退还积分（AI 调用失败时退回已扣金额）
-func (s *BillingService) Refund(ctx context.Context, userID string, amount int64) error {
+func (s *BillingService) Refund(ctx context.Context, userID string, amount int64, action, modelName, scene string) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -203,11 +204,16 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 	if err != nil {
 		return err
 	}
+	// 构建退费备注，包含退费原因
+	remark := fmt.Sprintf("%s失败退还", scene)
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:       userID,
 		Type:         "refund",
 		Amount:       amount,
-		Remark:       "积分退还",
+		Action:       action,
+		Model:        modelName,
+		Scene:        scene,
+		Remark:       remark,
 		BalanceAfter: balance,
 	})
 	return nil
