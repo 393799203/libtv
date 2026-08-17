@@ -140,7 +140,7 @@ export function BillingRecordsModal({ onClose }: { onClose: () => void }) {
           onChange={setFilterType}
           placeholder="类型"
           allowClear
-          className="w-24"
+          className="w-26"
           options={[
             { label: '全部类型', value: '' },
             { label: '扣费', value: 'deduct' },
