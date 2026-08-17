@@ -26,6 +26,7 @@ export interface BillingRecord {
 export interface BillingListParams {
   page?: number;
   page_size?: number;
+  user_id?: string; // 管理员查看其他用户的账单
   type?: BillingType | '';
   scene?: string;
   model?: string;

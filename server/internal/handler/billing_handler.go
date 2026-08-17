@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,22 +13,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// UserRoleGetter 查询用户角色（由 service 层实现）
+type UserRoleGetter interface {
+	GetUserRole(ctx context.Context, userID string) (string, error)
+}
+
 type BillingHandler struct {
 	billingRepo repository.BillingRepo
+	roleGetter  UserRoleGetter
 }
 
-func NewBillingHandler(billingRepo repository.BillingRepo) *BillingHandler {
-	return &BillingHandler{billingRepo: billingRepo}
+func NewBillingHandler(billingRepo repository.BillingRepo, roleGetter UserRoleGetter) *BillingHandler {
+	return &BillingHandler{billingRepo: billingRepo, roleGetter: roleGetter}
 }
 
-// List 当前用户的费用明细（分页 + 筛选，按时间倒序，需登录）
-// 查询参数：page / page_size、type（deduct|refund|recharge）、scene、model（均支持模糊）、
+// List 费用明细（分页 + 筛选，按时间倒序，需登录）
+// 管理员可通过 user_id 参数查看其他用户的账单；普通用户只能查看自己的
+// 查询参数：page / page_size、user_id（管理员专用）、type（deduct|refund|recharge）、scene、model（均支持模糊）、
 // start_time / end_time（支持 2006-01-02 或 2006-01-02 15:04:05）
 func (h *BillingHandler) List(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	if userID == "" {
+	currentUserID := middleware.GetUserID(c)
+	if currentUserID == "" {
 		response.Fail(c, http.StatusUnauthorized, "未登录")
 		return
+	}
+
+	// 确定要查询的用户 ID：管理员可指定 user_id，普通用户只能查自己
+	targetUserID := currentUserID
+	if queryUserID := c.Query("user_id"); queryUserID != "" && queryUserID != currentUserID {
+		// 检查当前用户是否为管理员
+		role, err := h.roleGetter.GetUserRole(c.Request.Context(), currentUserID)
+		if err != nil || role != "admin" {
+			response.Fail(c, http.StatusForbidden, "无权查看其他用户的账单")
+			return
+		}
+		targetUserID = queryUserID
 	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -59,7 +79,7 @@ func (h *BillingHandler) List(c *gin.Context) {
 		}
 	}
 
-	records, total, err := h.billingRepo.ListByUser(c.Request.Context(), userID, filter, page, pageSize)
+	records, total, err := h.billingRepo.ListByUser(c.Request.Context(), targetUserID, filter, page, pageSize)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "获取费用明细失败")
 		return

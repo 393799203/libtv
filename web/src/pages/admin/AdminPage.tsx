@@ -15,6 +15,7 @@ import {
   VideoCameraOutlined,
   CaretRightOutlined,
   LoadingOutlined,
+  AccountBookOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
@@ -23,6 +24,7 @@ import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import AddShowDialog from '@/components/AddShowDialog';
 import PricingManagement from './PricingManagement';
+import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
 
@@ -54,6 +56,7 @@ export default function AdminPage() {
   // ========== 用户管理状态 ==========
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
+  const [billingUserId, setBillingUserId] = useState<string | null>(null); // 查看哪个用户的积分明细
 
   // ========== 版图管理状态 ==========
   const [banners, setBanners] = useState<BannerItem[]>([]);
@@ -994,6 +997,7 @@ export default function AdminPage() {
 
         {/* ========== 用户管理 Tab ========== */}
         {activeTab === 'users' && (
+          <>
           <div className="flex-1 overflow-y-auto p-6">
             {userLoading ? (
               <div className="flex items-center justify-center py-20"><span className="text-gray-400">加载中...</span></div>
@@ -1016,6 +1020,7 @@ export default function AdminPage() {
                         <th className="px-4 py-3 text-left font-medium text-gray-600">昵称</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">剩余积分</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
                       </tr>
@@ -1057,11 +1062,24 @@ export default function AdminPage() {
                                 }}
                               />
                             </td>
+                            <td className="px-4 py-3 text-gray-800 font-medium">
+                              {user.credits ?? 0}
+                            </td>
                             <td className="px-4 py-3 text-gray-500">
                               {new Date(user.created_at).toLocaleDateString('zh-CN')}
                             </td>
                             <td className="px-4 py-3">
-                              {!isCurrentUser && (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBillingUserId(user.id);
+                                  }}
+                                  className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <AccountBookOutlined /> 积分明细
+                                </button>
+                                {!isCurrentUser && (
                                 <button
                                   onClick={async (e) => {
                                     e.stopPropagation();
@@ -1105,6 +1123,7 @@ export default function AdminPage() {
                                   删除
                                 </button>
                               )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1115,6 +1134,14 @@ export default function AdminPage() {
               </>
             )}
           </div>
+          {/* 用户积分明细弹窗 */}
+          {billingUserId && (
+            <BillingRecordsModal
+              userId={billingUserId}
+              onClose={() => setBillingUserId(null)}
+            />
+          )}
+          </>
         )}
 
         {/* ========== 版图管理 Tab ========== */}

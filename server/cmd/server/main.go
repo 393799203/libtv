@@ -134,7 +134,7 @@ func main() {
 	modelHandler := handler.NewModelHandler(modelManager)
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
-	billingHandler := handler.NewBillingHandler(billingRepo)
+	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService)
 
 	// 初始化 Gin

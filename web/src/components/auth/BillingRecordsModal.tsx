@@ -32,8 +32,9 @@ const SCENE_OPTIONS = [
 
 /**
  * 费用明细弹窗：当前账户所有的扣费 / 退款 / 充值记录（分页 + 筛选，按时间倒序）
+ * @param userId 可选，管理员查看其他用户的账单
  */
-export function BillingRecordsModal({ onClose }: { onClose: () => void }) {
+export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; userId?: string }) {
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -76,6 +77,7 @@ export function BillingRecordsModal({ onClose }: { onClose: () => void }) {
       page,
       page_size: pageSize,
     };
+    if (userId) params.user_id = userId;
     if (filterType) params.type = filterType;
     if (filterScene) params.scene = filterScene;
     if (filterModel) params.model = filterModel;
