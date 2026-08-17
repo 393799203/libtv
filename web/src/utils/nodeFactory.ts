@@ -4,10 +4,10 @@ import type { XYPosition } from '@xyflow/react';
 // 各类型节点的默认尺寸
 const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
   text: { width: 320, height: 300, minWidth: 320, minHeight: 200 },
-  image: { width: 320, minHeight: 190 },
+  image: { width: 320, minWidth: 320, minHeight: 190 },
   video: { width: 480 },
   audio: { width: 320 },
-  script: { width: 320 },
+  script: { width: 320, minWidth: 320 },
 };
 
 /**
