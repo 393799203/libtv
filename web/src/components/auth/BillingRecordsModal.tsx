@@ -4,7 +4,6 @@ import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { billingApi, type BillingRecord, type BillingType } from '@/services/billingApi';
 import { pricingApi } from '@/services/pricingApi';
-import { useAuthStore } from '@/stores/authStore';
 
 const { RangePicker } = DatePicker;
 
@@ -92,12 +91,6 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
         if (cancelled) return;
         setRecords(res.items || []);
         setTotal(res.total || 0);
-        // 第一页且无筛选时，同步最新余额到头部
-        if (page === 1 && !filterType && !filterScene && !filterModel && !filterDateRange) {
-          if (res.items && res.items.length > 0) {
-            useAuthStore.getState().setUser({ credits: res.items[0].balance_after });
-          }
-        }
       })
       .catch((err) => {
         console.error('加载费用明细失败:', err);
