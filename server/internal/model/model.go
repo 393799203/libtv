@@ -317,6 +317,30 @@ type ModelPrice struct {
 
 func (ModelPrice) TableName() string { return "model_prices" }
 
+// ========== 生成历史记录 ==========
+
+// GenerationHistory 节点生成历史（图片/视频）
+type GenerationHistory struct {
+	ID        string    `gorm:"size:36;primaryKey" json:"id"`
+	UserID    string    `gorm:"size:36;not null;index" json:"user_id"`
+	ProjectID string    `gorm:"size:36;not null;index" json:"project_id"`
+	NodeID    string    `gorm:"size:36;not null;index" json:"node_id"`
+	NodeType  string    `gorm:"size:20;not null" json:"node_type"` // image / video
+	Prompt    string    `gorm:"type:text" json:"prompt"`
+	Model     string    `gorm:"size:100" json:"model"`
+	ResultURL string    `gorm:"size:500;not null" json:"result_url"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (GenerationHistory) TableName() string { return "generation_history" }
+
+func (h *GenerationHistory) BeforeCreate(tx *gorm.DB) error {
+	if h.ID == "" {
+		h.ID = uuid.New().String()
+	}
+	return nil
+}
+
 func (a *UserAsset) BeforeCreate(tx *gorm.DB) error {
 	if a.ID == "" {
 		a.ID = uuid.New().String()

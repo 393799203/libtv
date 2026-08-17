@@ -743,19 +743,21 @@ func getAssetTypeFromNodeID(nodeID string) string {
 
 // ImageExecutor 图像节点执行器（调用图像生成API）
 type ImageExecutor struct {
-	imageClient       *llm.ImageClient
-	modelManager      *llm.ModelManager
-	fileUploadService *service.FileUploadService
-	biller            *service.BillingService
+	imageClient             *llm.ImageClient
+	modelManager            *llm.ModelManager
+	fileUploadService       *service.FileUploadService
+	biller                  *service.BillingService
+	generationHistoryService *service.GenerationHistoryService
 }
 
 // NewImageExecutor 创建图像执行器
-func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService) *ImageExecutor {
+func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ImageExecutor {
 	return &ImageExecutor{
-		imageClient:       client,
-		modelManager:      modelManager,
-		fileUploadService: fileUploadService,
-		biller:            biller,
+		imageClient:             client,
+		modelManager:            modelManager,
+		fileUploadService:       fileUploadService,
+		biller:                  biller,
+		generationHistoryService: generationHistoryService,
 	}
 }
 
@@ -1019,6 +1021,19 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		firstURL = ownURLs[0]
 	}
 
+	// 记录生成历史
+	if firstURL != "" && i.generationHistoryService != nil {
+		userID := execCtx.GetUserID()
+		projectID := execCtx.GetProjectID()
+		if userID != "" && projectID != "" {
+			for _, url := range ownURLs {
+				if err := i.generationHistoryService.RecordGeneration(ctx, userID, projectID, node.ID, "image", data.Prompt, data.Model, url); err != nil {
+					log.Printf("[ImageExecutor] 记录生成历史失败: %v", err)
+				}
+			}
+		}
+	}
+
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
@@ -1084,17 +1099,19 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 
 // VideoExecutor 视频节点执行器（doubao-seedance）
 type VideoExecutor struct {
-	videoClient       *llm.VideoClient
-	fileUploadService *service.FileUploadService
-	biller            *service.BillingService
+	videoClient              *llm.VideoClient
+	fileUploadService        *service.FileUploadService
+	biller                   *service.BillingService
+	generationHistoryService *service.GenerationHistoryService
 }
 
 // NewVideoExecutor 创建视频执行器
-func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *service.BillingService) *VideoExecutor {
+func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *VideoExecutor {
 	return &VideoExecutor{
-		videoClient:       videoClient,
-		fileUploadService: fileUploadService,
-		biller:            biller,
+		videoClient:              videoClient,
+		fileUploadService:        fileUploadService,
+		biller:                   biller,
+		generationHistoryService: generationHistoryService,
 	}
 }
 
@@ -1250,6 +1267,17 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		ownVideoURL = videoURL
 	} else {
 		log.Printf("[VideoExecutor] ✅ 视频已保存: original=%s -> ownURL=%s", videoURL, ownVideoURL)
+	}
+
+	// 记录生成历史
+	if ownVideoURL != "" && v.generationHistoryService != nil {
+		userID := execCtx.GetUserID()
+		projectID := execCtx.GetProjectID()
+		if userID != "" && projectID != "" {
+			if err := v.generationHistoryService.RecordGeneration(ctx, userID, projectID, node.ID, "video", data.Prompt, data.Model, ownVideoURL); err != nil {
+				log.Printf("[VideoExecutor] 记录生成历史失败: %v", err)
+			}
+		}
 	}
 
 	return &NodeOutput{
@@ -1588,12 +1616,12 @@ func roundTo8(n int) int {
 }
 
 // NewDefaultRegistry 创建默认执行器注册表（biller 为积分扣费服务，各执行器在真实 AI 调用前扣费并记账）
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService) *ExecutorRegistry {
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient, biller))
 	registry.Register("script", NewScriptExecutor(llmClient, biller))
-	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller))
-	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller))
+	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService))
+	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService))
 	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller))
 	return registry
 }

@@ -37,6 +37,7 @@ import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
 import { CanvasContextMenu } from './CanvasContextMenu';
 import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
+import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
 
 const edgeTypes = {
@@ -61,13 +62,20 @@ export const Canvas = memo(function Canvas() {
   const lastViewportUpdate = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  // 图片/视频节点右键菜单状态（下载 / 存到个人资产库）
+  // 图片/视频节点右键菜单状态（下载 / 存到个人资产库 / 查看生成历史）
   const [nodeMenu, setNodeMenu] = useState<{
     x: number;
     y: number;
     nodeType: 'image' | 'video';
     url: string;
     name: string;
+    nodeId: string;
+  } | null>(null);
+  // 生成历史弹窗状态
+  const [historyModal, setHistoryModal] = useState<{
+    nodeId: string;
+    nodeType: 'image' | 'video';
+    currentUrl: string;
   } | null>(null);
   const [nodeSelectPopup, setNodeSelectPopup] = useState<{
     position: { x: number; y: number };
@@ -190,6 +198,7 @@ export const Canvas = memo(function Canvas() {
       nodeType: node.type,
       url,
       name: (node.data.label as string) || '',
+      nodeId: node.id,
     });
   }, []);
 
@@ -508,7 +517,24 @@ export const Canvas = memo(function Canvas() {
           nodeType={nodeMenu.nodeType}
           url={nodeMenu.url}
           name={nodeMenu.name}
+          nodeId={nodeMenu.nodeId}
+          onUpdateNode={updateNodeData}
+          onShowHistory={(nid, nt, curUrl) => setHistoryModal({ nodeId: nid, nodeType: nt, currentUrl: curUrl })}
           onClose={() => setNodeMenu(null)}
+        />
+      )}
+
+      {/* 生成历史弹窗 */}
+      {historyModal && (
+        <GenerationHistoryModal
+          nodeId={historyModal.nodeId}
+          nodeType={historyModal.nodeType}
+          currentUrl={historyModal.currentUrl}
+          onSelect={(selectedUrl) => {
+            const dataKey = historyModal.nodeType === 'image' ? 'imageUrl' : 'videoUrl';
+            updateNodeData(historyModal.nodeId, { [dataKey]: selectedUrl });
+          }}
+          onClose={() => setHistoryModal(null)}
         />
       )}
 

@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -79,6 +79,7 @@ func main() {
 	userAssetRepo := repository.NewUserAssetRepo(db)
 	billingRepo := repository.NewBillingRepo(db)
 	modelPriceRepo := repository.NewModelPriceRepo(db)
+	generationHistoryRepo := repository.NewGenerationHistoryRepo(db)
 
 	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
 	appStorage := initStorage()
@@ -110,8 +111,11 @@ func main() {
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)
 
+	// 生成历史记录
+	generationHistoryService := service.NewGenerationHistoryService(generationHistoryRepo)
+
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
@@ -136,6 +140,7 @@ func main() {
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService)
+	generationHistoryHandler := handler.NewGenerationHistoryHandler(generationHistoryService)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -313,6 +318,9 @@ func main() {
 
 		// 积分费用明细（需登录）
 		api.GET("/billing/records", billingHandler.List) // 当前用户的扣费/退款/充值明细
+
+		// 生成历史记录（需登录）
+		api.GET("/generation-history", generationHistoryHandler.ListByNode) // 获取节点的生成历史
 
 		// 模型价格配置（查询需登录；保存仅管理员）
 		api.GET("/pricing", pricingHandler.List)

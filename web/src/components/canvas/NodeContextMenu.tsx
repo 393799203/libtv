@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Menu, App, type MenuProps } from 'antd';
-import { DownloadOutlined, FolderAddOutlined } from '@ant-design/icons';
+import { DownloadOutlined, FolderAddOutlined, HistoryOutlined } from '@ant-design/icons';
 import { assetApi } from '@/services/assetApi';
 import { downloadFile } from '@/utils/download';
 
@@ -11,6 +11,12 @@ interface NodeContextMenuProps {
   url: string;
   /** 节点名称（作为资产名） */
   name: string;
+  /** 节点 ID */
+  nodeId: string;
+  /** 更新节点数据的回调 */
+  onUpdateNode?: (nodeId: string, data: Record<string, any>) => void;
+  /** 点击“查看生成历史”回调 */
+  onShowHistory?: (nodeId: string, nodeType: 'image' | 'video', currentUrl: string) => void;
   onClose: () => void;
 }
 
@@ -18,12 +24,16 @@ interface NodeContextMenuProps {
  * 图片/视频节点右键菜单
  * - 下载图片 / 下载视频
  * - 存到个人资产库
+ * - 查看生成历史
  */
 export const NodeContextMenu = memo(function NodeContextMenu({
   position,
   nodeType,
   url,
   name,
+  nodeId,
+  onUpdateNode,
+  onShowHistory,
   onClose,
 }: NodeContextMenuProps) {
   const { message } = App.useApp();
@@ -66,6 +76,11 @@ export const NodeContextMenu = memo(function NodeContextMenu({
     }
   }, [nodeType, url, name, saving, onClose, message]);
 
+  const handleShowHistory = useCallback(() => {
+    onClose();
+    onShowHistory?.(nodeId, nodeType, url);
+  }, [onClose, onShowHistory, nodeId, nodeType, url]);
+
   const menuItems: MenuProps['items'] = [
     {
       key: 'download',
@@ -78,6 +93,15 @@ export const NodeContextMenu = memo(function NodeContextMenu({
       label: saving ? '保存中...' : '存到个人资产库',
       icon: <FolderAddOutlined />,
       onClick: handleSaveToLibrary,
+    },
+    {
+      type: 'divider',
+    },
+    {
+      key: 'history',
+      label: '查看生成历史',
+      icon: <HistoryOutlined />,
+      onClick: handleShowHistory,
     },
   ];
 
