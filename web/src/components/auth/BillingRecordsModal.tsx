@@ -126,7 +126,10 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
       footer={null}
       width={960}
       destroyOnClose
-      styles={{ body: { padding: '12px 16px 16px' } }}
+      styles={{
+        mask: { backdropFilter: 'blur(4px)' },
+        body: { padding: '12px 16px 16px' },
+      }}
     >
       {/* 筛选栏 */}
       <div className="flex items-center gap-3 mb-4">

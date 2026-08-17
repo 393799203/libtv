@@ -258,7 +258,10 @@ export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryMod
       footer={null}
       width={1200}
       destroyOnClose
-      styles={{ body: { padding: '4px 12px 12px', height: '68vh', overflowY: 'auto' } }}
+      styles={{
+        mask: { backdropFilter: 'blur(4px)' },
+        body: { padding: '4px 12px 12px', height: '68vh', overflowY: 'auto' },
+      }}
     >
       {!isPickMode && (
         <Tabs
