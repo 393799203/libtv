@@ -178,69 +178,75 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
         </Button>
       </div>
 
-      {/* 表格 */}
-      {loading ? (
-        <div className="py-16 text-center text-gray-400 text-sm">加载中...</div>
-      ) : records.length === 0 ? (
-        <Empty description="暂无费用记录" className="py-12" />
-      ) : (
-        <>
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-gray-400 text-[12px] border-b border-gray-100">
-                <th className="py-2 font-normal">时间</th>
-                <th className="py-2 font-normal">类型</th>
-                <th className="py-2 font-normal">场景</th>
-                <th className="py-2 font-normal">模型</th>
-                <th className="py-2 font-normal text-right">积分变动</th>
-                <th className="py-2 font-normal text-right">剩余积分</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((r) => {
-                const meta = TYPE_META[r.type] || TYPE_META.deduct;
-                return (
-                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                    <td className="py-2.5 text-gray-500 text-[12px] whitespace-nowrap">{formatTime(r.created_at)}</td>
-                    <td className="py-2.5">
-                      <div className="flex items-center gap-1">
-                        <Tag color={meta.color} className="!m-0">{meta.label}</Tag>
-                        {r.type === 'refund' && r.remark && (
-                          <Tooltip title={r.remark}>
-                            <QuestionCircleOutlined className="text-gray-400 text-[12px] cursor-help" />
-                          </Tooltip>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
-                    <td className="py-2.5 text-gray-500 text-[12px]">{r.model || '-'}</td>
-                    <td
-                      className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${
-                        r.type === 'deduct' ? 'text-red-500' : 'text-green-600'
-                      }`}
-                    >
-                      {r.amount === 0 ? '0' : `${meta.sign}${r.amount}`}
-                    </td>
-                    <td className="py-2.5 text-right text-gray-600 text-[13px] whitespace-nowrap">{r.balance_after}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {/* 分页 */}
-          <div className="flex justify-end mt-4">
-            <Pagination
-              current={page}
-              total={total}
-              pageSize={pageSize}
-              onChange={setPage}
-              showTotal={(t) => `共 ${t} 条`}
-              showSizeChanger={false}
-            />
+      {/* 表格区域：固定高度避免抖动 */}
+      <div className="h-[520px] flex flex-col">
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">加载中...</div>
+        ) : records.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center">
+            <Empty description="暂无费用记录" />
           </div>
-        </>
-      )}
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-white z-10">
+                  <tr className="text-gray-400 text-[12px] border-b border-gray-100">
+                    <th className="py-2 font-normal">时间</th>
+                    <th className="py-2 font-normal">类型</th>
+                    <th className="py-2 font-normal">场景</th>
+                    <th className="py-2 font-normal">模型</th>
+                    <th className="py-2 font-normal text-right">积分变动</th>
+                    <th className="py-2 font-normal text-right">剩余积分</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.map((r) => {
+                    const meta = TYPE_META[r.type] || TYPE_META.deduct;
+                    return (
+                      <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="py-2.5 text-gray-500 text-[12px] whitespace-nowrap">{formatTime(r.created_at)}</td>
+                        <td className="py-2.5">
+                          <div className="flex items-center gap-1">
+                            <Tag color={meta.color} className="!m-0">{meta.label}</Tag>
+                            {r.type === 'refund' && r.remark && (
+                              <Tooltip title={r.remark}>
+                                <QuestionCircleOutlined className="text-gray-400 text-[12px] cursor-help" />
+                              </Tooltip>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
+                        <td className="py-2.5 text-gray-500 text-[12px]">{r.model || '-'}</td>
+                        <td
+                          className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${
+                            r.type === 'deduct' ? 'text-red-500' : 'text-green-600'
+                          }`}
+                        >
+                          {r.amount === 0 ? '0' : `${meta.sign}${r.amount}`}
+                        </td>
+                        <td className="py-2.5 text-right text-gray-600 text-[13px] whitespace-nowrap">{r.balance_after}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 分页 */}
+            <div className="flex justify-end pt-4 border-t border-gray-100">
+              <Pagination
+                current={page}
+                total={total}
+                pageSize={pageSize}
+                onChange={setPage}
+                showTotal={(t) => `共 ${t} 条`}
+                showSizeChanger={false}
+              />
+            </div>
+          </>
+        )}
+      </div>
     </Modal>
   );
 }
