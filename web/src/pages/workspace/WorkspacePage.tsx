@@ -7,7 +7,7 @@ import {
   SaveOutlined,
   GlobalOutlined,
   VideoCameraOutlined,
-  FileOutlined,
+  FolderOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
 import { useCanvas } from '@/hooks/useCanvas';
@@ -229,7 +229,7 @@ function WorkspaceInner() {
           <Button
             type="text"
             size="small"
-            icon={<FileOutlined />}
+            icon={<FolderOutlined />}
             onClick={() => setShowAssetLibrary(true)}
           />
         </Tooltip>

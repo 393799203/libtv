@@ -54,15 +54,15 @@ else
 fi
 echo "=========================================="
 
-# [1/6] 检查SSH连接
+# [1/7] 检查SSH连接
 echo ""
-echo "[1/6] 检查SSH连接..."
+echo "[1/7] 检查SSH连接..."
 ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_IP} "echo 'SSH连接成功'"
 
-# [2/6] 安装Docker (仅全量或后端部署时需要)
+# [2/7] 安装Docker (仅全量或后端部署时需要)
 if [ "$FRONTEND_ONLY" = false ]; then
     echo ""
-    echo "[2/6] 在服务器上安装Docker..."
+    echo "[2/7] 在服务器上安装Docker..."
     ssh ${SERVER_USER}@${SERVER_IP} << 'ENDSSH'
 if ! command -v docker &> /dev/null; then
     echo "安装Docker..."
@@ -83,12 +83,25 @@ fi
 ENDSSH
 else
     echo ""
-    echo "[2/6] 跳过Docker安装检查 (仅前端模式)"
+    echo "[2/7] 跳过Docker安装检查 (仅前端模式)"
 fi
 
-# [3/6] 同步项目文件到服务器
+# [3/7] 构建前端（本地执行 npm run build）
+if [ "$BACKEND_ONLY" = false ]; then
+    echo ""
+    echo "[3/7] 构建前端..."
+    cd ${LOCAL_DIR}/web
+    npm run build
+    cd ${LOCAL_DIR}
+    echo "前端构建完成"
+else
+    echo ""
+    echo "[3/7] 跳过前端构建 (仅后端模式)"
+fi
+
+# [4/7] 同步项目文件到服务器
 echo ""
-echo "[3/6] 同步项目文件到服务器..."
+echo "[4/7] 同步项目文件到服务器..."
 ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${PROJECT_DIR}"
 
 # rsync SSH 保活参数
@@ -122,9 +135,9 @@ else
         ${LOCAL_DIR}/docker-compose.yml ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
 fi
 
-# [4/6] 构建并启动Docker容器
+# [5/7] 构建并启动Docker容器
 echo ""
-echo "[4/6] 构建并启动Docker容器..."
+echo "[5/7] 构建并启动Docker容器..."
 ssh ${SERVER_USER}@${SERVER_IP} << ENDSSH
 cd ${PROJECT_DIR}
 
@@ -151,9 +164,9 @@ echo "容器状态:"
 docker compose ps
 ENDSSH
 
-# [5/6] 验证部署
+# [6/7] 验证部署
 echo ""
-echo "[5/6] 验证部署..."
+echo "[6/7] 验证部署..."
 sleep 3
 
 # 检查前端
@@ -174,7 +187,7 @@ if [ "$FRONTEND_ONLY" = false ]; then
     fi
 fi
 
-# [6/6] 完成
+# [7/7] 完成
 echo ""
 echo "=========================================="
 echo "部署完成！"
