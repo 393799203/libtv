@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState, useEffect } from 'react';
 import {
   LinkOutlined,
   BarChartOutlined,
@@ -13,6 +13,7 @@ import {
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
 import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
+import { pricingApi, type NodePriceGroup } from '@/services/pricingApi';
 
 // 模型图标映射（匹配截图中的图标风格）
 const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
@@ -459,6 +460,36 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   // 语气词选择器状态
   const [toneOpen, setToneOpen] = useState(false);
 
+  // 价格数据
+  const [pricingNodes, setPricingNodes] = useState<NodePriceGroup[]>([]);
+  useEffect(() => {
+    pricingApi
+      .list()
+      .then((res) => setPricingNodes(res.nodes || []))
+      .catch(() => {});
+  }, []);
+
+  // 计算当前模型的费用
+  const estimatedCost = useMemo(() => {
+    if (pricingNodes.length === 0) return null;
+    // 找到当前节点类型对应的价格分组
+    const nodeGroup = pricingNodes.find((n) => n.node_type === nodeType);
+    if (!nodeGroup) return null;
+    // 找到当前模型的价格
+    const currentModelId = models.find((m) => m.value === selectedModel)?.modelId || selectedModel;
+    const modelPrice = nodeGroup.models.find((m) => m.model_id === currentModelId);
+    if (!modelPrice) return null;
+    const price = modelPrice.price;
+    if (price === 0) return 0;
+    // 按秒计费：视频/音频节点，费用 = 单价 × 时长
+    if (nodeGroup.billing_type === 'per_second') {
+      const duration = nodeType === 'video' ? selectedDuration : 1;
+      return Math.ceil(price * duration);
+    }
+    // 按次计费：直接返回单价
+    return price;
+  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration]);
+
   // 按分组整理音色
   const voiceGroups = useMemo(() => {
     const map = new Map<string, typeof VOICE_OPTIONS>();
@@ -750,6 +781,13 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             </>
           )}
         </div>
+        )}
+
+        {/* 费用提示（生成按钮左侧） */}
+        {estimatedCost !== null && estimatedCost > 0 && (
+          <span className="text-[11px] text-gray-500 mr-1.5 whitespace-nowrap">
+            {estimatedCost} 积分
+          </span>
         )}
 
         {/* 生成按钮 */}

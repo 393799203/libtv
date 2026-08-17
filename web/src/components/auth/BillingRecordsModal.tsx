@@ -21,7 +21,7 @@ function formatTime(iso: string): string {
 
 /** 场景选项（基于计费动作） */
 const SCENE_OPTIONS = [
-  { label: '全部', value: '' },
+  { label: '全部场景', value: '' },
   { label: '故事生成', value: '故事生成' },
   { label: '分镜剧本生成', value: '分镜剧本生成' },
   { label: '图片生成', value: '图片生成' },
@@ -60,7 +60,7 @@ export function BillingRecordsModal({ onClose }: { onClose: () => void }) {
           });
         });
         setModelOptions([
-          { label: '全部', value: '' },
+          { label: '全部模型', value: '' },
           ...Array.from(models, ([id, name]) => ({ label: name || id, value: id })),
         ]);
       })
@@ -142,7 +142,7 @@ export function BillingRecordsModal({ onClose }: { onClose: () => void }) {
           allowClear
           className="w-24"
           options={[
-            { label: '全部', value: '' },
+            { label: '全部类型', value: '' },
             { label: '扣费', value: 'deduct' },
             { label: '退款', value: 'refund' },
             { label: '充值', value: 'recharge' },
