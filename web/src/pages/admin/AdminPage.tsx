@@ -16,6 +16,7 @@ import {
   CaretRightOutlined,
   LoadingOutlined,
   AccountBookOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
@@ -57,6 +58,10 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [billingUserId, setBillingUserId] = useState<string | null>(null); // 查看哪个用户的积分明细
+  const [rechargeUserId, setRechargeUserId] = useState<string | null>(null); // 充值弹窗目标用户
+  const [rechargeAmount, setRechargeAmount] = useState<number>(100);
+  const [rechargeRemark, setRechargeRemark] = useState('');
+  const [recharging, setRecharging] = useState(false);
 
   // ========== 版图管理状态 ==========
   const [banners, setBanners] = useState<BannerItem[]>([]);
@@ -1073,6 +1078,17 @@ export default function AdminPage() {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    setRechargeUserId(user.id);
+                                    setRechargeAmount(100);
+                                    setRechargeRemark('');
+                                  }}
+                                  className="text-green-500 hover:text-green-600 hover:bg-green-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <DollarOutlined /> 充值
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setBillingUserId(user.id);
                                   }}
                                   className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer flex items-center gap-1"
@@ -1140,6 +1156,82 @@ export default function AdminPage() {
               userId={billingUserId}
               onClose={() => setBillingUserId(null)}
             />
+          )}
+          {/* 管理员充值弹窗 */}
+          {rechargeUserId && (
+            <div className="fixed inset-0 z-[1050] flex items-center justify-center" onClick={() => setRechargeUserId(null)}>
+              <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+              <div className="relative bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                {/* 弹窗头部 */}
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <div className="text-[15px] font-semibold text-gray-800">积分充值</div>
+                  <button onClick={() => setRechargeUserId(null)} className="text-gray-400 hover:text-gray-600 text-lg cursor-pointer">✕</button>
+                </div>
+                {/* 弹窗内容 */}
+                <div className="px-6 py-5 space-y-4">
+                  <div>
+                    <div className="text-[12px] text-gray-500 mb-1">充值用户</div>
+                    <div className="text-[14px] text-gray-800 font-medium">
+                      {users.find(u => u.id === rechargeUserId)?.email || rechargeUserId}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[12px] text-gray-500 mb-1">充值积分</div>
+                    <input
+                      type="number"
+                      min={1}
+                      value={rechargeAmount}
+                      onChange={(e) => setRechargeAmount(Math.max(1, parseInt(e.target.value) || 0))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-[14px] focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
+                      placeholder="请输入充值积分数量"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[12px] text-gray-500 mb-1">备注（可选）</div>
+                    <input
+                      type="text"
+                      value={rechargeRemark}
+                      onChange={(e) => setRechargeRemark(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-[14px] focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
+                      placeholder="默认显示“后台充值”"
+                    />
+                  </div>
+                </div>
+                {/* 弹窗底部 */}
+                <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+                  <button
+                    onClick={() => setRechargeUserId(null)}
+                    className="px-4 py-2 rounded-lg border border-gray-200 text-[13px] text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    disabled={recharging || rechargeAmount <= 0}
+                    onClick={async () => {
+                      if (!rechargeUserId || rechargeAmount <= 0) return;
+                      setRecharging(true);
+                      try {
+                        await userApi.recharge(rechargeUserId, {
+                          amount: rechargeAmount,
+                          remark: rechargeRemark || undefined,
+                        });
+                        message.success(`已成功充值 ${rechargeAmount} 积分`);
+                        setRechargeUserId(null);
+                        loadUsers();
+                      } catch {
+                        // HTTP 错误已由 api.ts 拦截器统一 message.error()
+                      } finally {
+                        setRecharging(false);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg bg-green-500 text-white text-[13px] hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    {recharging && <LoadingOutlined />}
+                    {recharging ? '充值中...' : '确认充值'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
           </>
         )}

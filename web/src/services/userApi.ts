@@ -40,4 +40,8 @@ export const userApi = {
   /** 删除用户（管理员） */
   delete: (id: number | string) =>
     api.delete(`/users/${id}`),
+
+  /** 管理员为用户充值积分 */
+  recharge: (id: number | string, data: { amount: number; remark?: string }) =>
+    api.post(`/users/${id}/recharge`, data),
 };

@@ -232,7 +232,7 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 }
 
 // Recharge 充值积分（后续管理端 / 支付回调调用）
-func (s *BillingService) Recharge(ctx context.Context, userID string, amount int64, remark string) error {
+func (s *BillingService) Recharge(ctx context.Context, userID string, amount int64, scene, remark string) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -246,10 +246,14 @@ func (s *BillingService) Recharge(ctx context.Context, userID string, amount int
 	if remark == "" {
 		remark = "积分充值"
 	}
+	if scene == "" {
+		scene = "积分充值"
+	}
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:       userID,
 		Type:         "recharge",
 		Amount:       amount,
+		Scene:        scene,
 		Remark:       remark,
 		BalanceAfter: balance,
 	})

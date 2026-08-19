@@ -127,7 +127,7 @@ func main() {
 	styleFavoriteService := service.NewStyleFavoriteService(styleFavoriteRepo, styleRepo)
 
 	// 初始化 Handler
-	userHandler := handler.NewUserHandler(userService)
+	userHandler := handler.NewUserHandler(userService, billingService)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, projectRepo, eng, registry)
@@ -216,6 +216,7 @@ func main() {
 		api.GET("/users", userHandler.List)                    // 管理员：获取所有用户
 		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
 		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
+		api.POST("/users/:id/recharge", userHandler.Recharge)   // 管理员：为用户充值积分
 
 		// 项目 + 画布
 		projects := api.Group("/projects")

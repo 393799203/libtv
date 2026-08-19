@@ -216,7 +216,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                             )}
                           </div>
                         </td>
-                        <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
+                        <td className="py-2.5 text-gray-700 text-[13px]">{r.remark || r.scene || r.action || '-'}</td>
                         <td className="py-2.5 text-gray-500 text-[12px]">{r.model || '-'}</td>
                         <td
                           className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${

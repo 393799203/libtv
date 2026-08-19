@@ -14,11 +14,12 @@ import (
 // UserHandler 处理用户相关 HTTP 请求
 // 仅做参数解析与协议转换，业务逻辑全部下放到 UserService
 type UserHandler struct {
-	userService *service.UserService
+	userService    *service.UserService
+	billingService *service.BillingService
 }
 
-func NewUserHandler(userService *service.UserService) *UserHandler {
-	return &UserHandler{userService: userService}
+func NewUserHandler(userService *service.UserService, billingService *service.BillingService) *UserHandler {
+	return &UserHandler{userService: userService, billingService: billingService}
 }
 
 type RegisterRequest struct {
@@ -166,5 +167,50 @@ func (h *UserHandler) UpdateRole(c *gin.Context) {
 		response.FailWith(c, err)
 		return
 	}
+	response.OK(c, user)
+}
+
+// RechargeRequest 管理员充值请求
+type RechargeRequest struct {
+	Amount int64  `json:"amount" binding:"required,gt=0"`
+	Remark string `json:"remark"`
+}
+
+// Recharge 管理员为用户充值积分
+func (h *UserHandler) Recharge(c *gin.Context) {
+	id := c.Param("id")
+	var req RechargeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "充值积分必须大于0")
+		return
+	}
+
+	// 检查当前用户是否为管理员
+	currentUserID := middleware.GetUserID(c)
+	role, err := h.userService.GetUserRole(c.Request.Context(), currentUserID)
+	if err != nil || role != "admin" {
+		response.Fail(c, http.StatusForbidden, "仅管理员可执行充值操作")
+		return
+	}
+
+	// 检查目标用户是否存在
+	_, err = h.userService.GetByID(c.Request.Context(), id)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, "用户不存在")
+		return
+	}
+
+	remark := req.Remark
+	if remark == "" {
+		remark = "后台充值"
+	}
+
+	if err := h.billingService.Recharge(c.Request.Context(), id, req.Amount, "后台充值", remark); err != nil {
+		response.FailWith(c, err)
+		return
+	}
+
+	// 返回充值后的用户信息
+	user, _ := h.userService.GetByID(c.Request.Context(), id)
 	response.OK(c, user)
 }
