@@ -5,7 +5,6 @@ import {
   HeartFilled,
   HeartOutlined,
 } from '@ant-design/icons';
-import type { UpstreamInput } from '@/types/prompt';
 import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
@@ -14,16 +13,10 @@ import { createNode } from '@/utils/nodeFactory';
 interface StyleSelectorProps {
   /** 当前节点 ID，用于定位画布上的风格节点与连线 */
   targetNodeId?: string;
-  /** 选中风格后自动插入 @引用 */
-  onInsertMention: (input: UpstreamInput) => void;
-  /** 移除 @引用（用于风格图删除/切换时自动清理） */
-  onRemoveMention?: (nodeId: string) => void;
 }
 
 export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
   targetNodeId,
-  onInsertMention,
-  onRemoveMention,
 }) {
   // 仅订阅 action 函数（zustand 中这些是稳定引用），不订阅 nodes/edges 数组
   const removeEdges = useCanvasStore((s) => s.removeEdges);
@@ -99,14 +92,15 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
       .finally(() => setStyleLoading(false));
   }, []);
 
-  // 选中风格：先清理旧风格，再创建新图片节点 + 连接 + 自动加入 @引用
-  // 只做画布操作 + 回调，选中状态由画布派生（画布变更 → styleSignature 变 → UI 自动更新）
+  // 选中风格：先清理旧风格，再创建新图片节点 + 连接。
+  // 只做画布操作，选中状态由画布派生（画布变更 → styleSignature 变 → UI 自动更新）。
+  // 风格图是独立通道：后端始终从上游连线收集 style- 节点，无需往提示词里插 @ 引用。
   const handleSelectStyle = useCallback((style: StyleItem) => {
     setStyleMarketOpen(false);
 
     if (!targetNodeId) return;
 
-    // 如果已有旧风格节点，先删除它和连线，并移除对应的 @引用
+    // 如果已有旧风格节点，先删除它和连线
     if (styleNodeId) {
       const { edges } = useCanvasStore.getState();
       const oldEdge = edges.find(
@@ -114,8 +108,6 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
       );
       if (oldEdge) removeEdges([oldEdge.id]);
       removeNodes([styleNodeId]);
-      // 移除旧风格的 @引用
-      onRemoveMention?.(styleNodeId);
     }
 
     // 按需读取当前节点位置（不订阅 nodes，避免无关更新触发重渲染）
@@ -142,17 +134,9 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
       target: targetNodeId,
       type: 'dataFlow',
     });
+  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges]);
 
-    // 自动加入 @引用，无需用户手动在提示词中 @
-    onInsertMention({
-      nodeId: newNodeId,
-      nodeType: 'image',
-      label: styleLabel,
-      thumbnail: style.image_url,
-    });
-  }, [targetNodeId, styleNodeId, addNode, addEdgeFn, removeNodes, removeEdges, onInsertMention, onRemoveMention]);
-
-  // 移除风格：删除连线 + 删除图片节点 + 移除 @引用
+  // 移除风格：删除连线 + 删除图片节点
   const handleRemoveStyle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -167,9 +151,7 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
 
     // 删除图片节点
     removeNodes([styleNodeId]);
-    // 移除对应的 @引用
-    onRemoveMention?.(styleNodeId);
-  }, [styleNodeId, targetNodeId, removeEdges, removeNodes, onRemoveMention]);
+  }, [styleNodeId, targetNodeId, removeEdges, removeNodes]);
 
   // 切换收藏
   const handleToggleFav = async (e: React.MouseEvent, styleId: string) => {

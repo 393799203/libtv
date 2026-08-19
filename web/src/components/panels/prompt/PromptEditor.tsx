@@ -24,8 +24,6 @@ export interface PromptEditorHandle {
   getValue: () => string;
   /** 获取当前 DOM 中实际存在的 mention 元数据（按 DOM 中出现顺序） */
   getMentions: () => MentionMarker[];
-  /** 在编辑器内容末尾插入一个 mention（id 由编辑器内部生成） */
-  insertMention: (input: { nodeId: string; label: string; nodeType: string }) => void;
   /** 删除 DOM 中所有 nodeId 匹配的 mention span */
   removeMentionByNodeId: (nodeId: string) => void;
 }
@@ -418,28 +416,6 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       });
       return result;
     },
-    insertMention: (input) => {
-      const el = editorRef.current;
-      if (!el) return;
-      const id = genUniqueMentionId();
-      const span = buildMentionSpan(id, input);
-      // 追加到内容末尾（空编辑器残留的 <br> 保持在最后）
-      const lastEl = el.lastElementChild;
-      if (lastEl && lastEl.tagName === 'BR') {
-        el.insertBefore(span, lastEl);
-      } else {
-        el.appendChild(span);
-      }
-      span.after(document.createTextNode('\u00A0'));
-      internalMentionsRef.current.set(id, {
-        id,
-        nodeId: input.nodeId,
-        label: input.label,
-        nodeType: input.nodeType as MentionMarker['nodeType'],
-      });
-      // 先清掉挂起的防抖，再立即同步父组件
-      commitNow();
-    },
     removeMentionByNodeId: (nodeId) => {
       const el = editorRef.current;
       if (!el) return;
@@ -457,7 +433,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       // 先清掉挂起的防抖，再立即同步父组件
       if (removed) commitNow();
     },
-  }), [buildMentionSpan, commitNow, genUniqueMentionId]);
+  }), [commitNow]);
 
   // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
   const filteredInputs = mentionFilter

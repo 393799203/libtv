@@ -367,19 +367,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     []
   );
 
-  // 从上游栏点击插入 @ 引用（收口到编辑器 DOM 层，编辑器内部生成 id 并触发 onChange 同步 state）
-  const handleInsertMention = useCallback(
-    (input: UpstreamInput) => {
-      editorRef.current?.insertMention({
-        nodeId: input.nodeId,
-        label: input.label,
-        nodeType: input.nodeType,
-      });
-    },
-    []
-  );
-
-  // 移除 @ 引用（用于风格图删除/切换时自动清理），直接删编辑器 DOM 中的 mention span
+  // 移除 @ 引用（删除上游连线时自动清理），直接删编辑器 DOM 中的 mention span
   const handleRemoveMention = useCallback(
     (nodeId: string) => {
       editorRef.current?.removeMentionByNodeId(nodeId);
@@ -530,7 +518,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       {/* 第一层：上游输入区 */}
       <PromptUpstreamBar
         inputs={upstreamInputs}
-        onInsertMention={handleInsertMention}
         onRemoveMention={handleRemoveMention}
         targetNodeId={nodeId}
         showStyleSelector={nodeType === 'image'}

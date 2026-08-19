@@ -851,6 +851,33 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	upstreamImageURLs := append(styleImageURLs, referenceImageURLs...)
 
 	if len(upstreamImageURLs) > 0 {
+		// ✅ 风格图是独立通道：不参与 @ 引用，无论用户是否 @ 了参考图，
+		// 上游连线的风格节点（style- 前缀或带 styleId）始终参与生成，按 URL 去重
+		for _, sourceNodeID := range execCtx.GetUpstreamSources(node.ID) {
+			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
+				var nd struct {
+					ImageUrl string `json:"imageUrl"`
+					StyleId  string `json:"styleId"`
+				}
+				if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
+					if strings.HasPrefix(sourceNodeID, "style-") || nd.StyleId != "" {
+						dup := false
+						for _, u := range styleImageURLs {
+							if u == nd.ImageUrl {
+								dup = true
+								break
+							}
+						}
+						if !dup {
+							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
+							log.Printf("[ImageExecutor] 🎨 上游风格图（独立通道）: nodeId=%s imageUrl=%s", sourceNodeID, nd.ImageUrl)
+						}
+					}
+				}
+			}
+		}
+		// 风格图补充后重新合并
+		upstreamImageURLs = append(styleImageURLs, referenceImageURLs...)
 		log.Printf("[ImageExecutor] ✅ 最终结果：风格图=%d 普通参考图=%d 总计=%d", len(styleImageURLs), len(referenceImageURLs), len(upstreamImageURLs))
 	} else {
 		log.Printf("[ImageExecutor] ⚠️ 没有找到@引用的图片，尝试fallback逻辑（查找上游连接的图片节点）")

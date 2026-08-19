@@ -15,8 +15,7 @@ import { StyleSelector } from './StyleSelector';
 
 interface PromptUpstreamBarProps {
   inputs: UpstreamInput[];
-  onInsertMention: (input: UpstreamInput) => void;
-  /** 移除 @引用（用于风格图删除/切换时自动清理） */
+  /** 移除 @引用（删除上游连线时自动清理 prompt 中对应的引用） */
   onRemoveMention?: (nodeId: string) => void;
   /** 当前节点 ID，用于删除连线时定位边 */
   targetNodeId?: string;
@@ -34,7 +33,6 @@ const NODE_TYPE_ICON: Record<UpstreamInput['nodeType'], React.ReactNode> = {
 
 export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUpstreamBar({
   inputs,
-  onInsertMention,
   onRemoveMention,
   targetNodeId,
   showStyleSelector = false,
@@ -87,11 +85,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
     <div className="flex items-start gap-2 pb-3 flex-wrap max-h-[104px] overflow-hidden">
       {/* 风格选择器 */}
       {showStyleSelector && (
-        <StyleSelector
-          targetNodeId={targetNodeId}
-          onInsertMention={onInsertMention}
-          onRemoveMention={onRemoveMention}
-        />
+        <StyleSelector targetNodeId={targetNodeId} />
       )}
 
       {(() => {
