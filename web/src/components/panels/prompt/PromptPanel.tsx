@@ -199,8 +199,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     : config.defaultModel;
   const [selectedModel, setSelectedModel] = useState(initialModel);
 
+  // 追踪 nodeId 变化，用于区分「切换节点」和「同节点 data 更新」
+  const prevNodeIdRef = useRef(nodeId);
+
   // 切换节点时重置本地状态为新节点的数据（useState 只初始化一次，不会随 nodeId 变化重新执行）
   useEffect(() => {
+    const isNodeSwitch = prevNodeIdRef.current !== nodeId;
+    prevNodeIdRef.current = nodeId;
+
     const newPrompt = ('prompt' in data ? (data as { prompt?: string }).prompt : '') || '';
     const newMentions = ('mentions' in data && Array.isArray((data as { mentions?: unknown }).mentions)
       ? ((data as { mentions: MentionMarker[] }).mentions || [])
@@ -215,16 +221,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       return prev;
     });
 
-    // 恢复节点数据中的模型选择：根据保存的modelId找到对应的value
-    if ('model' in data && (data as { model?: string }).model) {
-      const savedModelId = (data as { model: string }).model;
-      const matchedModel = availableModels.find(m => m.modelId === savedModelId);
-      if (matchedModel) {
-        setSelectedModel(prev => prev !== matchedModel.value ? matchedModel.value : prev);
+    // 恢复模型选择：仅在切换节点时执行，避免同节点内 data 更新（如改分辨率）导致模型被旧 data.model 回滚
+    if (isNodeSwitch) {
+      if ('model' in data && (data as { model?: string }).model) {
+        const savedModelId = (data as { model: string }).model;
+        const matchedModel = availableModels.find(m => m.modelId === savedModelId);
+        if (matchedModel) {
+          setSelectedModel(prev => prev !== matchedModel.value ? matchedModel.value : prev);
+        }
+      } else {
+        // 新节点没有保存的 model，使用配置的默认模型（避免保留上个节点的选择）
+        setSelectedModel(prev => prev !== config.defaultModel ? config.defaultModel : prev);
       }
-    } else {
-      // 新节点没有保存的 model，使用配置的默认模型（避免保留上个节点的选择）
-      setSelectedModel(prev => prev !== config.defaultModel ? config.defaultModel : prev);
     }
 
     // 图片节点：恢复节点数据中的分辨率、比例、画质
@@ -493,16 +501,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     await generate({ mode: 'single' });
   }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone, onUpdate, generate]);
 
-  // 模型切换：同步本地状态 + 立即写入节点 data
-  // 避免后续其他字段（如分辨率）触发 onUpdate 时，useEffect 从旧 data.model 回滚模型
-  const handleModelChange = useCallback((modelValue: string) => {
-    setSelectedModel(modelValue);
-    const currentModel = availableModels.find(m => m.value === modelValue);
-    if (currentModel) {
-      onUpdate({ model: currentModel.modelId } as Partial<LibTVNodeData>);
-    }
-  }, [availableModels, onUpdate]);
-
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
   const handleDurationChange = useCallback((duration: number) => {
     setSelectedDuration(duration);
@@ -622,7 +620,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       <PromptToolbar
         models={availableModels}
         selectedModel={selectedModel}
-        onModelChange={handleModelChange}
+        onModelChange={setSelectedModel}
         selectedResolution={selectedResolution}
         onResolutionChange={handleResolutionChange}
         selectedAspectRatio={selectedAspectRatio}
