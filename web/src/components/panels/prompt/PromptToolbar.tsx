@@ -186,6 +186,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   onResolutionChange,
   onAspectRatioChange,
   onQualityChange,
+  pricingNodes,
+  selectedDuration,
 }: {
   resolution: ResolutionOption;
   aspectRatio: string;
@@ -196,6 +198,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   onResolutionChange: (r: ResolutionOption) => void;
   onAspectRatioChange: (r: string) => void;
   onQualityChange: (q: string) => void;
+  pricingNodes?: NodePriceGroup[];
+  selectedDuration?: number;
 }) {
   const [open, setOpen] = useState(false);
   const isVideo = nodeType === 'video';
@@ -253,6 +257,23 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                 {resolutionOptions.map((res) => {
                   const disabled = !isVideo && is1KDisabled && res === '1K';
                   const isActive = effectiveResolution === res;
+                  // 视频节点：查找该分辨率对应的单价和预估费用
+                  let resPriceLabel: string | null = null;
+                  if (isVideo && pricingNodes && selectedModelId) {
+                    const videoGroup = pricingNodes.find((n) => n.node_type === 'video');
+                    if (videoGroup && videoGroup.billing_type === 'per_second') {
+                      const realModelId = models.find((m) => m.value === selectedModelId)?.modelId || selectedModelId;
+                      // 归一化分辨率：后端存 4k，前端展示 4K
+                      const normalizedRes = res.toLowerCase() === '4k' ? '4k' : res;
+                      const priceItem = videoGroup.models.find(
+                        (m) => m.model_id === realModelId && (m.resolution || '').toLowerCase() === normalizedRes,
+                      );
+                      if (priceItem && priceItem.price > 0) {
+                        const dur = selectedDuration && selectedDuration > 0 ? selectedDuration : 1;
+                        resPriceLabel = `${Math.ceil(priceItem.price * dur)}积分`;
+                      }
+                    }
+                  }
                   return (
                     <button
                       key={res}
@@ -266,7 +287,10 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                       onClick={() => { if (!disabled) { onResolutionChange(res as ResolutionOption); setOpen(false); } }}
                       disabled={disabled}
                     >
-                      {res}
+                      <div>{res}</div>
+                      {resPriceLabel && !disabled && (
+                        <div className="text-[10px] font-normal text-gray-400 mt-0.5 leading-none">{resPriceLabel}</div>
+                      )}
                       {disabled && <span className="ml-0.5 text-[9px] text-gray-400">✕</span>}
                     </button>
                   );
@@ -480,6 +504,17 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     if (!nodeGroup) return null;
     // 找到当前模型的价格
     const currentModelId = models.find((m) => m.value === selectedModel)?.modelId || selectedModel;
+    // 视频节点：按分辨率匹配价格（同一模型不同分辨率价格不同）
+    if (nodeGroup.billing_type === 'per_second' && nodeType === 'video') {
+      const normalizedRes = selectedResolution.toLowerCase() === '4k' ? '4k' : selectedResolution;
+      const modelPrice = nodeGroup.models.find(
+        (m) => m.model_id === currentModelId && (m.resolution || '').toLowerCase() === normalizedRes,
+      );
+      if (!modelPrice) return null;
+      const price = modelPrice.price;
+      if (price === 0) return 0;
+      return Math.ceil(price * selectedDuration);
+    }
     const modelPrice = nodeGroup.models.find((m) => m.model_id === currentModelId);
     if (!modelPrice) return null;
     const price = modelPrice.price;
@@ -495,7 +530,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     }
     // 按次计费：直接返回单价
     return price;
-  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, charCount]);
+  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, selectedResolution, charCount]);
 
   // 按分组整理音色
   const voiceGroups = useMemo(() => {
@@ -693,6 +728,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           onResolutionChange={onResolutionChange}
           onAspectRatioChange={onAspectRatioChange}
           onQualityChange={onQualityChange || (() => {})}
+          pricingNodes={pricingNodes}
+          selectedDuration={selectedDuration}
         />
       )}
 

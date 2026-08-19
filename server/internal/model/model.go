@@ -303,13 +303,15 @@ func (BillingRecord) TableName() string { return "billing_records" }
 // ========== 模型计费价格配置 ==========
 
 // ModelPrice 模型价格配置（运营后台「价格管理」维护）
-// 以（节点 + 模型）为维度存储单价：同一模型在不同节点可配置不同价格（如 llm 模型在文本/剧本节点分开定价）
-// 计费类型由节点推导：文本 / 图片节点按次计费（per_call），视频 / 语音节点按秒计费（per_second）
+// 以（节点 + 模型 + 分辨率）为维度存储单价：
+//   - 文本/剧本/图片/语音节点：resolution 为空，按次或按字计费
+//   - 视频节点：resolution 为 480p/720p/1080p/4k，同一模型不同分辨率可配置不同价格
 type ModelPrice struct {
-	ID       int64   `gorm:"primaryKey;autoIncrement" json:"id"`
-	NodeType string  `gorm:"size:20;not null;uniqueIndex:idx_price_node_model,priority:1" json:"node_type"` // 节点类型：text/script/image/video/audio
-	ModelID  string  `gorm:"size:100;not null;uniqueIndex:idx_price_node_model,priority:2" json:"model_id"` // 模型 ID（对应 models.yaml 的 id）
-	Price    float64 `gorm:"not null;default:0" json:"price"`                                               // 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
+	ID         int64   `gorm:"primaryKey;autoIncrement" json:"id"`
+	NodeType   string  `gorm:"size:20;not null;uniqueIndex:idx_price_node_model_res,priority:1" json:"node_type"`    // 节点类型：text/script/image/video/audio
+	ModelID    string  `gorm:"size:100;not null;uniqueIndex:idx_price_node_model_res,priority:2" json:"model_id"`    // 模型 ID（对应 models.yaml 的 id）
+	Resolution string  `gorm:"size:10;default:'';uniqueIndex:idx_price_node_model_res,priority:3" json:"resolution"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
+	Price      float64 `gorm:"not null;default:0" json:"price"`                                                     // 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

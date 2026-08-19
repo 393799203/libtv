@@ -122,6 +122,37 @@ func (s *BillingService) modelUnitPrice(ctx context.Context, nodeType, modelID s
 	return record.Price
 }
 
+// modelUnitPriceWithResolution 返回指定节点下模型按分辨率的单价（视频节点用）；
+// 未配置或查询失败时返回 0（暂不扣费）
+func (s *BillingService) modelUnitPriceWithResolution(ctx context.Context, nodeType, modelID, resolution string) float64 {
+	if s.priceRepo == nil || modelID == "" {
+		return 0
+	}
+	lookupID := modelID
+	if s.modelManager != nil {
+		if cfg := s.modelManager.FindModelByID(modelID); cfg != nil {
+			lookupID = cfg.ID
+		} else {
+			for _, models := range s.modelManager.ListModels() {
+				for _, m := range models {
+					if m.ModelID == modelID {
+						lookupID = m.ID
+						break
+					}
+				}
+			}
+		}
+	}
+	record, err := s.priceRepo.GetByNodeModelResolution(ctx, nodeType, lookupID, resolution)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("[Billing] 查询模型价格失败: nodeType=%s modelID=%s resolution=%s err=%v", nodeType, modelID, resolution, err)
+		}
+		return 0
+	}
+	return record.Price
+}
+
 // ChargeByModel 按次计费（文本/剧本/图片/提示词）：费用 = 单价 × 次数（四舍五入取整）
 // 返回本次实际扣减的积分（供调用失败时通过 Refund 退还）
 func (s *BillingService) ChargeByModel(ctx context.Context, userID, action, modelID, scene string, count int) (int64, error) {
@@ -140,6 +171,16 @@ func (s *BillingService) ChargeByDuration(ctx context.Context, userID, action, m
 		seconds = 1
 	}
 	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
+	cost := int64(math.Ceil(unit * float64(seconds)))
+	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+}
+
+// ChargeByDurationWithResolution 按秒计费（视频节点，按分辨率定价）：费用 = 单价 × 秒数
+func (s *BillingService) ChargeByDurationWithResolution(ctx context.Context, userID, action, modelID, scene, resolution string, seconds int) (int64, error) {
+	if seconds <= 0 {
+		seconds = 1
+	}
+	unit := s.modelUnitPriceWithResolution(ctx, actionNodeTypes[action], modelID, resolution)
 	cost := int64(math.Ceil(unit * float64(seconds)))
 	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
 }

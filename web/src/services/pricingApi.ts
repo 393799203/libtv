@@ -8,6 +8,7 @@ export interface PriceModelItem {
   model_id: string;
   model_name: string;
   description?: string;
+  resolution?: string; // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
   price: number; // 未配置时为 0
 }
 
@@ -28,6 +29,7 @@ export interface PricingListResponse {
 export interface PriceSaveItem {
   node_type: string;
   model_id: string;
+  resolution?: string; // 分辨率（视频节点必填，其他节点留空）
   price: number;
 }
 

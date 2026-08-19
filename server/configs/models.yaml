@@ -159,6 +159,15 @@ models:
       description: "字节豆包Seedream 5.0轻量版（华数TokenHub），生成速度快"
       default: true  # ✅ 默认选中此模型
 
+    - id: doubao-seedream-5.0-pro
+      name: "豆包 Seedream 5.0 Pro"
+      provider: wasu
+      model_id: "doubao-seedream-5.0-pro"
+      usage: [image, character, scene, prop]
+      max_tokens: 2048
+      temperature: 0.7
+      description: "字节豆包Seedream 5.0专业版（华数TokenHub），画质最高"
+
   # ---------- 视频生成 ----------
   video:
     - id: doubao-seedance-2.0

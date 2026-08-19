@@ -31,7 +31,7 @@ export default function PricingManagement() {
   const [nodes, setNodes] = useState<NodePriceGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  // 编辑中的价格：「node_type|model_id」-> 新价格（各节点独立编辑，互不影响）
+  // 编辑中的价格：「node_type|model_id|resolution」-> 新价格（各节点独立编辑，互不影响）
   const [edits, setEdits] = useState<Record<string, number>>({});
 
   const load = useCallback(() => {
@@ -49,14 +49,20 @@ export default function PricingManagement() {
     load();
   }, [load]);
 
-  // 发生变更的条目（仅提交被修改的（节点 + 模型）条目）
+  // 发生变更的条目（仅提交被修改的（节点 + 模型 + 分辨率）条目）
   const dirtyItems = useMemo(() => {
-    const items: { node_type: string; model_id: string; price: number }[] = [];
+    const items: { node_type: string; model_id: string; resolution?: string; price: number }[] = [];
     for (const node of nodes) {
       for (const m of node.models) {
-        const edited = edits[`${node.node_type}|${m.model_id}`];
+        const editKey = `${node.node_type}|${m.model_id}|${m.resolution || ''}`;
+        const edited = edits[editKey];
         if (edited !== undefined && edited !== m.price) {
-          items.push({ node_type: node.node_type, model_id: m.model_id, price: edited });
+          items.push({
+            node_type: node.node_type,
+            model_id: m.model_id,
+            resolution: m.resolution || undefined,
+            price: edited,
+          });
         }
       }
     }
@@ -139,11 +145,16 @@ export default function PricingManagement() {
               ) : (
                 <div className="divide-y divide-gray-100">
                   {node.models.map((m) => {
-                    const editKey = `${node.node_type}|${m.model_id}`;
+                    const editKey = `${node.node_type}|${m.model_id}|${m.resolution || ''}`;
                     return (
-                    <div key={m.model_id} className="px-5 py-3 flex items-center gap-4">
+                    <div key={editKey} className="px-5 py-3 flex items-center gap-4">
                       <div className="flex-1 min-w-0">
-                        <div className="text-[13px] text-gray-800 font-medium truncate">{m.model_name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] text-gray-800 font-medium truncate">{m.model_name}</span>
+                          {m.resolution && (
+                            <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[11px] font-medium shrink-0">{m.resolution}</span>
+                          )}
+                        </div>
                         {m.description && (
                           <div className="text-[11px] text-gray-400 mt-0.5 truncate">{m.description}</div>
                         )}

@@ -493,6 +493,16 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     await generate({ mode: 'single' });
   }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone, onUpdate, generate]);
 
+  // 模型切换：同步本地状态 + 立即写入节点 data
+  // 避免后续其他字段（如分辨率）触发 onUpdate 时，useEffect 从旧 data.model 回滚模型
+  const handleModelChange = useCallback((modelValue: string) => {
+    setSelectedModel(modelValue);
+    const currentModel = availableModels.find(m => m.value === modelValue);
+    if (currentModel) {
+      onUpdate({ model: currentModel.modelId } as Partial<LibTVNodeData>);
+    }
+  }, [availableModels, onUpdate]);
+
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
   const handleDurationChange = useCallback((duration: number) => {
     setSelectedDuration(duration);
@@ -612,7 +622,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       <PromptToolbar
         models={availableModels}
         selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
+        onModelChange={handleModelChange}
         selectedResolution={selectedResolution}
         onResolutionChange={handleResolutionChange}
         selectedAspectRatio={selectedAspectRatio}

@@ -44,10 +44,11 @@ var ErrInvalidPriceConfig = apperror.New(400, http.StatusBadRequest, "价格配�
 
 // PriceModelItem 单个模型的价格条目（价格管理页签展示用）
 type PriceModelItem struct {
-	ModelID     string  `json:"model_id"`
-	ModelName   string  `json:"model_name"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price"` // 未配置时为 0
+	ModelID    string  `json:"model_id"`
+	ModelName  string  `json:"model_name"`
+	Description string `json:"description"`
+	Resolution string  `json:"resolution,omitempty"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
+	Price      float64 `json:"price"`                // 未配置时为 0
 }
 
 // NodePriceGroup 节点维度的价格分组
@@ -65,9 +66,10 @@ type PriceListResult struct {
 
 // PriceSaveItem 保存价格请求条目
 type PriceSaveItem struct {
-	NodeType string  `json:"node_type" binding:"required"`
-	ModelID  string  `json:"model_id" binding:"required"`
-	Price    float64 `json:"price" binding:"gte=0"`
+	NodeType   string  `json:"node_type" binding:"required"`
+	ModelID    string  `json:"model_id" binding:"required"`
+	Resolution string  `json:"resolution"` // 分辨率（视频节点必填，其他节点留空）
+	Price      float64 `json:"price" binding:"gte=0"`
 }
 
 // nodeDefByType 按节点类型查找分组定义（校验 node_type 合法性 / 取计费类型）
@@ -92,15 +94,16 @@ func NewPricingService(modelManager *llm.ModelManager, priceRepo repository.Mode
 }
 
 // ListPrices 返回各节点下模型的价格配置（模型清单以 models.yaml 为准，未配置价格的模型价格为 0）
+// 视频节点按分辨率拆分展示：同一模型不同分辨率各占一行
 func (s *PricingService) ListPrices(ctx context.Context) (*PriceListResult, error) {
 	records, err := s.priceRepo.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-	// 价格按（节点 + 模型）双维度索引：同一模型在不同节点可配置不同价格
+	// 价格按（节点 + 模型 + 分辨率）三维度索引
 	priceByKey := make(map[string]float64, len(records))
 	for _, r := range records {
-		priceByKey[r.NodeType+"|"+r.ModelID] = r.Price
+		priceByKey[r.NodeType+"|"+r.ModelID+"|"+r.Resolution] = r.Price
 	}
 
 	registry := s.modelManager.ListModels()
@@ -116,19 +119,32 @@ func (s *PricingService) ListPrices(ctx context.Context) (*PriceListResult, erro
 			if !containsUsage(m.Usage, def.Usage) {
 				continue
 			}
-			group.Models = append(group.Models, PriceModelItem{
-				ModelID:     m.ID,
-				ModelName:   m.Name,
-				Description: m.Description,
-				Price:       priceByKey[def.NodeType+"|"+m.ID],
-			})
+			// 视频模型按分辨率拆分：每个分辨率一行
+			if def.NodeType == "video" && len(m.Resolutions) > 0 {
+				for _, res := range m.Resolutions {
+					group.Models = append(group.Models, PriceModelItem{
+						ModelID:     m.ID,
+						ModelName:   m.Name,
+						Description: m.Description,
+						Resolution:  res,
+						Price:       priceByKey[def.NodeType+"|"+m.ID+"|"+res],
+					})
+				}
+			} else {
+				group.Models = append(group.Models, PriceModelItem{
+					ModelID:     m.ID,
+					ModelName:   m.Name,
+					Description: m.Description,
+					Price:       priceByKey[def.NodeType+"|"+m.ID+"|"],
+				})
+			}
 		}
 		result.Nodes = append(result.Nodes, group)
 	}
 	return result, nil
 }
 
-// SavePrices 批量保存价格配置：校验节点与模型真实存在后按 (node_type, model_id) upsert
+// SavePrices 批量保存价格配置：校验节点与模型真实存在后按 (node_type, model_id, resolution) upsert
 func (s *PricingService) SavePrices(ctx context.Context, items []PriceSaveItem) error {
 	if len(items) == 0 {
 		return ErrInvalidPriceConfig
@@ -156,12 +172,12 @@ func (s *PricingService) SavePrices(ctx context.Context, items []PriceSaveItem) 
 			// 单价统一为整数（视频/语音按秒单价同样如此），小数一律拒绝
 			return ErrInvalidPriceConfig
 		}
-		key := item.NodeType + "|" + item.ModelID
+		key := item.NodeType + "|" + item.ModelID + "|" + item.Resolution
 		if _, dup := seen[key]; dup {
 			continue
 		}
 		seen[key] = struct{}{}
-		prices = append(prices, model.ModelPrice{NodeType: item.NodeType, ModelID: item.ModelID, Price: item.Price})
+		prices = append(prices, model.ModelPrice{NodeType: item.NodeType, ModelID: item.ModelID, Resolution: item.Resolution, Price: item.Price})
 	}
 
 	return s.priceRepo.BatchUpsert(ctx, prices)

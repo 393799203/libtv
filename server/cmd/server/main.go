@@ -65,6 +65,13 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
+	// 清理旧索引（model_prices 表原唯一索引已被 idx_price_node_model_res 替代）
+	if db.Migrator().HasIndex(&model.ModelPrice{}, "idx_price_node_model") {
+		if err := db.Migrator().DropIndex(&model.ModelPrice{}, "idx_price_node_model"); err != nil {
+			log.Printf("warning: drop old index idx_price_node_model failed: %v", err)
+		}
+	}
+
 	// 初始化 Repository
 	userRepo := repository.NewUserRepo(db)
 	projectRepo := repository.NewProjectRepo(db)
