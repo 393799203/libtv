@@ -13,7 +13,42 @@ import {
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
 import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
-import { pricingApi, type NodePriceGroup } from '@/services/pricingApi';
+import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
+
+// 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；
+// 失败时清空缓存，允许下次挂载时重试
+let pricingNodesPromise: Promise<NodePriceGroup[]> | null = null;
+function loadPricingNodes(): Promise<NodePriceGroup[]> {
+  if (!pricingNodesPromise) {
+    pricingNodesPromise = pricingApi
+      .list()
+      .then((res) => res.nodes || [])
+      .catch((err) => {
+        pricingNodesPromise = null;
+        throw err;
+      });
+  }
+  return pricingNodesPromise;
+}
+
+/**
+ * 在价格分组中查找视频模型指定分辨率的单价条目。
+ * 分辨率两侧统一小写比较（后端可能返回 720P/1080P/4k 等任意大小写）。
+ */
+function findVideoPricing(
+  pricingNodes: NodePriceGroup[],
+  modelId: string,
+  resolution: string,
+): PriceModelItem | null {
+  const videoGroup = pricingNodes.find((n) => n.node_type === 'video');
+  if (!videoGroup || videoGroup.billing_type !== 'per_second') return null;
+  const res = resolution.toLowerCase();
+  return (
+    videoGroup.models.find(
+      (m) => m.model_id === modelId && (m.resolution || '').toLowerCase() === res,
+    ) ?? null
+  );
+}
 
 // 模型图标映射（匹配截图中的图标风格）
 const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
@@ -25,6 +60,25 @@ const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
   cloud: <CloudOutlined style={{ fontSize: 16 }} />,
   audio: <AudioOutlined style={{ fontSize: 16 }} />,
   sound: <SoundOutlined style={{ fontSize: 16 }} />,
+};
+
+// 展开指示箭头（替代原来的文本 "^"）
+function ChevronIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className={className}>
+      <path d="M2 6.5L5 3.5L8 6.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// 清晰度的描述性副标签（纯展示文案）
+const RESOLUTION_META: Record<string, string> = {
+  '480p': '流畅',
+  '720p': '高清',
+  '1080p': '超清',
+  '1K': '标准',
+  '2K': '高清',
+  '4K': '极致',
 };
 
 interface PromptToolbarProps {
@@ -81,17 +135,17 @@ const ModelSelector = memo(function ModelSelector({
         onClick={() => setOpen(!open)}
       >
         <span className="text-gray-600">
-          {currentModel && currentModel.icon ? MODEL_ICON_MAP[currentModel.icon] : null}
+          {MODEL_ICON_MAP[currentModel?.icon || ''] || <RobotOutlined style={{ fontSize: 16 }} />}
         </span>
         <span className="text-[13px] font-medium text-gray-800">{currentModel?.label || '选择模型'}</span>
-        <span className="text-[10px] text-gray-400 ml-0.5">^</span>
+        <ChevronIcon className="text-gray-400 ml-0.5" />
       </button>
 
       {/* 下拉面板：截图2 样式 */}
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-2 w-[288px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+          <div className="absolute bottom-full left-0 mb-2 w-[288px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30">
             {models.map((model) => (
               <button
                 key={model.value}
@@ -147,7 +201,7 @@ function RatioIcon({ value, active }: { value: string; active: boolean }) {
     return (
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
         <rect x="3" y="3" width="14" height="14" rx="1.5"
-          stroke={active ? '#374151' : '#D1D5DB'} strokeWidth="1.5" strokeDasharray="3 2" fill="none" />
+          stroke={active ? '#111827' : '#D1D5DB'} strokeWidth="1.5" strokeDasharray="3 2" fill="none" />
       </svg>
     );
   }
@@ -170,8 +224,8 @@ function RatioIcon({ value, active }: { value: string; active: boolean }) {
     <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
       <rect x={ox + 1} y={oy + 1} width={iw - 2} height={ih - 2}
         rx={Math.min(iw, ih) * 0.15}
-        stroke={active ? '#374151' : '#9CA3AF'} strokeWidth={active ? 1.8 : 1.3}
-        fill={active ? '#F3F4F6' : 'white'} />
+        stroke={active ? '#111827' : '#9CA3AF'} strokeWidth={active ? 1.8 : 1.3}
+        fill={active ? 'rgba(17,24,39,0.06)' : 'white'} />
     </svg>
   );
 }
@@ -179,25 +233,21 @@ function RatioIcon({ value, active }: { value: string; active: boolean }) {
 const AspectRatioSelector = memo(function AspectRatioSelector({
   resolution,
   aspectRatio,
-  quality,
   selectedModelId,
   nodeType,
   models,
   onResolutionChange,
   onAspectRatioChange,
-  onQualityChange,
   pricingNodes,
   selectedDuration,
 }: {
   resolution: ResolutionOption;
   aspectRatio: string;
-  quality: string;
   selectedModelId?: string;
   nodeType: NodeType;
   models: ModelOption[];
   onResolutionChange: (r: ResolutionOption) => void;
   onAspectRatioChange: (r: string) => void;
-  onQualityChange: (q: string) => void;
   pricingNodes?: NodePriceGroup[];
   selectedDuration?: number;
 }) {
@@ -229,30 +279,39 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
     effectiveResolution = '2K';
   }
 
+  // 回退值与父组件状态不一致时回写，保证生成时提交的分辨率与 UI 显示一致
+  useEffect(() => {
+    if (effectiveResolution !== resolution) {
+      onResolutionChange(effectiveResolution as ResolutionOption);
+    }
+  }, [effectiveResolution, resolution, onResolutionChange]);
+
   return (
     <div className="relative">
       {/* 触发按钮 */}
       <button
-        className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer"
+        className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer"
         onClick={() => setOpen(!open)}
       >
-        <span className="text-[13px]">
-          <RatioIcon value={aspectRatio} active={true} />
-        </span>
+        <RatioIcon value={aspectRatio} active={true} />
         <span className="text-[13px] font-medium text-gray-800">{aspectRatio}</span>
-        <span className="text-gray-300 text-[13px]">·</span>
-        <span className="text-[13px] text-gray-500">{effectiveResolution}</span>
-        <span className="text-[10px] text-gray-400 ml-0.5">^</span>
+        <span className="px-1.5 py-px rounded-md bg-gray-100 text-[10px] font-semibold text-gray-500 leading-relaxed">
+          {effectiveResolution}
+        </span>
+        <ChevronIcon className="text-gray-400" />
       </button>
 
       {/* 弹出面板 */}
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-2 w-[340px] bg-white rounded-2xl shadow-xl border border-gray-200 p-5 z-30">
+          <div className="absolute bottom-full left-0 mb-2 w-[352px] bg-white rounded-2xl shadow-2xl border border-gray-100 ring-1 ring-black/5 p-4 z-30">
             {/* 清晰度 */}
-            <div className="mb-4">
-              <div className="text-[13px] font-medium text-gray-700 mb-2.5">清晰度</div>
+            <div>
+              <div className="flex items-baseline justify-between mb-2.5">
+                <span className="text-[12px] font-semibold text-gray-800">清晰度</span>
+                {isVideo && <span className="text-[10px] text-gray-400">按当前时长预估</span>}
+              </div>
               <div className="flex gap-2">
                 {resolutionOptions.map((res) => {
                   const disabled = !isVideo && is1KDisabled && res === '1K';
@@ -260,83 +319,76 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                   // 视频节点：查找该分辨率对应的单价和预估费用
                   let resPriceLabel: string | null = null;
                   if (isVideo && pricingNodes && selectedModelId) {
-                    const videoGroup = pricingNodes.find((n) => n.node_type === 'video');
-                    if (videoGroup && videoGroup.billing_type === 'per_second') {
-                      const realModelId = models.find((m) => m.value === selectedModelId)?.modelId || selectedModelId;
-                      // 归一化分辨率：后端存 4k，前端展示 4K
-                      const normalizedRes = res.toLowerCase() === '4k' ? '4k' : res;
-                      const priceItem = videoGroup.models.find(
-                        (m) => m.model_id === realModelId && (m.resolution || '').toLowerCase() === normalizedRes,
-                      );
-                      if (priceItem && priceItem.price > 0) {
-                        const dur = selectedDuration && selectedDuration > 0 ? selectedDuration : 1;
-                        resPriceLabel = `${Math.ceil(priceItem.price * dur)}积分`;
-                      }
+                    const realModelId = models.find((m) => m.value === selectedModelId)?.modelId || selectedModelId;
+                    const priceItem = findVideoPricing(pricingNodes, realModelId, res);
+                    if (priceItem && priceItem.price > 0) {
+                      const dur = selectedDuration && selectedDuration > 0 ? selectedDuration : 4;
+                      resPriceLabel = `${Math.ceil(priceItem.price * dur)}积分`;
                     }
                   }
                   return (
                     <button
                       key={res}
-                      className={`flex-1 max-w-[90px] py-[6px] rounded-lg text-[12px] font-medium transition-all ${
+                      title={disabled ? '当前模型不支持该清晰度' : undefined}
+                      className={`flex-1 rounded-xl border py-2 text-center transition-all ${
                         isActive
-                          ? 'bg-white text-gray-800 border border-gray-900 shadow-sm'
+                          ? 'border-gray-900 bg-gray-900 text-white shadow-sm'
                           : disabled
-                            ? 'bg-gray-50 text-gray-300 border border-transparent cursor-not-allowed'
-                            : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
+                            ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
+                            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400 hover:shadow-sm'
                       }`}
                       onClick={() => { if (!disabled) { onResolutionChange(res as ResolutionOption); setOpen(false); } }}
                       disabled={disabled}
                     >
-                      <div>{res}</div>
-                      {resPriceLabel && !disabled && (
-                        <div className="text-[10px] font-normal text-gray-400 mt-0.5 leading-none">{resPriceLabel}</div>
-                      )}
-                      {disabled && <span className="ml-0.5 text-[9px] text-gray-400">✕</span>}
+                      <div className="text-[13px] font-semibold leading-none">{res}</div>
+                      <div className={`text-[10px] leading-none mt-1.5 ${isActive ? 'text-gray-300' : disabled ? 'text-gray-300' : 'text-gray-400'}`}>
+                        {resPriceLabel && !disabled ? resPriceLabel : (RESOLUTION_META[res] || '')}
+                      </div>
                     </button>
                   );
                 })}
               </div>
               {is1KDisabled && (
-                <div className="text-[11px] text-amber-600 mt-1.5">当前模型不支持1K清晰度，已自动切换至2K</div>
+                <div className="text-[11px] text-amber-600 mt-2">当前模型不支持 1K 清晰度，已自动切换至 2K</div>
               )}
             </div>
 
+            <div className="my-3.5 h-px bg-gray-100" />
+
             {/* 比例网格 */}
             <div>
-              <div className="text-[13px] font-medium text-gray-700 mb-2.5">比例</div>
-              <div className="space-y-2">
-                {ASPECT_RATIO_ROWS.map((row, rowIndex) => (
-                  <div key={rowIndex} className="flex gap-2">
-                    {row.map((item) => {
-                      // 占位：空值渲染为透明占位元素
-                      if (!item.value) {
-                        return <div key="placeholder" className="flex-1 max-w-[60px]" />;
-                      }
-                      const isActive = aspectRatio === item.value;
-                      return (
-                        <button
-                          key={item.value}
-                          className={`flex-1 max-w-[60px] rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${
-                            isActive
-                              ? 'border-[1.5px] border-gray-800 bg-gray-50 shadow-sm'
-                              : 'border border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
-                          }`}
-                          style={{ minHeight: 52 }}
-                          onClick={() => { onAspectRatioChange(item.value); setOpen(false); }}
-                        >
-                          <RatioIcon value={item.value} active={isActive} />
-                          <span
-                            className={`text-[11px] leading-none ${
-                              isActive ? 'font-semibold text-gray-800' : 'text-gray-500'
-                            }`}
-                          >
-                            {item.label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
+              <div className="flex items-baseline justify-between mb-2.5">
+                <span className="text-[12px] font-semibold text-gray-800">比例</span>
+                <span className="text-[10px] text-gray-400">当前 {aspectRatio === 'free' ? '自适应' : aspectRatio}</span>
+              </div>
+              <div className="grid grid-cols-5 gap-2">
+                {ASPECT_RATIO_ROWS.flat().map((item, index) => {
+                  // 占位：空值渲染为透明占位元素
+                  if (!item.value) {
+                    return <div key={`placeholder-${index}`} />;
+                  }
+                  const isActive = aspectRatio === item.value;
+                  return (
+                    <button
+                      key={item.value}
+                      className={`rounded-xl transition-all flex flex-col items-center justify-center gap-1.5 py-2 ${
+                        isActive
+                          ? 'border-[1.5px] border-gray-900 bg-gray-900/[0.05] shadow-sm'
+                          : 'border border-gray-200 bg-white hover:border-gray-400 hover:shadow-sm'
+                      }`}
+                      onClick={() => { onAspectRatioChange(item.value); setOpen(false); }}
+                    >
+                      <RatioIcon value={item.value} active={isActive} />
+                      <span
+                        className={`text-[11px] leading-none ${
+                          isActive ? 'font-semibold text-gray-900' : 'text-gray-500'
+                        }`}
+                      >
+                        {item.label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -348,6 +400,116 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
 
 // ==================== 主工具栏（截图1 底部）====================
 
+// 视频时长选项：4-15 秒（火山引擎 doubao-seedance-2.0 官方限制）
+const DURATION_OPTIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+// 音色选项（仅列出 qwen3-tts-instruct-flash 支持的音色，来自阿里云百炼官方非实时音色列表）
+// 不支持的音色（Katerina/Ryan/Aiden/Andre 及全部方言）已移除，
+// 后端对旧数据有 qwen3-tts-flash 回退兜底
+const VOICE_OPTIONS = [
+  // —— 普通话·女声 ——
+  { value: 'Cherry', label: '芊悦（阳光女声）', group: '普通话·女声' },
+  { value: 'Serena', label: '苏瑶（温柔女声）', group: '普通话·女声' },
+  { value: 'Maia', label: '四月（知性女声）', group: '普通话·女声' },
+  { value: 'Chelsie', label: '千雪（二次元女声）', group: '普通话·女声' },
+  { value: 'Momo', label: '茉兔（撒娇女声）', group: '普通话·女声' },
+  { value: 'Vivian', label: '十三（可爱女声）', group: '普通话·女声' },
+  { value: 'Bella', label: '萌宝（萝莉女声）', group: '普通话·女声' },
+  { value: 'Mia', label: '乖小妹（温顺女声）', group: '普通话·女声' },
+  { value: 'Nini', label: '邻家妹妹（软萌女声）', group: '普通话·女声' },
+  { value: 'Stella', label: '少女阿月（甜妹女声）', group: '普通话·女声' },
+  { value: 'Bunny', label: '萌小姬（萝莉女声）', group: '普通话·女声' },
+  { value: 'Seren', label: '小婉（助眠女声）', group: '普通话·女声' },
+  { value: 'Elias', label: '墨讲师（知性女声）', group: '普通话·女声' },
+  // —— 普通话·男声 ——
+  { value: 'Ethan', label: '晨煦（阳光男声）', group: '普通话·男声' },
+  { value: 'Moon', label: '月白（帅气男声）', group: '普通话·男声' },
+  { value: 'Kai', label: '凯（沉稳男声）', group: '普通话·男声' },
+  { value: 'Nofish', label: '不吃鱼（设计师男声）', group: '普通话·男声' },
+  { value: 'Neil', label: '阿闻（新闻男声）', group: '普通话·男声' },
+  { value: 'Mochi', label: '沙小弥（童声男声）', group: '普通话·男声' },
+  { value: 'Pip', label: '顽屁小孩（调皮童声）', group: '普通话·男声' },
+  // —— 角色扮演 ——
+  { value: 'Eldric Sage', label: '沧明子（睿智老者）', group: '角色扮演' },
+  { value: 'Bellona', label: '燕铮莺（热血女将）', group: '角色扮演' },
+  { value: 'Vincent', label: '田叔（沙哑烟嗓）', group: '角色扮演' },
+  { value: 'Arthur', label: '徐大爷（质朴乡音）', group: '角色扮演' },
+];
+
+// 语速选项
+const SPEED_OPTIONS = [
+  { value: 0.5, label: '0.5x 慢速' },
+  { value: 0.75, label: '0.75x' },
+  { value: 1.0, label: '1.0x 正常' },
+  { value: 1.25, label: '1.25x' },
+  { value: 1.5, label: '1.5x 快速' },
+  { value: 2.0, label: '2.0x' },
+];
+
+// 风格选项（写入 instructions，由 Qwen3-TTS Instruct 模型解析）
+const STYLE_OPTIONS = [
+  { value: '', label: '默认' },
+  { value: '情感温暖、亲切自然', label: '温暖亲切' },
+  { value: '沉稳庄重、正式播报', label: '沉稳正式' },
+  { value: '活泼开朗、充满活力', label: '活泼开朗' },
+  { value: '深情悲伤、低沉缓慢', label: '深情悲伤' },
+  { value: '神秘紧张、悬疑感', label: '神秘紧张' },
+  { value: '幽默诙谐、轻松愉快', label: '幽默诙谐' },
+  { value: '慷慨激昂、热血振奋', label: '慷慨激昂' },
+  { value: '温柔舒缓、治愈安慰', label: '温柔治愈' },
+  { value: '新闻播报、字正腔圆', label: '新闻播报' },
+  { value: '旁白叙事、娓娓道来', label: '旁白叙事' },
+];
+
+// 语气词选项（写入 instructions，不再插入提示词）
+// 拆分为"情绪"与"语态"两组，均为可全局生效的语气描述词，
+// 后端会拼成"带有X的语气"写入 TTS instructions
+const TONE_OPTIONS = [
+  { value: '', label: '默认', group: '' },
+  // —— 情绪 ——
+  { value: '喜悦', label: '喜悦', group: '情绪' },
+  { value: '悲伤', label: '悲伤', group: '情绪' },
+  { value: '愤怒', label: '愤怒', group: '情绪' },
+  { value: '惊讶', label: '惊讶', group: '情绪' },
+  { value: '恐惧', label: '恐惧', group: '情绪' },
+  { value: '厌恶', label: '厌恶', group: '情绪' },
+  { value: '期待', label: '期待', group: '情绪' },
+  { value: '失落', label: '失落', group: '情绪' },
+  { value: '焦急', label: '焦急', group: '情绪' },
+  { value: '羞涩', label: '羞涩', group: '情绪' },
+  { value: '得意', label: '得意', group: '情绪' },
+  { value: '疑惑', label: '疑惑', group: '情绪' },
+  { value: '嘲讽', label: '嘲讽', group: '情绪' },
+  { value: '冷漠', label: '冷漠', group: '情绪' },
+  // —— 语态 ——
+  { value: '坚定', label: '坚定', group: '语态' },
+  { value: '镇定', label: '镇定', group: '语态' },
+  { value: '犹豫', label: '犹豫', group: '语态' },
+  { value: '严肃', label: '严肃', group: '语态' },
+  { value: '俏皮', label: '俏皮', group: '语态' },
+  { value: '低语', label: '低语', group: '语态' },
+  { value: '呐喊', label: '呐喊', group: '语态' },
+  { value: '哭腔', label: '哭腔', group: '语态' },
+  { value: '笑腔', label: '笑腔', group: '语态' },
+  { value: '叹息', label: '叹息', group: '语态' },
+  { value: '嘟囔', label: '嘟囔', group: '语态' },
+];
+
+// 按 group 字段分组（空 group 的项不进分组，由调用方单独渲染）
+function groupOptions<T extends { group: string }>(options: T[]): Array<[string, T[]]> {
+  const map = new Map<string, T[]>();
+  for (const o of options) {
+    if (!o.group) continue;
+    if (!map.has(o.group)) map.set(o.group, []);
+    map.get(o.group)!.push(o);
+  }
+  return Array.from(map.entries());
+}
+
+// 按分组整理音色 / 语气词（模块级常量，无需 useMemo）
+const VOICE_GROUPS = groupOptions(VOICE_OPTIONS);
+const TONE_GROUPS = groupOptions(TONE_OPTIONS);
+
 export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   models,
   selectedModel,
@@ -356,8 +518,6 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onResolutionChange,
   selectedAspectRatio,
   onAspectRatioChange,
-  selectedQuality = '标准画质',
-  onQualityChange,
   isGenerating = false,
   onGenerate,
   nodeType = 'image',
@@ -377,106 +537,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
 }) {
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
-  const unit = isVideo ? '个' : '张';
-
-  const [countOpen, setCountOpen] = useState(false);
-  const [count, setCount] = useState(1);
-  const countOptions = [1, 2, 4];
-  // 视频时长选项：4-15 秒（火山引擎 doubao-seedance-2.0 官方限制）
-  const durationOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
   const [durationOpen, setDurationOpen] = useState(false);
-
-  // 音色选项（仅列出 qwen3-tts-instruct-flash 支持的音色，来自阿里云百炼官方非实时音色列表）
-  // 不支持的音色（Katerina/Ryan/Aiden/Andre 及全部方言）已移除，
-  // 后端对旧数据有 qwen3-tts-flash 回退兜底
-  const VOICE_OPTIONS = [
-    // —— 普通话·女声 ——
-    { value: 'Cherry', label: '芊悦（阳光女声）', group: '普通话·女声' },
-    { value: 'Serena', label: '苏瑶（温柔女声）', group: '普通话·女声' },
-    { value: 'Maia', label: '四月（知性女声）', group: '普通话·女声' },
-    { value: 'Chelsie', label: '千雪（二次元女声）', group: '普通话·女声' },
-    { value: 'Momo', label: '茉兔（撒娇女声）', group: '普通话·女声' },
-    { value: 'Vivian', label: '十三（可爱女声）', group: '普通话·女声' },
-    { value: 'Bella', label: '萌宝（萝莉女声）', group: '普通话·女声' },
-    { value: 'Mia', label: '乖小妹（温顺女声）', group: '普通话·女声' },
-    { value: 'Nini', label: '邻家妹妹（软萌女声）', group: '普通话·女声' },
-    { value: 'Stella', label: '少女阿月（甜妹女声）', group: '普通话·女声' },
-    { value: 'Bunny', label: '萌小姬（萝莉女声）', group: '普通话·女声' },
-    { value: 'Seren', label: '小婉（助眠女声）', group: '普通话·女声' },
-    { value: 'Elias', label: '墨讲师（知性女声）', group: '普通话·女声' },
-    // —— 普通话·男声 ——
-    { value: 'Ethan', label: '晨煦（阳光男声）', group: '普通话·男声' },
-    { value: 'Moon', label: '月白（帅气男声）', group: '普通话·男声' },
-    { value: 'Kai', label: '凯（沉稳男声）', group: '普通话·男声' },
-    { value: 'Nofish', label: '不吃鱼（设计师男声）', group: '普通话·男声' },
-    { value: 'Neil', label: '阿闻（新闻男声）', group: '普通话·男声' },
-    { value: 'Mochi', label: '沙小弥（童声男声）', group: '普通话·男声' },
-    { value: 'Pip', label: '顽屁小孩（调皮童声）', group: '普通话·男声' },
-    // —— 角色扮演 ——
-    { value: 'Eldric Sage', label: '沧明子（睿智老者）', group: '角色扮演' },
-    { value: 'Bellona', label: '燕铮莺（热血女将）', group: '角色扮演' },
-    { value: 'Vincent', label: '田叔（沙哑烟嗓）', group: '角色扮演' },
-    { value: 'Arthur', label: '徐大爷（质朴乡音）', group: '角色扮演' },
-  ];
-
-  // 语速选项
-  const SPEED_OPTIONS = [
-    { value: 0.5, label: '0.5x 慢速' },
-    { value: 0.75, label: '0.75x' },
-    { value: 1.0, label: '1.0x 正常' },
-    { value: 1.25, label: '1.25x' },
-    { value: 1.5, label: '1.5x 快速' },
-    { value: 2.0, label: '2.0x' },
-  ];
-
-  // 风格选项（写入 instructions，由 Qwen3-TTS Instruct 模型解析）
-  const STYLE_OPTIONS = [
-    { value: '', label: '默认' },
-    { value: '情感温暖、亲切自然', label: '温暖亲切' },
-    { value: '沉稳庄重、正式播报', label: '沉稳正式' },
-    { value: '活泼开朗、充满活力', label: '活泼开朗' },
-    { value: '深情悲伤、低沉缓慢', label: '深情悲伤' },
-    { value: '神秘紧张、悬疑感', label: '神秘紧张' },
-    { value: '幽默诙谐、轻松愉快', label: '幽默诙谐' },
-    { value: '慷慨激昂、热血振奋', label: '慷慨激昂' },
-    { value: '温柔舒缓、治愈安慰', label: '温柔治愈' },
-    { value: '新闻播报、字正腔圆', label: '新闻播报' },
-    { value: '旁白叙事、娓娓道来', label: '旁白叙事' },
-  ];
-
-  // 语气词选项（写入 instructions，不再插入提示词）
-  // 拆分为"情绪"与"语态"两组，均为可全局生效的语气描述词，
-  // 后端会拼成"带有X的语气"写入 TTS instructions
-  const TONE_OPTIONS = [
-    { value: '', label: '默认', group: '' },
-    // —— 情绪 ——
-    { value: '喜悦', label: '喜悦', group: '情绪' },
-    { value: '悲伤', label: '悲伤', group: '情绪' },
-    { value: '愤怒', label: '愤怒', group: '情绪' },
-    { value: '惊讶', label: '惊讶', group: '情绪' },
-    { value: '恐惧', label: '恐惧', group: '情绪' },
-    { value: '厌恶', label: '厌恶', group: '情绪' },
-    { value: '期待', label: '期待', group: '情绪' },
-    { value: '失落', label: '失落', group: '情绪' },
-    { value: '焦急', label: '焦急', group: '情绪' },
-    { value: '羞涩', label: '羞涩', group: '情绪' },
-    { value: '得意', label: '得意', group: '情绪' },
-    { value: '疑惑', label: '疑惑', group: '情绪' },
-    { value: '嘲讽', label: '嘲讽', group: '情绪' },
-    { value: '冷漠', label: '冷漠', group: '情绪' },
-    // —— 语态 ——
-    { value: '坚定', label: '坚定', group: '语态' },
-    { value: '镇定', label: '镇定', group: '语态' },
-    { value: '犹豫', label: '犹豫', group: '语态' },
-    { value: '严肃', label: '严肃', group: '语态' },
-    { value: '俏皮', label: '俏皮', group: '语态' },
-    { value: '低语', label: '低语', group: '语态' },
-    { value: '呐喊', label: '呐喊', group: '语态' },
-    { value: '哭腔', label: '哭腔', group: '语态' },
-    { value: '笑腔', label: '笑腔', group: '语态' },
-    { value: '叹息', label: '叹息', group: '语态' },
-    { value: '嘟囔', label: '嘟囔', group: '语态' },
-  ];
 
   // 音色选择器状态
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -487,13 +548,14 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   // 语气词选择器状态
   const [toneOpen, setToneOpen] = useState(false);
 
-  // 价格数据
+  // 价格数据（模块级 promise 缓存，全局只请求一次；卸载后不再 setState）
   const [pricingNodes, setPricingNodes] = useState<NodePriceGroup[]>([]);
   useEffect(() => {
-    pricingApi
-      .list()
-      .then((res) => setPricingNodes(res.nodes || []))
+    let cancelled = false;
+    loadPricingNodes()
+      .then((nodes) => { if (!cancelled) setPricingNodes(nodes); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   // 计算当前模型的费用
@@ -506,10 +568,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     const currentModelId = models.find((m) => m.value === selectedModel)?.modelId || selectedModel;
     // 视频节点：按分辨率匹配价格（同一模型不同分辨率价格不同）
     if (nodeGroup.billing_type === 'per_second' && nodeType === 'video') {
-      const normalizedRes = selectedResolution.toLowerCase() === '4k' ? '4k' : selectedResolution;
-      const modelPrice = nodeGroup.models.find(
-        (m) => m.model_id === currentModelId && (m.resolution || '').toLowerCase() === normalizedRes,
-      );
+      const modelPrice = findVideoPricing(pricingNodes, currentModelId, selectedResolution);
       if (!modelPrice) return null;
       const price = modelPrice.price;
       if (price === 0) return 0;
@@ -531,27 +590,6 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     // 按次计费：直接返回单价
     return price;
   }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, selectedResolution, charCount]);
-
-  // 按分组整理音色
-  const voiceGroups = useMemo(() => {
-    const map = new Map<string, typeof VOICE_OPTIONS>();
-    for (const v of VOICE_OPTIONS) {
-      if (!map.has(v.group)) map.set(v.group, []);
-      map.get(v.group)!.push(v);
-    }
-    return Array.from(map.entries());
-  }, []);
-
-  // 按分组整理语气词（默认项单独渲染，不进分组）
-  const toneGroups = useMemo(() => {
-    const map = new Map<string, typeof TONE_OPTIONS>();
-    for (const t of TONE_OPTIONS) {
-      if (!t.group) continue;
-      if (!map.has(t.group)) map.set(t.group, []);
-      map.get(t.group)!.push(t);
-    }
-    return Array.from(map.entries());
-  }, []);
 
   return (
     <div className="flex items-center gap-0.5 pt-2.5 mt-0.5 border-t border-gray-100">
@@ -576,13 +614,13 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             <span className="text-gray-800 font-medium">
               {VOICE_OPTIONS.find((v) => v.value === selectedVoice)?.label || '音色'}
             </span>
-            <span className="text-[10px] text-gray-400">^</span>
+            <ChevronIcon className="text-gray-400" />
           </button>
           {voiceOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setVoiceOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[160px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-200 z-30">
-                {voiceGroups.map(([groupName, voices]) => (
+              <div className="absolute bottom-full left-0 mb-2 w-[160px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 z-30">
+                {VOICE_GROUPS.map(([groupName, voices]) => (
                   <div key={groupName}>
                     <div className="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0">{groupName}</div>
                     {voices.map((opt) => (
@@ -612,12 +650,12 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
           >
             <span className="text-gray-600">{selectedSpeed}x</span>
-            <span className="text-[10px] text-gray-400">^</span>
+            <ChevronIcon className="text-gray-400" />
           </button>
           {speedOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setSpeedOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[120px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+              <div className="absolute bottom-full left-0 mb-2 w-[120px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30">
                 {SPEED_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
@@ -645,12 +683,12 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             <span className="text-gray-800 font-medium">
               {STYLE_OPTIONS.find((s) => s.value === selectedStyle)?.label || '风格'}
             </span>
-            <span className="text-[10px] text-gray-400">^</span>
+            <ChevronIcon className="text-gray-400" />
           </button>
           {styleOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setStyleOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[130px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+              <div className="absolute bottom-full left-0 mb-2 w-[130px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30">
                 {STYLE_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
@@ -679,12 +717,12 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             <span className="text-gray-800 font-medium">
               {TONE_OPTIONS.find((t) => t.value === selectedTone)?.label || '语气词'}
             </span>
-            <span className="text-[10px] text-gray-400">^</span>
+            <ChevronIcon className="text-gray-400" />
           </button>
           {toneOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setToneOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[128px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-xl border border-gray-200 z-30">
+              <div className="absolute bottom-full left-0 mb-2 w-[128px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 z-30">
                 {/* 默认项 */}
                 <button
                   className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
@@ -694,7 +732,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
                 >
                   默认
                 </button>
-                {toneGroups.map(([groupName, tones]) => (
+                {TONE_GROUPS.map(([groupName, tones]) => (
                   <div key={groupName}>
                     <div className="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0">{groupName}</div>
                     {tones.map((opt) => (
@@ -721,13 +759,11 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         <AspectRatioSelector
           resolution={selectedResolution}
           aspectRatio={selectedAspectRatio}
-          quality={selectedQuality}
           selectedModelId={selectedModel}
           nodeType={nodeType}
           models={models}
           onResolutionChange={onResolutionChange}
           onAspectRatioChange={onAspectRatioChange}
-          onQualityChange={onQualityChange || (() => {})}
           pricingNodes={pricingNodes}
           selectedDuration={selectedDuration}
         />
@@ -753,13 +789,13 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
                 <path d="M7 4v3l2 1.5" stroke="#6B7280" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <span className="font-medium text-gray-800">{selectedDuration}s</span>
-              <span className="text-[10px] text-gray-400">^</span>
+              <ChevronIcon className="text-gray-400" />
             </button>
             {durationOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setDurationOpen(false)} />
-                <div className="absolute bottom-full right-0 mb-2 w-[64px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30 max-h-[260px] overflow-y-auto">
-                  {durationOptions.map((opt) => (
+                <div className="absolute bottom-full right-0 mb-2 w-[64px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30 max-h-[260px] overflow-y-auto">
+                  {DURATION_OPTIONS.map((opt) => (
                     <button
                       key={opt}
                       className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
@@ -797,36 +833,6 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           </button>
         )}
 
-        {/* 生成数量：API 暂不支持批量生成，暂时隐藏 */}
-        {false && nodeType === 'image' && (
-        <div className="relative">
-          <button
-            onClick={() => setCountOpen(!countOpen)}
-            className="flex items-center gap-0.5 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px] text-gray-600 mr-1"
-          >
-            <span>{count}{unit}</span>
-          </button>
-          {countOpen && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setCountOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[72px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
-                {countOptions.map((opt) => (
-                  <button
-                    key={opt}
-                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                      count === opt ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                    }`}
-                    onClick={() => { setCount(opt); setCountOpen(false); }}
-                  >
-                    {opt}{unit}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        )}
-
         {/* 费用提示（生成按钮左侧） */}
         {estimatedCost !== null && estimatedCost > 0 && (
           <span className="text-[11px] text-gray-500 mr-1.5 whitespace-nowrap">
@@ -837,7 +843,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         {/* 生成按钮 */}
         <button
           className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-gray-800 to-gray-950 text-white flex items-center justify-center hover:from-gray-700 hover:to-gray-900 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm text-[13px] font-medium tracking-wide"
-          onClick={() => onGenerate?.(count)}
+          onClick={() => onGenerate?.(1)}
           disabled={isGenerating}
         >
           {isGenerating ? '生成中…' : '生成'}

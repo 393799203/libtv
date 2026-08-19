@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CanvasData, LibTVNode, LibTVEdge, NodeExecutionStatus } from '@/types/canvas';
+import type { CanvasData, LibTVNode, LibTVEdge, NodeExecutionStatus, ScriptAssetItem } from '@/types/canvas';
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -87,6 +87,8 @@ interface CanvasState extends WorkspaceUIState {
   removeNodes: (ids: string[]) => void;
   updateNodeData: (id: string, data: Partial<LibTVNode['data']>) => void;
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
+  /** 只更新执行进度文案（SSE 高频回调专用）：不进历史、不置 isDirty */
+  updateNodeProgress: (id: string, progressMessage: string | undefined) => void;
 
   // 视口持久化
   saveViewport: (viewport: Viewport) => void;
@@ -126,9 +128,10 @@ function saveHistory(data: ProjectCanvasData): Pick<ProjectCanvasData, 'history'
       for (let i = 0; i < last.nodes.length && unchanged; i++) {
         const a = last.nodes[i];
         const b = snapshot.nodes[i];
+        // data 用引用比对：store 内均为不可变更新，data 内容变则引用必变
         if (a.id !== b.id || a.position.x !== b.position.x || a.position.y !== b.position.y ||
             a.selected !== b.selected || a.measured?.width !== b.measured?.width ||
-            a.measured?.height !== b.measured?.height) {
+            a.measured?.height !== b.measured?.height || a.data !== b.data) {
           unchanged = false;
         }
       }
@@ -180,11 +183,27 @@ function scheduleFlush(
       let data = cache.get(pid);
       if (!data) data = createEmptyProjectData();
 
-      // 如果当前项目标记了 skipHistory，本次不记录快照
-      const shouldRecord = !data.skipHistory;
+      // skipHistory 是一次性兼容标记（undo/redo/执行状态更新时设置）：消费掉即可，
+      // 记录决策完全由下面的变更类型门控决定——否则在没有 RF 回显时标记会残留，
+      // 吞掉用户的下一次真实操作（该操作不进历史且 future 不被清空）
       if (data.skipHistory) {
         data.skipHistory = false;
       }
+
+      // 按变更类型决定是否进 undo 历史：
+      // - select：纯 UI 状态，不记（撤销选中没有意义，还会让 undo 看起来"没反应"）
+      // - position：仅拖动结束帧（dragging === false）——一次拖动只产生一条记录
+      // - dimensions：仅手动调整大小的结束帧（resizing === false，NodeResizer）；
+      //   RF 被动测量回显（无 resizing 标志）不记——否则 undo/redo 后的重新测量
+      //   会污染历史并清掉 future，导致 redo 失效
+      // - add / remove：记录
+      const isRecordable = (c: NodeChange<LibTVNode> | EdgeChange<LibTVEdge>): boolean => {
+        if (c.type === 'select') return false;
+        if (c.type === 'position') return c.dragging === false;
+        if (c.type === 'dimensions') return (c as { resizing?: boolean }).resizing === false;
+        return true;
+      };
+      const shouldRecord = nChanges.some(isRecordable) || eChanges.some(isRecordable);
 
       if (nChanges.length > 0) {
         data.nodes = applyNodeChanges(nChanges, data.nodes);
@@ -267,7 +286,8 @@ function syncFromCache(
     edges: data.edges,
     selectedNodeIds: data.selectedNodeIds,
     selectedEdgeIds: data.selectedEdgeIds,
-    canUndo: data.history.length > 0,
+    // history[0] 是当前状态快照，至少要有一条更早的历史才可撤销
+    canUndo: data.history.length > 1,
     canRedo: data.future.length > 0,
   };
 }
@@ -345,7 +365,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // --- React Flow 回调 ---
   onNodesChange: (changes: NodeChange<LibTVNode>[]) => {
     // ✅ 处理节点删除：使用 ID 映射机制同步清空脚本节点资产
+    // 注意：这里只收集清理目标，不做原地 mutation —— scriptData[dataType] 数组和
+    // asset 对象被历史快照浅引用共享，原地写会污染所有历史条目导致 undo 无法恢复。
     const removeChanges = changes.filter(c => c.type === 'remove');
+    const assetCleanups: { scriptNodeId: string; dataType: string; assetName: string }[] = [];
     if (removeChanges.length > 0) {
       const state = get();
       const nodes = state.nodes;
@@ -378,9 +401,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
               const dataType = typeMap[assetType as '角色' | '场景' | '道具'];
               if (dataType && scriptData[dataType]) {
                 const assets = scriptData[dataType];
-                const asset = assets.find((a: any) => a.name === assetName);
-                if (asset) {
-                  asset.nodeId = undefined; // ✅ 清除资产关联的节点 ID
+                // ✅ 不再原地 mutation，仅收集清理目标，稍后统一不可变写回
+                if (assets.some((a: any) => a.name === assetName)) {
+                  assetCleanups.push({ scriptNodeId, dataType, assetName });
                   console.log('[CanvasStore] 清除资产 nodeId:', {
                     assetType,
                     assetName,
@@ -394,6 +417,39 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           }
         }
       }
+    }
+
+    // ✅ 统一不可变写回资产清理：nodes 数组、script 节点、data、assets 数组、asset
+    // 对象每一层都新建。这里故意不调 saveHistory、不置 skipHistory —— 随后的
+    // scheduleFlush 在微任务里应用 removeChanges 后才记录"变更后快照"，
+    // 因此"节点删除 + 资产清理"会记成同一条历史，undo 一步同时回滚两者。
+    if (assetCleanups.length > 0) {
+      set((state) => {
+        const pid = state.projectId;
+        if (!pid || state.isLoading) return {};
+        const cache = new Map(state._cache);
+        const data = cache.get(pid);
+        if (!data) return {};
+
+        data.nodes = data.nodes.map((node) => {
+          if (node.type !== 'script') return node;
+          const targets = assetCleanups.filter((t) => t.scriptNodeId === node.id);
+          if (targets.length === 0) return node;
+
+          const newData: Record<string, unknown> = { ...node.data };
+          for (const { dataType, assetName } of targets) {
+            const assets = newData[dataType];
+            if (!Array.isArray(assets)) continue;
+            newData[dataType] = assets.map((a: ScriptAssetItem) =>
+              a.name === assetName ? { ...a, nodeId: undefined } : a,
+            );
+          }
+          return { ...node, data: newData as LibTVNode['data'] };
+        });
+        cache.set(pid, data);
+
+        return { _cache: cache, ...syncFromCache(pid, cache) };
+      });
     }
 
     nodeChangeQueue.push(...changes);
@@ -517,6 +573,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 
+  updateNodeProgress: (id: string, progressMessage: string | undefined) => {
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid || state.isLoading) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid) || createEmptyProjectData();
+
+      // 标记跳过历史记录（进度变化不需要 undo；同时防止随后的尺寸重测变更产生历史条目）
+      data.skipHistory = true;
+      data.nodes = data.nodes.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, progressMessage } as LibTVNode['data'] } : node,
+      );
+      cache.set(pid, data);
+
+      return { _cache: cache, ...syncFromCache(pid, cache) };
+    });
+  },
+
   // --- 边操作 ---
   addEdge: (edge: LibTVEdge) => {
     set((state) => {
@@ -585,6 +659,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         skipHistory: false,
       };
       cache.set(pid, projectData);
+      // 种一条初始快照（history[0] === 加载后的当前状态），
+      // 保证加载后的第一次变更也能撤销回初始状态
+      projectData.history = [{ nodes: [...projectData.nodes], edges: [...projectData.edges] }];
 
       return {
         _cache: cache,
@@ -619,10 +696,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
-      if (data.history.length === 0) return {};
+      // history[0] 永远是"当前状态"的快照（saveHistory 记录的是变更后状态），
+      // 撤销需要回退到 history[1]（上一步的状态）
+      if (data.history.length < 2) return {};
 
-      const [prev, ...restHist] = data.history;
-      const current: HistorySnapshot = { nodes: [...data.nodes], edges: [...data.edges] };
+      const [cur, prev, ...restHist] = data.history;
 
       // 标记跳过历史记录
       data.skipHistory = true;
@@ -630,8 +708,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       data.edges = prev.edges;
       data.selectedNodeIds = [];
       data.selectedEdgeIds = [];
-      data.history = restHist;
-      data.future = [current, ...data.future];
+      // 维持不变式：history[0] = prev = 回退后的当前状态；被撤销的状态进 future 供 redo
+      data.history = [prev, ...restHist];
+      data.future = [cur, ...data.future];
       cache.set(pid, data);
 
       return { _cache: cache, isDirty: true, ...syncFromCache(pid, cache) };
@@ -648,7 +727,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       if (data.future.length === 0) return {};
 
       const [next, ...restFuture] = data.future;
-      const current: HistorySnapshot = { nodes: [...data.nodes], edges: [...data.edges] };
 
       // 标记跳过历史记录
       data.skipHistory = true;
@@ -656,7 +734,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       data.edges = next.edges;
       data.selectedNodeIds = [];
       data.selectedEdgeIds = [];
-      data.history = [current, ...data.history];
+      // 不变式：history[0] === 当前状态，redo 后当前状态变为 next
+      data.history = [next, ...data.history];
       data.future = restFuture;
       cache.set(pid, data);
 

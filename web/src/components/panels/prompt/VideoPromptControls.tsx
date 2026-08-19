@@ -6,15 +6,15 @@ import type { VideoMode } from '@/types/canvas';
 export const VIDEO_MODES: Array<{
   value: VideoMode;
   label: string;
-  /** 该模式需要的图片数量范围 [min, max]，0 表示不需要图片 */
-  imageRange: [number, number];
-  /** 该模式需要的视频数量范围 [min, max]，0 表示不需要视频 */
-  videoRange: [number, number];
+  /** 该模式需要的图片数量范围 [min, max]，0 表示不需要图片（universal-ref 走总数特判，不配置此项） */
+  imageRange?: [number, number];
+  /** 该模式需要的视频数量范围 [min, max]，0 表示不需要视频（universal-ref 走总数特判，不配置此项） */
+  videoRange?: [number, number];
 }> = [
   { value: 'text-to-video', label: '文生视频', imageRange: [0, 0], videoRange: [0, 0] },
   { value: 'video-ref', label: '视频参考', imageRange: [0, 0], videoRange: [1, 1] },
   { value: 'first-last-frame', label: '首尾帧', imageRange: [2, 2], videoRange: [0, 0] },
-  { value: 'universal-ref', label: '全能参考', imageRange: [0, 9], videoRange: [0, 9] },
+  { value: 'universal-ref', label: '全能参考' },
 ];
 
 /** 判断某模式在当前图片/视频数量下是否可用 */
@@ -28,20 +28,20 @@ function isModeAvailable(
     const total = imageCount + videoCount;
     return total >= 1 && total <= 9;
   }
-  const [imgMin, imgMax] = mode.imageRange;
-  const [vidMin, vidMax] = mode.videoRange;
+  const [imgMin, imgMax] = mode.imageRange ?? [0, 0];
+  const [vidMin, vidMax] = mode.videoRange ?? [0, 0];
   const imgOk = imageCount >= imgMin && imageCount <= imgMax;
   const vidOk = videoCount >= vidMin && videoCount <= vidMax;
   return imgOk && vidOk;
 }
 
-/** 当前模式不可用时自动切换到第一个可用模式 */
-function getAutoMode(currentMode: VideoMode, imageCount: number, videoCount: number): VideoMode {
+/** 当前模式不可用时自动切换到第一个可用模式；没有任何可用模式时返回 null */
+function getAutoMode(currentMode: VideoMode, imageCount: number, videoCount: number): VideoMode | null {
   const current = VIDEO_MODES.find((m) => m.value === currentMode);
   if (current && isModeAvailable(imageCount, videoCount, current)) {
     return currentMode;
   }
-  return VIDEO_MODES.find((m) => isModeAvailable(imageCount, videoCount, m))?.value ?? 'text-to-video';
+  return VIDEO_MODES.find((m) => isModeAvailable(imageCount, videoCount, m))?.value ?? null;
 }
 
 /** 生成模式不可用时的 tooltip 提示 */
@@ -50,16 +50,18 @@ function getModeTooltip(mode: typeof VIDEO_MODES[number], imageCount: number, vi
   if (mode.value === 'universal-ref') {
     return `需 1-9 个资源（图片或视频，当前 ${imageCount + videoCount} 个）`;
   }
+  const [imgMin, imgMax] = mode.imageRange ?? [0, 0];
+  const [vidMin, vidMax] = mode.videoRange ?? [0, 0];
   const parts: string[] = [];
-  if (mode.imageRange[0] > 0) {
-    parts.push(mode.imageRange[0] === mode.imageRange[1]
-      ? `${mode.imageRange[0]} 张图片`
-      : `${mode.imageRange[0]}-${mode.imageRange[1]} 张图片`);
+  if (imgMin > 0) {
+    parts.push(imgMin === imgMax
+      ? `${imgMin} 张图片`
+      : `${imgMin}-${imgMax} 张图片`);
   }
-  if (mode.videoRange[0] > 0) {
-    parts.push(mode.videoRange[0] === mode.videoRange[1]
-      ? `${mode.videoRange[0]} 个视频`
-      : `${mode.videoRange[0]}-${mode.videoRange[1]} 个视频`);
+  if (vidMin > 0) {
+    parts.push(vidMin === vidMax
+      ? `${vidMin} 个视频`
+      : `${vidMin}-${vidMax} 个视频`);
   }
   const need = parts.length > 0 ? `需 ${parts.join(' + ')}` : '无上游资源时可用';
   return `${need}（当前 ${imageCount} 图 + ${videoCount} 视频）`;
@@ -82,14 +84,15 @@ export const VideoModeSelector = memo<VideoModeSelectorProps>(function VideoMode
   imageCount,
   videoCount,
 }) {
-  // 当图片/视频数量变化导致当前模式不可用时，自动切换到合适的模式
+  // 当图片/视频数量变化导致当前模式不可用时，自动切换到合适的模式；
+  // 若当前资源数量下没有任何可用模式，保持现状不回写（避免持久化非法值）
   const effectiveMode = useMemo(
     () => getAutoMode(value, imageCount, videoCount),
     [value, imageCount, videoCount],
   );
 
   useEffect(() => {
-    if (effectiveMode !== value) {
+    if (effectiveMode && effectiveMode !== value) {
       onChange(effectiveMode);
     }
   }, [effectiveMode, value, onChange]);
@@ -119,6 +122,9 @@ export const VideoModeSelector = memo<VideoModeSelectorProps>(function VideoMode
           );
         })}
       </div>
+      {!effectiveMode && (
+        <span className="ml-2 text-[11px] text-amber-600">当前上游资源数量无可用模式，请调整连线</span>
+      )}
     </div>
   );
 });

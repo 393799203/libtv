@@ -422,9 +422,8 @@ export function useExecutionStream(
           } as never);
         } else if (event.type === 'node_progress' && event.nodeId) {
           const pd = event.data as { elapsed?: number; elapsedMs?: number; message?: string } | undefined;
-          useCanvasStore.getState().updateNodeData(event.nodeId, {
-            progressMessage: pd?.message, // 只保留progressMessage（"已运行 10s"）
-          } as never);
+          // 高频进度更新走专用通道：只写 progressMessage（"已运行 10s"），不进历史、不置脏标记
+          useCanvasStore.getState().updateNodeProgress(event.nodeId, pd?.message);
         }
       } catch (e) {
         console.error('[SSE] parse error:', e);

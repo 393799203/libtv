@@ -60,6 +60,9 @@ const VIEWPORT_CHANGE_THROTTLE = 100;
 export const Canvas = memo(function Canvas() {
   const viewportRef = useRef<Viewport | null>(null);
   const lastViewportUpdate = useRef(0);
+  // setViewport 节流：窗口内暂存最新视口，由 trailing timer 统一刷新一次
+  const pendingViewportRef = useRef<Viewport | null>(null);
+  const viewportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   // 图片/视频节点右键菜单状态（下载 / 存到个人资产库 / 查看生成历史）
@@ -278,11 +281,31 @@ export const Canvas = memo(function Canvas() {
 
   const onViewportChange = useCallback((viewport: Viewport) => {
     const now = Date.now();
-    setViewport(viewport);
     if (now - lastViewportUpdate.current > VIEWPORT_CHANGE_THROTTLE) {
-      viewportRef.current = viewport;
+      // 领先沿：立即刷新显示 + 按原节奏持久化（saveViewport 节流逻辑保持不变）
       lastViewportUpdate.current = now;
+      setViewport(viewport);
+      viewportRef.current = viewport;
       saveViewport(viewport);
+    } else {
+      // 节流窗口内：只记最新值，trailing timer 兜底刷新一次显示，避免每帧 setState
+      pendingViewportRef.current = viewport;
+      if (viewportTimerRef.current === null) {
+        viewportTimerRef.current = setTimeout(() => {
+          viewportTimerRef.current = null;
+          const latest = pendingViewportRef.current;
+          pendingViewportRef.current = null;
+          if (latest) setViewport(latest);
+        }, VIEWPORT_CHANGE_THROTTLE);
+      }
+    }
+  }, [saveViewport]);
+
+  // 卸载时清理视口节流 timer
+  useEffect(() => () => {
+    if (viewportTimerRef.current !== null) {
+      clearTimeout(viewportTimerRef.current);
+      viewportTimerRef.current = null;
     }
   }, []);
 
@@ -341,6 +364,16 @@ export const Canvas = memo(function Canvas() {
   const selectedNode = selectedNodeIds.length === 1
     ? nodes.find((n) => n.id === selectedNodeIds[0])
     : null;
+
+  // PromptPanel 的稳定 onUpdate 引用（内联箭头会击穿 memo）：
+  // 仅依赖选中节点 id，节点 data 变化不会导致回调引用变化
+  const selectedNodeId = selectedNode?.id;
+  const handlePromptUpdate = useCallback(
+    (partial: Partial<LibTVNode['data']>) => {
+      if (selectedNodeId) updateNodeData(selectedNodeId, partial);
+    },
+    [selectedNodeId, updateNodeData],
+  );
 
   // 支持提示词面板的节点类型（排除风格图片节点、拖动/框选操作）
   const hasPromptPanel = selectedNode
@@ -576,7 +609,7 @@ export const Canvas = memo(function Canvas() {
               nodeId={selectedNode!.id}
               nodeType={selectedNode!.data.type}
               data={selectedNode!.data}
-              onUpdate={(partial) => updateNodeData(selectedNode!.id, partial)}
+              onUpdate={handlePromptUpdate}
             />
           </div>
         </div>

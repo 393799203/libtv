@@ -96,6 +96,75 @@ function getUpstreamInputs(
     .filter(Boolean) as UpstreamInput[];
 }
 
+/**
+ * 手动创建的视频节点：从上游图片节点反查关联分镜的最终提示词
+ */
+function computeImportablePrompts(
+  nodeType: NodeType,
+  nodeId: string,
+  upstreamInputs: UpstreamInput[],
+  nodes: LibTVNode[]
+): { label: string; prompt: string; duration?: number }[] {
+  if (nodeType !== 'video' || nodeId.startsWith('shot-video-')) return [];
+  const result: { label: string; prompt: string; duration?: number }[] = [];
+  for (const input of upstreamInputs) {
+    if (input.nodeType !== 'image') continue;
+    // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}
+    const match = input.nodeId.match(/^shot-image-(.+)-(script-.+)$/);
+    if (!match) continue;
+    const [, shotId, scriptNodeId] = match;
+    const scriptNode = nodes.find((n) => n.id === scriptNodeId);
+    if (!scriptNode || scriptNode.type !== 'script') continue;
+    const scriptData = scriptNode.data as ScriptNodeData;
+    const shot = (scriptData.shots || []).find((s: ScriptShot) => s.id === shotId);
+    if (shot?.finalPrompt) {
+      // 有上游图片参考时，只需要运动提示词（画面由参考图提供）
+      const prompt = shot.motionPrompt?.trim()
+        ? `视频运动提示词：${shot.motionPrompt.trim()}`
+        : shot.finalPrompt;
+      result.push({ label: `分镜${shot.shotNumber}提示词`, prompt, duration: shot.duration });
+    }
+  }
+  return result;
+}
+
+/**
+ * 计算"上游签名"：把 getUpstreamInputs / computeImportablePrompts 实际读到的所有字段
+ * 拼成字符串。zustand 用 Object.is 比较选择器结果，签名不变就不会触发面板重渲染——
+ * 画布上其他节点的拖动 / SSE 进度写回都不会影响本面板。
+ */
+function computeUpstreamSignature(nodeId: string, nodes: LibTVNode[], edges: LibTVEdge[]): string {
+  const parts: string[] = [];
+  const seenNodes = new Set<string>();
+  const addNode = (n: LibTVNode | undefined) => {
+    if (!n || seenNodes.has(n.id)) return;
+    seenNodes.add(n.id);
+    const d = n.data as Record<string, unknown>;
+    parts.push(
+      `node:${n.id}|${n.type}|${d.type}|${d.label}|${d.imageUrl}|${d.videoUrl}|${d.content}|${d.scriptContent}|${d.audioUrl}`
+    );
+  };
+  for (const e of edges) {
+    if (e.target !== nodeId) continue;
+    parts.push(`edge:${e.source}`);
+    const src = nodes.find((n) => n.id === e.source);
+    addNode(src);
+    // 分镜图片节点关联的 script 节点：shots 里被读到的字段也纳入签名
+    if (src && src.id.startsWith('shot-image-')) {
+      const m = src.id.match(/^shot-image-(.+)-(script-.+)$/);
+      const scriptNode = m ? nodes.find((n) => n.id === m[2]) : undefined;
+      if (scriptNode) {
+        addNode(scriptNode);
+        const shots = (scriptNode.data as ScriptNodeData).shots || [];
+        for (const s of shots) {
+          parts.push(`shot:${s.id}|${s.shotNumber}|${s.finalPrompt}|${s.motionPrompt}|${s.duration}`);
+        }
+      }
+    }
+  }
+  return parts.join('\n');
+}
+
 export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   nodeId,
   nodeType,
@@ -107,10 +176,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 编辑器 ref，用于快捷导入/提取最新文本
   const editorRef = useRef<PromptEditorHandle>(null);
 
-  // 从全局 store 获取节点和边，用于计算上游输入
-  // 注意：zustand 默认用 Object.is 比较，选择器内不能返回新对象/数组
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
+  // 上游签名订阅：只在面板实际依赖的上游字段变化时才重渲染，
+  // 画布上无关节点的拖动 / SSE 进度写回不会触发本面板更新
+  const upstreamSignature = useCanvasStore((s) => computeUpstreamSignature(nodeId, s.nodes, s.edges));
   const projectId = useCanvasStore((s) => s.projectId);
 
   // 节点生成 hook — 统一入口（处理单点生成 + SSE 订阅）
@@ -127,36 +195,17 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 从后端 API 动态获取模型列表
   const availableModels = useModels(nodeType);
 
-  // 上游输入列表（useMemo 稳定引用，避免子组件无效重渲染）
-  const upstreamInputs = useMemo(
-    () => getUpstreamInputs(nodeId, nodes, edges),
-    [nodeId, nodes, edges]
-  );
-
-  // 手动创建的视频节点：从上游图片节点反查关联分镜的最终提示词
-  const importablePrompts = useMemo(() => {
-    if (nodeType !== 'video' || nodeId.startsWith('shot-video-')) return [];
-    const result: { label: string; prompt: string; duration?: number }[] = [];
-    for (const input of upstreamInputs) {
-      if (input.nodeType !== 'image') continue;
-      // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}
-      const match = input.nodeId.match(/^shot-image-(.+)-(script-.+)$/);
-      if (!match) continue;
-      const [, shotId, scriptNodeId] = match;
-      const scriptNode = nodes.find((n) => n.id === scriptNodeId);
-      if (!scriptNode || scriptNode.type !== 'script') continue;
-      const scriptData = scriptNode.data as ScriptNodeData;
-      const shot = (scriptData.shots || []).find((s: ScriptShot) => s.id === shotId);
-      if (shot?.finalPrompt) {
-        // 有上游图片参考时，只需要运动提示词（画面由参考图提供）
-        const prompt = shot.motionPrompt?.trim()
-          ? `视频运动提示词：${shot.motionPrompt.trim()}`
-          : shot.finalPrompt;
-        result.push({ label: `分镜${shot.shotNumber}提示词`, prompt, duration: shot.duration });
-      }
-    }
-    return result;
-  }, [nodeType, nodeId, upstreamInputs, nodes]);
+  // 上游输入 + 可导入提示词：签名不变时按需读 store（不订阅），useMemo 不重算
+  const { upstreamInputs, importablePrompts } = useMemo(() => {
+    const { nodes, edges } = useCanvasStore.getState();
+    const inputs = getUpstreamInputs(nodeId, nodes, edges);
+    return {
+      upstreamInputs: inputs,
+      importablePrompts: computeImportablePrompts(nodeType, nodeId, inputs, nodes),
+    };
+    // upstreamSignature 已覆盖这两个函数读到的所有字段（作为重算门控，eslint 认为它"多余"是有意为之）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId, nodeType, upstreamSignature]);
 
   // 导入提示词（填充后隐藏按钮）
   const [promptImported, setPromptImported] = useState(false);
@@ -165,13 +214,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     const cleanPrompt = prompt.replace(/[（(]@[^\）)]+[）)]/g, '').trim();
     setPromptText(cleanPrompt);
     setMentions([]);
+    promptTextRef.current = cleanPrompt;
+    mentionsRef.current = [];
     editorRef.current?.setValue(cleanPrompt);
     setPromptImported(true);
     // 立即保存到节点 data，确保生成时能读到 prompt
     const updateData: Partial<LibTVNodeData> = { prompt: cleanPrompt, mentions: [] };
     if (duration && duration > 0) {
+      // duration 是从 data 派生的值，这里只需写回 data
       const clampedDuration = Math.min(Math.max(duration, 4), 15);
-      setSelectedDuration(clampedDuration);
       (updateData as Record<string, unknown>).duration = clampedDuration;
     }
     onUpdate(updateData);
@@ -185,6 +236,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     : []);
   const [promptText, setPromptText] = useState(initialPrompt);
   const [mentions, setMentions] = useState<MentionMarker[]>(initialMentions);
+  // refs 与 state 同步，供暂存/生成的 useCallback 兜底读取
+  // （避免把 promptText/mentions 放进依赖，导致防抖 flush 时工具栏 memo 失效）
+  const promptTextRef = useRef(promptText);
+  const mentionsRef = useRef(mentions);
 
   // 模型选择状态（使用动态模型列表）
   // 初始化时：如果节点data中有model（modelId），根据modelId找到对应的模型value
@@ -199,80 +254,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     : config.defaultModel;
   const [selectedModel, setSelectedModel] = useState(initialModel);
 
-  // 追踪 nodeId 变化，用于区分「切换节点」和「同节点 data 更新」
-  const prevNodeIdRef = useRef(nodeId);
-
-  // 切换节点时重置本地状态为新节点的数据（useState 只初始化一次，不会随 nodeId 变化重新执行）
-  useEffect(() => {
-    const isNodeSwitch = prevNodeIdRef.current !== nodeId;
-    prevNodeIdRef.current = nodeId;
-
-    const newPrompt = ('prompt' in data ? (data as { prompt?: string }).prompt : '') || '';
-    const newMentions = ('mentions' in data && Array.isArray((data as { mentions?: unknown }).mentions)
-      ? ((data as { mentions: MentionMarker[] }).mentions || [])
-      : []);
-
-    // ✅ 只在值真正变化时才更新状态，避免无限循环
-    setPromptText(prev => prev !== newPrompt ? newPrompt : prev);
-    setMentions(prev => {
-      // 简单比较：长度和第一个元素
-      if (prev.length !== newMentions.length) return newMentions;
-      if (prev.length > 0 && prev[0].nodeId !== newMentions[0]?.nodeId) return newMentions;
-      return prev;
-    });
-
-    // 恢复模型选择：仅在切换节点时执行，避免同节点内 data 更新（如改分辨率）导致模型被旧 data.model 回滚
-    if (isNodeSwitch) {
-      if ('model' in data && (data as { model?: string }).model) {
-        const savedModelId = (data as { model: string }).model;
-        const matchedModel = availableModels.find(m => m.modelId === savedModelId);
-        if (matchedModel) {
-          setSelectedModel(prev => prev !== matchedModel.value ? matchedModel.value : prev);
-        }
-      } else {
-        // 新节点没有保存的 model，使用配置的默认模型（避免保留上个节点的选择）
-        setSelectedModel(prev => prev !== config.defaultModel ? config.defaultModel : prev);
-      }
-    }
-
-    // 图片节点：恢复节点数据中的分辨率、比例、画质
-    if (nodeType === 'image') {
-      if ('resolution' in data && (data as any).resolution) {
-        setSelectedResolution(prev => prev !== (data as any).resolution ? (data as any).resolution : prev);
-      }
-      if ('aspectRatio' in data && (data as any).aspectRatio) {
-        setSelectedAspectRatio(prev => prev !== (data as any).aspectRatio ? (data as any).aspectRatio : prev);
-      }
-      if ('quality' in data && (data as any).quality) {
-        setSelectedQuality(prev => prev !== (data as any).quality ? (data as any).quality : prev);
-      }
-    }
-
-    // 视频节点：恢复节点数据中的时长（4-15秒规范化）
-    if (nodeType === 'video') {
-      const d = (data as { duration?: number }).duration;
-      if (d && d > 0) {
-        const normalized = d < 4 ? 4 : d > 15 ? 15 : d;
-        setSelectedDuration(prev => prev !== normalized ? normalized : prev);
-      }
-      // 恢复声音开关（未设置时默认开启）
-      const ga = (data as { generateAudio?: boolean }).generateAudio;
-      const gaVal = ga !== false;
-      setGenerateAudio(prev => prev !== gaVal ? gaVal : prev);
-    }
-
-    // 音频节点：恢复节点数据中的音色、语速、风格、语气词
-    if (nodeType === 'audio') {
-      const v = (data as AudioNodeData).voice;
-      if (v) setSelectedVoice(prev => prev !== v ? v : prev);
-      const s = (data as AudioNodeData).speed;
-      if (s) setSelectedSpeed(prev => prev !== s ? s : prev);
-      const st = ((data as any).style as string) || '';
-      setSelectedStyle(prev => prev !== st ? st : prev);
-      const tn = ((data as any).tone as string) || '';
-      setSelectedTone(prev => prev !== tn ? tn : prev);
-    }
-  }, [nodeId, data, nodeType, availableModels]);
+  // 注意：Canvas.tsx 用 key={selectedNode.id} 重挂载本组件，切换节点时 useState 初始化器
+  // 已经生效，因此不再需要「监听 nodeId/data 变化并重置本地状态」的 effect。
 
   // 当模型列表加载完成时，自动选择默认模型或合适的模型
   // 只在初始化时或当前模型不在可用列表中时才重置，避免强制重置用户的选择
@@ -289,55 +272,50 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
   }, [availableModels, nodeType]); // 移除 selectedModel 依赖，避免每次切换都重置
 
-  // 图片节点专属参数：优先从节点data中读取，否则使用配置默认值
-  const initialResolution = ('resolution' in data && (data as any).resolution)
+  // 图片/视频节点的分辨率、比例：onChange 已即时写回 data，直接从 data 派生，不再保留本地 state
+  const selectedResolution: ResolutionOption = ('resolution' in data && (data as any).resolution)
     ? (data as any).resolution as ResolutionOption
     : (config.defaultResolution as ResolutionOption) || '1K';
-  const initialAspectRatio = ('aspectRatio' in data && (data as any).aspectRatio)
+  const selectedAspectRatio: string = ('aspectRatio' in data && (data as any).aspectRatio)
     ? (data as any).aspectRatio
     : config.defaultAspectRatio;
-  const initialQuality = ('quality' in data && (data as any).quality)
-    ? (data as any).quality
-    : '标准画质';
-
-  const [selectedResolution, setSelectedResolution] = useState<ResolutionOption>(initialResolution);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>(initialAspectRatio);
-  const [selectedQuality, setSelectedQuality] = useState<string>(initialQuality);
+  // 画质：无即时写回，仍用本地 state（暂存/生成时统一写回）
+  const [selectedQuality, setSelectedQuality] = useState<string>(
+    ('quality' in data && (data as any).quality)
+      ? (data as any).quality
+      : '标准画质'
+  );
 
   // 视频节点：模型切换后，若当前分辨率不在新模型支持的列表中，自动切换到第一个可用项
-  // 避免向后端发送模型不支持的分辨率
+  // 避免向后端发送模型不支持的分辨率（分辨率派生自 data，回退时直接写回 data）
   useEffect(() => {
     if (nodeType !== 'video') return;
     const currentModel = availableModels.find((m) => m.value === selectedModel);
     const supported = currentModel?.resolutions;
     const opts = supported && supported.length > 0 ? supported : [...VIDEO_RESOLUTION_OPTIONS];
     if (!opts.includes(selectedResolution)) {
-      setSelectedResolution(opts[0] as ResolutionOption);
+      onUpdate({ resolution: opts[0] } as Partial<LibTVNodeData>);
     }
-  }, [nodeType, selectedModel, availableModels, selectedResolution]);
+  }, [nodeType, selectedModel, availableModels, selectedResolution, onUpdate]);
 
   // 视频节点专属：生成模式（根据上游图片数量自动过滤可选模式）
   const [videoMode, setVideoMode] = useState<VideoMode>(
     nodeType === 'video' ? ((data as { videoMode?: VideoMode }).videoMode || 'text-to-video') : 'text-to-video'
   );
-  // 视频节点专属：时长（4-15秒，从节点data读取，默认5秒）
-  const [selectedDuration, setSelectedDuration] = useState<number>(
-    nodeType === 'video'
-      ? (() => {
-          const d = (data as { duration?: number }).duration;
-          if (!d || d <= 0) return 5;
-          if (d < 4) return 4;
-          if (d > 15) return 15;
-          return d;
-        })()
-      : 5
-  );
-  // 视频节点专属：是否生成音频（默认开启）
-  const [generateAudio, setGenerateAudio] = useState<boolean>(
-    nodeType === 'video'
-      ? ((data as { generateAudio?: boolean }).generateAudio !== false)
-      : true
-  );
+  // 视频节点专属：时长（4-15秒，默认5秒）与是否生成音频（默认开启）
+  // onChange 已即时写回 data，直接从 data 派生，不再保留本地 state
+  const selectedDuration: number = nodeType === 'video'
+    ? (() => {
+        const d = (data as { duration?: number }).duration;
+        if (!d || d <= 0) return 5;
+        if (d < 4) return 4;
+        if (d > 15) return 15;
+        return d;
+      })()
+    : 5;
+  const generateAudio: boolean = nodeType === 'video'
+    ? ((data as { generateAudio?: boolean }).generateAudio !== false)
+    : true;
   // 上游已连接的图片节点数量（用于控制模式可用性）
   const upstreamImageCount = useMemo(
     () => upstreamInputs.filter((i) => i.nodeType === 'image').length,
@@ -381,58 +359,42 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 提示词文本变化
   const handlePromptChange = useCallback(
     (value: string, newMentions: MentionMarker[]) => {
+      promptTextRef.current = value;
+      mentionsRef.current = newMentions;
       setPromptText(value);
       setMentions(newMentions);
     },
     []
   );
 
-  // 从上游栏点击插入 @ 引用
+  // 从上游栏点击插入 @ 引用（收口到编辑器 DOM 层，编辑器内部生成 id 并触发 onChange 同步 state）
   const handleInsertMention = useCallback(
     (input: UpstreamInput) => {
-      const newMention: MentionMarker = {
-        id: `${Date.now()}`,
+      editorRef.current?.insertMention({
         nodeId: input.nodeId,
         label: input.label,
         nodeType: input.nodeType,
-      };
-      setPromptText((prev) => prev + ` @${input.label} `);
-      setMentions((prev) => [...prev, newMention]);
+      });
     },
     []
   );
 
-  // 移除 @ 引用（用于风格图删除/切换时自动清理）
+  // 移除 @ 引用（用于风格图删除/切换时自动清理），直接删编辑器 DOM 中的 mention span
   const handleRemoveMention = useCallback(
     (nodeId: string) => {
-      const removed = mentions.find(m => m.nodeId === nodeId);
-      if (!removed) return;
-      // 从 mentions 数组中移除
-      setMentions(prev => prev.filter(m => m.nodeId !== nodeId));
-      // 从 promptText 中移除对应的标记（兼容 [[m:id]] 和 @label 两种格式）
-      setPromptText(prev => {
-        let result = prev;
-        const escapedId = removed.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        result = result.replace(new RegExp(`\\[\\[m:${escapedId}\\]\\]`, 'g'), '');
-        const escapedLabel = removed.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        result = result.replace(new RegExp(`\\s*@${escapedLabel}\\s*`, 'g'), ' ');
-        return result.replace(/\s{2,}/g, ' ').trim();
-      });
+      editorRef.current?.removeMentionByNodeId(nodeId);
     },
-    [mentions]
+    []
   );
 
-  // 暂存：只保存到 zustand store 内存状态，不持久化到后端
-  // 下次点击节点能取到最新内容，刷新页面回到之前后端持久化的状态
-  const [savedFlash, setSavedFlash] = useState(false);
-  const handleSaveDraft = useCallback(() => {
+  // 暂存/生成共用的字段组装：prompt/mentions 从编辑器 DOM 提取（避免防抖延迟），
+  // 分辨率/比例/时长/声音开关读 data 派生值，其余读本地 state
+  const buildUpdateData = useCallback((): Partial<LibTVNodeData> => {
     const currentModel = availableModels.find(m => m.value === selectedModel);
-    const modelIdToSave = currentModel?.modelId || selectedModel;
-    // 直接从编辑器 DOM 提取最新文本，避免防抖延迟导致 promptText 为旧值
-    const latestPrompt = editorRef.current?.getValue() ?? promptText;
+    const modelIdToSave = currentModel?.modelId || selectedModel;  // 保存实际的 model_id
     const updateData: Partial<LibTVNodeData> = {
-      prompt: latestPrompt,
-      mentions,
+      prompt: editorRef.current?.getValue() ?? promptTextRef.current,
+      mentions: editorRef.current?.getMentions() ?? mentionsRef.current,  // 从 DOM 提取，保证与实际引用一致
       model: modelIdToSave,
     };
     if (nodeType === 'image' || nodeType === 'video') {
@@ -444,17 +406,35 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
     if (nodeType === 'video') {
       (updateData as any).videoMode = videoMode;
-      (updateData as any).duration = selectedDuration;
-      (updateData as any).generateAudio = generateAudio;
+      (updateData as any).duration = selectedDuration;  // 视频时长（4-15秒）
+      (updateData as any).generateAudio = generateAudio;  // 是否生成音频
     }
-    onUpdate(updateData);
+    if (nodeType === 'audio') {
+      (updateData as any).voice = selectedVoice;  // 音色
+      (updateData as any).speed = selectedSpeed;  // 语速
+      (updateData as any).style = selectedStyle;  // 风格
+      (updateData as any).tone = selectedTone;    // 语气词
+    }
+    return updateData;
+  }, [availableModels, selectedModel, nodeType, selectedResolution, selectedAspectRatio, selectedQuality, videoMode, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone]);
+
+  // 暂存：只保存到 zustand store 内存状态，不持久化到后端
+  // 下次点击节点能取到最新内容，刷新页面回到之前后端持久化的状态
+  const [savedFlash, setSavedFlash] = useState(false);
+  const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 卸载时清理暂存闪烁的定时器，避免组件销毁后 setState
+  useEffect(() => () => {
+    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
+  }, []);
+  const handleSaveDraft = useCallback(() => {
+    onUpdate(buildUpdateData());
     setSavedFlash(true);
-    setTimeout(() => setSavedFlash(false), 1500);
-  }, [availableModels, selectedModel, promptText, mentions, nodeType, selectedResolution, selectedAspectRatio, selectedQuality, videoMode, selectedDuration, generateAudio, onUpdate]);
+    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
+    savedFlashTimerRef.current = setTimeout(() => setSavedFlash(false), 1500);
+  }, [buildUpdateData, onUpdate]);
 
   // 发送生成 — 通过 useNodeGeneration 统一入口
   const handleGenerate = useCallback(async (count?: number) => {
-    console.log('[PromptPanel] handleGenerate count=', count);
     if (!projectId) {
       console.error('projectId 不存在，无法执行工作流');
       return;
@@ -463,47 +443,19 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     // 1) 同步本地状态到节点 data（通过 onUpdate 传出来）
     //    mentions 跟 prompt 一起持久化，避免 reload 后 [[m:ID]] 找不到对应元数据
     if (nodeType === 'text' || nodeType === 'image' || nodeType === 'video' || nodeType === 'audio' || nodeType === 'script') {
-      // 找到当前选中的模型配置，获取实际的modelId
-      const currentModel = availableModels.find(m => m.value === selectedModel);
-      const modelIdToSave = currentModel?.modelId || selectedModel;  // ✅ 保存modelId而不是ID
-
-      const updateData: Partial<LibTVNodeData> = {
-        prompt: editorRef.current?.getValue() ?? promptText,  // 直接从编辑器提取，避免防抖延迟
-        mentions,
-        model: modelIdToSave,  // ✅ 保存实际的model_id
-      };
-
-      // 图片/视频节点同步分辨率、比例字段；画质仅图片节点
-      if (nodeType === 'image' || nodeType === 'video') {
-        (updateData as any).resolution = selectedResolution;
-        (updateData as any).aspectRatio = selectedAspectRatio;
-      }
+      const updateData = buildUpdateData();
       if (nodeType === 'image') {
-        (updateData as any).quality = selectedQuality;
         (updateData as any).count = count; // 生成数量
       }
-      if (nodeType === 'video') {
-        (updateData as any).videoMode = videoMode;
-        (updateData as any).duration = selectedDuration;  // 视频时长（4-15秒）
-        (updateData as any).generateAudio = generateAudio;  // 是否生成音频
-      }
-      if (nodeType === 'audio') {
-        (updateData as any).voice = selectedVoice;  // ✅ 同步音色
-        (updateData as any).speed = selectedSpeed;   // ✅ 同步语速
-        (updateData as any).style = selectedStyle;   // ✅ 同步风格
-        (updateData as any).tone = selectedTone;    // ✅ 同步语气词
-      }
-
       onUpdate(updateData);
     }
 
     // 2) 调统一入口（自动：存盘 → 调后端 → 订阅 SSE）
     await generate({ mode: 'single' });
-  }, [projectId, nodeId, nodeType, promptText, mentions, selectedModel, availableModels, selectedResolution, selectedAspectRatio, selectedQuality, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone, onUpdate, generate]);
+  }, [projectId, nodeType, buildUpdateData, onUpdate, generate]);
 
-  // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）
+  // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）；UI 值从 data 派生
   const handleDurationChange = useCallback((duration: number) => {
-    setSelectedDuration(duration);
     if (nodeType === 'video') {
       onUpdate({ duration } as Partial<LibTVNodeData>);
     }
@@ -511,7 +463,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 图片/视频节点：长宽比切换后实时同步到节点 data（节点高度需根据比例动态变化）
   const handleAspectRatioChange = useCallback((ratio: string) => {
-    setSelectedAspectRatio(ratio);
     if (nodeType === 'image' || nodeType === 'video') {
       onUpdate({ aspectRatio: ratio } as Partial<LibTVNodeData>);
     }
@@ -519,7 +470,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 图片/视频节点：分辨率切换后实时同步到节点 data
   const handleResolutionChange = useCallback((res: ResolutionOption) => {
-    setSelectedResolution(res);
     if (nodeType === 'image' || nodeType === 'video') {
       onUpdate({ resolution: res } as Partial<LibTVNodeData>);
     }
@@ -527,7 +477,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 视频节点：声音开关切换后实时同步到节点 data
   const handleGenerateAudioChange = useCallback((enabled: boolean) => {
-    setGenerateAudio(enabled);
     if (nodeType === 'video') {
       onUpdate({ generateAudio: enabled } as Partial<LibTVNodeData>);
     }
@@ -535,7 +484,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-xl shadow-lg border border-gray-100 w-[750px] flex flex-col px-2 py-2';
+    : 'bg-white rounded-2xl shadow-xl border border-gray-100 ring-1 ring-black/5 w-[750px] flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>

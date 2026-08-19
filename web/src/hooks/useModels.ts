@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useModelStore } from '@/stores/modelStore';
 import type { ModelOption } from '@/types/prompt';
 import type { ModelConfig } from '@/services/modelApi';
@@ -59,15 +59,21 @@ export function useModels(nodeType: NodeType): ModelOption[] {
     loadModels
   } = useModelStore();
 
-  // 组件初始化时加载模型配置
+  // 组件初始化时加载模型配置；失败后最多自动重试一次
+  // （loadModels 开始时会重置 isLoading/error，仅靠 deps 判断会在持续失败时无限重试，故用 ref 限制次数）
+  const retriedRef = useRef(false);
   useEffect(() => {
-    if (imageModels.length === 0 && !isLoading && !error) {
+    if (imageModels.length === 0 && !isLoading) {
+      if (error) {
+        if (retriedRef.current) return;
+        retriedRef.current = true;
+      }
       loadModels();
     }
   }, [imageModels.length, isLoading, error, loadModels]);
 
   // ✅ 使用 useMemo 缓存结果，避免每次渲染都返回新数组引用
-  // 使用 JSON.stringify 确保只有在内容真正变化时才重新计算
+  // zustand store 中的数组引用在 set 之前保持稳定，直接作为依赖即可
   return useMemo(() => {
     switch (nodeType) {
       case 'image':
@@ -83,12 +89,5 @@ export function useModels(nodeType: NodeType): ModelOption[] {
       default:
         return [];
     }
-  }, [
-    nodeType,
-    // 使用 JSON.stringify 确保内容变化时才重新计算
-    JSON.stringify(imageModels),
-    JSON.stringify(videoModels),
-    JSON.stringify(llmModels),
-    JSON.stringify(audioModels),
-  ]);
+  }, [nodeType, imageModels, videoModels, llmModels, audioModels]);
 }
