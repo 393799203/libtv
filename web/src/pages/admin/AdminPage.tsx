@@ -1211,10 +1211,15 @@ export default function AdminPage() {
                       if (!rechargeUserId || rechargeAmount <= 0) return;
                       setRecharging(true);
                       try {
-                        await userApi.recharge(rechargeUserId, {
+                        const updatedUser = await userApi.recharge(rechargeUserId, {
                           amount: rechargeAmount,
                           remark: rechargeRemark || undefined,
-                        });
+                        }) as any;
+                        // 如果充值的是当前登录用户，立即更新右上角积分
+                        const currentUser = useAuthStore.getState().user;
+                        if (currentUser && currentUser.id === rechargeUserId && updatedUser?.credits != null) {
+                          useAuthStore.getState().setUser({ credits: updatedUser.credits });
+                        }
                         message.success(`已成功充值 ${rechargeAmount} 积分`);
                         setRechargeUserId(null);
                         loadUsers();

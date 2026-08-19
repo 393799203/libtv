@@ -5,6 +5,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useAuthStore } from '@/stores/authStore';
 import { workflowApi } from '@/services/workflowApi';
 import { canvasApi } from '@/services/canvasApi';
+import api from '@/services/api';
 import { createNode } from '@/utils/nodeFactory';
 import type { WSEvent } from '@/types/workflow';
 import type { ImageNodeData, LibTVEdge } from '@/types/canvas';
@@ -449,6 +450,13 @@ export function useExecutionStream(
 
       // 从 activeStreams 中移除本执行（让下次同节点再生成能重新订阅）
       useExecutionStore.getState().removeActiveStream(executionId);
+
+      // 执行完成后刷新右上角积分（扣费后同步余额）
+      api.get('/auth/me').then((me: any) => {
+        if (me?.credits != null) {
+          useAuthStore.getState().setUser({ credits: me.credits });
+        }
+      }).catch(() => { /* 静默失败，下次页面加载会重新同步 */ });
 
       // 执行完成后自动保存画布
       const store = useCanvasStore.getState();
