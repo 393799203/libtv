@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"libtv/internal/model"
 
@@ -21,8 +22,9 @@ type UserRepo interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	List(ctx context.Context, keyword string) ([]model.User, error)
-	// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序
-	ListPaged(ctx context.Context, keyword string, page, pageSize int) ([]model.User, int64, error)
+	// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序；
+	// 当前操作者（currentUserID）永远排在自己所在角色分组的第一个
+	ListPaged(ctx context.Context, keyword string, page, pageSize int, currentUserID string) ([]model.User, int64, error)
 	// StatsByUserIDs 批量统计指定用户的项目数与分类型资产数（管理员列表展示用）
 	StatsByUserIDs(ctx context.Context, userIDs []string) (map[string]UserStats, error)
 	UpdateRole(ctx context.Context, id, role string) error
@@ -80,8 +82,9 @@ func (r *userRepo) List(ctx context.Context, keyword string) ([]model.User, erro
 	return users, err
 }
 
-// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序
-func (r *userRepo) ListPaged(ctx context.Context, keyword string, page, pageSize int) ([]model.User, int64, error) {
+// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序；
+// 当前操作者（currentUserID）永远排在自己所在角色分组的第一个
+func (r *userRepo) ListPaged(ctx context.Context, keyword string, page, pageSize int, currentUserID string) ([]model.User, int64, error) {
 	q := r.db.WithContext(ctx).Model(&model.User{})
 	if keyword != "" {
 		q = q.Where("nickname LIKE ? OR email LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
@@ -90,12 +93,29 @@ func (r *userRepo) ListPaged(ctx context.Context, keyword string, page, pageSize
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+	// 注意：必须用单个字符串 Order。GORM v1.25 的 Order() 只认 string/clause.OrderByColumn/clause.OrderBy，
+	// gorm.Expr 会被静默丢弃；多个 Order 混用 Expression 时 MergeClause 也会互相覆盖
+	order := "CASE WHEN role = 'admin' THEN 0 ELSE 1 END" + selfOrderExpr(currentUserID) + ", created_at DESC"
 	var users []model.User
-	err := q.Order("CASE WHEN role = 'admin' THEN 0 ELSE 1 END, created_at DESC").
+	err := q.Order(order).
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&users).Error
 	return users, total, err
+}
+
+// selfOrderExpr 生成「当前用户排自己角色分组第一」的排序片段；仅接受 UUID 形态的 id，防注入
+func selfOrderExpr(id string) string {
+	if len(id) != 36 {
+		return ""
+	}
+	for _, ch := range id {
+		isHex := (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+		if !isHex && ch != '-' {
+			return ""
+		}
+	}
+	return fmt.Sprintf(", CASE WHEN id = '%s' THEN 0 ELSE 1 END", id)
 }
 
 // StatsByUserIDs 批量统计：两条 GROUP BY 查询，避免逐用户查询的 N+1 问题

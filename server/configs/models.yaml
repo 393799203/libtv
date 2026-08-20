@@ -15,7 +15,7 @@ models:
       usage: [text, script]  # ✅ 同时支持文本节点和脚本节点
       max_tokens: 8192       # ✅ 使用更大的 tokens，兼容剧本生成需求
       temperature: 0.7
-      description: "DeepSeek V4 Flash（华数TokenHub），适合文本生成、剧本分镜和提示词生成"
+      description: "DeepSeek V4 Flash，适合文本生成、剧本分镜和提示词生成"
       default: true          # ✅ 默认选中此模型
 
     - id: deepseek-v4-pro
@@ -25,7 +25,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "DeepSeek V4 Pro（华数TokenHub），推理能力更强，适合复杂剧本和提示词生成"
+      description: "DeepSeek V4 Pro，推理能力更强，适合复杂剧本和提示词生成"
 
     - id: qwen3.6-plus
       name: "Qwen 3.6 Plus"
@@ -34,7 +34,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "通义千问3.6增强版（华数TokenHub），中文能力强"
+      description: "通义千问3.6增强版，中文能力强"
 
     - id: qwen3.6-flash
       name: "Qwen 3.6 Flash"
@@ -43,7 +43,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "通义千问3.6快速版（华数TokenHub），响应速度快"
+      description: "通义千问3.6快速版，响应速度快"
 
     - id: glm-5.1
       name: "GLM-5.1"
@@ -52,7 +52,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "智谱GLM-5.1（华数TokenHub），综合能力均衡"
+      description: "智谱GLM-5.1，综合能力均衡"
 
     - id: kimi-k2.6
       name: "Kimi K2.6"
@@ -61,7 +61,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "Kimi K2.6（华数TokenHub），长文本理解能力强"
+      description: "Kimi K2.6，长文本理解能力强"
 
     - id: doubao-seed-2.0-pro
       name: "豆包 Seed 2.0 Pro"
@@ -70,7 +70,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节豆包Seed 2.0 Pro（华数TokenHub），综合能力强"
+      description: "字节豆包Seed 2.0 Pro，综合能力强"
 
     - id: doubao-seed-2.0-lite
       name: "豆包 Seed 2.0 Lite"
@@ -79,7 +79,7 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节豆包Seed 2.0 Lite（华数TokenHub），轻量快速"
+      description: "字节豆包Seed 2.0 Lite，轻量快速"
 
     - id: doubao-seed-2.0-mini
       name: "豆包 Seed 2.0 Mini"
@@ -88,9 +88,9 @@ models:
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节豆包Seed 2.0 Mini（华数TokenHub），极速轻量"
+      description: "字节豆包Seed 2.0 Mini，极速轻量"
 
-  # ---------- 图像生成（华数TokenHub）----------
+  # ---------- 图像生成----------
   image:
     - id: qwen-image-2.0
       name: "Qwen Image 2.0"
@@ -99,7 +99,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "通义千问图像2.0（华数TokenHub），适合角色/场景/道具图生成"
+      description: "通义千问图像2.0，适合角色/场景/道具图生成"
       parameters:
         width: 1920   # ✅ 16:9 比例，适合视频分镜场景
         height: 1080
@@ -111,7 +111,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "通义千问图像2.0专业版（华数TokenHub），画质更高"
+      description: "通义千问图像2.0专业版，画质更高"
 
     - id: wan2.7-image
       name: "Wan 2.7 Image"
@@ -120,7 +120,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "万象2.7图像生成（华数TokenHub），适合创意图像生成"
+      description: "万象2.7图像生成，适合创意图像生成"
 
     - id: wan2.7-image-pro
       name: "Wan 2.7 Image Pro"
@@ -129,7 +129,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "万象2.7图像专业版（华数TokenHub），画质更高"
+      description: "万象2.7图像专业版，画质更高"
 
     - id: doubao-seedream-4.0
       name: "豆包 Seedream 4.0"
@@ -138,7 +138,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 4.0（华数TokenHub），综合图像生成"
+      description: "字节豆包Seedream 4.0，综合图像生成"
 
     - id: doubao-seedream-4.5
       name: "豆包 Seedream 4.5"
@@ -147,7 +147,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 4.5（华数TokenHub），画质提升"
+      description: "字节豆包Seedream 4.5，画质提升"
 
     - id: doubao-seedream-5.0-lite
       name: "豆包 Seedream 5.0 Lite"
@@ -156,7 +156,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 5.0轻量版（华数TokenHub），生成速度快"
+      description: "字节豆包Seedream 5.0轻量版，生成速度快"
       default: true  # ✅ 默认选中此模型
 
     - id: doubao-seedream-5.0-pro
@@ -166,7 +166,7 @@ models:
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 5.0专业版（华数TokenHub），画质最高"
+      description: "字节豆包Seedream 5.0专业版，画质最高"
 
   # ---------- 视频生成 ----------
   video:
@@ -175,21 +175,21 @@ models:
       provider: wasu
       model_id: "doubao-seedance-2.0"
       usage: [video]
-      description: "字节豆包Seedance 2.0视频生成（华数TokenHub）"
+      description: "字节豆包Seedance 2.0视频生成"
       resolutions: ["480p", "720p", "1080p", "4k"]
     - id: doubao-seedance-2.0-fast
       name: "豆包 Seedance 2.0 Fast"
       provider: wasu
       model_id: "doubao-seedance-2.0-fast"
       usage: [video]
-      description: "字节豆包Seedance 2.0快速版（华数TokenHub），生成速度更快"
+      description: "字节豆包Seedance 2.0快速版，生成速度更快"
       resolutions: ["480p", "720p"]
     - id: wan3.0-video
       name: "万相 Wan 3.0"
       provider: wasu
       model_id: "wan3.0-video"
       usage: [video]
-      description: "阿里万相Wan 3.0全能参考视频生成（华数TokenHub），最长30秒"
+      description: "阿里万相Wan 3.0全能参考视频生成，最长30秒"
       resolutions: ["480p", "720p", "1080p"]
 
   # ---------- 音频 / TTS ----------
@@ -199,7 +199,7 @@ models:
       provider: wasu
       model_id: "qwen3-tts-instruct-flash"
       usage: [audio]
-      description: "通义千问Qwen3 TTS指令版快速模型（华数TokenHub），支持多音色语音合成"
+      description: "通义千问Qwen3 TTS指令版快速模型，支持多音色语音合成"
 
 
 # ============================================

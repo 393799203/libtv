@@ -138,9 +138,9 @@ func (s *UserService) ListWithStats(ctx context.Context, keyword string) ([]User
 	return items, nil
 }
 
-// ListWithStatsPaged 分页用户列表 + 项目/资产统计（管理员列表展示用，管理员排前）
-func (s *UserService) ListWithStatsPaged(ctx context.Context, keyword string, page, pageSize int) ([]UserListItem, int64, error) {
-	users, total, err := s.userRepo.ListPaged(ctx, keyword, page, pageSize)
+// ListWithStatsPaged 分页用户列表 + 项目/资产统计（管理员列表展示用，管理员排前，自己排所在分组第一）
+func (s *UserService) ListWithStatsPaged(ctx context.Context, keyword string, page, pageSize int, operatorID string) ([]UserListItem, int64, error) {
+	users, total, err := s.userRepo.ListPaged(ctx, keyword, page, pageSize, operatorID)
 	if err != nil {
 		return nil, 0, err
 	}

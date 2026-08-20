@@ -112,8 +112,8 @@ export default function PricingManagement() {
         </Button>
       </div>
 
-      {/* 节点分组列表 */}
-      <div className="p-6 space-y-4">
+      {/* 节点分组列表：宽屏下两列瀑布流（columns + break-inside-avoid），卡片按自身高度紧密排列；卡片内模型条目两列 */}
+      <div className="p-6 columns-1 xl:columns-2 gap-4">
         {loading ? (
           <div className="flex items-center justify-center py-20 text-gray-400">
             <LoadingOutlined className="mr-2" /> 加载中...
@@ -122,7 +122,7 @@ export default function PricingManagement() {
           <div className="text-center py-20 text-gray-400 text-[13px]">暂无模型配置</div>
         ) : (
           nodes.map((node) => (
-            <div key={node.node_type} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div key={node.node_type} className="bg-white rounded-xl border border-gray-200 overflow-hidden break-inside-avoid mb-4">
               {/* 分组头 */}
               <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2.5 bg-gray-50/60">
                 <span className="text-gray-500 text-[15px]">{NODE_ICONS[node.node_type]}</span>
@@ -139,17 +139,17 @@ export default function PricingManagement() {
                 </span>
               </div>
 
-              {/* 模型价格列表 */}
+              {/* 模型价格列表：卡片内两列，hairline 分隔线 */}
               {node.models.length === 0 ? (
                 <div className="px-5 py-6 text-center text-[12px] text-gray-400">该节点暂无可用模型</div>
               ) : (
-                <div className="divide-y divide-gray-100">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-gray-100">
                   {node.models.map((m) => {
                     const editKey = `${node.node_type}|${m.model_id}|${m.resolution || ''}`;
                     return (
-                    <div key={editKey} className="px-5 py-3 flex items-center gap-4">
+                    <div key={editKey} className="bg-white px-4 py-2.5 flex items-center gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <span className="text-[13px] text-gray-800 font-medium truncate">{m.model_name}</span>
                           {m.resolution && (
                             <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[11px] font-medium shrink-0">{m.resolution}</span>
@@ -159,7 +159,7 @@ export default function PricingManagement() {
                           <div className="text-[11px] text-gray-400 mt-0.5 truncate">{m.description}</div>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <InputNumber
                           size="small"
                           min={0}
@@ -177,10 +177,10 @@ export default function PricingManagement() {
                               return next;
                             });
                           }}
-                          className="w-28"
+                          className="w-20"
                         />
-                        <span className="text-[12px] text-gray-500 w-20">
-                          {node.billing_type === 'per_call' ? '积分 / 次' : node.billing_type === 'per_char' ? '积分 / 100字' : '积分 / 秒'}
+                        <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                          {node.billing_type === 'per_call' ? '积分/次' : node.billing_type === 'per_char' ? '积分/100字' : '积分/秒'}
                         </span>
                       </div>
                     </div>

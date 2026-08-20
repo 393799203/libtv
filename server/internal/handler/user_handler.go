@@ -136,7 +136,7 @@ func (h *UserHandler) List(c *gin.Context) {
 		if pageSize <= 0 || pageSize > 100 {
 			pageSize = 10
 		}
-		items, total, err := h.userService.ListWithStatsPaged(c.Request.Context(), keyword, page, pageSize)
+		items, total, err := h.userService.ListWithStatsPaged(c.Request.Context(), keyword, page, pageSize, middleware.GetUserID(c))
 		if err != nil {
 			response.FailWith(c, err)
 			return
