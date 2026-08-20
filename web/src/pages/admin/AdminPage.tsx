@@ -25,6 +25,7 @@ import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import AddShowDialog from '@/components/AddShowDialog';
 import PricingManagement from './PricingManagement';
+import PointsPackageManagement from './PointsPackageManagement';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
@@ -104,8 +105,8 @@ export default function AdminPage() {
   const [authorSearching, setAuthorSearching] = useState(false);
 
   // ========== 系统设置状态 ==========
-  // 系统设置页内子页签（当前：价格管理）
-  const [settingsSubTab, setSettingsSubTab] = useState<'pricing'>('pricing');
+  // 系统设置页内子页签（价格管理 / 套餐管理）
+  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages'>('pricing');
 
   // 远程搜索作者（供风格弹窗使用）
   const fetchAuthors = (_keyword?: string) => {
@@ -1353,10 +1354,23 @@ export default function AdminPage() {
               >
                 价格管理
               </button>
+              <button
+                onClick={() => setSettingsSubTab('packages')}
+                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
+                  settingsSubTab === 'packages'
+                    ? 'border-blue-600 text-blue-700 font-medium'
+                    : 'border-transparent text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                套餐管理
+              </button>
             </div>
 
             {/* 价格管理页签 */}
             {settingsSubTab === 'pricing' && <PricingManagement />}
+
+            {/* 套餐管理页签 */}
+            {settingsSubTab === 'packages' && <PointsPackageManagement />}
           </div>
         )}
       </main>

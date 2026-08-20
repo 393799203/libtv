@@ -9,12 +9,14 @@ import {
   GoldOutlined,
   AccountBookOutlined,
   FolderOutlined,
+  ShopOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
 import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
+import { PointsMallModal } from '@/components/auth/PointsMallModal';
 import { getUserAvatarSrc } from '@/utils/avatar';
 
 const { Header: AntHeader, Content } = Layout;
@@ -31,6 +33,7 @@ export function AppLayout() {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [showAssetLibrary, setShowAssetLibrary] = useState(false);
   const [showBillingRecords, setShowBillingRecords] = useState(false);
+  const [showPointsMall, setShowPointsMall] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -96,6 +99,15 @@ export function AppLayout() {
               </button>
             )}
 
+            {/* 积分超市入口 */}
+            <button
+              onClick={() => setShowPointsMall(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg text-gray-600 transition-colors cursor-pointer hover:text-amber-600 hover:bg-amber-50"
+            >
+              <ShopOutlined />
+              积分超市
+            </button>
+
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <Button type="text" size="small">
                 <Space>
@@ -121,6 +133,9 @@ export function AppLayout() {
 
             {/* 费用明细弹窗 */}
             {showBillingRecords && <BillingRecordsModal onClose={() => setShowBillingRecords(false)} />}
+
+            {/* 积分超市弹窗 */}
+            {showPointsMall && <PointsMallModal onClose={() => setShowPointsMall(false)} />}
           </div>
         ) : (
           <button

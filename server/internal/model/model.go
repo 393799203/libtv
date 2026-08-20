@@ -319,6 +319,26 @@ type ModelPrice struct {
 
 func (ModelPrice) TableName() string { return "model_prices" }
 
+// ========== 积分套餐（积分超市） ==========
+
+// PointsPackage 积分套餐（积分超市卡片，运营后台「套餐管理」维护）
+type PointsPackage struct {
+	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name        string    `gorm:"size:50;not null" json:"name"`              // 套餐名称，如「尝鲜包」
+	Price       float64   `gorm:"not null;default:0" json:"price"`           // 售价（元）
+	Points      int64     `gorm:"not null;default:0" json:"points"`          // 积分数量
+	Badge       string    `gorm:"size:20;default:''" json:"badge"`           // 角标文案（空表示无角标）
+	Recommended bool      `gorm:"not null;default:false" json:"recommended"` // 是否推荐（卡片高亮展示）
+	Features    string    `gorm:"type:text;default:''" json:"features"`      // 套餐特点，每行一条
+	SortOrder   int       `gorm:"not null;default:0" json:"sort_order"`      // 排序，越小越靠前
+	Enabled     bool      `gorm:"not null;default:true" json:"enabled"`      // 是否在积分超市展示
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (PointsPackage) TableName() string { return "points_packages" }
+
 // ========== 生成历史记录 ==========
 
 // GenerationHistory 节点生成历史（图片/视频）

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -61,7 +62,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -87,6 +88,7 @@ func main() {
 	billingRepo := repository.NewBillingRepo(db)
 	modelPriceRepo := repository.NewModelPriceRepo(db)
 	generationHistoryRepo := repository.NewGenerationHistoryRepo(db)
+	pointsPackageRepo := repository.NewPointsPackageRepo(db)
 
 	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
 	appStorage := initStorage()
@@ -102,6 +104,12 @@ func main() {
 	pricingService := service.NewPricingService(modelManager, modelPriceRepo)
 	// 积分扣费服务（AI 调用前置校验；真实单价来自 model_prices 表，运营后台价格管理维护）
 	billingService := service.NewBillingService(userRepo, billingRepo, modelPriceRepo, modelManager)
+	// 积分套餐服务（积分超市卡片，运营后台「套餐管理」维护）
+	pointsPackageService := service.NewPointsPackageService(pointsPackageRepo)
+	// 首次启动时写入默认套餐
+	if err := pointsPackageService.SeedDefaults(context.Background()); err != nil {
+		log.Printf("warning: seed default points packages failed: %v", err)
+	}
 
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
@@ -148,6 +156,7 @@ func main() {
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService)
 	generationHistoryHandler := handler.NewGenerationHistoryHandler(generationHistoryService)
+	pointsPackageHandler := handler.NewPointsPackageHandler(pointsPackageService)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -192,6 +201,9 @@ func main() {
 
 	// 公开模型配置接口（无需登录）
 	r.GET("/api/models", modelHandler.ListModels)
+
+	// 积分超市套餐列表（无需登录，仅启用中的套餐）
+	r.GET("/api/points-packages", pointsPackageHandler.ListPublic)
 
 	// 公开上传接口
 	publicUpload := r.Group("/api/upload")
@@ -333,6 +345,15 @@ func main() {
 		// 模型价格配置（查询需登录；保存仅管理员）
 		api.GET("/pricing", pricingHandler.List)
 		api.PUT("/pricing", middleware.RequireAdmin(userService), pricingHandler.Save)
+
+		// 积分套餐管理（仅管理员；积分超市公开列表见上方公共路由）
+		pointsPackages := api.Group("/admin/points-packages", middleware.RequireAdmin(userService))
+		{
+			pointsPackages.GET("", pointsPackageHandler.ListAll)
+			pointsPackages.POST("", pointsPackageHandler.Create)
+			pointsPackages.PUT("/:id", pointsPackageHandler.Update)
+			pointsPackages.DELETE("/:id", pointsPackageHandler.Delete)
+		}
 	}
 
 	// 启动服务
