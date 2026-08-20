@@ -184,6 +184,13 @@ models:
       usage: [video]
       description: "字节豆包Seedance 2.0快速版（华数TokenHub），生成速度更快"
       resolutions: ["480p", "720p"]
+    - id: wan3.0-video
+      name: "万相 Wan 3.0"
+      provider: wasu
+      model_id: "wan3.0-video"
+      usage: [video]
+      description: "阿里万相Wan 3.0全能参考视频生成（华数TokenHub），最长30秒"
+      resolutions: ["480p", "720p", "1080p"]
 
   # ---------- 音频 / TTS ----------
   audio:

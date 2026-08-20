@@ -124,39 +124,18 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	if ratio == "" {
 		ratio = "16:9"
 	}
-	// doubao-seedance-2.0 支持的 duration 范围：4-15秒（火山引擎官方限制）
+	// 按模型分派参数规范化：每个模型独立处理自己的时长范围与参考视频限制
 	originalDuration := duration
-	if duration < 4 {
-		duration = 4
+	var err error
+	switch {
+	case strings.Contains(model, "wan3.0"):
+		duration, err = normalizeWanParams(ctx, duration, videoURLs)
+	default: // doubao-seedance 系列（火山引擎）
+		duration, err = normalizeSeedanceParams(ctx, model, duration, videoURLs)
 	}
-	if duration > 15 {
-		duration = 15
+	if err != nil {
+		return "", err
 	}
-
-	// 有参考视频时，seedance-2.0-fast 模型要求「参考视频时长 + 生成视频时长 <= 15.2秒」
-	// 超限时提示用户切换到 seedance 2.0（非 fast 版本）
-	if len(videoURLs) > 0 && strings.Contains(model, "fast") {
-		var totalRefDuration float64
-		for _, vURL := range videoURLs {
-			if vURL == "" {
-				continue
-			}
-			refDur, err := getVideoDurationFromURL(ctx, vURL)
-			if err != nil {
-				log.Printf("[VideoGen] ⚠️ 获取参考视频时长失败，跳过检测: %v", err)
-				continue
-			}
-			log.Printf("[VideoGen] 参考视频时长: %.1fs url=%s", refDur, vURL)
-			totalRefDuration += refDur
-		}
-		if totalRefDuration > 0 {
-			totalDuration := totalRefDuration + float64(duration)
-			if totalDuration > 15.2 {
-				return "", fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 seedance-2.0-fast 模型的15秒限制。请将视频模型切换为 seedance 2.0（非 fast 版本）后重试", totalRefDuration, duration, totalDuration)
-			}
-		}
-	}
-
 	if originalDuration != duration {
 		log.Printf("[VideoGen] duration 规范化: %d → %d", originalDuration, duration)
 	}
@@ -185,11 +164,12 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 			Type:     "image_url",
 			ImageURL: &VideoContentImage{URL: finalURL},
 		}
-		// 首尾帧模式: first_frame / last_frame
+		// 首尾帧模式: first_frame / last_frame（按实际写入 content 的顺序分配，
+		// 不能用 imageURLs 原始下标——前面的图为空或处理失败被跳过时会导致角色错位）
 		// 全能参考模式: reference_image（API 要求必须指定 role）
 		// 首帧模式（1张图无 mode）: 不填 role
 		if videoMode == "first-last-frame" {
-			if i == 0 {
+			if len(metadata.Content) == 0 {
 				item.Role = "first_frame"
 			} else {
 				item.Role = "last_frame"
@@ -261,6 +241,79 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 
 	log.Printf("[VideoGen] ✅ 视频生成成功: url=%s", videoURL)
 	return videoURL, nil
+}
+
+// NormalizeVideoDuration 按模型钳制视频时长（秒）：
+// wan3.0-video（阿里万相）：2-30 秒；doubao-seedance 系列（火山引擎）：4-15 秒
+// 供 executor 在扣费前调用，保证扣费时长与实际生成时长一致
+func NormalizeVideoDuration(model string, duration int) int {
+	if strings.Contains(model, "wan3.0") {
+		return clampDuration(duration, 2, 30)
+	}
+	return clampDuration(duration, 4, 15)
+}
+
+// clampDuration 将时长钳制到 [min, max]
+func clampDuration(duration, min, max int) int {
+	if duration < min {
+		return min
+	}
+	if duration > max {
+		return max
+	}
+	return duration
+}
+
+// normalizeSeedanceParams 豆包 Seedance 系列（火山引擎）参数规范化：
+// 时长范围 4-15 秒；fast 版本额外要求「参考视频时长 + 生成时长 <= 15.2 秒」
+func normalizeSeedanceParams(ctx context.Context, model string, duration int, videoURLs []string) (int, error) {
+	duration = clampDuration(duration, 4, 15)
+
+	// 有参考视频时，seedance-2.0-fast 模型要求「参考视频时长 + 生成视频时长 <= 15.2秒」
+	// 超限时提示用户切换到 seedance 2.0（非 fast 版本）
+	if len(videoURLs) > 0 && strings.Contains(model, "fast") {
+		if totalRefDuration := sumRefVideoDuration(ctx, videoURLs); totalRefDuration > 0 {
+			totalDuration := totalRefDuration + float64(duration)
+			if totalDuration > 15.2 {
+				return 0, fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 seedance-2.0-fast 模型的15秒限制。请将视频模型切换为 seedance 2.0（非 fast 版本）后重试", totalRefDuration, duration, totalDuration)
+			}
+		}
+	}
+	return duration, nil
+}
+
+// normalizeWanParams 阿里万相 wan3.0-video 参数规范化：
+// 时长范围 2-30 秒；有参考视频时要求「参考视频总时长 + 生成时长 <= 30 秒」（阿里云官方限制）
+func normalizeWanParams(ctx context.Context, duration int, videoURLs []string) (int, error) {
+	duration = clampDuration(duration, 2, 30)
+
+	if len(videoURLs) > 0 {
+		if totalRefDuration := sumRefVideoDuration(ctx, videoURLs); totalRefDuration > 0 {
+			totalDuration := totalRefDuration + float64(duration)
+			if totalDuration > 30 {
+				return 0, fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 wan3.0-video 模型的30秒限制。请缩短参考视频或生成时长后重试", totalRefDuration, duration, totalDuration)
+			}
+		}
+	}
+	return duration, nil
+}
+
+// sumRefVideoDuration 汇总参考视频总时长（秒），获取失败的跳过
+func sumRefVideoDuration(ctx context.Context, videoURLs []string) float64 {
+	var total float64
+	for _, vURL := range videoURLs {
+		if vURL == "" {
+			continue
+		}
+		refDur, err := getVideoDurationFromURL(ctx, vURL)
+		if err != nil {
+			log.Printf("[VideoGen] ⚠️ 获取参考视频时长失败，跳过检测: %v", err)
+			continue
+		}
+		log.Printf("[VideoGen] 参考视频时长: %.1fs url=%s", refDur, vURL)
+		total += refDur
+	}
+	return total
 }
 
 // processImageURL 处理图片URL：公网URL直接使用，本地URL转base64

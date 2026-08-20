@@ -302,14 +302,17 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const [videoMode, setVideoMode] = useState<VideoMode>(
     nodeType === 'video' ? ((data as { videoMode?: VideoMode }).videoMode || 'text-to-video') : 'text-to-video'
   );
-  // 视频节点专属：时长（4-15秒，默认5秒）与是否生成音频（默认开启）
+  // 视频节点专属：时长（seedance 4-15秒 / wan3.0-video 2-30秒，默认5秒）与是否生成音频（默认开启）
   // onChange 已即时写回 data，直接从 data 派生，不再保留本地 state
   const selectedDuration: number = nodeType === 'video'
     ? (() => {
         const d = (data as { duration?: number }).duration;
+        const isWan = selectedModel.includes('wan3.0');
+        const minD = isWan ? 2 : 4;
+        const maxD = isWan ? 30 : 15;
         if (!d || d <= 0) return 5;
-        if (d < 4) return 4;
-        if (d > 15) return 15;
+        if (d < minD) return minD;
+        if (d > maxD) return maxD;
         return d;
       })()
     : 5;
@@ -394,7 +397,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
     if (nodeType === 'video') {
       (updateData as any).videoMode = videoMode;
-      (updateData as any).duration = selectedDuration;  // 视频时长（4-15秒）
+      (updateData as any).duration = selectedDuration;  // 视频时长（seedance 4-15秒 / wan3.0-video 2-30秒）
       (updateData as any).generateAudio = generateAudio;  // 是否生成音频
     }
     if (nodeType === 'audio') {

@@ -1274,6 +1274,9 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		resolution = "4k"
 	}
 
+	// 时长按模型钳制后再扣费，保证扣费时长与实际生成时长一致（GenerateVideo 内仍有兜底钳制）
+	data.Duration = llm.NormalizeVideoDuration(model, data.Duration)
+
 	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按分辨率+时长计）
 	chargedAmount, err := v.biller.ChargeByDurationWithResolution(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", resolution, data.Duration)
 	if err != nil {

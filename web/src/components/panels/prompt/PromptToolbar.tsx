@@ -400,8 +400,14 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
 
 // ==================== 主工具栏（截图1 底部）====================
 
-// 视频时长选项：4-15 秒（火山引擎 doubao-seedance-2.0 官方限制）
-const DURATION_OPTIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+// 视频时长选项：按模型分流
+// doubao-seedance-2.0：4-15 秒（火山引擎官方限制）；wan3.0-video：2-30 秒（阿里云官方限制）
+function getDurationOptions(model: string): number[] {
+  const isWan = model.includes('wan3.0');
+  const min = isWan ? 2 : 4;
+  const max = isWan ? 30 : 15;
+  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
+}
 
 // 音色选项（仅列出 qwen3-tts-instruct-flash 支持的音色，来自阿里云百炼官方非实时音色列表）
 // 不支持的音色（Katerina/Ryan/Aiden/Andre 及全部方言）已移除，
@@ -538,6 +544,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
   const [durationOpen, setDurationOpen] = useState(false);
+  // 视频时长选项随所选模型变化（wan3.0-video: 2-30s，seedance: 4-15s）
+  const durationOptions = getDurationOptions(selectedModel);
 
   // 音色选择器状态
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -782,7 +790,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             <button
               onClick={() => setDurationOpen(!durationOpen)}
               className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px] text-gray-600"
-              title="视频时长（4-15秒）"
+              title="视频时长（秒）"
             >
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
                 <circle cx="7" cy="7" r="5.5" stroke="#6B7280" strokeWidth="1.3" />
@@ -795,7 +803,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setDurationOpen(false)} />
                 <div className="absolute bottom-full right-0 mb-2 w-[64px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30 max-h-[260px] overflow-y-auto">
-                  {DURATION_OPTIONS.map((opt) => (
+                  {durationOptions.map((opt) => (
                     <button
                       key={opt}
                       className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
