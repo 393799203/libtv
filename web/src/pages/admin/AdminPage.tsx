@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { App, Select } from 'antd';
+import { App, Select, Pagination } from 'antd';
 import {
   TagOutlined,
   SettingOutlined,
@@ -58,6 +58,8 @@ export default function AdminPage() {
   // ========== 用户管理状态 ==========
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
+  const [userPage, setUserPage] = useState(1);        // 当前页码（一页10条，管理员排前）
+  const [userTotal, setUserTotal] = useState(0);      // 用户总数（分页用）
   const [billingUserId, setBillingUserId] = useState<string | null>(null); // 查看哪个用户的积分明细
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null); // 充值弹窗目标用户
   const [rechargeAmount, setRechargeAmount] = useState<number>(100);
@@ -142,12 +144,15 @@ export default function AdminPage() {
     else if (activeTab === 'styles' && activeCategory) loadStyles(activeCategory);
   };
 
-  // 加载用户列表
-  const loadUsers = () => {
+  // 加载用户列表（分页：一页10条，管理员排前）
+  const USER_PAGE_SIZE = 10;
+  const loadUsers = (page: number = userPage) => {
     setUserLoading(true);
-    userApi.list()
+    userApi.listPaged(page, USER_PAGE_SIZE)
       .then((res) => {
         setUsers(res.items || []);
+        setUserTotal(res.total || 0);
+        setUserPage(res.page || page);
       })
       .catch(() => {})
       .finally(() => setUserLoading(false));
@@ -1015,7 +1020,7 @@ export default function AdminPage() {
             ) : (
               <>
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-[13px] text-gray-500">共 {users?.length || 0} 个用户</span>
+                  <span className="text-[13px] text-gray-500">共 {userTotal} 个用户</span>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <table className="w-full text-[13px]">
@@ -1147,6 +1152,16 @@ export default function AdminPage() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                {/* 分页（一页10条，管理员排前） */}
+                <div className="flex justify-end mt-4">
+                  <Pagination
+                    current={userPage}
+                    pageSize={USER_PAGE_SIZE}
+                    total={userTotal}
+                    showSizeChanger={false}
+                    onChange={(p) => loadUsers(p)}
+                  />
                 </div>
               </>
             )}

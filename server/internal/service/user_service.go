@@ -138,6 +138,33 @@ func (s *UserService) ListWithStats(ctx context.Context, keyword string) ([]User
 	return items, nil
 }
 
+// ListWithStatsPaged 分页用户列表 + 项目/资产统计（管理员列表展示用，管理员排前）
+func (s *UserService) ListWithStatsPaged(ctx context.Context, keyword string, page, pageSize int) ([]UserListItem, int64, error) {
+	users, total, err := s.userRepo.ListPaged(ctx, keyword, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	ids := make([]string, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.ID)
+	}
+	stats, err := s.userRepo.StatsByUserIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]UserListItem, 0, len(users))
+	for _, u := range users {
+		item := UserListItem{User: u}
+		if st, ok := stats[u.ID]; ok {
+			item.ProjectCount = st.ProjectCount
+			item.AssetImageCount = st.AssetImageCount
+			item.AssetVideoCount = st.AssetVideoCount
+		}
+		items = append(items, item)
+	}
+	return items, total, nil
+}
+
 // Delete 删除用户（含级联删除关联数据 + 用户存储目录）
 // operatorID 为当前操作者用户 ID，用于禁止删除自己
 func (s *UserService) Delete(ctx context.Context, id, operatorID string) error {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"libtv/internal/middleware"
 	"libtv/internal/model"
@@ -125,9 +126,31 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	response.OKWithMsg(c, "密码修改成功", nil)
 }
 
-// List 获取所有用户列表（管理员，附带项目数/资产数统计）
+// List 获取用户列表（管理员，附带项目数/资产数统计）
+// 传 page>=1 时分页返回（管理员排前，同角色按注册时间倒序）；不传 page 保持全量返回（作者选择器等场景）
 func (h *UserHandler) List(c *gin.Context) {
-	items, err := h.userService.ListWithStats(c.Request.Context(), c.Query("keyword"))
+	keyword := c.Query("keyword")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "0"))
+	if page >= 1 {
+		pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+		if pageSize <= 0 || pageSize > 100 {
+			pageSize = 10
+		}
+		items, total, err := h.userService.ListWithStatsPaged(c.Request.Context(), keyword, page, pageSize)
+		if err != nil {
+			response.FailWith(c, err)
+			return
+		}
+		response.OK(c, gin.H{
+			"items":     items,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		})
+		return
+	}
+
+	items, err := h.userService.ListWithStats(c.Request.Context(), keyword)
 	if err != nil {
 		response.FailWith(c, err)
 		return

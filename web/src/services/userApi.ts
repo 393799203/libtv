@@ -25,9 +25,13 @@ export const userApi = {
   changePassword: (oldPassword: string, newPassword: string) =>
     api.put('/auth/password', { old_password: oldPassword, new_password: newPassword }),
 
-  /** 获取所有用户列表（管理员） */
+  /** 获取所有用户列表（管理员，全量，供作者选择器等场景） */
   list: () =>
     api.get('/users').then((res: any) => res),
+
+  /** 分页获取用户列表（管理员，管理员排前，同角色按注册时间倒序） */
+  listPaged: (page: number, pageSize: number, keyword?: string) =>
+    api.get('/users', { params: { page, page_size: pageSize, keyword: keyword || undefined } }).then((res: any) => res),
 
   /** 搜索用户 */
   search: (keyword: string) =>

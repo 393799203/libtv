@@ -21,6 +21,8 @@ type UserRepo interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	List(ctx context.Context, keyword string) ([]model.User, error)
+	// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序
+	ListPaged(ctx context.Context, keyword string, page, pageSize int) ([]model.User, int64, error)
 	// StatsByUserIDs 批量统计指定用户的项目数与分类型资产数（管理员列表展示用）
 	StatsByUserIDs(ctx context.Context, userIDs []string) (map[string]UserStats, error)
 	UpdateRole(ctx context.Context, id, role string) error
@@ -76,6 +78,24 @@ func (r *userRepo) List(ctx context.Context, keyword string) ([]model.User, erro
 	}
 	err := q.Find(&users).Error
 	return users, err
+}
+
+// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序
+func (r *userRepo) ListPaged(ctx context.Context, keyword string, page, pageSize int) ([]model.User, int64, error) {
+	q := r.db.WithContext(ctx).Model(&model.User{})
+	if keyword != "" {
+		q = q.Where("nickname LIKE ? OR email LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var users []model.User
+	err := q.Order("CASE WHEN role = 'admin' THEN 0 ELSE 1 END, created_at DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&users).Error
+	return users, total, err
 }
 
 // StatsByUserIDs 批量统计：两条 GROUP BY 查询，避免逐用户查询的 N+1 问题
