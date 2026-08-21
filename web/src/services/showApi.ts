@@ -16,6 +16,8 @@ export interface ShowItem {
   status: string; // pending / published
   views: number;
   likes: number;
+  /** 评论数（含回复，详情接口返回） */
+  comment_count?: number;
   category?: {
     id: string;
     name: string;

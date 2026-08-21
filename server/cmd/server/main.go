@@ -98,7 +98,7 @@ func main() {
 	userService := service.NewUserService(userRepo, appStorage)
 	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
 	canvasService := service.NewCanvasService(canvasRepo)
-	showService := service.NewShowService(showRepo, userRepo, appStorage)
+	showService := service.NewShowService(showRepo, userRepo, commentRepo, appStorage)
 	commentService := service.NewCommentService(commentRepo, showRepo, userRepo)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)

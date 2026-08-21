@@ -103,7 +103,7 @@ export default function VideoDetailPage() {
           stats: {
             views: show.views || 0,
             likes: show.likes || 0,
-            comments: 0,
+            comments: show.comment_count || 0,
           },
           createdAt: show.created_at,
           updatedAt: show.updated_at,
@@ -510,6 +510,7 @@ export default function VideoDetailPage() {
           showId={id}
           open={showCommentPanel}
           onClose={handleCloseCommentPanel}
+          initialCount={videoInfo?.stats.comments || 0}
           onCountChange={handleCommentCountChange}
         />
       )}

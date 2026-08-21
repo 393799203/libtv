@@ -204,6 +204,8 @@ type Show struct {
 	Status       string         `gorm:"size:20;index" json:"status"`     // pending / published / rejected
 	Views        int            `gorm:"default:0" json:"views"`
 	Likes        int            `gorm:"default:0" json:"likes"`
+	// CommentCount 评论数（含回复）；不存库，详情/列表查询时补充
+	CommentCount int64          `gorm:"-" json:"comment_count"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	Category     ShowCategory   `gorm:"foreignKey:CategoryID" json:"category"`

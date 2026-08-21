@@ -104,26 +104,10 @@ func BuildPromptGenerationUserMessage(
 
 // parsePromptResponse 解析 LLM 响应，提取画面提示词和运动提示词
 func parsePromptResponse(content string) (string, string) {
-	// 查找"画面提示词："和"运动提示词："标记
-	storyboardPrompt := ""
-	motionPrompt := ""
+	storyboardPrompt := extractSection(content, "画面提示词", []string{"运动提示词"})
+	motionPrompt := extractSection(content, "运动提示词", nil)
 
-	// 简单解析：查找关键标记
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "画面提示词：") || strings.HasPrefix(line, "画面提示词:") {
-			storyboardPrompt = strings.TrimPrefix(line, "画面提示词：")
-			storyboardPrompt = strings.TrimPrefix(storyboardPrompt, "画面提示词:")
-			storyboardPrompt = strings.TrimSpace(storyboardPrompt)
-		} else if strings.HasPrefix(line, "运动提示词：") || strings.HasPrefix(line, "运动提示词:") {
-			motionPrompt = strings.TrimPrefix(line, "运动提示词：")
-			motionPrompt = strings.TrimPrefix(motionPrompt, "运动提示词:")
-			motionPrompt = strings.TrimSpace(motionPrompt)
-		}
-	}
-
-	// 如果没有找到标记，尝试简单分割（兼容旧格式）
+	// 如果两个标记都没找到，尝试简单分割（兼容旧格式）
 	if storyboardPrompt == "" && motionPrompt == "" {
 		// 按换行分割，第一部分为画面，第二部分为运动
 		parts := strings.SplitN(content, "\n", 2)
@@ -136,6 +120,26 @@ func parsePromptResponse(content string) (string, string) {
 	}
 
 	return storyboardPrompt, motionPrompt
+}
+
+// extractSection 提取标记后的内容段，截止到下一个标记。
+// 兼容各种输出变体：标记单独成行（内容在后续行）、markdown 加粗（**画面提示词：**）、半角/全角冒号
+func extractSection(content, marker string, endMarkers []string) string {
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := content[idx+len(marker):]
+	// 去掉标记后的冒号/星号/空白/换行（标记单独成行时内容从下一行开始）
+	rest = strings.TrimLeft(rest, "：:** \t\r\n")
+	// 截止到下一个标记出现的位置
+	end := len(rest)
+	for _, em := range endMarkers {
+		if i := strings.Index(rest, em); i >= 0 && i < end {
+			end = i
+		}
+	}
+	return strings.TrimSpace(rest[:end])
 }
 
 // formatAssetList 格式化资产列表

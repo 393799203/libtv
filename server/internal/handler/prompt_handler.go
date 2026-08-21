@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"log"
+
 	"libtv/internal/llm"
 	"libtv/internal/middleware"
 	"libtv/internal/pkg/apperror"
@@ -95,7 +97,8 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	}
 
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
-	if _, err := h.biller.ChargeByModel(c.Request.Context(), middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", 1); err != nil {
+	chargedAmount, err := h.biller.ChargeByModel(c.Request.Context(), middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", 1)
+	if err != nil {
 		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
 			"code": apperror.CodeFromError(err),
 			"msg":  apperror.MsgFromError(err),
@@ -114,6 +117,15 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	)
 	if err != nil {
 		response.Fail(c, 500, "生成提示词失败: "+err.Error())
+		return
+	}
+
+	// 模型输出格式异常导致画面/运动任一为空：不能让用户为半残结果买单，退费并提示重试
+	if storyboardPrompt == "" || motionPrompt == "" {
+		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成"); refundErr != nil {
+			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
+		}
+		response.Fail(c, 500, "生成结果不完整（画面或运动提示词缺失），已退费，请重试")
 		return
 	}
 

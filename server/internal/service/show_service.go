@@ -17,9 +17,10 @@ import (
 
 // ShowService 首页展示服务
 type ShowService struct {
-	showRepo repository.ShowRepo
-	userRepo repository.UserRepo
-	storage  storage.Storage
+	showRepo    repository.ShowRepo
+	userRepo    repository.UserRepo
+	commentRepo repository.CommentRepo
+	storage     storage.Storage
 }
 
 // sentinel errors（携带 HTTP 状态码，便于 handler 统一映射）
@@ -29,8 +30,8 @@ var (
 	ErrCategoryNameConflict = apperror.New(1003, http.StatusConflict, "分类名已存在")
 )
 
-func NewShowService(showRepo repository.ShowRepo, userRepo repository.UserRepo, storage storage.Storage) *ShowService {
-	return &ShowService{showRepo: showRepo, userRepo: userRepo, storage: storage}
+func NewShowService(showRepo repository.ShowRepo, userRepo repository.UserRepo, commentRepo repository.CommentRepo, storage storage.Storage) *ShowService {
+	return &ShowService{showRepo: showRepo, userRepo: userRepo, commentRepo: commentRepo, storage: storage}
 }
 
 // ========== Show CRUD ==========
@@ -46,6 +47,12 @@ func (s *ShowService) GetByID(ctx context.Context, id string) (*model.Show, erro
 			return nil, ErrShowNotFound
 		}
 		return nil, err
+	}
+	// 补充评论数（含回复）；统计失败不阻断详情返回
+	if s.commentRepo != nil {
+		if counts, err := s.commentRepo.CountByShowIDs(ctx, []string{id}); err == nil {
+			show.CommentCount = counts[id]
+		}
 	}
 	return show, nil
 }

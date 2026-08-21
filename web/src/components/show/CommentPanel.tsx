@@ -33,21 +33,25 @@ interface CommentPanelProps {
   showId: string;
   open: boolean;
   onClose: () => void;
-  /** 评论总数变化时同步给父组件（更新评论图标上的数字） */
+  /** 详情接口返回的评论总数（含回复），面板以此为准同步图标数字 */
+  initialCount: number;
+  /** 评论总数（含回复）变化时同步给父组件 */
   onCountChange?: (total: number) => void;
 }
 
 /**
  * 视频详情页右侧评论面板：顶级评论 + 一层回复（回复/展开回复/删除）
  */
-export default function CommentPanel({ showId, open, onClose, onCountChange }: CommentPanelProps) {
+export default function CommentPanel({ showId, open, onClose, initialCount, onCountChange }: CommentPanelProps) {
   const { message } = App.useApp();
   const currentUser = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
 
   const [comments, setComments] = useState<CommentItem[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(0); // 顶级评论数（分页用）
+  // 全部评论数（含回复，头部与图标展示用）：以详情接口的 comment_count 为初始值
+  const [allCount, setAllCount] = useState(initialCount);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -62,6 +66,20 @@ export default function CommentPanel({ showId, open, onClose, onCountChange }: C
   const onCountChangeRef = useRef(onCountChange);
   onCountChangeRef.current = onCountChange;
 
+  // 详情接口的 comment_count 异步返回后同步（初次为 0，详情加载后变为真实值）
+  useEffect(() => {
+    setAllCount(initialCount);
+  }, [initialCount]);
+
+  // 全部评论数变化（发评论/回复、删除）时同步给父组件
+  const bumpAllCount = (delta: number) => {
+    setAllCount((prev) => {
+      const next = Math.max(0, prev + delta);
+      onCountChangeRef.current?.(next);
+      return next;
+    });
+  };
+
   const load = useCallback(async (p: number, append: boolean) => {
     if (append) setLoadingMore(true);
     else setLoading(true);
@@ -70,7 +88,6 @@ export default function CommentPanel({ showId, open, onClose, onCountChange }: C
       setComments((prev) => (append ? [...prev, ...(res.items || [])] : (res.items || [])));
       setTotal(res.total || 0);
       setPage(res.page || p);
-      onCountChangeRef.current?.(res.total || 0);
     } catch {
       // HTTP 错误已由 api.ts 拦截器统一 message.error()
     } finally {
@@ -146,13 +163,13 @@ export default function CommentPanel({ showId, open, onClose, onCountChange }: C
           return { ...prev, [topId]: { ...entry, items: [...entry.items, item], total: entry.total + 1 } };
         });
         setReplyTarget(null);
+        bumpAllCount(1);
         message.success('回复成功');
       } else {
-        // 顶级评论：插入列表头部，总数 +1
+        // 顶级评论：插入列表头部，顶级数与全部数各 +1
         setComments((prev) => [item, ...prev]);
-        const next = total + 1;
-        setTotal(next);
-        onCountChangeRef.current?.(next);
+        setTotal((t) => t + 1);
+        bumpAllCount(1);
         listRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
         message.success('评论成功');
       }
@@ -168,7 +185,7 @@ export default function CommentPanel({ showId, open, onClose, onCountChange }: C
     try {
       await commentApi.remove(c.id);
       if (c.parent_id) {
-        // 删除回复：从展开的回复列表移除，顶级评论 reply_count -1
+        // 删除回复：从展开的回复列表移除，顶级评论 reply_count -1，全部数 -1
         setRepliesMap((prev) => {
           const entry = prev[c.parent_id];
           if (!entry) return prev;
@@ -184,17 +201,17 @@ export default function CommentPanel({ showId, open, onClose, onCountChange }: C
         setComments((prev) =>
           prev.map((x) => (x.id === c.parent_id ? { ...x, reply_count: Math.max(0, (x.reply_count || 0) - 1) } : x))
         );
+        bumpAllCount(-1);
       } else {
-        // 删除顶级评论（服务端连带删回复）：移除条目并清理回复状态，总数 -1
+        // 删除顶级评论（服务端连带删回复）：移除条目并清理回复状态；全部数 -(1+回复数)
         setComments((prev) => prev.filter((x) => x.id !== c.id));
         setRepliesMap((prev) => {
           const next = { ...prev };
           delete next[c.id];
           return next;
         });
-        const next = Math.max(0, total - 1);
-        setTotal(next);
-        onCountChangeRef.current?.(next);
+        setTotal((t) => Math.max(0, t - 1));
+        bumpAllCount(-(1 + (c.reply_count || 0)));
       }
       message.success('已删除');
     } catch {
@@ -272,7 +289,7 @@ export default function CommentPanel({ showId, open, onClose, onCountChange }: C
     >
       {/* 头部 */}
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between shrink-0">
-        <span className="text-[14px] font-medium text-gray-800">评论 ({total})</span>
+        <span className="text-[14px] font-medium text-gray-800">评论 ({allCount})</span>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer p-1">
           <CloseOutlined />
         </button>

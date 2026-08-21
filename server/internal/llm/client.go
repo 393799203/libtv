@@ -237,5 +237,14 @@ func (c *Client) GeneratePrompt(
 	}
 	storyboardPrompt, motionPrompt := parsePromptResponse(content)
 
+	// 解析结果不完整时输出原始响应（截断），便于排查模型输出格式问题
+	if storyboardPrompt == "" || motionPrompt == "" {
+		preview := content
+		if len(preview) > 800 {
+			preview = preview[:800]
+		}
+		log.Printf("[LLM] ⚠️ 提示词解析不完整: model=%s storyboardLen=%d motionLen=%d raw=%s", model, len(storyboardPrompt), len(motionPrompt), preview)
+	}
+
 	return storyboardPrompt, motionPrompt, nil
 }
