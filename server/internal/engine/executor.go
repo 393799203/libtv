@@ -27,6 +27,14 @@ type NodeOutput struct {
 	Error  string                 `json:"error,omitempty"`
 }
 
+// refundWithFreshCtx 用独立 context 退费：
+// 生成失败时原 ctx 往往已超时/取消（如视频轮询 10 分钟超时），用死 ctx 退费会直接失败导致用户积分损失
+func refundWithFreshCtx(biller *service.BillingService, userID string, amount int64, action, modelName, scene string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return biller.Refund(ctx, userID, amount, action, modelName, scene)
+}
+
 // ExecutionContext 执行上下文（节点间数据传递）
 type ExecutionContext struct {
 	mu      sync.RWMutex
@@ -537,7 +545,7 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
-		if refundErr := t.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionStory, data.Model, "故事生成"); refundErr != nil {
+		if refundErr := refundWithFreshCtx(t.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionStory, data.Model, "故事生成"); refundErr != nil {
 			log.Printf("[TextExecutor] 退费失败: %v", refundErr)
 		}
 		return nil, fmt.Errorf("generate story: %w", err)
@@ -687,7 +695,7 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
-		if refundErr := s.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionScript, data.Model, "分镜剧本生成"); refundErr != nil {
+		if refundErr := refundWithFreshCtx(s.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionScript, data.Model, "分镜剧本生成"); refundErr != nil {
 			log.Printf("[ScriptExecutor] 退费失败: %v", refundErr)
 		}
 		return nil, fmt.Errorf("generate script: %w", err)
@@ -1027,7 +1035,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
 		if err != nil {
 			// API调用失败，退还已扣费用
-			if refundErr := i.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成"); refundErr != nil {
+			if refundErr := refundWithFreshCtx(i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成"); refundErr != nil {
 				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
 			}
 			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
@@ -1037,7 +1045,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generatedURLs, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size, count)
 		if err != nil {
 			// API调用失败，退还已扣费用
-			if refundErr := i.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成"); refundErr != nil {
+			if refundErr := refundWithFreshCtx(i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成"); refundErr != nil {
 				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
 			}
 			return nil, fmt.Errorf("generate image: %w", err)
@@ -1299,7 +1307,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
 		// API调用失败，退还已扣费用
-		if refundErr := v.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成"); refundErr != nil {
+		if refundErr := refundWithFreshCtx(v.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成"); refundErr != nil {
 			log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
 		}
 		return &NodeOutput{
@@ -1488,7 +1496,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
 		// API调用失败，退还已扣费用
-		if refundErr := a.biller.Refund(ctx, execCtx.GetUserID(), chargedAmount, service.BillingActionAudio, model, "音频生成"); refundErr != nil {
+		if refundErr := refundWithFreshCtx(a.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionAudio, model, "音频生成"); refundErr != nil {
 			log.Printf("[AudioExecutor] 退费失败: %v", refundErr)
 		}
 		return &NodeOutput{

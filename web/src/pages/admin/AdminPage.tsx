@@ -110,10 +110,10 @@ export default function AdminPage() {
   // 系统设置页内子页签（价格管理 / 套餐管理）
   const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages'>('pricing');
 
-  // 远程搜索作者（供风格弹窗使用）
-  const fetchAuthors = (_keyword?: string) => {
+  // 远程搜索作者（供风格弹窗使用）：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
+  const fetchAuthors = (keyword?: string) => {
     setAuthorSearching(true);
-    userApi.list()
+    (keyword ? userApi.search(keyword) : userApi.list())
       .then(res => setAuthorOptions(res.items || []))
       .catch(() => {})
       .finally(() => setAuthorSearching(false));
@@ -1484,7 +1484,7 @@ export default function AdminPage() {
                       placeholder="点击选择或输入搜索"
                       showSearch
                       allowClear
-                      options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
+                      options={authorOptions.slice(0, 50).map(u => ({ label: u.nickname || u.email, value: u.nickname || u.email }))}
                       notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
                       filterOption={false}
                       getPopupContainer={(trigger) => trigger.parentElement!}

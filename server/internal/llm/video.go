@@ -445,7 +445,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 				return taskResp.Data.ResultURL, nil
 			}
 			return "", fmt.Errorf("task succeeded but no result_url")
-		case "FAIL", "FAILED", "ERROR":
+		case "FAIL", "FAILED", "FAILURE", "ERROR", "CANCELED", "CANCELLED":
 			reason := taskResp.Data.FailReason
 			if reason == "" {
 				reason = taskResp.Message

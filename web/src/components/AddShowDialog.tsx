@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { App, Select } from 'antd';
 import {
   UploadOutlined,
@@ -7,6 +7,7 @@ import {
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
 import { uploadVideo } from '@/services/uploadApi';
+import { useAuthStore } from '@/stores/authStore';
 
 export interface AddShowDialogProps {
   open: boolean;
@@ -39,6 +40,7 @@ export default function AddShowDialog({
   projectName,
 }: AddShowDialogProps) {
   const { message } = App.useApp();
+  const currentUser = useAuthStore((s) => s.user); // 当前登录用户（作者默认选中自己）
   const coverPickVideoRef = useRef<HTMLVideoElement>(null);
 
   const [addShowForm, setAddShowForm] = useState({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
@@ -109,12 +111,31 @@ export default function AddShowDialog({
     return { file, dataUrl };
   };
 
-  const fetchAuthors = (_keyword?: string) => {
+  // 作者搜索：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
+  const fetchAuthors = (keyword?: string) => {
     setAuthorSearching(true);
-    userApi.list().then(res => {
-      setAuthorOptions(res.items || []);
-    }).finally(() => setAuthorSearching(false));
+    (keyword ? userApi.search(keyword) : userApi.list())
+      .then(res => {
+        setAuthorOptions(res.items || []);
+      })
+      .catch(() => {})
+      .finally(() => setAuthorSearching(false));
   };
+
+  // 作者下拉选项：搜索结果（最多50条）+ 当前已选作者（不在结果里时补一条，避免显示成原始ID）
+  const authorSelectOptions = useMemo(() => {
+    const opts = authorOptions.slice(0, 50).map(u => ({ label: u.nickname || u.email, value: u.id }));
+    if (addShowForm.author_id && !opts.some(o => o.value === addShowForm.author_id)) {
+      let label = '';
+      if (currentUser && addShowForm.author_id === currentUser.id) {
+        label = currentUser.nickname || currentUser.email;
+      } else {
+        label = editingShow?.author || existingShow?.author || '';
+      }
+      if (label) opts.unshift({ label, value: addShowForm.author_id });
+    }
+    return opts;
+  }, [authorOptions, addShowForm.author_id, currentUser, editingShow, existingShow]);
 
   // ========== 初始化/重置 ==========
 
@@ -159,7 +180,7 @@ export default function AddShowDialog({
       setSelectedCategoryId(editingShow.category_id);
     } else {
       setExistingShow(null);
-      setAddShowForm({ title: projectName || '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
+      setAddShowForm({ title: projectName || '', description: '', video_url: '', author_id: currentUser?.id || '', duration: 0, tags: '' });
       setAddShowFile(null);
       setAddShowPreviewUrl('');
       setAddShowVideoFile(null);
@@ -606,7 +627,7 @@ export default function AddShowDialog({
                 placeholder="点击选择或输入搜索"
                 showSearch
                 allowClear
-                options={authorOptions.slice(0, 10).map(u => ({ label: u.nickname || u.email, value: u.id }))}
+                options={authorSelectOptions}
                 notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
                 filterOption={false}
                 getPopupContainer={(trigger) => trigger.parentElement!}
