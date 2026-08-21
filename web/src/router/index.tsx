@@ -14,6 +14,7 @@ import { GlobalComponents } from '@/components/GlobalComponents';
 const WorkspacePage = lazy(() => import('@/pages/workspace/WorkspacePage'));
 const VideoListPage = lazy(() => import('@/pages/videos/VideoListPage'));
 const VideoDetailPage = lazy(() => import('@/pages/videos/VideoDetailPage'));
+const MyProjectsPage = lazy(() => import('@/pages/projects/MyProjectsPage'));
 const AIModelsPage = lazy(() => import('@/pages/ai-models/AIModelsPage'));
 const AdminPage = lazy(() => import('@/pages/admin/AdminPage'));
 
@@ -58,6 +59,16 @@ export const routes: RouteObject[] = [
             ),
           },
           // 需要认证的页面：用 AuthGuard 包裹
+          {
+            path: 'projects',
+            element: (
+              <AuthGuard>
+                <LazyLoad>
+                  <MyProjectsPage />
+                </LazyLoad>
+              </AuthGuard>
+            ),
+          },
           {
             path: 'project/:projectId',
             element: (

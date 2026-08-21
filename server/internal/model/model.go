@@ -41,6 +41,8 @@ type Project struct {
 	Name        string    `gorm:"size:255;not null" json:"name"`
 	Description string    `gorm:"size:1000" json:"description"`
 	CoverURL    string    `gorm:"size:500" json:"cover_url"`
+	// ShowStatus 关联发布视频的状态（pending/published/rejected），无关联为空；不存库，列表查询时补充
+	ShowStatus string    `gorm:"-" json:"show_status"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	User        User      `gorm:"foreignKey:UserID" json:"-"`
@@ -230,6 +232,28 @@ type ShowLike struct {
 func (ShowLike) TableName() string { return "show_likes" }
 
 func (s *ShowLike) BeforeCreate(tx *gorm.DB) error {
+	if s.ID == "" {
+		s.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// ShowComment 视频评论（一层楼中楼：回复挂顶级评论，不再嵌套）
+type ShowComment struct {
+	ID        string    `gorm:"primaryKey;size:36" json:"id"`
+	ShowID    string    `gorm:"size:36;not null;index" json:"show_id"`
+	UserID    string    `gorm:"size:36;not null;index" json:"user_id"`
+	Content   string    `gorm:"size:1000;not null" json:"content"`
+	// ParentID 为空=顶级评论；非空=回复，指向顶级评论 ID（回复的回复也归到顶级下）
+	ParentID string `gorm:"size:36;index" json:"parent_id"`
+	// ReplyToNickname 冗余展示用：回复某条回复时为被回复人昵称（回复顶级评论时为空）
+	ReplyToNickname string    `gorm:"size:100" json:"reply_to_nickname"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (ShowComment) TableName() string { return "show_comments" }
+
+func (s *ShowComment) BeforeCreate(tx *gorm.DB) error {
 	if s.ID == "" {
 		s.ID = uuid.New().String()
 	}

@@ -15,6 +15,8 @@ export interface ProjectListItem {
   name: string;
   description?: string;
   coverUrl?: string;
+  /** 关联发布视频的状态（pending/published/rejected），未发布为空 */
+  showStatus?: string;
   updatedAt: string;
 }
 

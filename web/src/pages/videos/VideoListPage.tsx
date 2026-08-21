@@ -19,6 +19,7 @@ import { projectApi } from '@/services/projectApi';
 import { showApi } from '@/services/showApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
+import { ProjectCard, CreateProjectCard } from '@/components/project/ProjectCard';
 import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
 
@@ -34,50 +35,7 @@ const formatDuration = (seconds: number) => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-// 项目卡片组件 - 使用memo优化
-const ProjectCard = memo(function ProjectCard({
-  project,
-  isAuthenticated,
-  onNavigate,
-  onDelete,
-}: {
-  project: ProjectListItem;
-  isAuthenticated: boolean;
-  onNavigate: (id: string) => void;
-  onDelete: (project: ProjectListItem) => void;
-}) {
-  return (
-    <div
-      className="h-28 bg-gray-100 relative rounded-lg overflow-hidden cursor-pointer hover:shadow-md"
-      onClick={() => onNavigate(project.id)}
-      style={{
-        willChange: 'transform', // 提示Chrome优化
-        contain: 'layout style paint', // CSS containment优化
-      }}
-    >
-      {project.coverUrl ? (
-        <img src={project.coverUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-cyan-500">
-          <img src={`https://picsum.photos/200/150?random=${project.id}`} alt="" className="w-full h-full object-cover" loading="lazy" />
-        </div>
-      )}
-      <button
-        className="absolute top-1 right-1 z-10 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-red-500 cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(project);
-        }}
-        title="删除项目"
-      >
-        <DeleteOutlined style={{ fontSize: 12 }} />
-      </button>
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
-        <p className="!text-white !text-xs truncate">{project.name}</p>
-      </div>
-    </div>
-  );
-});
+// 项目卡片组件已抽取到 @/components/project/ProjectCard（首页与「我的项目」页共用）
 
 // 视频卡片组件 - 使用memo优化 + Intersection Observer懒渲染
 const VideoCard = memo(function VideoCard({
@@ -233,6 +191,7 @@ export default function VideoListPage() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [videosLoading, setVideosLoading] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
+  const [projectTotal, setProjectTotal] = useState(0); // 项目总数（判断要不要显示「查看全部」）
   const [tvShowVideos, setTvShowVideos] = useState<VideoListItem[]>([]);
   const [showCategories, setShowCategories] = useState<{ key: string; label: string }[]>([ALL_CATEGORY]);
   const [banners, setBanners] = useState<BannerItem[]>([]);
@@ -309,17 +268,19 @@ export default function VideoListPage() {
     setDragStartX(0);
   }, [isDragging, dragStartX, banners.length]);
 
-  // 加载项目列表：仅依赖登录状态
+  // 加载项目列表：仅依赖登录状态；首页只取第一页（网格最多展示两行，超出走「我的项目」页）
   const loadProjects = useCallback(async () => {
     if (isAuthenticated) {
       try {
-        const data = await projectApi.getProjects();
+        const data = await projectApi.getProjects(1, 19);
         setProjects(data.list || []);
+        setProjectTotal(data.total || 0);
       } catch {
         // 后端未启动时为空列表
       }
     } else {
       setProjects([]);
+      setProjectTotal(0);
     }
   }, [isAuthenticated]);
 
@@ -749,35 +710,28 @@ export default function VideoListPage() {
         )}
       </div>
 
-      {/* 最近项目 */}
+      {/* 最近项目（最多展示两行，超出走「我的项目」页） */}
       <section className="max-w-7xl mx-auto px-6 mb-10">
         <div className="flex items-center justify-between mb-4">
           <Text className="text-gray-600 font-medium">最近项目</Text>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {/* 新建项目卡片 */}
-          <div>
-            <Card
-              hoverable
-              className="!rounded-lg border-dashed cursor-pointer"
-              styles={{ body: { padding: 0 } }}
-              onClick={handleCreateProject}
+          {isAuthenticated && projectTotal > 4 && (
+            <a
+              className="text-[13px] text-blue-500 hover:text-blue-600 cursor-pointer"
+              onClick={() => navigate('/projects')}
             >
-              <div className="h-28 bg-gray-50 flex flex-col items-center justify-center">
-                <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center mb-2">
-                  <PlusOutlined className="text-blue-500" />
-                </div>
-                <Text type="secondary" className="text-xs">开始创作</Text>
-              </div>
-            </Card>
-          </div>
+              查看全部 ({projectTotal}) →
+            </a>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[240px] overflow-hidden">
+          {/* 新建项目卡片 */}
+          <CreateProjectCard onClick={handleCreateProject} />
 
           {/* 项目列表 */}
           {projectListData.map((project) => (
             <ProjectCard
               key={project.id}
               project={project}
-              isAuthenticated={isAuthenticated}
               onNavigate={(id) => isAuthenticated ? navigate(`/project/${id}`) : openLoginModal()}
               onDelete={handleDeleteProject}
             />

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography,
@@ -9,19 +9,19 @@ import {
   ArrowLeftOutlined,
   PlayCircleOutlined,
   PauseCircleOutlined,
-  MoreOutlined,
   HeartOutlined,
   HeartFilled,
   MessageOutlined,
-  ShareAltOutlined,
+  DownloadOutlined,
+  LoadingOutlined,
   FullscreenOutlined,
   FullscreenExitOutlined,
-  PlusOutlined,
   SoundOutlined,
   MutedOutlined,
 } from '@ant-design/icons';
 import { showApi } from '@/services/showApi';
 import { useAuthStore } from '@/stores/authStore';
+import CommentPanel from '@/components/show/CommentPanel';
 import type { Video } from '@/types/video';
 
 const { Text } = Typography;
@@ -49,6 +49,36 @@ export default function VideoDetailPage() {
   const [videoInfo, setVideoInfo] = useState<Video | null>(null);
   const [isLiked, setIsLiked] = useState(false);
   const [likeLoading, setLikeLoading] = useState(false);
+  const [showCommentPanel, setShowCommentPanel] = useState(false); // 右侧评论面板
+  // 评论面板回调（useCallback 稳定引用，避免面板内 useEffect 因引用变化反复触发）
+  const handleCloseCommentPanel = useCallback(() => setShowCommentPanel(false), []);
+  const handleCommentCountChange = useCallback((n: number) => {
+    setVideoInfo((v) => (v ? { ...v, stats: { ...v.stats, comments: n } } : v));
+  }, []);
+
+  // 下载视频：fetch 转 blob 本地下载；跨域/网络失败时退化为新窗口打开
+  const [downloading, setDownloading] = useState(false);
+  const handleDownload = useCallback(async () => {
+    if (!videoInfo?.videoUrl || downloading) return;
+    setDownloading(true);
+    try {
+      const resp = await fetch(videoInfo.videoUrl);
+      if (!resp.ok) throw new Error(`download failed: ${resp.status}`);
+      const blob = await resp.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = `${videoInfo.title || 'video'}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objUrl);
+    } catch {
+      window.open(videoInfo.videoUrl, '_blank');
+    } finally {
+      setDownloading(false);
+    }
+  }, [videoInfo, downloading]);
   const hideControlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPlayingRef = useRef(false);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -344,11 +374,6 @@ export default function VideoDetailPage() {
           onClick={() => navigate(-1)}
           style={{ backgroundColor: 'rgba(0,0,0,0.3)', border: 'none', color: 'white' }}
         />
-        <Button
-          type="text"
-          icon={<MoreOutlined style={{ color: 'white', fontSize: '24px' }} />}
-          style={{ backgroundColor: 'rgba(0,0,0,0.3)', border: 'none', color: 'white' }}
-        />
       </div>
 
       {/* 右侧交互按钮（抖音风格） */}
@@ -357,12 +382,7 @@ export default function VideoDetailPage() {
       >
         {/* 作者头像 */}
         <div className="flex flex-col items-center">
-          <div className="relative">
-            <Avatar size={48} src={videoInfo.authorAvatar || undefined} style={{ border: '2px solid white' }} />
-            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
-              <PlusOutlined style={{ fontSize: '12px', color: 'white' }} />
-            </div>
-          </div>
+          <Avatar size={48} src={videoInfo.authorAvatar || undefined} style={{ border: '2px solid white' }} />
         </div>
 
         {/* 点赞 */}
@@ -381,19 +401,22 @@ export default function VideoDetailPage() {
           <Button
             type="text"
             icon={<MessageOutlined style={{ fontSize: '32px', color: 'white' }} />}
+            onClick={() => setShowCommentPanel(true)}
             style={{ color: 'white', border: 'none', padding: 0 }}
           />
           <Text style={{ color: 'white', fontSize: '12px', marginTop: '4px' }}>{videoInfo.stats.comments}</Text>
         </div>
 
-        {/* 分享 */}
+        {/* 下载 */}
         <div className="flex flex-col items-center">
           <Button
             type="text"
-            icon={<ShareAltOutlined style={{ fontSize: '32px', color: 'white' }} />}
+            icon={downloading ? <LoadingOutlined style={{ fontSize: '32px', color: 'white' }} /> : <DownloadOutlined style={{ fontSize: '32px', color: 'white' }} />}
+            onClick={handleDownload}
+            disabled={downloading}
             style={{ color: 'white', border: 'none', padding: 0 }}
           />
-          <Text style={{ color: 'white', fontSize: '12px', marginTop: '4px' }}>分享</Text>
+          <Text style={{ color: 'white', fontSize: '12px', marginTop: '4px' }}>下载</Text>
         </div>
       </div>
 
@@ -480,6 +503,16 @@ export default function VideoDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 右侧评论面板 */}
+      {id && (
+        <CommentPanel
+          showId={id}
+          open={showCommentPanel}
+          onClose={handleCloseCommentPanel}
+          onCountChange={handleCommentCountChange}
+        />
+      )}
     </div>
   );
 }

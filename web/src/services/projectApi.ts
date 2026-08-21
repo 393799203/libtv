@@ -8,6 +8,7 @@ interface RawProject {
   name: string;
   description: string;
   cover_url: string;
+  show_status?: string; // 关联发布视频的状态（published 时展示「已发布」角标）
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +31,7 @@ function mapRawToListItem(raw: RawProject): ProjectListItem {
     name: raw.name,
     description: raw.description || undefined,
     coverUrl: raw.cover_url || undefined,
+    showStatus: raw.show_status || undefined,
     updatedAt: raw.updated_at,
   };
 }

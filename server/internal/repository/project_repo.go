@@ -47,7 +47,42 @@ func (r *projectRepo) ListByUserID(ctx context.Context, userID string, offset, l
 	if err := db.Order("updated_at DESC").Offset(offset).Limit(limit).Find(&projects).Error; err != nil {
 		return nil, 0, err
 	}
+	fillShowStatus(ctx, r.db, projects)
 	return projects, total, nil
+}
+
+// fillShowStatus 批量补充项目关联视频的发布状态（两条查询，避免逐项目 N+1；published 优先）
+func fillShowStatus(ctx context.Context, db *gorm.DB, projects []*model.Project) {
+	if len(projects) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(projects))
+	for _, p := range projects {
+		ids = append(ids, p.ID)
+	}
+	var rows []struct {
+		ProjectID string
+		Status    string
+	}
+	if err := db.WithContext(ctx).Model(&model.Show{}).
+		Select("project_id, status").
+		Where("project_id IN ?", ids).
+		Scan(&rows).Error; err != nil {
+		return // 查询失败不阻断项目列表，仅不显示发布角标
+	}
+	statusByProject := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if row.ProjectID == "" {
+			continue
+		}
+		// 一个项目可能有多条 show 记录：published 优先，否则保留先到的状态
+		if cur, ok := statusByProject[row.ProjectID]; !ok || (cur != "published" && row.Status == "published") {
+			statusByProject[row.ProjectID] = row.Status
+		}
+	}
+	for _, p := range projects {
+		p.ShowStatus = statusByProject[p.ID]
+	}
 }
 
 func (r *projectRepo) Update(ctx context.Context, project *model.Project) error {

@@ -62,7 +62,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -80,6 +80,7 @@ func main() {
 	execRepo := repository.NewExecutionRepo(db)
 	aiTaskRepo := repository.NewAITaskRepo(db)
 	showRepo := repository.NewShowRepo(db)
+	commentRepo := repository.NewCommentRepo(db)
 	bannerRepo := repository.NewBannerRepo(db)
 	styleRepo := repository.NewStyleRepo(db)
 	categoryRepo := repository.NewCategoryRepo(db)
@@ -98,6 +99,7 @@ func main() {
 	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, appStorage)
+	commentService := service.NewCommentService(commentRepo, showRepo, userRepo)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
 	// 模型价格配置服务（运营后台价格管理；模型清单来自 models.yaml，价格存 model_prices 表）
@@ -149,6 +151,7 @@ func main() {
 	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService, projectRepo)
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
+	commentHandler := handler.NewCommentHandler(commentService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager)
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
@@ -190,6 +193,8 @@ func main() {
 		publicShows.GET("/categories", showHandler.ListCategories)
 		publicShows.GET("", showHandler.ListShows)
 		publicShows.GET("/:id", showHandler.GetShow)
+		publicShows.GET("/:id/comments", commentHandler.List)                // 顶级评论列表（公开）
+		publicShows.GET("/comments/:commentId/replies", commentHandler.ListReplies) // 评论的回复列表（公开）
 	}
 
 	// 公开Banner接口（无需登录）
@@ -311,6 +316,9 @@ func main() {
 			shows.POST("/:id/like", showHandler.LikeShow)
 			shows.DELETE("/:id/like", showHandler.UnlikeShow)
 			shows.GET("/:id/liked", showHandler.CheckShowLiked)
+			// 评论相关
+			shows.POST("/:id/comments", commentHandler.Create)          // 发表评论
+			shows.DELETE("/comments/:commentId", commentHandler.Delete) // 删除评论（本人或管理员）
 		}
 
 		// Banner资源位管理（需登录）
