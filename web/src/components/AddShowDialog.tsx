@@ -41,6 +41,8 @@ export default function AddShowDialog({
 }: AddShowDialogProps) {
   const { message } = App.useApp();
   const currentUser = useAuthStore((s) => s.user); // 当前登录用户（作者默认选中自己）
+  // 画布侧提交（status=pending）作者锁定为当前用户，不可更改；管理后台可自由选择
+  const lockAuthor = status === 'pending';
   const coverPickVideoRef = useRef<HTMLVideoElement>(null);
 
   const [addShowForm, setAddShowForm] = useState({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
@@ -205,7 +207,7 @@ export default function AddShowDialog({
                 title: existing.title,
                 description: existing.description || '',
                 video_url: existing.video_url,
-                author_id: existing.author_id || '',
+                author_id: lockAuthor ? (currentUser?.id || '') : (existing.author_id || ''),
                 duration: existing.duration,
                 tags: (existing.tags || []).join(', '),
               });
@@ -331,7 +333,7 @@ export default function AddShowDialog({
           title: addShowForm.title.trim(),
           description: addShowForm.description.trim() || undefined,
           video_url: (videoUploadedUrl || addShowForm.video_url.trim()) || undefined,
-          author_id: addShowForm.author_id || undefined,
+          author_id: (lockAuthor ? currentUser?.id : addShowForm.author_id) || undefined,
           duration: addShowForm.duration || undefined,
           tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
           // 从画布再次提交时，重置状态为 pending（让管理员重新审核）
@@ -346,7 +348,7 @@ export default function AddShowDialog({
           title: addShowForm.title.trim(),
           description: addShowForm.description.trim() || undefined,
           video_url: addShowForm.video_url.trim(),
-          author_id: addShowForm.author_id || undefined,
+          author_id: (lockAuthor ? currentUser?.id : addShowForm.author_id) || undefined,
           duration: addShowForm.duration || undefined,
           tags: addShowForm.tags ? addShowForm.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean) : [],
           status,
@@ -626,7 +628,8 @@ export default function AddShowDialog({
                 onOpenChange={(open) => { if (open) fetchAuthors(''); }}
                 placeholder="点击选择或输入搜索"
                 showSearch
-                allowClear
+                allowClear={!lockAuthor}
+                disabled={lockAuthor}
                 options={authorSelectOptions}
                 notFoundContent={authorSearching ? '搜索中...' : '暂无匹配用户'}
                 filterOption={false}
