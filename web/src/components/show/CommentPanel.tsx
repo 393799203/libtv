@@ -334,7 +334,7 @@ export default function CommentPanel({ showId, open, onClose, initialCount, onCo
                 </button>
               </div>
             )}
-            <div className="flex items-end gap-2">
+            <div className="flex items-stretch gap-2">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -349,7 +349,7 @@ export default function CommentPanel({ showId, open, onClose, initialCount, onCo
                 maxLength={500}
                 className="flex-1 px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none resize-none"
               />
-              <Button type="primary" size="small" loading={posting} disabled={!input.trim()} onClick={handlePost}>
+              <Button type="primary" size="small" loading={posting} disabled={!input.trim()} onClick={handlePost} className="!h-auto">
                 发送
               </Button>
             </div>
