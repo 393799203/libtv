@@ -18,6 +18,8 @@ interface BaseNodeProps {
   className?: string; // 允许子节点追加容器样式（如编辑模式 nodrag）
   /** 去掉内容区域 padding */
   noContentPadding?: boolean;
+  /** 隐藏输入 Handle（如白模预演节点不连上游） */
+  hideInputHandle?: boolean;
 }
 
 export const BaseNode = memo<BaseNodeProps>(function BaseNode({
@@ -29,6 +31,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   headerColor,
   className,
   noContentPadding,
+  hideInputHandle,
 }) {
   const nodeType = data.type as NodeType;
   const config = NODE_TYPE_CONFIG[nodeType];
@@ -130,11 +133,13 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       </div>
 
       {/* 输入 Handle（左耳）：锚定在节点左边缘中心（连线从边框连出），hover 节点时 ease 弹出 */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="libtv-handle libtv-handle-left"
-      />
+      {!hideInputHandle && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="libtv-handle libtv-handle-left"
+        />
+      )}
 
       {/* 输出 Handle（右耳）：锚定在节点右边缘中心 */}
       <Handle

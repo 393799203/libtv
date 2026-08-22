@@ -6,6 +6,7 @@ import {
   VideoCameraOutlined,
   AudioOutlined,
   CodeOutlined,
+  DeploymentUnitOutlined,
 } from '@ant-design/icons';
 import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 
@@ -17,9 +18,10 @@ const iconMap: Record<string, React.ReactNode> = {
   VideoCameraOutlined: <VideoCameraOutlined />,
   AudioOutlined: <AudioOutlined />,
   CodeOutlined: <CodeOutlined />,
+  DeploymentUnitOutlined: <DeploymentUnitOutlined />,
 };
 
-const nodeTypeList: NodeType[] = ['text', 'image', 'video', 'audio', 'script'];
+const nodeTypeList: NodeType[] = ['text', 'image', 'video', 'audio', 'script', 'previz'];
 
 export const NodeLibrary = memo(function NodeLibrary() {
   const handleDragStart = useCallback((e: React.DragEvent, nodeType: NodeType) => {

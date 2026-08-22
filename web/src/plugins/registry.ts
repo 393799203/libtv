@@ -15,6 +15,7 @@ const PRODUCES: Record<NodeType, { kind: OutputKind; fields: string[] }> = {
   image: { kind: 'image', fields: ['imageUrl'] },
   video: { kind: 'video', fields: ['videoUrl'] },
   audio: { kind: 'audio', fields: ['audioUrl'] },
+  previz: { kind: 'video', fields: ['videoUrl'] },  // 白模预演未来导出白片视频
 };
 
 // 为每个 NodeType 构造 plugin
@@ -43,7 +44,7 @@ class NodeTypeRegistry {
   private plugins = new Map<NodeType, NodeTypePlugin>();
 
   constructor() {
-    const types: NodeType[] = ['text', 'image', 'video', 'audio', 'script'];
+    const types: NodeType[] = ['text', 'image', 'video', 'audio', 'script', 'previz'];
     types.forEach((t) => this.plugins.set(t, buildPlugin(t)));
   }
 

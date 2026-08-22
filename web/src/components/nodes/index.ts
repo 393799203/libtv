@@ -3,6 +3,7 @@ import { ImageNode } from './ImageNode';
 import { VideoNode } from './VideoNode';
 import { AudioNode } from './AudioNode';
 import { ScriptNode } from './ScriptNode';
+import { PrevizNode } from './PrevizNode';
 
 // 性能优化：nodeTypes 必须在组件外部定义，避免每次渲染重新创建
 export const nodeTypes = {
@@ -11,4 +12,5 @@ export const nodeTypes = {
   video: VideoNode,
   audio: AudioNode,
   script: ScriptNode,
+  previz: PrevizNode,
 } as const;

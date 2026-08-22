@@ -25,6 +25,63 @@ type Asset = ScriptCharacter | ScriptScene | ScriptProp;
 // 从 hook 动态获取图像生成模型选项
 // IMAGE_MODEL_OPTIONS 将在组件中使用 useModels hook 获取
 
+// ==================== 资产生成状态监听（模块级，与弹窗生命周期解耦）====================
+// loading 消息跟随画布图片节点的生成状态（SSE 驱动 canvasStore 节点 status 变化），
+// 节点 success / failed / 超时 时才销毁；关闭资产弹窗不影响监听
+const assetGenWatchers = new Map<string, () => void>(); // imageNodeId -> cancel
+
+function watchAssetGeneration(
+  imageNodeId: string,
+  onSuccess: (imageUrl: string) => void,
+  onSettled: () => void,
+) {
+  const msgKey = `asset-gen-${imageNodeId}`;
+  // 同一节点重新生成时，取消上一个监听，避免重复提示
+  assetGenWatchers.get(imageNodeId)?.();
+
+  let timer: ReturnType<typeof setTimeout>;
+  const unsubscribe = useCanvasStore.subscribe((state, prevState) => {
+    const node = state.nodes.find((n) => n.id === imageNodeId);
+    const prevNode = prevState.nodes.find((n) => n.id === imageNodeId);
+    if (!node || node === prevNode) return;
+    const status = (node.data as { status?: string; imageUrl?: string })?.status;
+    const prevStatus = (prevNode?.data as { status?: string })?.status;
+    if (status === prevStatus) return;
+
+    if (status === 'success') {
+      cancel();
+      message.destroy(msgKey);
+      const url = (node.data as { imageUrl?: string })?.imageUrl;
+      if (url) {
+        onSuccess(url);
+        message.success('图像生成成功');
+      }
+      onSettled();
+    } else if (status === 'failed') {
+      cancel();
+      message.destroy(msgKey);
+      // 节点右上角 Badge 已显示错误状态和 Tooltip，不需要全局提示
+      onSettled();
+    }
+  });
+
+  const cancel = () => {
+    clearTimeout(timer);
+    unsubscribe();
+    assetGenWatchers.delete(imageNodeId);
+  };
+
+  // 超时保护（180 秒）
+  timer = setTimeout(() => {
+    cancel();
+    message.destroy(msgKey);
+    message.warning('图像生成超时，可在画布上查看图片节点状态');
+    onSettled();
+  }, 180000);
+
+  assetGenWatchers.set(imageNodeId, cancel);
+}
+
 interface AssetEditModalProps {
   open: boolean;
   scriptNodeId: string;
@@ -70,10 +127,6 @@ export const AssetEditModal = memo<AssetEditModalProps>(
     const [selectedModel, setSelectedModel] = useState('');
     const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
-    // 用于清理资源的 ref（防止组件卸载后资源泄漏）
-    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const unsubscribeRef = useRef<(() => void) | null>(null);
-
     // 打开/切换资产时，从图片节点读取当前模型选中（仅在资产切换时触发，不随节点更新重置）
     useEffect(() => {
       if (IMAGE_MODEL_OPTIONS.length > 0) {
@@ -106,40 +159,14 @@ export const AssetEditModal = memo<AssetEditModalProps>(
       }
     }, [asset?.name, asset?.description, asset]);
 
-    // 关闭时重置状态并清理资源
+    // 关闭时重置本地状态（生成监听是模块级的，不随弹窗关闭而清理）
     useEffect(() => {
       if (!open) {
         setUploading(false);
         setGenerating(false);
         setModelDropdownOpen(false);
-
-        // 清理资源：防止组件卸载后资源泄漏
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-        if (unsubscribeRef.current) {
-          unsubscribeRef.current();
-          unsubscribeRef.current = null;
-        }
-        // loading 消息是 duration:0 必须显式销毁，否则关闭弹窗后会永久残留
-        message.destroy('gen');
       }
     }, [open]);
-
-    // 组件卸载时清理所有资源
-    useEffect(() => {
-      return () => {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-        }
-        if (unsubscribeRef.current) {
-          unsubscribeRef.current();
-        }
-        // loading 消息是 duration:0 必须显式销毁
-        message.destroy('gen');
-      };
-    }, []);
 
     /** 点击图片区域 → 触发文件选择 */
     const handleImageClick = useCallback(() => {
@@ -198,16 +225,6 @@ export const AssetEditModal = memo<AssetEditModalProps>(
         return;
       }
 
-      // 清理之前的资源
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
-
       setGenerating(true);
 
       const viewText =
@@ -217,14 +234,14 @@ export const AssetEditModal = memo<AssetEditModalProps>(
             ? '四视图'
             : '六视图';
 
+      const imageNodeId = generateAssetImageNodeId(assetType, asset.name, scriptNodeId);
+      const msgKey = `asset-gen-${imageNodeId}`;
       const modelName = IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel;
       message.loading({
         content: `正在使用 ${modelName} 生成${viewText}…`,
-        key: 'gen',
+        key: msgKey,
         duration: 0,
       });
-
-      const imageNodeId = generateAssetImageNodeId(assetType, asset.name, scriptNodeId);
 
       try {
         // Step 1: 确保图片节点存在（不存在则创建）
@@ -274,65 +291,18 @@ export const AssetEditModal = memo<AssetEditModalProps>(
           nodeId: imageNodeId,
         });
 
-        // 监听节点状态变化（使用 Zustand 订阅，实时响应）
-        const unsubscribe = useCanvasStore.subscribe((state, prevState) => {
-          const node = state.nodes.find(n => n.id === imageNodeId);
-          const prevNode = prevState.nodes.find(n => n.id === imageNodeId);
-
-          // 只在节点数据变化时处理
-          if (node && node !== prevNode) {
-            const nodeData = node.data as any;
-            const prevData = prevNode?.data as any;
-
-            // 检测状态变化
-            if (nodeData.status !== prevData?.status) {
-              if (nodeData.status === 'success' && nodeData.imageUrl) {
-                // 清理资源
-                if (timeoutRef.current) {
-                  clearTimeout(timeoutRef.current);
-                  timeoutRef.current = null;
-                }
-                unsubscribe();
-                unsubscribeRef.current = null;
-
-                const imageUrl = nodeData.imageUrl;
-                onUpload(asset.name, imageUrl);
-                message.success('图像生成成功');
-                setGenerating(false);
-                message.destroy('gen');
-              } else if (nodeData.status === 'failed') {
-                // 清理资源
-                if (timeoutRef.current) {
-                  clearTimeout(timeoutRef.current);
-                  timeoutRef.current = null;
-                }
-                unsubscribe();
-                unsubscribeRef.current = null;
-
-                // 节点右上角的 Badge 已经显示错误状态和 Tooltip，不需要全局提示
-                setGenerating(false);
-                message.destroy('gen');
-              }
-            }
-          }
-        });
-
-        // 保存 unsubscribe 到 ref，用于组件卸载时清理
-        unsubscribeRef.current = unsubscribe;
-
-        // 超时保护（120秒）
-        timeoutRef.current = setTimeout(() => {
-          unsubscribe();
-          unsubscribeRef.current = null;
-          message.destroy('gen');
-          message.warning('图像生成超时，可在画布上查看图片节点状态');
-          setGenerating(false);
-        }, 120000);
+        // 模块级监听画布节点生成状态：跟随 SSE 状态变化，生成结束才销毁 loading 消息
+        // 弹窗关闭不影响监听与资产回填
+        watchAssetGeneration(
+          imageNodeId,
+          (url) => onUpload(asset.name, url),
+          () => setGenerating(false),
+        );
 
       } catch (error) {
         console.error('图像生成失败:', error);
 
-        message.destroy('gen');
+        message.destroy(msgKey);
         // HTTP 错误已由 api.ts 拦截器统一 message.error()，此处仅兜底非 HTTP 错误
         if (!(error instanceof Error) || !error.message) {
           message.error('图像生成失败', 3);

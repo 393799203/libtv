@@ -17,6 +17,7 @@ const VideoDetailPage = lazy(() => import('@/pages/videos/VideoDetailPage'));
 const MyProjectsPage = lazy(() => import('@/pages/projects/MyProjectsPage'));
 const AIModelsPage = lazy(() => import('@/pages/ai-models/AIModelsPage'));
 const AdminPage = lazy(() => import('@/pages/admin/AdminPage'));
+const PrevizEditor = lazy(() => import('@/pages/previz/PrevizEditor'));
 
 const Loading = () => (
   <div className="w-full h-screen flex items-center justify-center">
@@ -75,6 +76,16 @@ export const routes: RouteObject[] = [
               <AuthGuard>
                 <LazyLoad>
                   <WorkspacePage />
+                </LazyLoad>
+              </AuthGuard>
+            ),
+          },
+          {
+            path: 'project/:projectId/previz/:nodeId',
+            element: (
+              <AuthGuard>
+                <LazyLoad>
+                  <PrevizEditor />
                 </LazyLoad>
               </AuthGuard>
             ),

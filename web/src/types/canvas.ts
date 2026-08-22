@@ -2,7 +2,7 @@ import type { Node, Edge } from '@xyflow/react';
 import type { MentionMarker } from './prompt';
 
 // 节点类型枚举
-export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script';
+export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script' | 'previz';
 
 // 节点执行状态
 export type NodeExecutionStatus = 'idle' | 'pending' | 'running' | 'success' | 'failed';
@@ -151,13 +151,22 @@ export interface ScriptShot {
   finalPrompt?: string;
 }
 
+// 白模预演节点数据
+export interface PrevizNodeData extends BaseNodeFields, Record<string, unknown> {
+  type: 'previz';
+  label: string;
+  scene?: string;     // 白模场景 JSON 字符串（见 pages/previz/types.ts 的 PrevizScene）
+  videoUrl?: string;  // 导出的白片视频 URL（P4 阶段使用）
+}
+
 // 节点数据联合类型
 export type LibTVNodeData =
   | TextNodeData
   | ImageNodeData
   | VideoNodeData
   | AudioNodeData
-  | ScriptNodeData;
+  | ScriptNodeData
+  | PrevizNodeData;
 
 // 画布节点类型
 export type LibTVNode = Node<LibTVNodeData, NodeType>;
@@ -195,4 +204,5 @@ export const NODE_TYPE_CONFIG: Record<NodeType, { label: string; color: string; 
   video: { label: '视频', color: '#ef4444', icon: 'VideoCameraOutlined' },
   audio: { label: '音频', color: '#10b981', icon: 'AudioOutlined' },
   script: { label: '脚本', color: '#f59e0b', icon: 'CodeOutlined' },
+  previz: { label: '白模预演', color: '#64748b', icon: 'DeploymentUnitOutlined' },
 };

@@ -1,0 +1,486 @@
+import { create } from 'zustand';
+import type {
+  PrevizCamera,
+  PrevizCameraMove,
+  PrevizCharacter,
+  PrevizObject,
+  PrevizObjectType,
+  PrevizPathPoint,
+  PrevizScene,
+  Vec3,
+} from './types';
+import { createEmptyScene } from './types';
+
+// 各几何体类型的中文名（用于自动生成对象名）
+export const OBJECT_TYPE_LABELS: Record<PrevizObjectType, string> = {
+  box: '方块',
+  cylinder: '圆柱',
+  sphere: '球体',
+  plane: '平面',
+  wall: '墙体',
+};
+
+// 白模默认灰色系颜色
+const DEFAULT_COLOR = '#9ca3af';
+
+// 各类型新对象的默认变换（放置在原点、落在地面上）
+const OBJECT_DEFAULTS: Record<PrevizObjectType, { position: Vec3; rotation: Vec3; scale: Vec3 }> = {
+  box: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  cylinder: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  sphere: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  plane: { position: [0, 0.01, 0], rotation: [-Math.PI / 2, 0, 0], scale: [2, 2, 1] },
+  wall: { position: [0, 1, 0], rotation: [0, 0, 0], scale: [3, 2, 0.1] },
+};
+
+// 新角色默认位置（原点，面向 -Z 以外的默认朝向）
+const CHARACTER_DEFAULT_POSITION: Vec3 = [0, 0, 0];
+
+// 生成节点 id
+function genId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// 路径点选中 id 的编解码（选中路径点时用于挂 TransformControls）
+export function pathPointId(charId: string, index: number): string {
+  return `pp:${charId}:${index}`;
+}
+export function parsePathPointId(id: string): { charId: string; index: number } | null {
+  if (!id.startsWith('pp:')) return null;
+  const [, charId, idx] = id.split(':');
+  const index = Number(idx);
+  if (!charId || Number.isNaN(index)) return null;
+  return { charId, index };
+}
+
+// 相机机位点选中 id 的编解码（视口拖动相机起止机位用）
+export function cameraPointId(camId: string, point: 'start' | 'end'): string {
+  return `camp:${camId}:${point}`;
+}
+export function parseCameraPointId(id: string): { camId: string; point: 'start' | 'end' } | null {
+  if (!id.startsWith('camp:')) return null;
+  const parts = id.split(':');
+  const point = parts[parts.length - 1];
+  const camId = parts.slice(1, -1).join(':');
+  if (!camId || (point !== 'start' && point !== 'end')) return null;
+  return { camId, point };
+}
+
+interface PrevizState {
+  objects: PrevizObject[];
+  characters: PrevizCharacter[];
+  cameras: PrevizCamera[];
+  selectedId: string | null; // 几何体 id / 角色 id / 路径点 id（pp:charId:index）/ 相机机位点 id（camp:camId:start|end）
+  duration: number; // 场景时长（秒）
+  fps: number;
+
+  // 播放状态（currentTime 每帧更新，组件请用 getState() 读取避免高频重渲染）
+  playing: boolean;
+  currentTime: number;
+  /** 人偶 GLB 加载失败标记（面板提示用） */
+  mannequinError: boolean;
+
+  // 相机面板状态
+  selectedCameraId: string | null; // 相机列表中选中的相机（编辑用）
+  previewCameraId: string | null;  // 正在预览相机视角的相机（null = 自由视角）
+
+  // 几何体
+  addObject: (type: PrevizObjectType) => void;
+  removeObject: (id: string) => void;
+  updateObject: (id: string, upd: Partial<Omit<PrevizObject, 'id'>>) => void;
+
+  // 角色
+  addCharacter: () => void;
+  removeCharacter: (id: string) => void;
+  updateCharacter: (id: string, upd: Partial<Omit<PrevizCharacter, 'id' | 'path' | 'actions'>>) => void;
+
+  // 角色动作
+  addAction: (charId: string, clip: string) => void; // start 取当前播放头时间
+  removeAction: (charId: string, index: number) => void;
+  updateActionStart: (charId: string, index: number, start: number) => void;
+
+  // 走位路径
+  addPathPoint: (charId: string) => void; // t 取当前播放头时间，位置取角色在该时刻的实际位置（路径采样）
+  removePathPoint: (charId: string, index: number) => void;
+  updatePathPoint: (charId: string, index: number, upd: Partial<PrevizPathPoint>) => void;
+  // 拖拽角色本体：把位置写进当前播放头时刻的路径点（有则更新，无则新建）
+  upsertPathPointAt: (charId: string, t: number, position: Vec3) => void;
+  // 路径绘制模式：视口地面点击直接添加路径点（首个点取当前播放头，后续每点 +1 秒）
+  pathDrawMode: boolean;
+  setPathDrawMode: (v: boolean) => void;
+  appendDrawnPathPoint: (charId: string, position: Vec3) => void;
+  // gizmo 拖拽中标记（拖拽时暂停位置采样回弹）
+  gizmoDragging: boolean;
+  setGizmoDragging: (v: boolean) => void;
+
+  // 相机
+  addCamera: () => void;
+  removeCamera: (id: string) => void;
+  updateCamera: (id: string, upd: Partial<Omit<PrevizCamera, 'id' | 'move'>>) => void;
+  updateCameraMove: (id: string, upd: Partial<PrevizCameraMove>) => void;
+  setSelectedCamera: (id: string | null) => void;
+  setPreviewCamera: (id: string | null) => void;
+
+  // 播放控制
+  setPlaying: (playing: boolean) => void;
+  setCurrentTime: (t: number) => void;
+  setDuration: (d: number) => void;
+  setFps: (f: number) => void;
+  setMannequinError: (v: boolean) => void;
+
+  select: (id: string | null) => void;
+  reset: () => void;
+
+  // 序列化 / 反序列化（与 previz 节点 data.scene 的 JSON 字符串互转）
+  toJSON: () => string;
+  fromJSON: (json: string) => void;
+}
+
+// 角色动作按 start 升序插入
+function insertAction(actions: PrevizCharacter['actions'], action: PrevizCharacter['actions'][number]) {
+  const next = [...actions, action];
+  next.sort((a, b) => a.start - b.start);
+  return next;
+}
+
+// 路径点按 t 升序插入
+function insertPathPoint(path: PrevizPathPoint[], point: PrevizPathPoint) {
+  const next = [...path, point];
+  next.sort((a, b) => a.t - b.t);
+  return next;
+}
+
+export const usePrevizStore = create<PrevizState>()((set, get) => ({
+  objects: [],
+  characters: [],
+  cameras: [],
+  selectedId: null,
+  duration: 10,
+  fps: 24,
+  playing: false,
+  currentTime: 0,
+  mannequinError: false,
+  selectedCameraId: null,
+  previewCameraId: null,
+  gizmoDragging: false,
+  pathDrawMode: false,
+
+  setGizmoDragging: (v) => set({ gizmoDragging: v }),
+  setPathDrawMode: (v) => set({ pathDrawMode: v }),
+
+  // 绘制模式添加路径点：首个点取当前播放头时刻，后续每个点自动 +1 秒
+  appendDrawnPathPoint: (charId, position) => {
+    const { currentTime } = get();
+    set((state) => ({
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        const last = c.path[c.path.length - 1];
+        const t = last ? Math.round((last.t + 1) * 100) / 100 : Math.round(currentTime * 100) / 100;
+        return { ...c, path: [...c.path, { t, position }] };
+      }),
+    }));
+  },
+
+  // ====== 几何体 ======
+  addObject: (type) => {
+    const { objects } = get();
+    const defaults = OBJECT_DEFAULTS[type];
+    const count = objects.filter((o) => o.type === type).length + 1;
+    const obj: PrevizObject = {
+      id: genId('obj'),
+      type,
+      name: `${OBJECT_TYPE_LABELS[type]} ${count}`,
+      position: [...defaults.position],
+      rotation: [...defaults.rotation],
+      scale: [...defaults.scale],
+      color: DEFAULT_COLOR,
+    };
+    set({ objects: [...objects, obj], selectedId: obj.id });
+  },
+
+  removeObject: (id) => {
+    set((state) => ({
+      objects: state.objects.filter((o) => o.id !== id),
+      selectedId: state.selectedId === id ? null : state.selectedId,
+    }));
+  },
+
+  updateObject: (id, upd) => {
+    set((state) => ({
+      objects: state.objects.map((o) => (o.id === id ? { ...o, ...upd } : o)),
+    }));
+  },
+
+  // ====== 角色 ======
+  addCharacter: () => {
+    const { characters } = get();
+    const char: PrevizCharacter = {
+      id: genId('char'),
+      name: `角色 ${characters.length + 1}`,
+      position: [...CHARACTER_DEFAULT_POSITION],
+      rotationY: 0,
+      path: [],
+      actions: [],
+    };
+    set({ characters: [...characters, char], selectedId: char.id });
+  },
+
+  removeCharacter: (id) => {
+    set((state) => ({
+      characters: state.characters.filter((c) => c.id !== id),
+      selectedId:
+        state.selectedId === id || state.selectedId?.startsWith(`pp:${id}:`)
+          ? null
+          : state.selectedId,
+    }));
+  },
+
+  updateCharacter: (id, upd) => {
+    set((state) => ({
+      characters: state.characters.map((c) => (c.id === id ? { ...c, ...upd } : c)),
+    }));
+  },
+
+  // ====== 角色动作 ======
+  addAction: (charId, clip) => {
+    const { currentTime } = get();
+    set((state) => ({
+      characters: state.characters.map((c) =>
+        c.id === charId
+          ? { ...c, actions: insertAction(c.actions, { clip, start: Math.round(currentTime * 100) / 100 }) }
+          : c
+      ),
+    }));
+  },
+
+  removeAction: (charId, index) => {
+    set((state) => ({
+      characters: state.characters.map((c) =>
+        c.id === charId ? { ...c, actions: c.actions.filter((_, i) => i !== index) } : c
+      ),
+    }));
+  },
+
+  updateActionStart: (charId, index, start) => {
+    set((state) => ({
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        const actions = c.actions.map((a, i) => (i === index ? { ...a, start } : a));
+        actions.sort((a, b) => a.start - b.start);
+        return { ...c, actions };
+      }),
+    }));
+  },
+
+  // ====== 走位路径 ======
+  addPathPoint: (charId) => {
+    const { currentTime } = get();
+    set((state) => ({
+      characters: state.characters.map((c) =>
+        c.id === charId
+          ? {
+              ...c,
+              // 记录「播放头时刻 + 角色在该时刻的实际位置」（路径插值采样，无路径时为基准位置）
+              path: insertPathPoint(c.path, {
+                t: Math.round(currentTime * 100) / 100,
+                position: sampleCharacterPosition(c, currentTime),
+              }),
+            }
+          : c
+      ),
+    }));
+  },
+
+  // 拖拽角色本体时调用：把位置写进「当前播放头时刻」的路径点（已存在该时刻的点则更新，否则新建）
+  upsertPathPointAt: (charId, t, position) => {
+    set((state) => ({
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        const EPS = 0.05; // 同一时刻判定容差（秒）
+        const idx = c.path.findIndex((p) => Math.abs(p.t - t) <= EPS);
+        if (idx >= 0) {
+          const path = c.path.map((p, i) => (i === idx ? { ...p, position } : p));
+          return { ...c, path };
+        }
+        return { ...c, path: insertPathPoint(c.path, { t: Math.round(t * 100) / 100, position }) };
+      }),
+    }));
+  },
+
+  removePathPoint: (charId, index) => {
+    set((state) => ({
+      characters: state.characters.map((c) =>
+        c.id === charId ? { ...c, path: c.path.filter((_, i) => i !== index) } : c
+      ),
+      selectedId:
+        state.selectedId === pathPointId(charId, index) ? charId : state.selectedId,
+    }));
+  },
+
+  updatePathPoint: (charId, index, upd) => {
+    set((state) => ({
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        const path = c.path.map((p, i) => (i === index ? { ...p, ...upd } : p));
+        path.sort((a, b) => a.t - b.t);
+        return { ...c, path };
+      }),
+    }));
+  },
+
+  // ====== 相机 ======
+  addCamera: () => {
+    const { cameras, duration } = get();
+    // 默认机位：斜上方看向原点；endPos 默认沿视线推进一半距离（推镜常用默认值）
+    const startPos: Vec3 = [6, 4, 6];
+    const startLook: Vec3 = [0, 1, 0];
+    const dir: Vec3 = [startLook[0] - startPos[0], startLook[1] - startPos[1], startLook[2] - startPos[2]];
+    const cam: PrevizCamera = {
+      id: genId('cam'),
+      name: `相机 ${cameras.length + 1}`,
+      fov: 50,
+      move: {
+        type: 'static',
+        startPos,
+        endPos: [startPos[0] + dir[0] / 2, startPos[1] + dir[1] / 2, startPos[2] + dir[2] / 2],
+        startLook,
+        endLook: [...startLook],
+        duration: Math.min(5, duration),
+        start: 0,
+      },
+    };
+    set({ cameras: [...cameras, cam], selectedCameraId: cam.id });
+  },
+
+  removeCamera: (id) => {
+    set((state) => ({
+      cameras: state.cameras.filter((c) => c.id !== id),
+      selectedCameraId: state.selectedCameraId === id ? null : state.selectedCameraId,
+      previewCameraId: state.previewCameraId === id ? null : state.previewCameraId,
+      selectedId: state.selectedId?.startsWith(`camp:${id}:`) ? null : state.selectedId,
+    }));
+  },
+
+  updateCamera: (id, upd) => {
+    set((state) => ({
+      cameras: state.cameras.map((c) => (c.id === id ? { ...c, ...upd } : c)),
+    }));
+  },
+
+  updateCameraMove: (id, upd) => {
+    set((state) => ({
+      cameras: state.cameras.map((c) =>
+        c.id === id ? { ...c, move: { ...c.move, ...upd } } : c
+      ),
+    }));
+  },
+
+  setSelectedCamera: (id) => set({ selectedCameraId: id }),
+
+  setPreviewCamera: (id) => set({ previewCameraId: id }),
+
+  // ====== 播放控制 ======
+  setPlaying: (playing) => set({ playing }),
+
+  setCurrentTime: (t) => {
+    const { duration } = get();
+    set({ currentTime: Math.max(0, Math.min(t, duration)) });
+  },
+
+  setDuration: (d) => {
+    const dur = Math.max(1, d);
+    set((state) => ({
+      duration: dur,
+      currentTime: Math.min(state.currentTime, dur),
+    }));
+  },
+
+  setFps: (f) => set({ fps: f }),
+
+  setMannequinError: (v) => set({ mannequinError: v }),
+
+  select: (id) => set({ selectedId: id }),
+
+  reset: () => {
+    const scene = createEmptyScene();
+    set({
+      objects: [],
+      characters: [],
+      cameras: [],
+      selectedId: null,
+      duration: scene.duration,
+      fps: scene.fps,
+      playing: false,
+      currentTime: 0,
+      mannequinError: false,
+      selectedCameraId: null,
+      previewCameraId: null,
+    });
+  },
+
+  toJSON: () => {
+    const { objects, characters, cameras, duration, fps } = get();
+    const scene: PrevizScene = {
+      objects,
+      characters,
+      cameras,
+      duration,
+      fps,
+    };
+    return JSON.stringify(scene);
+  },
+
+  fromJSON: (json) => {
+    try {
+      const scene = JSON.parse(json) as PrevizScene;
+      set({
+        objects: Array.isArray(scene.objects) ? scene.objects : [],
+        characters: Array.isArray(scene.characters) ? scene.characters : [],
+        cameras: Array.isArray(scene.cameras) ? scene.cameras : [],
+        selectedId: null,
+        duration: scene.duration ?? 10,
+        fps: scene.fps ?? 24,
+        playing: false,
+        currentTime: 0,
+        selectedCameraId: null,
+        previewCameraId: null,
+      });
+    } catch (err) {
+      console.error('解析白模场景 JSON 失败:', err);
+      get().reset();
+    }
+  },
+}));
+
+// ====== 播放采样辅助（供视口/动画使用）======
+
+// 采样角色在 t 时刻的位置：按走位路径线性插值；无路径时用基准位置
+export function sampleCharacterPosition(char: PrevizCharacter, t: number): Vec3 {
+  const path = char.path;
+  if (path.length === 0) return char.position;
+  if (t <= path[0].t) return path[0].position;
+  const last = path[path.length - 1];
+  if (t >= last.t) return last.position;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const ratio = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
+      return [
+        a.position[0] + (b.position[0] - a.position[0]) * ratio,
+        a.position[1] + (b.position[1] - a.position[1]) * ratio,
+        a.position[2] + (b.position[2] - a.position[2]) * ratio,
+      ];
+    }
+  }
+  return last.position;
+}
+
+// 取 t 时刻应播放的动作（start <= t 的最近一个）；无则返回 null（播待机）
+export function activeActionAt(char: PrevizCharacter, t: number) {
+  let active: PrevizCharacter['actions'][number] | null = null;
+  for (const a of char.actions) {
+    if (a.start <= t) active = a;
+    else break; // actions 按 start 升序
+  }
+  return active;
+}

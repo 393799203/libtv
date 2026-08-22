@@ -6,6 +6,7 @@ import {
   VideoCameraOutlined,
   AudioOutlined,
   CodeOutlined,
+  DeploymentUnitOutlined,
 } from '@ant-design/icons';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -62,6 +63,11 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
       key: 'script',
       label: '脚本节点',
       icon: <CodeOutlined />,
+    },
+    {
+      key: 'previz',
+      label: '白模预演',
+      icon: <DeploymentUnitOutlined />,
     },
   ];
 

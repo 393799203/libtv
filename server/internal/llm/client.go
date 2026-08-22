@@ -219,8 +219,8 @@ func (c *Client) GeneratePrompt(
 	systemPrompt := PromptGenerationSystemPrompt
 	userMessage := BuildPromptGenerationUserMessage(shotData, characters, scenes, props)
 
-	// 调用 LLM
-	resp, err := c.ChatWithModel(ctx, model, systemPrompt, userMessage, WithTemperature(0.7), WithMaxTokens(4096))
+	// 调用 LLM（max_tokens 显式传大值，见 maxGenerationTokens）
+	resp, err := c.ChatWithModel(ctx, model, systemPrompt, userMessage, WithTemperature(0.7), WithMaxTokens(maxGenerationTokens))
 	if err != nil {
 		return "", "", err
 	}

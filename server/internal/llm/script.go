@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"libtv/internal/config"
@@ -66,6 +67,10 @@ type scriptResponse struct {
 	Shots         []ScriptShot `json:"shots"`
 }
 
+// maxGenerationTokens 文本生成调用的 max_tokens 上限：
+// 显式传大值，避免服务端写死小值截断、也避免不传时网关套用小默认值
+const maxGenerationTokens = 65536
+
 // GenerateStory 根据用户提示词生成故事剧本文本
 // 用于 TextNode：用户输入 prompt → LLM 生成故事 → 填充 content
 func GenerateStory(ctx context.Context, client *Client, userPrompt string, model string) (string, error) {
@@ -80,7 +85,7 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string, model
 			StorySystemPrompt,
 			BuildStoryUserPrompt(userPrompt),
 			WithTemperature(0.8),
-			WithMaxTokens(8192),
+			WithMaxTokens(maxGenerationTokens),
 		)
 	} else {
 		// 使用默认模型
@@ -89,7 +94,7 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string, model
 			StorySystemPrompt,
 			BuildStoryUserPrompt(userPrompt),
 			WithTemperature(0.8),
-			WithMaxTokens(8192),
+			WithMaxTokens(maxGenerationTokens),
 		)
 	}
 
@@ -126,7 +131,7 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 			ScriptSystemPrompt,
 			BuildScriptUserPrompt(textContent),
 			WithTemperature(0.7),
-			WithMaxTokens(16384),
+			WithMaxTokens(maxGenerationTokens),
 		)
 	} else {
 		// 使用默认模型
@@ -135,7 +140,7 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 			ScriptSystemPrompt,
 			BuildScriptUserPrompt(textContent),
 			WithTemperature(0.7),
-			WithMaxTokens(16384),
+			WithMaxTokens(maxGenerationTokens),
 		)
 	}
 
@@ -153,12 +158,28 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 		content = resp.Choices[0].Message.ReasoningContent
 	}
 
+	// 输出被 max_tokens 截断：JSON 必然不完整，直接报明确错误，不再走解析
+	if resp.Choices[0].FinishReason == "length" {
+		return nil, fmt.Errorf("生成内容超出长度限制被截断，请缩短输入文本或减少镜头数量后重试")
+	}
+
 	// 清理可能的 markdown 代码块包裹
 	content = cleanJSONMarkdown(content)
 
 	var result scriptResponse
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("parse script json: %w, raw: %s", err, content)
+		// 完整原文写服务端日志（截断展示），返回给前端的错误只带末尾片段：
+		// JSON 语法错误看末尾才能区分是截断（ unexpected end ）还是格式错误（少逗号等）
+		rawLog := content
+		if len(rawLog) > 2000 {
+			rawLog = rawLog[:2000] + "..."
+		}
+		log.Printf("[GenerateScript] JSON 解析失败: %v\nraw: %s", err, rawLog)
+		tail := content
+		if len(tail) > 200 {
+			tail = "..." + tail[len(tail)-200:]
+		}
+		return nil, fmt.Errorf("模型输出的 JSON 格式有误，请重试（%v）: %s", err, tail)
 	}
 
 	// 确保每个 shot 有 ID

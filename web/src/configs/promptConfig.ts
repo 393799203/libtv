@@ -98,4 +98,15 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     placeholder: '连接上游文本节点后，点击生成剧本分镜...',
     maxLength: 8000,
   },
+  // 白模预演节点不使用提示词面板，仅占位满足 Record 穷尽检查
+  previz: {
+    acceptedInputs: [],
+    defaultModel: '',
+    defaultResolution: '1K',
+    defaultAspectRatio: 'free',
+    availableModels: [],
+    toolbarControls: [],
+    placeholder: '',
+    maxLength: 0,
+  },
 };

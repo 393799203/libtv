@@ -38,6 +38,7 @@ function filterModelsByUsage(models: ModelConfig[], nodeType: NodeType): ModelCo
       image: ['image', 'character', 'scene', 'prop'],  // image 节点支持多种用途
       video: ['video'],
       audio: ['audio'],
+      previz: [],  // 白模预演不使用生成模型
     };
 
     const keywords = usageKeywords[nodeType] || [];
