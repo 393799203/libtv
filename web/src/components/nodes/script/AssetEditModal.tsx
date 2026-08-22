@@ -122,6 +122,8 @@ export const AssetEditModal = memo<AssetEditModalProps>(
           unsubscribeRef.current();
           unsubscribeRef.current = null;
         }
+        // loading 消息是 duration:0 必须显式销毁，否则关闭弹窗后会永久残留
+        message.destroy('gen');
       }
     }, [open]);
 
@@ -134,6 +136,8 @@ export const AssetEditModal = memo<AssetEditModalProps>(
         if (unsubscribeRef.current) {
           unsubscribeRef.current();
         }
+        // loading 消息是 duration:0 必须显式销毁
+        message.destroy('gen');
       };
     }, []);
 
