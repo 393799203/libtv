@@ -8,6 +8,7 @@ import {
   parsePathPointId,
   cameraPointId,
   parseCameraPointId,
+  parseBoneId,
 } from './previzStore';
 import { CharacterView } from './CharacterView';
 import { sampleCameraPose } from './cameraRig';
@@ -652,6 +653,8 @@ export function Viewport3D() {
   const select = usePrevizStore((s) => s.select);
   const setPreviewCamera = usePrevizStore((s) => s.setPreviewCamera);
   const pathDrawMode = usePrevizStore((s) => s.pathDrawMode);
+  const gizmoDragging = usePrevizStore((s) => s.gizmoDragging); // 拖拽骨骼/gizmo 时禁用轨道相机
+  // 骨骼被选中时也禁用轨道相机（OrbitControls 先于 R3F 拿到手势，选中即禁用才可靠）
   // 绘制模式的目标角色（选中的人偶）
   const drawCharId = pathDrawMode && selectedId?.startsWith('char-') ? selectedId : null;
 
@@ -685,6 +688,10 @@ export function Viewport3D() {
       store.updateCameraMove(cp.camId, cp.point === 'start' ? { startPos: pos } : { endPos: pos });
       return;
     }
+
+    // 骨骼：姿态编辑的 gizmo 拖拽直接改骨骼局部旋转（骨骼在 three 场景里，
+    // 不写回 store；「保存为姿势」时再快照四元数）。此处仅拦截避免落入几何体分支
+    if (parseBoneId(sid)) return;
 
     // 路径点：只写回位置
     const pp = parsePathPointId(sid);
@@ -732,6 +739,8 @@ export function Viewport3D() {
   if (selectedId && selectedObj3d) {
     if (parseCameraPointId(selectedId)) {
       gizmoMode = 'translate'; // 相机机位点只能平移
+    } else if (parseBoneId(selectedId)) {
+      gizmoMode = null; // 骨骼不挂 gizmo 圆环：直接拖骨骼小球旋转（见 CharacterView 拖拽逻辑）
     } else if (parsePathPointId(selectedId)) {
       gizmoMode = 'translate'; // 路径点只能平移
     } else if (selectedId.startsWith('char-')) {
@@ -759,7 +768,11 @@ export function Viewport3D() {
           // 登记渲染器/相机引用，供录制模块（P4 白片导出）使用
           registerPrevizViewport(state.gl, state.camera as THREE.PerspectiveCamera)
         }
-        onPointerMissed={() => select(null)}
+        onPointerMissed={() => {
+          // 姿态编辑模式下不响应落空点击（不退出编辑、不清除选中），退出编辑后恢复原逻辑
+          if (usePrevizStore.getState().poseEditingCharId) return;
+          select(null);
+        }}
       >
         <color attach="background" args={['#1e293b']} />
         {/* 三点打光（免下载 Environment 的替代方案）：环境底光 + 半球天光 + 主方向光（投影）+ 背光补光 */}
@@ -833,8 +846,10 @@ export function Viewport3D() {
             onMouseUp={() => usePrevizStore.getState().setGizmoDragging(false)}
           />
         )}
-        {/* 相机视角下禁用自由视角控制 */}
-        {!previewCameraId && <OrbitControls makeDefault />}
+        {/* 相机视角下禁用自由视角控制；骨骼选中/拖拽期间也禁用（防止手势被相机抢走） */}
+        {!previewCameraId && (
+          <OrbitControls makeDefault enabled={!gizmoDragging && !(selectedId && parseBoneId(selectedId))} />
+        )}
       </Canvas>
 
       {/* 变换模式切换工具条（相机视角下隐藏） */}

@@ -11,6 +11,7 @@ import type {
   Vec3,
 } from './types';
 import { createEmptyScene } from './types';
+import { POSE_CLIP } from './actionLibrary';
 
 // 各元素类型的中文名（用于自动生成对象名）
 export const OBJECT_TYPE_LABELS: Record<PrevizObjectType, string> = {
@@ -165,6 +166,19 @@ export function parseCameraPointId(id: string): { camId: string; point: 'start' 
   return { camId, point };
 }
 
+// 骨骼选中 id 的编解码（姿态编辑模式下挂 TransformControls 到骨骼）
+export function boneObjectId(charId: string, segment: string): string {
+  return `bone:${charId}:${segment}`;
+}
+export function parseBoneId(id: string): { charId: string; segment: string } | null {
+  if (!id.startsWith('bone:')) return null;
+  const parts = id.split(':');
+  const segment = parts[parts.length - 1];
+  const charId = parts.slice(1, -1).join(':');
+  if (!charId || !segment) return null;
+  return { charId, segment };
+}
+
 interface PrevizState {
   objects: PrevizObject[];
   characters: PrevizCharacter[];
@@ -214,6 +228,12 @@ interface PrevizState {
   gizmoDragging: boolean;
   setGizmoDragging: (v: boolean) => void;
 
+  // 姿态编辑模式：目标角色 id（null = 关闭）；开启后该角色暂停动画驱动、显示骨骼小球
+  poseEditingCharId: string | null;
+  setPoseEditing: (charId: string | null) => void;
+  /** 把姿势快照存成一条自定义姿势动作（挂到当前播放头时刻） */
+  savePoseAction: (charId: string, pose: Record<string, [number, number, number, number]>) => void;
+
   // 相机
   addCamera: () => void;
   removeCamera: (id: string) => void;
@@ -251,8 +271,7 @@ function insertPathPoint(path: PrevizPathPoint[], point: PrevizPathPoint) {
   return next;
 }
 
-export const usePrevizStore = create<PrevizState>()((set, get) => ({
-  objects: [],
+export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [],
   characters: [],
   cameras: [],
   selectedId: null,
@@ -265,9 +284,36 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({
   previewCameraId: null,
   gizmoDragging: false,
   pathDrawMode: false,
+  poseEditingCharId: null,
 
   setGizmoDragging: (v) => set({ gizmoDragging: v }),
   setPathDrawMode: (v) => set({ pathDrawMode: v }),
+
+  // 进入/退出姿态编辑模式；退出时若选中的是骨骼则一并清除选中
+  setPoseEditing: (charId) =>
+    set((state) => ({
+      poseEditingCharId: charId,
+      selectedId:
+        !charId && state.selectedId?.startsWith('bone:') ? null : state.selectedId,
+    })),
+
+  savePoseAction: (charId, pose) => {
+    const { currentTime } = get();
+    set((state) => ({
+      characters: state.characters.map((c) =>
+        c.id === charId
+          ? {
+              ...c,
+              actions: insertAction(c.actions, {
+                clip: POSE_CLIP,
+                start: Math.round(currentTime * 100) / 100,
+                pose,
+              }),
+            }
+          : c
+      ),
+    }));
+  },
 
   // 绘制模式添加路径点：首个点取当前播放头时刻，后续每个点自动 +1 秒
   appendDrawnPathPoint: (charId, position) => {
@@ -341,9 +387,12 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({
     set((state) => ({
       characters: state.characters.filter((c) => c.id !== id),
       selectedId:
-        state.selectedId === id || state.selectedId?.startsWith(`pp:${id}:`)
+        state.selectedId === id ||
+        state.selectedId?.startsWith(`pp:${id}:`) ||
+        state.selectedId?.startsWith(`bone:${id}:`)
           ? null
           : state.selectedId,
+      poseEditingCharId: state.poseEditingCharId === id ? null : state.poseEditingCharId,
     }));
   },
 
@@ -511,7 +560,17 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({
 
   setMannequinError: (v) => set({ mannequinError: v }),
 
-  select: (id) => set({ selectedId: id }),
+  // 切换选中对象时自动退出姿态编辑模式（选中该角色本体/其骨骼时保持）
+  select: (id) =>
+    set((state) => ({
+      selectedId: id,
+      poseEditingCharId:
+        state.poseEditingCharId &&
+        id !== state.poseEditingCharId &&
+        !id?.startsWith(`bone:${state.poseEditingCharId}:`)
+          ? null
+          : state.poseEditingCharId,
+    })),
 
   reset: () => {
     const scene = createEmptyScene();
@@ -527,6 +586,7 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({
       mannequinError: false,
       selectedCameraId: null,
       previewCameraId: null,
+      poseEditingCharId: null,
     });
   },
 
@@ -596,4 +656,9 @@ export function activeActionAt(char: PrevizCharacter, t: number) {
     else break; // actions 按 start 升序
   }
   return active;
+}
+
+// 调试钩子：E2E/控制台可直接读取和操作 store（选择骨骼、读取角色等）
+if (typeof window !== 'undefined') {
+  (window as unknown as { __previzStore: typeof usePrevizStore }).__previzStore = usePrevizStore;
 }

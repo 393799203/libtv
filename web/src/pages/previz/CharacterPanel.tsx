@@ -1,8 +1,16 @@
-import { useMemo, useState } from 'react';
-import { Select, App } from 'antd';
-import { DeleteOutlined, PlusOutlined, HighlightOutlined, CopyOutlined } from '@ant-design/icons';
-import { usePrevizStore, CHARACTER_PALETTE, characterColorLabel } from './previzStore';
+import { useEffect, useMemo, useState } from 'react';
+import { Select, App, Slider } from 'antd';
+import {
+  DeleteOutlined,
+  PlusOutlined,
+  HighlightOutlined,
+  CopyOutlined,
+  ManOutlined,
+  SaveOutlined,
+} from '@ant-design/icons';
+import { usePrevizStore, CHARACTER_PALETTE, characterColorLabel, parseBoneId } from './previzStore';
 import { MODEL_DEFS, actionLabel, modelDef } from './actionLibrary';
+import { snapshotPose, getPoseBone, POSE_BONE_LABELS } from './poseBones';
 import { useCanvasStore } from '@/stores/canvasStore';
 import type { ScriptNodeData } from '@/types/canvas';
 
@@ -22,6 +30,9 @@ export function CharacterPanel() {
   const updatePathPoint = usePrevizStore((s) => s.updatePathPoint);
   const pathDrawMode = usePrevizStore((s) => s.pathDrawMode);
   const setPathDrawMode = usePrevizStore((s) => s.setPathDrawMode);
+  const poseEditingCharId = usePrevizStore((s) => s.poseEditingCharId);
+  const setPoseEditing = usePrevizStore((s) => s.setPoseEditing);
+  const savePoseAction = usePrevizStore((s) => s.savePoseAction);
   const select = usePrevizStore((s) => s.select);
   const canvasNodes = useCanvasStore((s) => s.nodes);
 
@@ -53,7 +64,25 @@ export function CharacterPanel() {
     setEditingId(null);
   };
 
-  const selectedChar = characters.find((c) => c.id === selectedId) ?? null;
+  // 骨骼选中（bone:charId:segment）时定位到所属角色，保持角色详情/姿态滑杆可见
+  const boneSel = selectedId ? parseBoneId(selectedId) : null;
+  const selectedChar =
+    characters.find((c) => c.id === selectedId) ??
+    (boneSel ? characters.find((c) => c.id === boneSel.charId) ?? null : null);
+  // 姿态编辑模式是否作用于当前选中角色
+  const poseEditing = !!selectedChar && poseEditingCharId === selectedChar.id;
+
+  // 保存当前姿势为一条「自定义姿势」动作（挂到当前播放头时刻）
+  const handleSavePose = () => {
+    if (!selectedChar) return;
+    const pose = snapshotPose(selectedChar.id);
+    if (!pose || Object.keys(pose).length === 0) {
+      message.warning('未获取到骨骼数据，请确认人偶已加载');
+      return;
+    }
+    savePoseAction(selectedChar.id, pose);
+    message.success('已保存姿势到动作列表');
+  };
 
   // 身份映射提示词：只列绑定了剧本角色的角色，颜色写中文名
   const boundChars = characters.filter((c) => c.assetName);
@@ -190,6 +219,41 @@ export function CharacterPanel() {
                     updateCharacter(selectedChar.id, { assetName: e.target.value.trim() || undefined })
                   }
                 />
+              )}
+            </div>
+
+            {/* 姿态编辑：骨骼小球 + gizmo 旋转摆姿势，可保存为自定义姿势动作 */}
+            <div className="px-3 py-2 border-t border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-400 font-medium">姿态编辑</div>
+                <button
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] rounded transition-colors cursor-pointer ${
+                    poseEditing
+                      ? 'bg-blue-500 text-white hover:bg-blue-600'
+                      : 'text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600'
+                  }`}
+                  title="开启后角色显示骨骼点，点击骨骼用 gizmo 旋转摆姿势"
+                  onClick={() => setPoseEditing(poseEditing ? null : selectedChar.id)}
+                >
+                  <ManOutlined className="text-[9px]" />
+                  {poseEditing ? '退出姿态编辑' : '姿态编辑'}
+                </button>
+              </div>
+              {poseEditing && (
+                <div className="mt-1.5 flex flex-col gap-1.5">
+                  <div className="text-[11px] text-blue-500 leading-relaxed">
+                    视口中点击骨骼小球选中骨骼，用下方滑杆调整旋转（编辑期间该角色暂停动画）
+                  </div>
+                  <BonePoseSliders />
+                  <button
+                    className="flex items-center justify-center gap-1 px-2 py-1 text-[11px] text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors cursor-pointer"
+                    title="把当前姿势保存为动作（挂到当前播放头时刻）"
+                    onClick={handleSavePose}
+                  >
+                    <SaveOutlined className="text-[9px]" />
+                    保存为姿势
+                  </button>
+                </div>
               )}
             </div>
 
@@ -362,6 +426,59 @@ export function CharacterPanel() {
           <div className="mt-1.5 text-[10px] text-gray-300 text-center">先为角色绑定剧本角色</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// 骨骼旋转滑杆：选中骨骼小球后调整其 X/Y/Z 轴旋转（度）
+function BonePoseSliders() {
+  const selectedId = usePrevizStore((s) => s.selectedId);
+  const boneSel = selectedId ? parseBoneId(selectedId) : null;
+  const bone = boneSel ? getPoseBone(boneSel.charId, boneSel.segment) : undefined;
+  const [euler, setEuler] = useState<[number, number, number]>([0, 0, 0]);
+
+  // 选中骨骼变化时读取其当前旋转（度）
+  useEffect(() => {
+    if (bone) {
+      setEuler([
+        Math.round((bone.rotation.x * 180) / Math.PI),
+        Math.round((bone.rotation.y * 180) / Math.PI),
+        Math.round((bone.rotation.z * 180) / Math.PI),
+      ]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boneSel?.charId, boneSel?.segment]);
+
+  if (!boneSel || !bone) {
+    return <div className="text-[11px] text-gray-300">未选中骨骼（点击视口中的骨骼小球）</div>;
+  }
+
+  const onAxis = (axis: 0 | 1 | 2, v: number) => {
+    const next: [number, number, number] = [...euler];
+    next[axis] = v;
+    setEuler(next);
+    bone.rotation.set((next[0] * Math.PI) / 180, (next[1] * Math.PI) / 180, (next[2] * Math.PI) / 180);
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="text-[11px] text-gray-600 font-medium">
+        {POSE_BONE_LABELS[boneSel.segment] ?? boneSel.segment}
+      </div>
+      {(['X', 'Y', 'Z'] as const).map((label, axis) => (
+        <div key={label} className="flex items-center gap-1.5">
+          <span className="text-[10px] text-gray-400 w-3 shrink-0">{label}</span>
+          <Slider
+            className="flex-1"
+            min={-180}
+            max={180}
+            step={1}
+            value={euler[axis]}
+            onChange={(v) => onAxis(axis as 0 | 1 | 2, v as number)}
+          />
+          <span className="text-[10px] text-gray-500 w-8 text-right shrink-0">{euler[axis]}°</span>
+        </div>
+      ))}
     </div>
   );
 }

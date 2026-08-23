@@ -90,10 +90,12 @@ export interface PrevizPathPoint {
   position: Vec3;
 }
 
-// 动作片段：start 时刻开始播放 clip 动画（clip 为 mannequin.glb 内的动画名）
+// 动作片段：start 时刻开始播放 clip 动画（clip 为 GLB 动画名；自定义姿势用 __pose__ 占位）
 export interface PrevizActionClip {
   clip: string;
   start: number; // 开始时间（秒）
+  /** 自定义姿势快照：骨骼名片段 → 局部四元数 [x,y,z,w]（clip 为 __pose__ 时有效） */
+  pose?: Record<string, [number, number, number, number]>;
 }
 
 // 灰模人偶角色

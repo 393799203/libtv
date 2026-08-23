@@ -81,6 +81,7 @@ export function modelDef(kind?: string): PrevizModelDef {
 
 // 按模型查动作中文名
 export function actionLabel(kind: string | undefined, clip: string): string {
+  if (clip === POSE_CLIP) return '自定义姿势';
   for (const g of modelDef(kind).library) {
     for (const i of g.items) {
       if (i.clip === clip) return i.label;
@@ -88,3 +89,6 @@ export function actionLabel(kind: string | undefined, clip: string): string {
   }
   return clip;
 }
+
+// 自定义姿势动作的 clip 占位名（姿势数据存在 PrevizActionClip.pose 字段）
+export const POSE_CLIP = '__pose__';
