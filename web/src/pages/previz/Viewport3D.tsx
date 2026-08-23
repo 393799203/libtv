@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Line, OrbitControls, TransformControls } from '@react-three/drei';
+import { Line, OrbitControls, RoundedBox, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   usePrevizStore,
@@ -12,7 +12,7 @@ import {
 import { CharacterView } from './CharacterView';
 import { sampleCameraPose } from './cameraRig';
 import { registerPrevizViewport } from './recorder';
-import type { PrevizCamera, PrevizObject, PrevizObjectType } from './types';
+import type { PrevizCamera, PrevizObject } from './types';
 
 // TransformControls 的三种拖拽模式
 type TransformMode = 'translate' | 'rotate' | 'scale';
@@ -23,22 +23,428 @@ const MODE_LABELS: Record<TransformMode, string> = {
   scale: '缩放',
 };
 
-// 每种几何体类型对应的 three 几何体（墙用薄方块、平面用单面片，尺寸差异由对象 scale 承担）
-function ObjectGeometry({ type }: { type: PrevizObjectType }) {
-  switch (type) {
+// 圆角方块：白模粘土质感的基础件；圆角半径按最小边自适应（薄板件不会过度圆角）
+// 注：圆角 + 阴影会增加三角面数，同屏元素很多（上百个组合件）时注意性能
+function BBox({
+  args,
+  children,
+  position,
+  rotation,
+  scale,
+}: {
+  args: [number, number, number];
+  children?: React.ReactNode;
+  position?: [number, number, number];
+  rotation?: [number, number, number];
+  scale?: [number, number, number] | number;
+}) {
+  const radius = Math.min(0.04, Math.min(...args) * 0.2);
+  return (
+    <RoundedBox
+      args={args}
+      radius={radius}
+      smoothness={2}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+    >
+      {children}
+    </RoundedBox>
+  );
+}
+
+// 按对象 id 哈希给材质明度做 ±5% 抖动，减少「全是同一个灰盒子」感
+function shadeColor(hex: string, id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) | 0;
+  }
+  const f = 0.95 + (((h % 100) + 100) % 100) / 1000; // 0.95 ~ 1.049
+  const c = new THREE.Color(hex).multiplyScalar(f);
+  return `#${c.getHexString()}`;
+}
+
+// 每种类型对应的渲染内容：基础几何体为单 mesh，组合式白模组件为 group 拼装
+// 组合内部相对比例写死、外包围盒约 1m，实际尺寸由对象 scale 承担（与单位几何体同一约定）
+function ObjectContent({ obj, selected }: { obj: PrevizObject; selected: boolean }) {
+  // 统一灰白白模材质（选中蓝色高亮）；按 id 做轻微明度抖动，road 等自带颜色由 obj.color 承担
+  const matColor = useMemo(() => shadeColor(obj.color, obj.id), [obj.color, obj.id]);
+  const mat = (
+    <meshStandardMaterial
+      color={matColor}
+      emissive={selected ? '#2563eb' : '#000000'}
+      emissiveIntensity={selected ? 0.5 : 0}
+      side={THREE.DoubleSide}
+    />
+  );
+
+  switch (obj.type) {
     case 'box':
     case 'wall':
-      return <boxGeometry args={[1, 1, 1]} />;
+      return (
+        <BBox args={[1, 1, 1]}>{mat}</BBox>
+      );
     case 'cylinder':
-      return <cylinderGeometry args={[0.5, 0.5, 1, 32]} />;
+      return (
+        <mesh>
+          <cylinderGeometry args={[0.5, 0.5, 1, 32]} />
+          {mat}
+        </mesh>
+      );
     case 'sphere':
-      return <sphereGeometry args={[0.5, 32, 16]} />;
+      return (
+        <mesh>
+          <sphereGeometry args={[0.5, 32, 16]} />
+          {mat}
+        </mesh>
+      );
+    // 平面：平躺烘进几何（mesh 层 rotation-x=-90°），不再依赖对象 rotation（AI 返回 [0,0,0]）
     case 'plane':
-      return <planeGeometry args={[1, 1]} />;
+      return (
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[1, 1]} />
+          {mat}
+        </mesh>
+      );
+
+    // 楼梯：5 级台阶逐级上升（沿 -z 上行），包围盒 1x1x1
+    case 'stairs':
+      return (
+        <group>
+          {[0, 1, 2, 3, 4].map((i) => {
+            const h = 0.2 * (i + 1);
+            return (
+              <BBox key={i} position={[0, h / 2, 0.4 - 0.2 * i]} args={[1, h, 0.2]}>{mat}</BBox>
+            );
+          })}
+        </group>
+      );
+
+    // 房子：box 主体 + 四棱锥屋顶（45° 旋转扣在顶上），包围盒约 1x1x0.8
+    case 'house':
+      return (
+        <group>
+          <BBox position={[0, 0.325, 0]} args={[1, 0.65, 0.8]}>{mat}</BBox>
+          <mesh position={[0, 0.825, 0]} rotation={[0, Math.PI / 4, 0]}>
+            <coneGeometry args={[0.72, 0.35, 4]} />
+            {mat}
+          </mesh>
+        </group>
+      );
+
+    // 路面：薄长条（y≈0.02），深灰色由 obj.color 承担
+    case 'road':
+      return (
+        <BBox position={[0, 0.01, 0]} args={[1, 0.02, 1]}>{mat}</BBox>
+      );
+
+    // 树：cylinder 树干 + sphere 树冠，总高 1
+    case 'tree':
+      return (
+        <group>
+          <mesh position={[0, 0.225, 0]}>
+            <cylinderGeometry args={[0.06, 0.08, 0.45, 12]} />
+            {mat}
+          </mesh>
+          <mesh position={[0, 0.7, 0]}>
+            <sphereGeometry args={[0.3, 20, 14]} />
+            {mat}
+          </mesh>
+        </group>
+      );
+
+    // 栅栏：薄矮板（比 wall 矮）
+    case 'fence':
+      return (
+        <BBox position={[0, 0.5, 0]} args={[1, 1, 0.05]}>{mat}</BBox>
+      );
+
+    // 车辆：box 车身 + 小一号 box 车厢，包围盒 1x0.9x0.45
+    case 'car':
+      return (
+        <group>
+          <BBox position={[0, 0.25, 0]} args={[1, 0.5, 0.45]}>{mat}</BBox>
+          <BBox position={[-0.05, 0.7, 0]} args={[0.55, 0.4, 0.4]}>{mat}</BBox>
+        </group>
+      );
+
+    // ====== 建筑结构 ======
+
+    // 斜坡：斜置薄板坡道（沿 -z 上行，坡角约 24°）
+    case 'ramp':
+      return (
+        <BBox position={[0, 0.22, 0]} rotation={[0.42, 0, 0]} args={[1, 0.05, 1.1]}>{mat}</BBox>
+      );
+
+    // 平台/高台：扁平台子
+    case 'platform':
+      return (
+        <BBox position={[0, 0.5, 0]} args={[1, 1, 1]}>{mat}</BBox>
+      );
+
+    // 门：竖直薄板 + 边框（两侧框 + 顶框）
+    case 'door':
+      return (
+        <group>
+          <BBox position={[0, 0.48, 0]} args={[0.85, 0.96, 0.5]}>{mat}</BBox>
+          <BBox position={[-0.46, 0.5, 0]} args={[0.08, 1, 1]}>{mat}</BBox>
+          <BBox position={[0.46, 0.5, 0]} args={[0.08, 1, 1]}>{mat}</BBox>
+          <BBox position={[0, 0.98, 0]} args={[1, 0.05, 1]}>{mat}</BBox>
+        </group>
+      );
+
+    // 窗：外框 + 内嵌板（装墙上用）
+    case 'window':
+      return (
+        <group>
+          <BBox position={[0, 0.5, 0]} args={[1, 1, 0.6]}>{mat}</BBox>
+          <BBox position={[0, 0.5, 0]} args={[0.85, 0.85, 1]}>{mat}</BBox>
+        </group>
+      );
+
+    // 拱门：两根柱 + 顶部横梁
+    case 'arch':
+      return (
+        <group>
+          <BBox position={[-0.45, 0.4, 0]} args={[0.1, 0.8, 0.5]}>{mat}</BBox>
+          <BBox position={[0.45, 0.4, 0]} args={[0.1, 0.8, 0.5]}>{mat}</BBox>
+          <BBox position={[0, 0.9, 0]} args={[1, 0.2, 0.5]}>{mat}</BBox>
+        </group>
+      );
+
+    // 栏杆：矮薄板 + 顶杆
+    case 'railing':
+      return (
+        <group>
+          <BBox position={[0, 0.3, 0]} args={[1, 0.6, 0.05]}>{mat}</BBox>
+          <BBox position={[0, 0.9, 0]} args={[1, 0.08, 0.08]}>{mat}</BBox>
+        </group>
+      );
+
+    // ====== 街道设施 ======
+
+    // 路灯：细圆柱杆 + 顶部横臂 + 灯头
+    case 'streetlamp':
+      return (
+        <group>
+          <mesh position={[0, 0.425, 0]}>
+            <cylinderGeometry args={[0.02, 0.03, 0.85, 10]} />
+            {mat}
+          </mesh>
+          <BBox position={[0.12, 0.86, 0]} args={[0.25, 0.04, 0.05]}>{mat}</BBox>
+          <BBox position={[0.24, 0.83, 0]} args={[0.1, 0.05, 0.07]}>{mat}</BBox>
+        </group>
+      );
+
+    // 长椅：座板 + 靠背 + 两短腿
+    case 'bench':
+      return (
+        <group>
+          <BBox position={[0, 0.45, 0]} args={[1, 0.06, 0.3]}>{mat}</BBox>
+          <BBox position={[0, 0.66, -0.14]} args={[1, 0.36, 0.05]}>{mat}</BBox>
+          <BBox position={[-0.45, 0.22, 0]} args={[0.05, 0.45, 0.25]}>{mat}</BBox>
+          <BBox position={[0.45, 0.22, 0]} args={[0.05, 0.45, 0.25]}>{mat}</BBox>
+        </group>
+      );
+
+    // 招牌：立柱 + 矩形牌面
+    case 'signboard':
+      return (
+        <group>
+          <mesh position={[0, 0.35, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.7, 10]} />
+            {mat}
+          </mesh>
+          <BBox position={[0, 0.85, 0]} args={[0.6, 0.3, 0.04]}>{mat}</BBox>
+        </group>
+      );
+
+    // 人行道：薄板条（浅灰由 obj.color 承担，区别于 road 深灰）
+    case 'sidewalk':
+      return (
+        <BBox position={[0, 0.015, 0]} args={[1, 0.03, 1]}>{mat}</BBox>
+      );
+
+    // 电线杆：高圆柱 + 顶部横担
+    case 'utilitypole':
+      return (
+        <group>
+          <mesh position={[0, 0.5, 0]}>
+            <cylinderGeometry args={[0.025, 0.035, 1, 10]} />
+            {mat}
+          </mesh>
+          <BBox position={[0, 0.9, 0]} args={[0.5, 0.04, 0.05]}>{mat}</BBox>
+        </group>
+      );
+
+    // ====== 家具 ======
+
+    // 桌子：面板 + 四腿
+    case 'table':
+      return (
+        <group>
+          <BBox position={[0, 0.94, 0]} args={[1, 0.06, 0.55]}>{mat}</BBox>
+          {[
+            [-0.45, -0.22],
+            [0.45, -0.22],
+            [-0.45, 0.22],
+            [0.45, 0.22],
+          ].map(([x, z]) => (
+            <BBox key={`${x},${z}`} position={[x, 0.47, z]} args={[0.05, 0.94, 0.05]}>{mat}</BBox>
+          ))}
+        </group>
+      );
+
+    // 椅子：座面 + 靠背 + 四腿
+    case 'chair':
+      return (
+        <group>
+          <BBox position={[0, 0.5, 0]} args={[0.9, 0.07, 0.9]}>{mat}</BBox>
+          <BBox position={[0, 0.78, -0.42]} args={[0.9, 0.55, 0.07]}>{mat}</BBox>
+          {[
+            [-0.4, -0.4],
+            [0.4, -0.4],
+            [-0.4, 0.4],
+            [0.4, 0.4],
+          ].map(([x, z]) => (
+            <BBox key={`${x},${z}`} position={[x, 0.25, z]} args={[0.07, 0.5, 0.07]}>{mat}</BBox>
+          ))}
+        </group>
+      );
+
+    // 沙发：底座 + 靠背 + 两扶手
+    case 'sofa':
+      return (
+        <group>
+          <BBox position={[0, 0.18, 0]} args={[1, 0.36, 0.45]}>{mat}</BBox>
+          <BBox position={[0, 0.58, -0.16]} args={[1, 0.45, 0.12]}>{mat}</BBox>
+          <BBox position={[-0.44, 0.5, 0]} args={[0.12, 0.3, 0.45]}>{mat}</BBox>
+          <BBox position={[0.44, 0.5, 0]} args={[0.12, 0.3, 0.45]}>{mat}</BBox>
+        </group>
+      );
+
+    // 床：床架 + 床垫 + 床头板
+    case 'bed':
+      return (
+        <group>
+          <BBox position={[0, 0.1, 0]} args={[1, 0.2, 1]}>{mat}</BBox>
+          <BBox position={[0, 0.28, 0]} args={[0.95, 0.16, 0.95]}>{mat}</BBox>
+          <BBox position={[0, 0.45, -0.47]} args={[1, 0.5, 0.06]}>{mat}</BBox>
+        </group>
+      );
+
+    // 柜子：高柜体 + 顶沿
+    case 'cabinet':
+      return (
+        <group>
+          <BBox position={[0, 0.48, 0]} args={[1, 0.96, 1]}>{mat}</BBox>
+          <BBox position={[0, 0.98, 0]} args={[1.05, 0.04, 1.05]}>{mat}</BBox>
+        </group>
+      );
+
+    // 屏幕/电视：薄板 + 支架 + 底座
+    case 'screen':
+      return (
+        <group>
+          <BBox position={[0, 0.7, 0]} args={[1, 0.6, 0.06]}>{mat}</BBox>
+          <BBox position={[0, 0.3, 0]} args={[0.08, 0.2, 0.06]}>{mat}</BBox>
+          <BBox position={[0, 0.03, 0]} args={[0.4, 0.05, 0.3]}>{mat}</BBox>
+        </group>
+      );
+
+    // ====== 载具 ======
+
+    // 卡车：货厢大 box + 车头小 box（沿 x 走向）
+    case 'truck':
+      return (
+        <group>
+          <BBox position={[-0.15, 0.5, 0]} args={[0.65, 0.65, 0.9]}>{mat}</BBox>
+          <BBox position={[0.36, 0.4, 0]} args={[0.28, 0.4, 0.85]}>{mat}</BBox>
+        </group>
+      );
+
+    // 摩托：两轮（细圆柱横放）+ 车身小 box
+    case 'motorcycle':
+      return (
+        <group>
+          <mesh position={[-0.35, 0.15, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.15, 0.15, 0.05, 16]} />
+            {mat}
+          </mesh>
+          <mesh position={[0.35, 0.15, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.15, 0.15, 0.05, 16]} />
+            {mat}
+          </mesh>
+          <BBox position={[0, 0.3, 0]} args={[0.5, 0.15, 0.12]}>{mat}</BBox>
+        </group>
+      );
+
+    // 自行车：两个细轮 + 斜梁 + 立管（三角架近似）
+    case 'bicycle':
+      return (
+        <group>
+          <mesh position={[-0.3, 0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.03, 16]} />
+            {mat}
+          </mesh>
+          <mesh position={[0.3, 0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.03, 16]} />
+            {mat}
+          </mesh>
+          {/* 斜梁 */}
+          <BBox position={[0, 0.4, 0]} rotation={[0, 0, 0.5]} args={[0.55, 0.03, 0.03]}>{mat}</BBox>
+          {/* 车把立管 */}
+          <BBox position={[0.28, 0.55, 0]} args={[0.03, 0.35, 0.03]}>{mat}</BBox>
+        </group>
+      );
+
+    // ====== 自然 ======
+
+    // 岩石：压扁的十二面体（不规则感）
+    case 'rock':
+      return (
+        <mesh position={[0, 0.3, 0]} scale={[1, 0.7, 0.9]}>
+          <dodecahedronGeometry args={[0.5, 0]} />
+          {mat}
+        </mesh>
+      );
+
+    // 灌木：半球
+    case 'bush':
+      return (
+        <mesh position={[0, 0, 0]}>
+          <sphereGeometry args={[0.5, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          {mat}
+        </mesh>
+      );
+
+    // 水面：薄平面，半透明蓝色（白模中唯一的彩色元素）
+    case 'water':
+      return (
+        <BBox args={[1, 0.02, 1]} position={[0, 0.01, 0]}>
+          <meshStandardMaterial
+            color={matColor}
+            transparent
+            opacity={0.55}
+            emissive={selected ? '#2563eb' : '#000000'}
+            emissiveIntensity={selected ? 0.5 : 0}
+            side={THREE.DoubleSide}
+          />
+        </BBox>
+      );
+
+    // 土坡/山丘：半球（默认 scale 压成扁平坡）
+    case 'hill':
+      return (
+        <mesh position={[0, 0, 0]}>
+          <sphereGeometry args={[0.5, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          {mat}
+        </mesh>
+      );
   }
 }
 
-// 单个场景对象：灰色系白模材质，选中时蓝色高亮
+// 单个场景对象：外层 group 承载位置/旋转/缩放，灰色系白模材质，选中时蓝色高亮
 function SceneObject({
   obj,
   registerRef,
@@ -49,25 +455,38 @@ function SceneObject({
   const selected = usePrevizStore((s) => s.selectedId === obj.id);
   const select = usePrevizStore((s) => s.select);
 
+  // 阴影：组内所有 mesh 统一投射+接收阴影（组合件子件多，逐件标注太啰嗦）
+  const handleRef = useCallback(
+    (g: THREE.Group | null) => {
+      registerRef(obj.id, g);
+      g?.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
+      });
+    },
+    [obj.id, registerRef]
+  );
+
+  // plane 兼容：平躺已烘进几何，忽略对象 rotation 的 X 分量
+  // （存量场景 JSON 里 plane 存的 -π/2 若再应用会被转两次）
+  const rotation: [number, number, number] =
+    obj.type === 'plane' ? [0, obj.rotation[1], 0] : obj.rotation;
+
   return (
-    <mesh
-      ref={(mesh) => registerRef(obj.id, mesh)}
+    <group
+      ref={handleRef}
       position={obj.position}
-      rotation={obj.rotation}
+      rotation={rotation}
       scale={obj.scale}
       onClick={(e) => {
         e.stopPropagation();
         select(obj.id);
       }}
     >
-      <ObjectGeometry type={obj.type} />
-      <meshStandardMaterial
-        color={obj.color}
-        emissive={selected ? '#2563eb' : '#000000'}
-        emissiveIntensity={selected ? 0.5 : 0}
-        side={THREE.DoubleSide}
-      />
-    </mesh>
+      <ObjectContent obj={obj} selected={selected} />
+    </group>
   );
 }
 
@@ -237,6 +656,9 @@ export function Viewport3D() {
   const drawCharId = pathDrawMode && selectedId?.startsWith('char-') ? selectedId : null;
 
   const [mode, setMode] = useState<TransformMode>('translate');
+  // handleObjectChange 是空依赖 useCallback，通过 ref 读最新模式
+  const modeRef = useRef<TransformMode>('translate');
+  modeRef.current = mode;
   // 选中目标 id → three 对象（几何体 / 角色 group / 路径点小球 / 相机机位点）的引用表，供 TransformControls 挂载
   const objRefs = useRef(new Map<string, THREE.Object3D>());
 
@@ -273,11 +695,16 @@ export function Viewport3D() {
       return;
     }
 
-    // 角色：有路径时，拖拽本体 = 在「当前播放头时刻」记录/更新路径点；
-    // 无路径时，写回基准位置。朝向（rotationY）始终写回
+    // 角色：旋转模式只写朝向（并标记手动锁定，行走不再自动朝前）；
+    // 移动模式写位置——有路径时写进当前播放头时刻的路径点，无路径时写基准位置
     if (sid.startsWith('char-')) {
       const char = store.characters.find((c) => c.id === sid);
-      if (char && char.path.length > 0) {
+      if (!char) return;
+      if (modeRef.current === 'rotate') {
+        store.updateCharacter(sid, { rotationY: obj3d.rotation.y, manualFacing: true });
+        return;
+      }
+      if (char.path.length > 0) {
         if (!store.playing) {
           // 播放中不写路径点（播放头持续前进会刷出一串点）
           store.upsertPathPointAt(sid, store.currentTime, [obj3d.position.x, obj3d.position.y, obj3d.position.z]);
@@ -287,7 +714,6 @@ export function Viewport3D() {
           position: [obj3d.position.x, obj3d.position.y, obj3d.position.z],
         });
       }
-      store.updateCharacter(sid, { rotationY: obj3d.rotation.y });
       return;
     }
 
@@ -327,6 +753,7 @@ export function Viewport3D() {
   return (
     <div className="relative w-full h-full">
       <Canvas
+        shadows
         camera={{ position: [8, 6, 8], fov: 50 }}
         onCreated={(state) =>
           // 登记渲染器/相机引用，供录制模块（P4 白片导出）使用
@@ -335,8 +762,26 @@ export function Viewport3D() {
         onPointerMissed={() => select(null)}
       >
         <color attach="background" args={['#1e293b']} />
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[10, 12, 8]} intensity={1.2} />
+        {/* 三点打光（免下载 Environment 的替代方案）：环境底光 + 半球天光 + 主方向光（投影）+ 背光补光 */}
+        <ambientLight intensity={0.35} />
+        <hemisphereLight args={['#cbd5e1', '#334155', 0.5]} />
+        <directionalLight
+          position={[10, 12, 8]}
+          intensity={1.1}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-camera-left={-14}
+          shadow-camera-right={14}
+          shadow-camera-top={14}
+          shadow-camera-bottom={-14}
+          shadow-camera-far={60}
+        />
+        <directionalLight position={[-6, 8, -8]} intensity={0.3} />
+        {/* 地面阴影承接垫（透明 shadowMaterial，只显示阴影，与 gridHelper 共存） */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]} receiveShadow>
+          <planeGeometry args={[60, 60]} />
+          <shadowMaterial transparent opacity={0.3} />
+        </mesh>
         {/* 地面参考网格 20x20 */}
         <gridHelper args={[20, 20, '#94a3b8', '#475569']} />
 

@@ -5,27 +5,16 @@ import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { usePrevizStore, sampleCharacterPosition, activeActionAt } from './previzStore';
-import { IDLE_CLIP, LOOPING_CLIPS } from './actionLibrary';
+import { modelDef, MODEL_DEFS } from './actionLibrary';
 import type { PrevizCharacter } from './types';
 
-// 人偶模型（KayKit Knight，CC0）：骨架 + 76 个动画
-// 模型内是 PrototypePete 素体 + 可拆件，隐藏盔甲/武器/披风后就是普通人物白模
-export const MANNEQUIN_URL = '/previz/mannequin.glb';
+// 人偶目标身高（米）：加载后按包围盒高度归一缩放（模型单位不一定是米）
+const CHARACTER_HEIGHT = 1.75;
 
-// 加载时隐藏的部件（盔甲/武器/披风），只留素体
-const HIDDEN_PARTS = new Set([
-  '1H_Sword_Offhand',
-  'Badge_Shield',
-  'Rectangle_Shield',
-  'Round_Shield',
-  'Spike_Shield',
-  '1H_Sword',
-  '2H_Sword',
-  'Knight_Helmet',
-  'Knight_Cape',
-]);
+// 朝向校正：模型正脸若非 +Z，行走自动朝向会反向——人偶倒着走就改成 Math.PI
+const FACING_OFFSET = 0;
 
-// 白模材质颜色
+// 白模材质默认颜色（未染色的角色）
 const MANNEQUIN_COLOR = '#d1d5db';
 const SELECT_EMISSIVE = '#2563eb';
 
@@ -46,7 +35,7 @@ function CharacterFallback({ char }: { char: PrevizCharacter }) {
     >
       <mesh position={[0, 0.9, 0]}>
         <capsuleGeometry args={[0.3, 1.2, 4, 8]} />
-        <meshStandardMaterial color="#9ca3af" />
+        <meshStandardMaterial color={char.color ?? '#9ca3af'} />
       </mesh>
     </group>
   );
@@ -86,9 +75,11 @@ function CharacterModel({
   const selected = usePrevizStore((s) => s.selectedId === char.id);
   const select = usePrevizStore((s) => s.select);
 
-  const { scene, animations } = useGLTF(MANNEQUIN_URL);
+  // 按角色选择的模型加载（男体 / 女体）
+  const def = modelDef(char.model);
+  const { scene, animations } = useGLTF(def.url);
 
-  // 克隆场景（多角色各自独立骨骼），并统一替换成浅灰白模材质
+  // 克隆场景（多角色各自独立骨骼），统一换成白模材质，并按包围盒归一到目标身高
   const { clonedScene, material } = useMemo(() => {
     const cloned = skeletonClone(scene);
     const mat = new THREE.MeshStandardMaterial({
@@ -97,19 +88,41 @@ function CharacterModel({
       metalness: 0,
     });
     cloned.traverse((o) => {
-      // 隐藏盔甲/武器/披风部件，只留普通人物素体
-      if (HIDDEN_PARTS.has(o.name)) {
-        o.visible = false;
-        return;
-      }
       if ((o as THREE.Mesh).isMesh) {
         (o as THREE.Mesh).material = mat;
+        // 人偶参与阴影投射/接收
+        o.castShadow = true;
+        o.receiveShadow = true;
+        // 骨骼蒙皮模型的几何包围球不可靠，防止视锥剔除误判
+        o.frustumCulled = false;
       }
     });
+    // 尺寸归一：蒙皮模型用蒙皮感知的包围盒（静态几何包围盒对部分模型不可信）
+    const bbox = new THREE.Box3();
+    const tmpBox = new THREE.Box3();
+    cloned.updateMatrixWorld(true);
+    cloned.traverse((o) => {
+      const sm = o as THREE.SkinnedMesh;
+      if (sm.isSkinnedMesh) {
+        sm.computeBoundingBox();
+        tmpBox.copy(sm.boundingBox).applyMatrix4(sm.matrixWorld);
+        bbox.union(tmpBox);
+      }
+    });
+    if (bbox.isEmpty()) bbox.setFromObject(cloned);
+    const height = bbox.max.y - bbox.min.y;
+    if (height > 1e-6 && Math.abs(height - CHARACTER_HEIGHT) > 0.01) {
+      cloned.scale.multiplyScalar(CHARACTER_HEIGHT / height);
+    }
     return { clonedScene: cloned, material: mat };
-  }, [scene]);
+  }, [scene, def.kind]);
 
   const { actions, mixer } = useAnimations(animations, groupRef);
+
+  // 角色染色（白片中区分角色；未设置用默认灰）
+  useEffect(() => {
+    material.color.set(char.color ?? MANNEQUIN_COLOR);
+  }, [material, char.color]);
 
   // 选中高亮（直接改材质自发光，避免重建）
   useEffect(() => {
@@ -143,9 +156,9 @@ function CharacterModel({
       const [x, y, z] = sampleCharacterPosition(char, t);
       g.position.set(x, y, z);
 
-      // 朝向：有路径且正在移动时，脸朝运动前方（向前/向后差分确定方向）；静止时用手动设置的朝向
+      // 朝向：有路径且未手动锁定朝向时，脸朝运动前方（向前/向后差分确定方向）；否则用手动设置的朝向
       let rotY = char.rotationY;
-      if (char.path.length >= 2) {
+      if (char.path.length >= 2 && !char.manualFacing) {
         const EPS = 1e-4;
         const STEP = 0.1;
         const ahead = sampleCharacterPosition(char, t + STEP);
@@ -158,22 +171,22 @@ function CharacterModel({
           dz = z - behind[2];
         }
         if (Math.hypot(dx, dz) > EPS) {
-          rotY = Math.atan2(dx, dz); // 模型正脸朝 +Z，使 +Z 对齐运动方向
+          rotY = Math.atan2(dx, dz); // 模型正脸朝 +Z（见 FACING_OFFSET），使 +Z 对齐运动方向
         }
       }
-      g.rotation.set(0, rotY, 0);
+      g.rotation.set(0, rotY + FACING_OFFSET, 0);
     }
 
     // 该时刻应播放的动作
     const active = activeActionAt(char, t);
-    const clipName = active?.clip ?? IDLE_CLIP;
+    const clipName = active?.clip ?? def.idleClip;
     const state = playStateRef.current;
 
     // 动作切换：crossFade 0.2s 淡入新动作
     if (clipName !== state.clipName) {
       const next = actions[clipName];
       if (next) {
-        const looping = LOOPING_CLIPS.has(clipName);
+        const looping = def.looping.has(clipName);
         next.reset();
         next.setLoop(looping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
         next.clampWhenFinished = true;
@@ -194,7 +207,7 @@ function CharacterModel({
       mixer.update(delta);
       const clip = action.getClip();
       const local = Math.max(0, t - (active?.start ?? 0));
-      const expected = LOOPING_CLIPS.has(clipName)
+      const expected = def.looping.has(clipName)
         ? local % clip.duration
         : Math.min(local, clip.duration);
       if (Math.abs(action.time - expected) > 0.5) {
@@ -204,7 +217,7 @@ function CharacterModel({
       // 暂停/拖进度条：直接跳到该时刻的姿势
       const clip = action.getClip();
       const local = Math.max(0, t - (active?.start ?? 0));
-      action.time = LOOPING_CLIPS.has(clipName)
+      action.time = def.looping.has(clipName)
         ? local % clip.duration
         : Math.min(local, Math.max(0, clip.duration - 1e-4));
       mixer.update(0);
@@ -244,4 +257,5 @@ export function CharacterView({
   );
 }
 
-useGLTF.preload(MANNEQUIN_URL);
+useGLTF.preload(MODEL_DEFS.male.url);
+useGLTF.preload(MODEL_DEFS.female.url);

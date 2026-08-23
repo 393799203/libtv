@@ -155,6 +155,7 @@ func main() {
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager)
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
+	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService)
@@ -334,6 +335,12 @@ func main() {
 		prompt := api.Group("/prompt")
 		{
 			prompt.POST("/generate", middleware.Billing(billingService, service.BillingActionPromptGenerate), promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
+		}
+
+		// 白模预演（需登录）；AI 场景解析入口，先过扣费中间件
+		previz := api.Group("/previz")
+		{
+			previz.POST("/analyze-scene", middleware.Billing(billingService, service.BillingActionPrevizAnalyze), previzHandler.AnalyzeScene) // AI 建白模：参考图 → 几何体布局
 		}
 
 		// 用户个人资产库（需登录）

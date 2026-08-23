@@ -1,13 +1,7 @@
 import { useState } from 'react';
-import {
-  DeleteOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { usePrevizStore, OBJECT_TYPE_LABELS } from './previzStore';
-import type { PrevizObjectType } from './types';
-
-// 可添加的几何体类型列表
-const ADDABLE_TYPES: PrevizObjectType[] = ['box', 'cylinder', 'sphere', 'plane', 'wall'];
+import { OBJECT_CATEGORIES } from './types';
 
 export function ObjectsPanel() {
   const objects = usePrevizStore((s) => s.objects);
@@ -35,27 +29,36 @@ export function ObjectsPanel() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 添加几何体 */}
-      <div className="p-3 border-b border-gray-100">
-        <div className="text-xs text-gray-400 font-medium mb-2">添加几何体</div>
-        <div className="grid grid-cols-2 gap-1.5">
-          {ADDABLE_TYPES.map((type) => (
-            <button
-              key={type}
-              className="flex items-center justify-center gap-1 px-2 py-1.5 text-xs text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors cursor-pointer"
-              onClick={() => addObject(type)}
-            >
-              <PlusOutlined className="text-[10px]" />
-              {OBJECT_TYPE_LABELS[type]}
-            </button>
-          ))}
-        </div>
+      {/* 添加元素（按分类分组；AI 建白模的补充） */}
+      <div className="p-3 border-b border-gray-100 max-h-72 overflow-y-auto">
+        <div className="text-xs text-gray-400 font-medium mb-2">添加元素</div>
+        {OBJECT_CATEGORIES.map((cat) => (
+          <div key={cat.key} className="mb-2">
+            <div className="text-[10px] text-gray-300 mb-1">{cat.label}</div>
+            <div className="grid grid-cols-3 gap-1">
+              {cat.types.map((type) => (
+                <button
+                  key={type}
+                  className="flex items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors cursor-pointer"
+                  onClick={() => addObject(type)}
+                >
+                  <PlusOutlined className="text-[9px]" />
+                  {OBJECT_TYPE_LABELS[type]}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* 对象列表 */}
+      {/* 对象列表（微调/删除） */}
       <div className="flex-1 overflow-y-auto p-2">
         {objects.length === 0 ? (
-          <div className="text-xs text-gray-300 text-center py-8">空场景，点击上方按钮添加</div>
+          <div className="text-xs text-gray-300 text-center py-8 leading-relaxed">
+            空场景
+            <br />
+            点击上方按钮添加，或用顶栏「AI 建白模」生成
+          </div>
         ) : (
           objects.map((obj) => (
             <div

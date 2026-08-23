@@ -3,6 +3,7 @@ import type {
   PrevizCamera,
   PrevizCameraMove,
   PrevizCharacter,
+  PrevizModelKind,
   PrevizObject,
   PrevizObjectType,
   PrevizPathPoint,
@@ -11,29 +12,128 @@ import type {
 } from './types';
 import { createEmptyScene } from './types';
 
-// 各几何体类型的中文名（用于自动生成对象名）
+// 各元素类型的中文名（用于自动生成对象名）
 export const OBJECT_TYPE_LABELS: Record<PrevizObjectType, string> = {
+  // 基础几何
   box: '方块',
   cylinder: '圆柱',
   sphere: '球体',
   plane: '平面',
   wall: '墙体',
+  // 建筑结构
+  stairs: '楼梯',
+  house: '房子',
+  fence: '栅栏',
+  ramp: '斜坡',
+  platform: '平台',
+  door: '门',
+  window: '窗',
+  arch: '拱门',
+  railing: '栏杆',
+  // 街道设施
+  road: '路面',
+  streetlamp: '路灯',
+  bench: '长椅',
+  signboard: '招牌',
+  sidewalk: '人行道',
+  utilitypole: '电线杆',
+  // 家具
+  table: '桌子',
+  chair: '椅子',
+  sofa: '沙发',
+  bed: '床',
+  cabinet: '柜子',
+  screen: '屏幕',
+  // 载具
+  car: '车辆',
+  truck: '卡车',
+  motorcycle: '摩托',
+  bicycle: '自行车',
+  // 自然
+  tree: '树',
+  rock: '岩石',
+  bush: '灌木',
+  water: '水面',
+  hill: '土坡',
 };
 
 // 白模默认灰色系颜色
 const DEFAULT_COLOR = '#9ca3af';
+// 路面深灰（区别于地面）
+const ROAD_COLOR = '#4b5563';
+// 人行道浅灰（区别于 road 深灰）
+const SIDEWALK_COLOR = '#cbd5e1';
+// 水面半透明蓝
+const WATER_COLOR = '#60a5fa';
 
-// 各类型新对象的默认变换（放置在原点、落在地面上）
-const OBJECT_DEFAULTS: Record<PrevizObjectType, { position: Vec3; rotation: Vec3; scale: Vec3 }> = {
+// 各类型新对象的默认变换与颜色（组合式组件内部比例写死、包围盒约 1m，scale 表达实际米数）
+const OBJECT_DEFAULTS: Record<
+  PrevizObjectType,
+  { position: Vec3; rotation: Vec3; scale: Vec3; color?: string }
+> = {
+  // 基础几何
   box: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   cylinder: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   sphere: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-  plane: { position: [0, 0.01, 0], rotation: [-Math.PI / 2, 0, 0], scale: [2, 2, 1] },
+  // plane 平躺已烘进几何（Viewport3D 的 mesh 层 rotation-x=-90°），rotation 恒为 [0,0,0]
+  plane: { position: [0, 0.01, 0], rotation: [0, 0, 0], scale: [2, 2, 1] },
   wall: { position: [0, 1, 0], rotation: [0, 0, 0], scale: [3, 2, 0.1] },
+  // 建筑结构（组合组件几何从地面 y=0 起建，xz 居中）
+  stairs: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1.5, 3] },
+  house: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [6, 4, 6] },
+  fence: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 1] },
+  ramp: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1.2, 4] },
+  platform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [3, 0.6, 3] },
+  door: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 2.2, 0.1] },
+  window: { position: [0, 1, 0], rotation: [0, 0, 0], scale: [1.5, 1.2, 0.05] },
+  arch: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 2.5, 0.3] },
+  railing: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 1] },
+  // 街道设施
+  road: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4, 1, 12], color: ROAD_COLOR },
+  streetlamp: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 3.5, 1] },
+  bench: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.8, 1, 1] },
+  signboard: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 2.5, 1] },
+  sidewalk: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 8], color: SIDEWALK_COLOR },
+  utilitypole: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 6, 1] },
+  // 家具
+  table: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.6, 0.75, 0.9] },
+  chair: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [0.45, 0.9, 0.45] },
+  sofa: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 0.85, 0.9] },
+  bed: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.8, 0.6, 2] },
+  cabinet: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.2, 2, 0.5] },
+  screen: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.2, 1, 0.7] },
+  // 载具
+  car: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4.5, 1.6, 1.8] },
+  truck: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [6, 2.6, 2.2] },
+  motorcycle: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 0.6] },
+  bicycle: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.8, 1.1, 0.5] },
+  // 自然
+  tree: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 3, 2] },
+  rock: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.5, 1.2, 1.5] },
+  bush: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [0.8, 0.6, 0.8] },
+  water: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4, 1, 4], color: WATER_COLOR },
+  hill: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 4, 8] },
 };
 
 // 新角色默认位置（原点，面向 -Z 以外的默认朝向）
 const CHARACTER_DEFAULT_POSITION: Vec3 = [0, 0, 0];
+
+// 角色染色调色板（按添加顺序分配；白片喂视频模型时用颜色区分角色）
+export const CHARACTER_PALETTE = [
+  { color: '#ef4444', label: '红' },
+  { color: '#3b82f6', label: '蓝' },
+  { color: '#22c55e', label: '绿' },
+  { color: '#eab308', label: '黄' },
+  { color: '#a855f7', label: '紫' },
+  { color: '#f97316', label: '橙' },
+  { color: '#06b6d4', label: '青' },
+  { color: '#ec4899', label: '粉' },
+] as const;
+
+// 颜色值 → 中文名（身份映射提示词用；未染色返回「灰」）
+export function characterColorLabel(color?: string): string {
+  return CHARACTER_PALETTE.find((p) => p.color === color)?.label ?? '灰';
+}
 
 // 生成节点 id
 function genId(prefix: string): string {
@@ -87,9 +187,11 @@ interface PrevizState {
   addObject: (type: PrevizObjectType) => void;
   removeObject: (id: string) => void;
   updateObject: (id: string, upd: Partial<Omit<PrevizObject, 'id'>>) => void;
+  /** 批量导入几何体（AI 建白模）：append 追加到现有场景 / replace 清空后重建 */
+  importObjects: (list: Omit<PrevizObject, 'id'>[], mode: 'append' | 'replace') => void;
 
   // 角色
-  addCharacter: () => void;
+  addCharacter: (model?: PrevizModelKind) => void;
   removeCharacter: (id: string) => void;
   updateCharacter: (id: string, upd: Partial<Omit<PrevizCharacter, 'id' | 'path' | 'actions'>>) => void;
 
@@ -192,7 +294,7 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({
       position: [...defaults.position],
       rotation: [...defaults.rotation],
       scale: [...defaults.scale],
-      color: DEFAULT_COLOR,
+      color: defaults.color ?? DEFAULT_COLOR,
     };
     set({ objects: [...objects, obj], selectedId: obj.id });
   },
@@ -210,14 +312,25 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({
     }));
   },
 
+  importObjects: (list, mode) => {
+    const items: PrevizObject[] = list.map((o) => ({ ...o, id: genId('obj') }));
+    set((state) => ({
+      objects: mode === 'replace' ? items : [...state.objects, ...items],
+      selectedId: null,
+    }));
+  },
+
   // ====== 角色 ======
-  addCharacter: () => {
+  addCharacter: (model) => {
     const { characters } = get();
     const char: PrevizCharacter = {
       id: genId('char'),
       name: `角色 ${characters.length + 1}`,
+      model: model ?? 'male',
       position: [...CHARACTER_DEFAULT_POSITION],
       rotationY: 0,
+      // 按添加顺序从调色板分配染色（超过 8 个循环使用）
+      color: CHARACTER_PALETTE[characters.length % CHARACTER_PALETTE.length].color,
       path: [],
       actions: [],
     };

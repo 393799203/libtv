@@ -137,8 +137,78 @@ func (c *Client) ChatWithModel(ctx context.Context, model, systemPrompt, userMes
 		return nil, fmt.Errorf("marshal chat request: %w", err)
 	}
 
+	return c.doChatRequest(ctx, model, payload, len(userMessage))
+}
+
+// ---- 视觉（图片理解）调用 ----
+
+// VisionContentPart OpenAI vision 格式的消息内容分片
+type VisionContentPart struct {
+	Type     string `json:"type"`            // "text" | "image_url"
+	Text     string `json:"text,omitempty"`  // type=text 时的文本
+	ImageURL *struct {
+		URL string `json:"url"` // 图片 URL 或 data:image/...;base64,...
+	} `json:"image_url,omitempty"` // type=image_url 时的图片
+}
+
+// VisionMessage 视觉消息：Content 为 string（system）或 []VisionContentPart（user）
+type VisionMessage struct {
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+// VisionChatRequest 视觉聊天补全请求（独立于 ChatRequest，不影响纯文本调用）
+type VisionChatRequest struct {
+	Model       string          `json:"model"`
+	Messages    []VisionMessage `json:"messages"`
+	Temperature float64         `json:"temperature,omitempty"`
+	MaxTokens   int             `json:"max_tokens,omitempty"`
+}
+
+// ChatWithImages 发起带图片的聊天补全请求（视觉模型）
+// imageURLs 需为可直接访问的 URL 或 base64 data URI（本地路径的转换在调用方处理）
+func (c *Client) ChatWithImages(ctx context.Context, model, systemPrompt, userText string, imageURLs []string, opts ...Option) (*ChatResponse, error) {
+	reqOpts := &chatOptions{
+		Temperature: 0.7,
+		MaxTokens:   8192,
+	}
+	for _, opt := range opts {
+		opt(reqOpts)
+	}
+
+	// user 消息：文本 + 图片的 vision 格式数组
+	parts := []VisionContentPart{{Type: "text", Text: userText}}
+	for _, u := range imageURLs {
+		parts = append(parts, VisionContentPart{
+			Type:     "image_url",
+			ImageURL: &struct {
+				URL string `json:"url"`
+			}{URL: u},
+		})
+	}
+
+	body := VisionChatRequest{
+		Model: model,
+		Messages: []VisionMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: parts},
+		},
+		Temperature: reqOpts.Temperature,
+		MaxTokens:   reqOpts.MaxTokens,
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal vision chat request: %w", err)
+	}
+
+	return c.doChatRequest(ctx, model, payload, len(userText))
+}
+
+// doChatRequest 发送 /chat/completions 请求并解析响应（纯文本与视觉调用共用）
+func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte, userMsgLen int) (*ChatResponse, error) {
 	url := fmt.Sprintf("%s/chat/completions", c.baseURL)
-	log.Printf("[LLM] request: model=%s url=%s userMsgLen=%d", model, url, len(userMessage))
+	log.Printf("[LLM] request: model=%s url=%s userMsgLen=%d", model, url, userMsgLen)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {

@@ -1,9 +1,13 @@
-import { useState } from 'react';
-import { DeleteOutlined, PlusOutlined, HighlightOutlined } from '@ant-design/icons';
-import { usePrevizStore } from './previzStore';
-import { ACTION_LIBRARY, ACTION_LABELS } from './actionLibrary';
+import { useMemo, useState } from 'react';
+import { Select, App } from 'antd';
+import { DeleteOutlined, PlusOutlined, HighlightOutlined, CopyOutlined } from '@ant-design/icons';
+import { usePrevizStore, CHARACTER_PALETTE, characterColorLabel } from './previzStore';
+import { MODEL_DEFS, actionLabel, modelDef } from './actionLibrary';
+import { useCanvasStore } from '@/stores/canvasStore';
+import type { ScriptNodeData } from '@/types/canvas';
 
 export function CharacterPanel() {
+  const { message } = App.useApp();
   const characters = usePrevizStore((s) => s.characters);
   const selectedId = usePrevizStore((s) => s.selectedId);
   const mannequinError = usePrevizStore((s) => s.mannequinError);
@@ -19,6 +23,19 @@ export function CharacterPanel() {
   const pathDrawMode = usePrevizStore((s) => s.pathDrawMode);
   const setPathDrawMode = usePrevizStore((s) => s.setPathDrawMode);
   const select = usePrevizStore((s) => s.select);
+  const canvasNodes = useCanvasStore((s) => s.nodes);
+
+  // 画布 script 节点里的剧本角色名（绑定角色下拉选项）
+  const scriptCharacterNames = useMemo(() => {
+    const names: string[] = [];
+    for (const n of canvasNodes) {
+      if (n.data.type !== 'script') continue;
+      for (const c of (n.data as ScriptNodeData).characters ?? []) {
+        if (c.name && !names.includes(c.name)) names.push(c.name);
+      }
+    }
+    return names;
+  }, [canvasNodes]);
 
   // 改名状态（双击名称进入编辑）
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -38,20 +55,42 @@ export function CharacterPanel() {
 
   const selectedChar = characters.find((c) => c.id === selectedId) ?? null;
 
+  // 身份映射提示词：只列绑定了剧本角色的角色，颜色写中文名
+  const boundChars = characters.filter((c) => c.assetName);
+  const handleCopyMapping = async () => {
+    if (boundChars.length === 0) return;
+    const mapping = boundChars
+      .map((c) => `${characterColorLabel(c.color)}色人物是「${c.assetName}」`)
+      .join('，');
+    const text = `Video 1 为白模预演参考：人物的走位、动作、镜头运动以 Video 1 为准。颜色与角色对应关系：${mapping}。（参考图 Image 1/Image 2 请按上述角色顺序提供）`;
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success('映射提示词已复制');
+    } catch (err) {
+      console.error('复制失败:', err);
+      message.error('复制失败，请检查浏览器剪贴板权限');
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
-      {/* 添加人偶 */}
+      {/* 添加人偶（男体 / 女体） */}
       <div className="p-3 border-b border-gray-100">
-        <button
-          className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-xs text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors cursor-pointer"
-          onClick={addCharacter}
-        >
-          <PlusOutlined className="text-[10px]" />
-          添加人偶
-        </button>
+        <div className="grid grid-cols-3 gap-1">
+          {(Object.values(MODEL_DEFS)).map((m) => (
+            <button
+              key={m.kind}
+              className="flex items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors cursor-pointer"
+              onClick={() => addCharacter(m.kind)}
+            >
+              <PlusOutlined className="text-[9px]" />
+              {m.label}
+            </button>
+          ))}
+        </div>
         {mannequinError && (
           <div className="mt-2 text-[11px] text-red-400 leading-relaxed">
-            人偶模型加载失败，已用占位体显示，请检查 /previz/mannequin.glb 是否存在
+            人偶模型加载失败，已用占位体显示，请检查 /previz/ 下的 GLB 模型文件是否存在
           </div>
         )}
       </div>
@@ -109,12 +148,57 @@ export function CharacterPanel() {
         {/* 选中角色的编辑区 */}
         {selectedChar && (
           <>
-            {/* 动作库 */}
+            {/* 染色（白片中区分角色） */}
+            <div className="px-3 py-2 border-t border-gray-100">
+              <div className="text-xs text-gray-400 font-medium mb-1.5">颜色</div>
+              <div className="flex flex-wrap gap-1.5">
+                {CHARACTER_PALETTE.map((p) => (
+                  <button
+                    key={p.color}
+                    className={`w-5 h-5 rounded cursor-pointer transition-transform hover:scale-110 ${
+                      selectedChar.color === p.color
+                        ? 'ring-2 ring-offset-1 ring-blue-500'
+                        : 'ring-1 ring-gray-200'
+                    }`}
+                    style={{ backgroundColor: p.color }}
+                    title={`${p.label}色`}
+                    onClick={() => updateCharacter(selectedChar.id, { color: p.color })}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* 绑定剧本角色（生成身份映射提示词用） */}
+            <div className="px-3 py-2 border-t border-gray-100">
+              <div className="text-xs text-gray-400 font-medium mb-1.5">绑定角色</div>
+              {scriptCharacterNames.length > 0 ? (
+                <Select
+                  size="small"
+                  className="w-full"
+                  placeholder="选择剧本角色"
+                  allowClear
+                  value={selectedChar.assetName}
+                  options={scriptCharacterNames.map((name) => ({ value: name, label: name }))}
+                  onChange={(v) => updateCharacter(selectedChar.id, { assetName: v || undefined })}
+                />
+              ) : (
+                <input
+                  className="w-full bg-white border border-gray-300 rounded px-2 py-1 text-xs text-gray-800 outline-none focus:border-blue-400"
+                  placeholder="角色名，如：南方"
+                  value={selectedChar.assetName ?? ''}
+                  onChange={(e) =>
+                    updateCharacter(selectedChar.id, { assetName: e.target.value.trim() || undefined })
+                  }
+                />
+              )}
+            </div>
+
+            {/* 动作库（按当前角色模型过滤：男体/女体各自支持的常规动作） */}
             <div className="px-3 py-2 border-t border-gray-100">
               <div className="text-xs text-gray-400 font-medium mb-1.5">
                 动作库（点击加到播放头时刻）
               </div>
-              {ACTION_LIBRARY.map((group) => (
+              {modelDef(selectedChar.model).library.map((group) => (
                 <div key={group.category} className="mb-2">
                   <div className="text-[10px] text-gray-300 mb-1">{group.category}</div>
                   <div className="flex flex-wrap gap-1">
@@ -142,7 +226,7 @@ export function CharacterPanel() {
                 selectedChar.actions.map((action, i) => (
                   <div key={`${action.clip}-${i}`} className="group flex items-center gap-1.5 py-1">
                     <span className="flex-1 text-[11px] text-gray-600 truncate">
-                      {ACTION_LABELS[action.clip] ?? action.clip}
+                      {actionLabel(selectedChar.model, action.clip)}
                     </span>
                     <input
                       type="number"
@@ -200,6 +284,16 @@ export function CharacterPanel() {
                   在地面点击添加路径点（首个点取当前播放头时刻，后续每点 +1 秒），拖小球可微调
                 </div>
               )}
+              {selectedChar.path.length >= 2 && (
+                <label className="flex items-center gap-1.5 mb-1.5 text-[11px] text-gray-500 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!selectedChar.manualFacing}
+                    onChange={(e) => updateCharacter(selectedChar.id, { manualFacing: !e.target.checked })}
+                  />
+                  行走时自动朝向前进方向（手动旋转过朝向则取消勾选）
+                </label>
+              )}
               {selectedChar.path.length === 0 ? (
                 <div className="text-[11px] text-gray-300">暂无路径点（角色固定站位）</div>
               ) : (
@@ -246,6 +340,26 @@ export function CharacterPanel() {
               )}
             </div>
           </>
+        )}
+      </div>
+
+      {/* 身份映射提示词（白片喂视频模型时说明颜色 ↔ 角色对应关系） */}
+      <div className="p-3 border-t border-gray-100 shrink-0">
+        <button
+          className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 text-xs rounded transition-colors cursor-pointer ${
+            boundChars.length === 0
+              ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+              : 'text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600'
+          }`}
+          disabled={boundChars.length === 0}
+          title={boundChars.length === 0 ? '请先在上方为角色绑定剧本角色' : '复制颜色与角色对应关系提示词'}
+          onClick={handleCopyMapping}
+        >
+          <CopyOutlined className="text-[10px]" />
+          复制映射提示词
+        </button>
+        {boundChars.length === 0 && characters.length > 0 && (
+          <div className="mt-1.5 text-[10px] text-gray-300 text-center">先为角色绑定剧本角色</div>
         )}
       </div>
     </div>

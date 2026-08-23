@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, App } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, RobotOutlined } from '@ant-design/icons';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
 import type { CanvasData, PrevizNodeData } from '@/types/canvas';
@@ -10,6 +10,7 @@ import { ObjectsPanel } from './ObjectsPanel';
 import { CharacterPanel } from './CharacterPanel';
 import { CameraPanel } from './CameraPanel';
 import { ExportPanel } from './ExportPanel';
+import { AIBuildModal } from './AIBuildModal';
 import { TimelineBar } from './TimelineBar';
 import { Viewport3D } from './Viewport3D';
 
@@ -27,6 +28,7 @@ export default function PrevizEditor() {
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [leftTab, setLeftTab] = useState<LeftTab>('objects');
+  const [showAIBuild, setShowAIBuild] = useState(false);
   const objects = usePrevizStore((s) => s.objects);
   const characters = usePrevizStore((s) => s.characters);
   const cameras = usePrevizStore((s) => s.cameras);
@@ -166,6 +168,14 @@ export default function PrevizEditor() {
           返回画布
         </Button>
         <span className="text-sm text-gray-600">白模预演编辑器</span>
+        <Button
+          type="text"
+          size="small"
+          icon={<RobotOutlined />}
+          onClick={() => setShowAIBuild(true)}
+        >
+          AI 建白模
+        </Button>
         <div className="flex-1" />
         {saving && <span className="text-xs text-gray-400">保存中...</span>}
       </div>
@@ -177,7 +187,7 @@ export default function PrevizEditor() {
           <div className="flex border-b border-gray-200 shrink-0">
             {(
               [
-                { key: 'objects', label: '几何体' },
+                { key: 'objects', label: '场景对象' },
                 { key: 'characters', label: '角色' },
               ] as { key: LeftTab; label: string }[]
             ).map((tab) => (
@@ -223,6 +233,11 @@ export default function PrevizEditor() {
           </div>
         )}
       </div>
+
+      {/* AI 建白模弹窗 */}
+      {showAIBuild && projectId && (
+        <AIBuildModal projectId={projectId} onClose={() => setShowAIBuild(false)} />
+      )}
     </div>
   );
 }

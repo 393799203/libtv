@@ -24,6 +24,7 @@ const (
 	BillingActionImage           = "ai.image"         // 图片生成（图片节点）
 	BillingActionVideo           = "ai.video"         // 视频生成（视频节点）
 	BillingActionAudio           = "ai.audio"         // 音频生成（音频节点）
+	BillingActionPrevizAnalyze   = "ai.previz_analyze" // 白模场景解析（previz 节点）
 )
 
 // ErrInsufficientCredits 积分不足（HTTP 402，前端可用 code=4002 区分提示充值）
@@ -37,6 +38,7 @@ var actionRemarks = map[string]string{
 	BillingActionImage:          "图片生成",
 	BillingActionVideo:          "视频生成",
 	BillingActionAudio:          "音频生成",
+	BillingActionPrevizAnalyze:  "白模场景解析",
 }
 
 // defaultPrices 动作级兜底策略表（仅 EnsureBalance 前置校验用，当前全部为 0 即放行）
@@ -48,6 +50,7 @@ var defaultPrices = map[string]int64{
 	BillingActionImage:          0,
 	BillingActionVideo:          0,
 	BillingActionAudio:          0,
+	BillingActionPrevizAnalyze:  0,
 }
 
 // actionNodeTypes 扣费 action → 定价节点映射：价格按（节点 + 模型）维度配置，
@@ -59,6 +62,7 @@ var actionNodeTypes = map[string]string{
 	BillingActionImage:          "image",
 	BillingActionVideo:          "video",
 	BillingActionAudio:          "audio",
+	BillingActionPrevizAnalyze:  "text", // 视觉模型按文本节点维度定价
 }
 
 // BillingService 积分扣费服务：

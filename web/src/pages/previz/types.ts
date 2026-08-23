@@ -1,8 +1,74 @@
 // 白模预演（previz）场景 JSON 类型定义
 // 场景整体序列化为 JSON 字符串，持久化在 previz 节点 data.scene 字段中，随画布保存
 
-// 场景几何体类型
-export type PrevizObjectType = 'box' | 'cylinder' | 'sphere' | 'plane' | 'wall';
+// 场景元素类型（共 35 种，按分类组织）
+// 基础几何为单几何体，其余为组合式白模组件（内部比例写死、外包围盒约 1m，scale 表达实际米数）
+export type PrevizObjectType =
+  // 基础几何
+  | 'box'
+  | 'cylinder'
+  | 'sphere'
+  | 'plane'
+  | 'wall'
+  // 建筑结构
+  | 'stairs' // 楼梯
+  | 'house' // 房子
+  | 'fence' // 栅栏/围栏
+  | 'ramp' // 斜坡
+  | 'platform' // 平台/高台
+  | 'door' // 门
+  | 'window' // 窗
+  | 'arch' // 拱门
+  | 'railing' // 栏杆
+  // 街道设施
+  | 'road' // 路面/街道
+  | 'streetlamp' // 路灯
+  | 'bench' // 长椅
+  | 'signboard' // 招牌
+  | 'sidewalk' // 人行道
+  | 'utilitypole' // 电线杆
+  // 家具
+  | 'table' // 桌子
+  | 'chair' // 椅子
+  | 'sofa' // 沙发
+  | 'bed' // 床
+  | 'cabinet' // 柜子
+  | 'screen' // 屏幕/电视
+  // 载具
+  | 'car' // 车辆
+  | 'truck' // 卡车
+  | 'motorcycle' // 摩托
+  | 'bicycle' // 自行车
+  // 自然
+  | 'tree' // 树
+  | 'rock' // 岩石
+  | 'bush' // 灌木
+  | 'water' // 水面
+  | 'hill'; // 土坡/山丘
+
+// 元素分类（添加面板分组、AI 词汇表共用）
+export interface PrevizObjectCategory {
+  key: string;
+  label: string;
+  types: PrevizObjectType[];
+}
+
+export const OBJECT_CATEGORIES: PrevizObjectCategory[] = [
+  { key: 'basic', label: '基础几何', types: ['box', 'cylinder', 'sphere', 'plane', 'wall'] },
+  {
+    key: 'structure',
+    label: '建筑结构',
+    types: ['stairs', 'house', 'fence', 'ramp', 'platform', 'door', 'window', 'arch', 'railing'],
+  },
+  {
+    key: 'street',
+    label: '街道设施',
+    types: ['road', 'streetlamp', 'bench', 'signboard', 'sidewalk', 'utilitypole'],
+  },
+  { key: 'furniture', label: '家具', types: ['table', 'chair', 'sofa', 'bed', 'cabinet', 'screen'] },
+  { key: 'vehicle', label: '载具', types: ['car', 'truck', 'motorcycle', 'bicycle'] },
+  { key: 'nature', label: '自然', types: ['tree', 'rock', 'bush', 'water', 'hill'] },
+];
 
 // 三元组（位置/旋转/缩放）
 export type Vec3 = [number, number, number];
@@ -31,11 +97,19 @@ export interface PrevizActionClip {
 }
 
 // 灰模人偶角色
+// 人偶模型类型：male=Soldier 男体；female=Xbot 女体（仅移动/表演类常规动作）
+export type PrevizModelKind = 'male' | 'female';
+
 export interface PrevizCharacter {
   id: string;
   name: string;
+  model?: PrevizModelKind; // 人偶模型（未设置或已下架的模型回退男体，兼容旧场景）
   position: Vec3;   // 出生/基准位置（无走位路径时的站位；有路径时路径优先）
   rotationY: number; // 朝向（绕 Y 轴，弧度）
+  // 手动锁定朝向：用户用 gizmo 旋转过后为 true，行走时不再自动朝向前进方向
+  manualFacing?: boolean;
+  color?: string;      // 人偶染色（十六进制，白片中区分角色用；未设置用默认灰）
+  assetName?: string;  // 绑定的剧本角色名（生成身份映射提示词用）
   path: PrevizPathPoint[];     // 走位路径（按 t 升序）
   actions: PrevizActionClip[]; // 动作时间轴（按 start 升序）
 }
