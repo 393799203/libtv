@@ -1,13 +1,13 @@
-import { Component, Suspense, useEffect, useMemo, useRef } from 'react';
+import { Component, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { usePrevizStore, sampleCharacterPosition, activeActionAt, boneObjectId } from './previzStore';
-import { modelDef, MODEL_DEFS, POSE_CLIP } from './actionLibrary';
+import { modelDef, MODEL_DEFS, POSE_CLIP, isLoopingClip } from './actionLibrary';
 import { matchPoseBone, registerPoseSnapshotter, unregisterPoseSnapshotter, registerPoseBoneObjects, unregisterPoseBoneObjects } from './poseBones';
-import type { PoseBoneMap } from './poseBones';
+import type { PoseBoneMap, PoseSnapshot } from './poseBones';
 import type { PrevizCharacter } from './types';
 
 // 人偶目标身高（米）：加载后按包围盒高度归一缩放（模型单位不一定是米）
@@ -87,6 +87,7 @@ function CharacterModel({
   const def = modelDef(char.model);
   const { scene, animations } = useGLTF(def.url);
 
+
   // 克隆场景（多角色各自独立骨骼），统一换成白模材质，并按包围盒归一到目标身高
   const { clonedScene, material } = useMemo(() => {
     const cloned = skeletonClone(scene);
@@ -127,6 +128,12 @@ function CharacterModel({
 
   const { actions, mixer } = useAnimations(animations, groupRef);
 
+  // 动画列表变化（扩展动作加载完成并入）后 useAnimations 会重建 actions 并停掉旧动作，
+  // 重置播放状态，让下一帧用新 actions 重新拉起当前 clip
+  useEffect(() => {
+    playStateRef.current = { clipName: '', action: null };
+  }, [animations]);
+
   // 收集 20 个主要骨骼（包含匹配，见 poseBones.ts）
   const poseBones: PoseBoneMap = useMemo(() => {
     const map: PoseBoneMap = new Map();
@@ -151,15 +158,6 @@ function CharacterModel({
       playStateRef.current = { clipName: '', action: null };
     }
   }, [poseEditing, mixer]);
-
-  // 姿态编辑期间把骨骼注册进 gizmo 引用表（TransformControls 挂骨骼本体）
-  useEffect(() => {
-    if (!poseEditing) return;
-    poseBones.forEach((bone, seg) => registerRef(boneObjectId(char.id, seg), bone));
-    return () => {
-      poseBones.forEach((_, seg) => registerRef(boneObjectId(char.id, seg), null));
-    };
-  }, [poseEditing, poseBones, char.id, registerRef]);
 
   // 注册姿势快照函数（面板「保存为姿势」时取当前 20 骨的局部四元数）
   useEffect(() => {
@@ -202,45 +200,6 @@ function CharacterModel({
     clipName: '',
     action: null,
   });
-
-  // 骨骼拖拽旋转：按住骨骼小球直接拖动摆姿势
-  const camera = useThree((s) => s.camera);
-  const boneDrag = useRef<{ seg: string; x: number; y: number } | null>(null);
-  const startBoneDrag = (seg: string, e: { stopPropagation: () => void; clientX: number; clientY: number; target: EventTarget | null; pointerId: number; nativeEvent: PointerEvent }) => {
-    e.stopPropagation();
-    // 关键：阻断 DOM 事件继续派发给 OrbitControls（它和 R3F 都挂在 canvas 上，
-    // 不阻断的话同一按下手势会先启动相机旋转，骨骼就拖不动了）
-    e.nativeEvent.stopImmediatePropagation();
-    select(boneObjectId(char.id, seg));
-    // 指针捕获到 canvas：拖动移出小球后 move/up 事件仍派发给该骨骼
-    (e.target as Element | null)?.setPointerCapture?.(e.pointerId);
-    boneDrag.current = { seg, x: e.clientX, y: e.clientY };
-    usePrevizStore.getState().setGizmoDragging(true); // 双保险：禁用轨道相机
-  };
-  const moveBoneDrag = (e: { clientX: number; clientY: number }) => {
-    const d = boneDrag.current;
-    if (!d) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    d.x = e.clientX;
-    d.y = e.clientY;
-    if (dx === 0 && dy === 0) return;
-    const bone = poseBones.get(d.seg);
-    if (!bone || !bone.parent) return;
-    // 屏幕方向映射到世界轴：横向拖=绕相机上轴转，纵向拖=绕相机右轴转
-    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
-    const qWorld = new THREE.Quaternion()
-      .setFromAxisAngle(up, dx * 0.01)
-      .multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.01));
-    // 世界旋转增量转到骨骼父空间，再前乘到骨骼局部四元数
-    const pq = bone.parent.getWorldQuaternion(new THREE.Quaternion());
-    bone.quaternion.premultiply(pq.clone().invert().multiply(qWorld).multiply(pq));
-  };
-  const endBoneDrag = () => {
-    boneDrag.current = null;
-    usePrevizStore.getState().setGizmoDragging(false);
-  };
 
   // 每帧驱动：位置按走位路径插值；动画按时间轴切换/对时
   useFrame((_, delta) => {
@@ -296,7 +255,10 @@ function CharacterModel({
     // 该时刻应播放的动作
     const active = activeActionAt(char, t);
 
-    // 自定义姿势动作：直接把快照四元数写到骨骼，不走 mixer（骨骼找不到的跳过）
+    // 自定义姿势动作：把快照四元数写到骨骼，不走 mixer（骨骼找不到的跳过）
+    // 相邻两个姿势之间按时间做球面插值（slerp），姿势序列变成连贯的关键帧动画。
+    // 注：姿势↔动画之间的过渡目前是硬切（mixer 权重机制无法从任意骨骼状态混入），
+    // 编排时把姿势收尾摆到接近下一个动画的起始姿态即可
     if (active?.pose) {
       const poseState = playStateRef.current;
       if (poseState.clipName !== POSE_CLIP) {
@@ -304,9 +266,26 @@ function CharacterModel({
         poseState.action = null;
         poseState.clipName = POSE_CLIP;
       }
+      // 查找下一条动作：若也是自定义姿势，按播放头在两者之间的位置插值
+      const activeIdx = char.actions.indexOf(active);
+      const next = char.actions[activeIdx + 1];
+      const nextPose = next?.pose ?? null;
+      const span = nextPose ? next.start - active.start : 0;
+      const ratio = nextPose && span > 1e-3 ? Math.min(1, Math.max(0, (t - active.start) / span)) : 0;
+      const qa = new THREE.Quaternion();
+      const qb = new THREE.Quaternion();
       poseBones.forEach((bone, seg) => {
-        const q = active.pose?.[seg];
-        if (q) bone.quaternion.set(q[0], q[1], q[2], q[3]);
+        const a = active.pose?.[seg];
+        if (!a) return;
+        qa.set(a[0], a[1], a[2], a[3]);
+        if (nextPose && ratio > 0) {
+          const b = nextPose[seg];
+          if (b) {
+            qb.set(b[0], b[1], b[2], b[3]);
+            qa.slerp(qb, ratio);
+          }
+        }
+        bone.quaternion.copy(qa);
       });
       return;
     }
@@ -315,10 +294,16 @@ function CharacterModel({
     const state = playStateRef.current;
 
     // 动作切换：crossFade 0.2s 淡入新动作
+    // 扩展动作未加载完成时兜底播 idle（加载完成后下一轮自动切换过去）
     if (clipName !== state.clipName) {
-      const next = actions[clipName];
-      if (next) {
-        const looping = def.looping.has(clipName);
+      let target = clipName;
+      let next = actions[target];
+      if (!next) {
+        target = def.idleClip;
+        next = actions[target];
+      }
+      if (next && target !== state.clipName) {
+        const looping = isLoopingClip(char.model, target);
         next.reset();
         next.setLoop(looping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
         next.clampWhenFinished = true;
@@ -327,7 +312,7 @@ function CharacterModel({
         }
         next.play();
         state.action = next;
-        state.clipName = clipName;
+        state.clipName = target;
       }
     }
 
@@ -339,7 +324,7 @@ function CharacterModel({
       mixer.update(delta);
       const clip = action.getClip();
       const local = Math.max(0, t - (active?.start ?? 0));
-      const expected = def.looping.has(clipName)
+      const expected = isLoopingClip(char.model, state.clipName)
         ? local % clip.duration
         : Math.min(local, clip.duration);
       if (Math.abs(action.time - expected) > 0.5) {
@@ -349,7 +334,7 @@ function CharacterModel({
       // 暂停/拖进度条：直接跳到该时刻的姿势
       const clip = action.getClip();
       const local = Math.max(0, t - (active?.start ?? 0));
-      action.time = def.looping.has(clipName)
+      action.time = isLoopingClip(char.model, state.clipName)
         ? local % clip.duration
         : Math.min(local, Math.max(0, clip.duration - 1e-4));
       mixer.update(0);
@@ -372,7 +357,7 @@ function CharacterModel({
     >
       <primitive object={clonedScene} />
 
-      {/* 姿态编辑模式：主要骨骼小球（点击选中后挂 gizmo 旋转摆姿势；depthTest 关闭保证不被身体挡住） */}
+      {/* 姿态编辑模式：主要骨骼小球（点击选中后用面板滑杆摆姿势；depthTest 关闭保证不被身体挡住） */}
       {poseEditing &&
         [...poseBones.keys()].map((seg) => {
           const bid = boneObjectId(char.id, seg);
@@ -389,10 +374,6 @@ function CharacterModel({
                 e.stopPropagation();
                 select(bid);
               }}
-              onPointerDown={(e) => startBoneDrag(seg, e)}
-              onPointerMove={moveBoneDrag}
-              onPointerUp={endBoneDrag}
-              onPointerCancel={endBoneDrag}
             >
               <sphereGeometry args={[isBoneSelected ? 0.05 : 0.032, 12, 8]} />
               <meshBasicMaterial

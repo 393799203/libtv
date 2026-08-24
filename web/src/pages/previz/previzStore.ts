@@ -233,6 +233,9 @@ interface PrevizState {
   setPoseEditing: (charId: string | null) => void;
   /** 把姿势快照存成一条自定义姿势动作（挂到当前播放头时刻） */
   savePoseAction: (charId: string, pose: Record<string, [number, number, number, number]>) => void;
+  // 重命名动作 / 复制动作（自定义姿势用；复制挂到当前播放头时刻）
+  renameAction: (charId: string, index: number, name: string) => void;
+  duplicateAction: (charId: string, index: number) => void;
 
   // 相机
   addCamera: () => void;
@@ -300,18 +303,54 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
   savePoseAction: (charId, pose) => {
     const { currentTime } = get();
     set((state) => ({
-      characters: state.characters.map((c) =>
-        c.id === charId
-          ? {
-              ...c,
-              actions: insertAction(c.actions, {
-                clip: POSE_CLIP,
-                start: Math.round(currentTime * 100) / 100,
-                pose,
-              }),
-            }
-          : c
-      ),
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        // 默认名：姿势 N（按该角色现有姿势动作计数）
+        const poseCount = c.actions.filter((a) => a.pose).length;
+        return {
+          ...c,
+          actions: insertAction(c.actions, {
+            clip: POSE_CLIP,
+            start: Math.round(currentTime * 100) / 100,
+            pose,
+            name: `姿势 ${poseCount + 1}`,
+          }),
+        };
+      }),
+    }));
+  },
+
+  // 重命名动作（自定义姿势用）
+  renameAction: (charId, index, name) => {
+    set((state) => ({
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        const actions = c.actions.map((a, i) =>
+          i === index ? { ...a, name: name.trim() || undefined } : a
+        );
+        return { ...c, actions };
+      }),
+    }));
+  },
+
+  // 复制动作（自定义姿势用）：复制姿势数据，挂在当前播放头时刻
+  duplicateAction: (charId, index) => {
+    const { currentTime } = get();
+    set((state) => ({
+      characters: state.characters.map((c) => {
+        if (c.id !== charId) return c;
+        const src = c.actions[index];
+        if (!src) return c;
+        return {
+          ...c,
+          actions: insertAction(c.actions, {
+            ...src,
+            pose: src.pose ? { ...src.pose } : undefined,
+            name: src.name ? `${src.name} 副本` : undefined,
+            start: Math.round(currentTime * 100) / 100,
+          }),
+        };
+      }),
     }));
   },
 

@@ -28,6 +28,8 @@ export function CharacterPanel() {
   const addPathPoint = usePrevizStore((s) => s.addPathPoint);
   const removePathPoint = usePrevizStore((s) => s.removePathPoint);
   const updatePathPoint = usePrevizStore((s) => s.updatePathPoint);
+  const duplicateAction = usePrevizStore((s) => s.duplicateAction);
+  const renameAction = usePrevizStore((s) => s.renameAction);
   const pathDrawMode = usePrevizStore((s) => s.pathDrawMode);
   const setPathDrawMode = usePrevizStore((s) => s.setPathDrawMode);
   const poseEditingCharId = usePrevizStore((s) => s.poseEditingCharId);
@@ -51,6 +53,9 @@ export function CharacterPanel() {
   // 改名状态（双击名称进入编辑）
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  // 姿势动作改名状态（双击动作名进入编辑）
+  const [editingActionIdx, setEditingActionIdx] = useState<number | null>(null);
+  const [editingActionName, setEditingActionName] = useState('');
 
   const startRename = (id: string, name: string) => {
     setEditingId(id);
@@ -62,6 +67,14 @@ export function CharacterPanel() {
       updateCharacter(editingId, { name: editingName.trim() });
     }
     setEditingId(null);
+  };
+
+  // 提交姿势动作改名
+  const commitActionRename = () => {
+    if (selectedChar && editingActionIdx !== null) {
+      renameAction(selectedChar.id, editingActionIdx, editingActionName);
+    }
+    setEditingActionIdx(null);
   };
 
   // 骨骼选中（bone:charId:segment）时定位到所属角色，保持角色详情/姿态滑杆可见
@@ -222,7 +235,7 @@ export function CharacterPanel() {
               )}
             </div>
 
-            {/* 姿态编辑：骨骼小球 + gizmo 旋转摆姿势，可保存为自定义姿势动作 */}
+            {/* 姿态编辑：骨骼小球选中 + 滑杆摆姿势，可保存为自定义姿势动作 */}
             <div className="px-3 py-2 border-t border-gray-100">
               <div className="flex items-center justify-between">
                 <div className="text-xs text-gray-400 font-medium">姿态编辑</div>
@@ -281,7 +294,7 @@ export function CharacterPanel() {
               ))}
             </div>
 
-            {/* 角色的动作片段列表 */}
+            {/* 角色的动作片段列表（自定义姿势可双击改名、可复制） */}
             <div className="px-3 py-2 border-t border-gray-100">
               <div className="text-xs text-gray-400 font-medium mb-1.5">动作片段</div>
               {selectedChar.actions.length === 0 ? (
@@ -289,9 +302,31 @@ export function CharacterPanel() {
               ) : (
                 selectedChar.actions.map((action, i) => (
                   <div key={`${action.clip}-${i}`} className="group flex items-center gap-1.5 py-1">
-                    <span className="flex-1 text-[11px] text-gray-600 truncate">
-                      {actionLabel(selectedChar.model, action.clip)}
-                    </span>
+                    {action.pose && editingActionIdx === i ? (
+                      <input
+                        autoFocus
+                        className="flex-1 min-w-0 bg-white border border-blue-400 rounded px-1 py-0.5 text-[11px] text-gray-800 outline-none"
+                        value={editingActionName}
+                        onChange={(e) => setEditingActionName(e.target.value)}
+                        onBlur={commitActionRename}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitActionRename();
+                          if (e.key === 'Escape') setEditingActionIdx(null);
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className={`flex-1 min-w-0 text-[11px] text-gray-600 truncate ${action.pose ? 'cursor-text' : ''}`}
+                        title={action.pose ? '双击改名' : undefined}
+                        onDoubleClick={() => {
+                          if (!action.pose) return;
+                          setEditingActionIdx(i);
+                          setEditingActionName(action.name || '自定义姿势');
+                        }}
+                      >
+                        {action.pose ? action.name || '自定义姿势' : actionLabel(selectedChar.model, action.clip)}
+                      </span>
+                    )}
                     <input
                       type="number"
                       className="w-14 bg-white border border-gray-300 rounded px-1 py-0.5 text-[11px] text-gray-800 outline-none focus:border-blue-400"
@@ -304,6 +339,15 @@ export function CharacterPanel() {
                         if (!Number.isNaN(v)) updateActionStart(selectedChar.id, i, Math.max(0, v));
                       }}
                     />
+                    {action.pose && (
+                      <button
+                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-500 transition-opacity cursor-pointer shrink-0"
+                        title="复制该姿势（挂到当前播放头时刻）"
+                        onClick={() => duplicateAction(selectedChar.id, i)}
+                      >
+                        <CopyOutlined className="text-[11px]" />
+                      </button>
+                    )}
                     <button
                       className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity cursor-pointer shrink-0"
                       title="删除动作"

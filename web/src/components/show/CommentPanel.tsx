@@ -356,7 +356,7 @@ export default function CommentPanel({ showId, open, onClose, initialCount, onCo
           </>
         ) : (
           <button
-            onClick={openLoginModal}
+            onClick={() => openLoginModal()}
             className="w-full py-2 text-[13px] text-gray-400 bg-gray-50 rounded-lg hover:text-blue-500 cursor-pointer transition-colors"
           >
             登录后参与评论

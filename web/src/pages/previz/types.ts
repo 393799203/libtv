@@ -96,6 +96,8 @@ export interface PrevizActionClip {
   start: number; // 开始时间（秒）
   /** 自定义姿势快照：骨骼名片段 → 局部四元数 [x,y,z,w]（clip 为 __pose__ 时有效） */
   pose?: Record<string, [number, number, number, number]>;
+  /** 自定义姿势的名称（可改/可复制；仅姿势动作用，动画 clip 用动作库中文名） */
+  name?: string;
 }
 
 // 灰模人偶角色

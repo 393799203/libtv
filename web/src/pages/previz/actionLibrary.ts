@@ -2,6 +2,8 @@ import type { PrevizModelKind } from './types';
 
 // 动作库：按人偶模型分组（clip 名与 GLB 内 AnimationClip.name 一致）
 // 男体 Soldier / 女体 Xbot 均来自 three.js 官方示例模型，仅含移动/表演类常规动作
+// 注意：外部 FBX 动作暂不支持——Mixamo 动画直接套到这两个 GLB 上静止姿态不匹配会摆烂，
+// 扩充动作需走 Mixamo 官网下载（FBX Without Skin）+ FBX 原生模型接入（另行评估）
 
 export interface PrevizActionDef {
   clip: string;  // GLB 动画名
@@ -88,6 +90,11 @@ export function actionLabel(kind: string | undefined, clip: string): string {
     }
   }
   return clip;
+}
+
+// 判断动作是否循环播放
+export function isLoopingClip(kind: string | undefined, clip: string): boolean {
+  return modelDef(kind).looping.has(clip);
 }
 
 // 自定义姿势动作的 clip 占位名（姿势数据存在 PrevizActionClip.pose 字段）
