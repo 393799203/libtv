@@ -182,7 +182,13 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	}
 
 	// 处理参考视频（视频参考/全能参考模式）
+	// 首尾帧模式不收参考视频：wan3.0 规定 first_frame/last_frame 与 reference_* 互斥，
+	// 混合会被整单拒绝（且首尾帧模式下参考视频本来也没有意义）
 	for i, rawURL := range videoURLs {
+		if videoMode == "first-last-frame" {
+			log.Printf("[VideoGen] ⚠️ 首尾帧模式忽略参考视频[%d]（wan3.0 首尾帧与参考互斥）", i)
+			continue
+		}
 		if rawURL == "" {
 			continue
 		}
