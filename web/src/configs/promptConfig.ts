@@ -12,6 +12,9 @@ export const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const;
 export const VIDEO_RESOLUTION_OPTIONS = ['480p', '720p', '1080p', '4K'] as const;
 export type VideoResolutionOption = typeof VIDEO_RESOLUTION_OPTIONS[number];
 
+// wan3.0（阿里万相）支持的画幅比例（其余视频模型不限制；free=自适应，后端映射为 adaptive）
+export const WAN3_VIDEO_ASPECT_RATIOS = ['free', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
+
 // ==================== 画质选项 ====================
 
 export const QUALITY_OPTIONS = ['低画质', '标准画质', '高画质'] as const;

@@ -64,7 +64,7 @@ type VideoContentImage struct {
 	URL string `json:"url"`
 }
 
-// VideoMetadata 视频元数据
+// VideoMetadata 视频元数据（doubao-seedance 系列 / 火山引擎格式）
 type VideoMetadata struct {
 	Resolution    string             `json:"resolution"`     // "1080p"
 	Ratio         string             `json:"ratio"`          // "16:9"
@@ -73,12 +73,42 @@ type VideoMetadata struct {
 	Content       []VideoContentItem `json:"content"`        // 参考图列表
 }
 
+// WanMediaItem 阿里万相 wan3.0 媒体素材
+// Type: first_frame/last_frame/reference_image/reference_video
+// 注意：reference_* 与 first_frame/last_frame 互斥，不能混用
+type WanMediaItem struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+// WanVideoMetadata 阿里万相 wan3.0 元数据。
+// 网关（new-api ali 渠道）会把 metadata 按键名合并进 DashScope 请求的
+// input/parameters 两个对象，平铺的 resolution/ratio/content 键会被静默丢弃，
+// 所以必须使用这个嵌套结构
+type WanVideoMetadata struct {
+	Input      WanVideoInput      `json:"input"`
+	Parameters WanVideoParameters `json:"parameters"`
+}
+
+// WanVideoInput wan3.0 输入（media 为空时整个字段省略）
+type WanVideoInput struct {
+	Media []WanMediaItem `json:"media,omitempty"`
+}
+
+// WanVideoParameters wan3.0 参数
+type WanVideoParameters struct {
+	Resolution string `json:"resolution"` // 480P/720P/1080P
+	Ratio      string `json:"ratio"`      // adaptive/16:9/4:3/1:1/3:4/9:16
+	Audio      bool   `json:"audio"`      // 是否输出音轨
+	Watermark  bool   `json:"watermark"`  // false=无水印
+}
+
 // VideoRequest 视频生成请求
 type VideoRequest struct {
-	Model    string        `json:"model"`
-	Prompt   string        `json:"prompt"`
-	Duration int           `json:"duration"`
-	Metadata VideoMetadata `json:"metadata"`
+	Model    string `json:"model"`
+	Prompt   string `json:"prompt"`
+	Duration int    `json:"duration"`
+	Metadata any    `json:"metadata"` // seedance: VideoMetadata；wan3.0: WanVideoMetadata
 }
 
 // VideoResponse 视频生成响应（创建任务时的响应）
@@ -113,9 +143,19 @@ type VideoTaskResponse struct {
 	} `json:"data"`
 }
 
-// GenerateVideo 调用视频生成API
+// mediaItem 统一收集的参考素材。
+// role 词汇两家 API 相同（first_frame/last_frame/reference_image/reference_video），
+// 由各自的模型构建器转换成各自的请求格式
+type mediaItem struct {
+	url     string
+	role    string // 空 = seedance 单图参考（无 role）
+	isVideo bool
+}
+
+// GenerateVideo 调用视频生成API，按模型分派到对应的请求构建器：
+// wan3.0（阿里万相）→ buildWanRequest；其他（doubao-seedance 系列）→ buildSeedanceRequest
 // imageURLs: 参考图列表。videoURLs: 参考视频列表。
-// videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=无role
+// videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=参考
 // generateAudio: 是否生成音频（true=生成声音，false=静音）
 func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) (string, error) {
 	if resolution == "" {
@@ -124,33 +164,187 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	if ratio == "" {
 		ratio = "16:9"
 	}
-	// 按模型分派参数规范化：每个模型独立处理自己的时长范围与参考视频限制
-	originalDuration := duration
+
+	var payload []byte
 	var err error
-	switch {
-	case strings.Contains(model, "wan3.0"):
-		duration, err = normalizeWanParams(ctx, duration, videoURLs)
-	default: // doubao-seedance 系列（火山引擎）
-		duration, err = normalizeSeedanceParams(ctx, model, duration, videoURLs)
+	if strings.Contains(model, "wan3.0") {
+		payload, err = c.buildWanRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, videoMode, generateAudio)
+	} else {
+		payload, err = c.buildSeedanceRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, videoMode, generateAudio)
 	}
 	if err != nil {
 		return "", err
 	}
-	if originalDuration != duration {
-		log.Printf("[VideoGen] duration 规范化: %d → %d", originalDuration, duration)
+
+	videoURL, err := c.doRequest(ctx, payload)
+	if err != nil {
+		return "", err
 	}
 
-	metadata := VideoMetadata{
-		Resolution:    resolution,
-		Ratio:         ratio,
-		GenerateAudio: generateAudio,
-		Content:       []VideoContentItem{},
+	log.Printf("[VideoGen] ✅ 视频生成成功: url=%s", videoURL)
+	return videoURL, nil
+}
+
+// ==================== 豆包 Seedance 系列（火山引擎）====================
+
+// buildSeedanceRequest 构建豆包 Seedance 请求体：
+// 平铺 metadata（resolution/ratio/generate_audio + content[image_url/video_url + role]）
+func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) ([]byte, error) {
+	origDuration := duration
+	duration, err := normalizeSeedanceParams(ctx, model, duration, videoURLs)
+	if err != nil {
+		return nil, err
+	}
+	logDurationNormalized(origDuration, duration)
+
+	// seedance 角色规则：首尾帧=first_frame/last_frame；全能参考=reference_image；
+	// 单图无 mode=不填 role；参考视频=reference_video
+	items := c.collectMedia(ctx, imageURLs, videoURLs, videoMode, "")
+
+	content := make([]VideoContentItem, 0, len(items))
+	for _, it := range items {
+		entry := VideoContentItem{Role: it.role}
+		if it.isVideo {
+			entry.Type = "video_url"
+			entry.VideoURL = &VideoContentImage{URL: it.url}
+		} else {
+			entry.Type = "image_url"
+			entry.ImageURL = &VideoContentImage{URL: it.url}
+		}
+		content = append(content, entry)
 	}
 
-	// 处理参考图
-	// 0张 → 纯文生视频
-	// 1张 → 参考模式（无 role）
-	// 2张 → 首尾帧模式（first_frame + last_frame）
+	payload, err := json.Marshal(VideoRequest{
+		Model:    model,
+		Prompt:   prompt,
+		Duration: duration,
+		Metadata: VideoMetadata{
+			Resolution:    resolution,
+			Ratio:         ratio,
+			GenerateAudio: generateAudio,
+			Content:       content,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal video request: %w", err)
+	}
+
+	log.Printf("[VideoGen] 发起请求: model=%s mode=%s duration=%ds resolution=%s ratio=%s imageCount=%d promptLen=%d",
+		model, videoModeLabel(videoMode, len(items) > 0), duration, resolution, ratio, len(items), len(prompt))
+	return payload, nil
+}
+
+// normalizeSeedanceParams 豆包 Seedance 系列（火山引擎）参数规范化：
+// 时长范围 4-15 秒；fast 版本额外要求「参考视频时长 + 生成时长 <= 15.2 秒」
+func normalizeSeedanceParams(ctx context.Context, model string, duration int, videoURLs []string) (int, error) {
+	duration = clampDuration(duration, 4, 15)
+
+	// 有参考视频时，seedance-2.0-fast 模型要求「参考视频时长 + 生成视频时长 <= 15.2秒」
+	// 超限时提示用户切换到 seedance 2.0（非 fast 版本）
+	if len(videoURLs) > 0 && strings.Contains(model, "fast") {
+		if totalRefDuration := sumRefVideoDuration(ctx, videoURLs); totalRefDuration > 0 {
+			totalDuration := totalRefDuration + float64(duration)
+			if totalDuration > 15.2 {
+				return 0, fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 seedance-2.0-fast 模型的15秒限制。请将视频模型切换为 seedance 2.0（非 fast 版本）后重试", totalRefDuration, duration, totalDuration)
+			}
+		}
+	}
+	return duration, nil
+}
+
+// ==================== 阿里万相 wan3.0 ====================
+
+// buildWanRequest 构建阿里万相 wan3.0 请求体：
+// 嵌套 metadata（input.media[type/url] + parameters[resolution/ratio/audio/watermark]）。
+// 网关（new-api ali 渠道）会把 metadata 按键名合并进 DashScope 请求的
+// input/parameters 两个对象，平铺键会被静默丢弃，不能用 seedance 的格式
+func (c *VideoClient) buildWanRequest(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) ([]byte, error) {
+	origDuration := duration
+	duration, err := normalizeWanParams(ctx, duration, videoURLs)
+	if err != nil {
+		return nil, err
+	}
+	logDurationNormalized(origDuration, duration)
+
+	// wan3.0 角色规则：与 seedance 相同，但单图无 mode 也必须带 type，归为 reference_image
+	items := c.collectMedia(ctx, imageURLs, videoURLs, videoMode, "reference_image")
+
+	wanMedia := make([]WanMediaItem, 0, len(items))
+	for _, it := range items {
+		wanMedia = append(wanMedia, WanMediaItem{Type: it.role, URL: it.url})
+	}
+
+	payload, err := json.Marshal(VideoRequest{
+		Model:    model,
+		Prompt:   prompt,
+		Duration: duration,
+		Metadata: WanVideoMetadata{
+			Input: WanVideoInput{Media: wanMedia},
+			Parameters: WanVideoParameters{
+				Resolution: wanResolution(resolution),
+				Ratio:      wanRatio(ratio),
+				Audio:      generateAudio,
+				Watermark:  false,
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal video request: %w", err)
+	}
+
+	log.Printf("[VideoGen] 发起请求: model=%s mode=%s duration=%ds resolution=%s ratio=%s imageCount=%d promptLen=%d",
+		model, videoModeLabel(videoMode, len(items) > 0), duration, wanResolution(resolution), wanRatio(ratio), len(items), len(prompt))
+	return payload, nil
+}
+
+// wanResolution 转为万相大写分辨率档位（480P/720P/1080P），非法值回退 1080P
+func wanResolution(resolution string) string {
+	switch strings.ToUpper(resolution) {
+	case "480P":
+		return "480P"
+	case "720P":
+		return "720P"
+	default:
+		return "1080P"
+	}
+}
+
+// wanRatio 万相仅支持 adaptive/16:9/4:3/1:1/3:4/9:16，其余（free/21:9 等）回退 adaptive
+func wanRatio(ratio string) string {
+	switch ratio {
+	case "16:9", "4:3", "1:1", "3:4", "9:16":
+		return ratio
+	default:
+		return "adaptive"
+	}
+}
+
+// normalizeWanParams 阿里万相 wan3.0-video 参数规范化：
+// 时长范围 2-30 秒；有参考视频时要求「参考视频总时长 + 生成时长 <= 30 秒」（阿里云官方限制）
+func normalizeWanParams(ctx context.Context, duration int, videoURLs []string) (int, error) {
+	duration = clampDuration(duration, 2, 30)
+
+	if len(videoURLs) > 0 {
+		if totalRefDuration := sumRefVideoDuration(ctx, videoURLs); totalRefDuration > 0 {
+			totalDuration := totalRefDuration + float64(duration)
+			if totalDuration > 30 {
+				return 0, fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 wan3.0-video 模型的30秒限制。请缩短参考视频或生成时长后重试", totalRefDuration, duration, totalDuration)
+			}
+		}
+	}
+	return duration, nil
+}
+
+// ==================== 共享辅助 ====================
+
+// collectMedia 下载/转码参考素材并分配 role（两家 API 的 role 词汇相同）。
+// defaultImageRole：单图无 mode 时的角色（seedance 传 ""；wan3.0 传 "reference_image"）
+// 首尾帧模式忽略参考视频：wan3.0 规定 first_frame/last_frame 与 reference_* 互斥，
+// 混合会被整单拒绝（且首尾帧模式下参考视频本来也没有意义）
+func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, videoURLs []string, videoMode string, defaultImageRole string) []mediaItem {
+	var items []mediaItem
+
+	// 参考图：0张=文生视频；1张=参考；首尾帧模式=first_frame+last_frame
 	for i, rawURL := range imageURLs {
 		if rawURL == "" {
 			continue
@@ -160,33 +354,26 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 			log.Printf("[VideoGen] ⚠️ 参考图[%d]处理失败，跳过: %v", i, err)
 			continue
 		}
-		item := VideoContentItem{
-			Type:     "image_url",
-			ImageURL: &VideoContentImage{URL: finalURL},
-		}
-		// 首尾帧模式: first_frame / last_frame（按实际写入 content 的顺序分配，
-		// 不能用 imageURLs 原始下标——前面的图为空或处理失败被跳过时会导致角色错位）
-		// 全能参考模式: reference_image（API 要求必须指定 role）
-		// 首帧模式（1张图无 mode）: 不填 role
+		item := mediaItem{url: finalURL, role: defaultImageRole}
+		// 首尾帧按实际写入顺序分配 first/last，
+		// 不能用 imageURLs 原始下标——前面的图为空或处理失败被跳过时会导致角色错位
 		if videoMode == "first-last-frame" {
-			if len(metadata.Content) == 0 {
-				item.Role = "first_frame"
+			if len(items) == 0 {
+				item.role = "first_frame"
 			} else {
-				item.Role = "last_frame"
+				item.role = "last_frame"
 			}
 		} else if videoMode == "universal-ref" {
-			item.Role = "reference_image"
+			item.role = "reference_image"
 		}
-		metadata.Content = append(metadata.Content, item)
-		log.Printf("[VideoGen] ✅ 参考图[%d]已添加: role=%s urlLen=%d", i, item.Role, len(finalURL))
+		items = append(items, item)
+		log.Printf("[VideoGen] ✅ 参考图[%d]已添加: role=%s urlLen=%d", i, item.role, len(finalURL))
 	}
 
-	// 处理参考视频（视频参考/全能参考模式）
-	// 首尾帧模式不收参考视频：wan3.0 规定 first_frame/last_frame 与 reference_* 互斥，
-	// 混合会被整单拒绝（且首尾帧模式下参考视频本来也没有意义）
+	// 参考视频（视频参考/全能参考模式）
 	for i, rawURL := range videoURLs {
 		if videoMode == "first-last-frame" {
-			log.Printf("[VideoGen] ⚠️ 首尾帧模式忽略参考视频[%d]（wan3.0 首尾帧与参考互斥）", i)
+			log.Printf("[VideoGen] ⚠️ 首尾帧模式忽略参考视频[%d]（首尾帧与参考互斥）", i)
 			continue
 		}
 		if rawURL == "" {
@@ -197,56 +384,39 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 			log.Printf("[VideoGen] ⚠️ 参考视频[%d]处理失败，跳过: %v", i, err)
 			continue
 		}
-		item := VideoContentItem{
-			Type:     "video_url",
-			VideoURL: &VideoContentImage{URL: finalURL},
-			Role:     "reference_video", // 视频参考模式必须设置 role
-		}
-		metadata.Content = append(metadata.Content, item)
-		log.Printf("[VideoGen] ✅ 参考视频[%d]已添加: role=%s urlLen=%d", i, item.Role, len(finalURL))
+		items = append(items, mediaItem{url: finalURL, role: "reference_video", isVideo: true})
+		log.Printf("[VideoGen] ✅ 参考视频[%d]已添加: role=reference_video urlLen=%d", i, len(finalURL))
 	}
 
-	// 首尾帧模式限制2张；全能参考最多5张
-	if videoMode == "first-last-frame" && len(metadata.Content) > 2 {
-		metadata.Content = metadata.Content[:2]
+	// 首尾帧模式限制2张
+	if videoMode == "first-last-frame" && len(items) > 2 {
+		items = items[:2]
 	}
+	return items
+}
 
-	mode := "文生视频"
-	if len(metadata.Content) > 0 {
-		switch videoMode {
-		case "first-last-frame":
-			mode = "首尾帧模式"
-		case "video-ref":
-			mode = "视频参考模式"
-		case "universal-ref":
-			mode = "全能参考模式"
-		default:
-			mode = "参考模式"
-		}
+// videoModeLabel 日志用的模式名称
+func videoModeLabel(videoMode string, hasMedia bool) string {
+	if !hasMedia {
+		return "文生视频"
 	}
-
-	req := VideoRequest{
-		Model:    model,
-		Prompt:   prompt,
-		Duration: duration,
-		Metadata: metadata,
+	switch videoMode {
+	case "first-last-frame":
+		return "首尾帧模式"
+	case "video-ref":
+		return "视频参考模式"
+	case "universal-ref":
+		return "全能参考模式"
+	default:
+		return "参考模式"
 	}
+}
 
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return "", fmt.Errorf("marshal video request: %w", err)
+// logDurationNormalized 时长被钳制时打日志（expected 为扣费时长，actual 为规范化后时长）
+func logDurationNormalized(expected, actual int) {
+	if expected != actual {
+		log.Printf("[VideoGen] duration 规范化: %d → %d", expected, actual)
 	}
-
-	log.Printf("[VideoGen] 发起请求: model=%s mode=%s duration=%ds resolution=%s ratio=%s imageCount=%d promptLen=%d",
-		model, mode, duration, resolution, ratio, len(metadata.Content), len(prompt))
-
-	videoURL, err := c.doRequest(ctx, payload)
-	if err != nil {
-		return "", err
-	}
-
-	log.Printf("[VideoGen] ✅ 视频生成成功: url=%s", videoURL)
-	return videoURL, nil
 }
 
 // NormalizeVideoDuration 按模型钳制视频时长（秒）：
@@ -268,40 +438,6 @@ func clampDuration(duration, min, max int) int {
 		return max
 	}
 	return duration
-}
-
-// normalizeSeedanceParams 豆包 Seedance 系列（火山引擎）参数规范化：
-// 时长范围 4-15 秒；fast 版本额外要求「参考视频时长 + 生成时长 <= 15.2 秒」
-func normalizeSeedanceParams(ctx context.Context, model string, duration int, videoURLs []string) (int, error) {
-	duration = clampDuration(duration, 4, 15)
-
-	// 有参考视频时，seedance-2.0-fast 模型要求「参考视频时长 + 生成视频时长 <= 15.2秒」
-	// 超限时提示用户切换到 seedance 2.0（非 fast 版本）
-	if len(videoURLs) > 0 && strings.Contains(model, "fast") {
-		if totalRefDuration := sumRefVideoDuration(ctx, videoURLs); totalRefDuration > 0 {
-			totalDuration := totalRefDuration + float64(duration)
-			if totalDuration > 15.2 {
-				return 0, fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 seedance-2.0-fast 模型的15秒限制。请将视频模型切换为 seedance 2.0（非 fast 版本）后重试", totalRefDuration, duration, totalDuration)
-			}
-		}
-	}
-	return duration, nil
-}
-
-// normalizeWanParams 阿里万相 wan3.0-video 参数规范化：
-// 时长范围 2-30 秒；有参考视频时要求「参考视频总时长 + 生成时长 <= 30 秒」（阿里云官方限制）
-func normalizeWanParams(ctx context.Context, duration int, videoURLs []string) (int, error) {
-	duration = clampDuration(duration, 2, 30)
-
-	if len(videoURLs) > 0 {
-		if totalRefDuration := sumRefVideoDuration(ctx, videoURLs); totalRefDuration > 0 {
-			totalDuration := totalRefDuration + float64(duration)
-			if totalDuration > 30 {
-				return 0, fmt.Errorf("参考视频时长(%.1f秒) + 生成时长(%d秒) = %.1f秒，超过 wan3.0-video 模型的30秒限制。请缩短参考视频或生成时长后重试", totalRefDuration, duration, totalDuration)
-			}
-		}
-	}
-	return duration, nil
 }
 
 // sumRefVideoDuration 汇总参考视频总时长（秒），获取失败的跳过

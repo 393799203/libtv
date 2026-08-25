@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
-import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS } from '@/configs/promptConfig';
+import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS } from '@/configs/promptConfig';
 import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
 
 // 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；
@@ -267,6 +267,26 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   // 图片节点：doubao-seedream 系列不支持 1K
   const is1KDisabled = !isVideo && !!selectedModelId && selectedModelId.startsWith('doubao-seedream');
 
+  // 视频节点：wan3.0（阿里万相）仅支持部分比例，其余模型不限制
+  const allowedAspectRatios: readonly string[] | null =
+    isVideo && !!selectedModelId && selectedModelId.includes('wan3.0') ? WAN3_VIDEO_ASPECT_RATIOS : null;
+
+  // 当前比例不被模型支持时自动回退到自适应（free），与分辨率回退同理
+  const effectiveAspectRatio =
+    allowedAspectRatios && !allowedAspectRatios.includes(aspectRatio) ? 'free' : aspectRatio;
+
+  // 回退值与父组件状态不一致时回写，保证生成时提交的比例与 UI 显示一致
+  useEffect(() => {
+    if (effectiveAspectRatio !== aspectRatio) {
+      onAspectRatioChange(effectiveAspectRatio);
+    }
+  }, [effectiveAspectRatio, aspectRatio, onAspectRatioChange]);
+
+  // 比例网格按模型过滤（保留占位元素维持布局）
+  const aspectRatioRows = allowedAspectRatios
+    ? ASPECT_RATIO_ROWS.map((row) => row.filter((item) => !item.value || allowedAspectRatios.includes(item.value)))
+    : ASPECT_RATIO_ROWS;
+
   // 当前分辨率不可用时自动回退：
   // - 图片：1K 被禁用时回退到 2K
   // - 视频：当前值不在模型支持列表时回退到第一个可用项
@@ -293,8 +313,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
         className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer"
         onClick={() => setOpen(!open)}
       >
-        <RatioIcon value={aspectRatio} active={true} />
-        <span className="text-[13px] font-medium text-gray-800">{aspectRatio}</span>
+        <RatioIcon value={effectiveAspectRatio} active={true} />
+        <span className="text-[13px] font-medium text-gray-800">{effectiveAspectRatio}</span>
         <span className="px-1.5 py-px rounded-md bg-gray-100 text-[10px] font-semibold text-gray-500 leading-relaxed">
           {effectiveResolution}
         </span>
@@ -359,15 +379,15 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
             <div>
               <div className="flex items-baseline justify-between mb-2.5">
                 <span className="text-[12px] font-semibold text-gray-800">比例</span>
-                <span className="text-[10px] text-gray-400">当前 {aspectRatio === 'free' ? '自适应' : aspectRatio}</span>
+                <span className="text-[10px] text-gray-400">当前 {effectiveAspectRatio === 'free' ? '自适应' : effectiveAspectRatio}</span>
               </div>
               <div className="grid grid-cols-5 gap-2">
-                {ASPECT_RATIO_ROWS.flat().map((item, index) => {
+                {aspectRatioRows.flat().map((item, index) => {
                   // 占位：空值渲染为透明占位元素
                   if (!item.value) {
                     return <div key={`placeholder-${index}`} />;
                   }
-                  const isActive = aspectRatio === item.value;
+                  const isActive = effectiveAspectRatio === item.value;
                   return (
                     <button
                       key={item.value}
@@ -390,6 +410,9 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                   );
                 })}
               </div>
+              {allowedAspectRatios && (
+                <div className="text-[11px] text-amber-600 mt-2">万相 Wan 3.0 仅支持以上比例</div>
+              )}
             </div>
           </div>
         </>
