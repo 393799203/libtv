@@ -122,7 +122,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 
 	// 模型输出格式异常导致画面/运动任一为空：不能让用户为半残结果买单，退费并提示重试
 	if storyboardPrompt == "" || motionPrompt == "" {
-		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成"); refundErr != nil {
+		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成结果不完整（画面或运动提示词缺失）"); refundErr != nil {
 			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
 		}
 		response.Fail(c, 500, "生成结果不完整（画面或运动提示词缺失），已退费，请重试")

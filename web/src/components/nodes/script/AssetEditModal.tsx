@@ -221,7 +221,7 @@ export const AssetEditModal = memo<AssetEditModalProps>(
 
       const scriptNode = store.nodes.find(n => n.id === scriptNodeId);
       if (!scriptNode) {
-        message.error('找不到脚本节点');
+        message.error('找不到分镜节点');
         return;
       }
 

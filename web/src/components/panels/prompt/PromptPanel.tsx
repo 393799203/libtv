@@ -79,7 +79,7 @@ function getUpstreamInputs(
           return {
             nodeId: sourceNode.id,
             nodeType: 'script',
-            label: '脚本',
+            label: '分镜',
             textSnippet: d.scriptContent && d.scriptContent.length > 500 ? d.scriptContent.slice(0, 500) + '…' : d.scriptContent?.slice(0, 500),
           };
         case 'audio':

@@ -70,7 +70,7 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 
 	// 退费辅助：解析/调用失败不能让用户买单
 	refund := func(reason string) {
-		if refundErr := h.biller.Refund(c.Request.Context(), userID, chargedAmount, service.BillingActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析"); refundErr != nil {
+		if refundErr := h.biller.Refund(c.Request.Context(), userID, chargedAmount, service.BillingActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析", reason); refundErr != nil {
 			log.Printf("[PrevizHandler] 退费失败(%s): %v", reason, refundErr)
 		}
 	}

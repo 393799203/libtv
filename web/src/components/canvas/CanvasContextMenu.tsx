@@ -61,7 +61,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
     },
     {
       key: 'script',
-      label: '脚本节点',
+      label: '分镜节点',
       icon: <CodeOutlined />,
     },
     {

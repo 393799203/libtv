@@ -249,8 +249,8 @@ func (s *BillingService) EnsureBalance(ctx context.Context, userID, action strin
 	return nil
 }
 
-// Refund 退还积分（AI 调用失败时退回已扣金额）
-func (s *BillingService) Refund(ctx context.Context, userID string, amount int64, action, modelName, scene string) error {
+// Refund 退还积分（AI 调用失败时退回已扣金额，reason 为失败的真实原因，如 API 返回的敏感内容信息）
+func (s *BillingService) Refund(ctx context.Context, userID string, amount int64, action, modelName, scene, reason string) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -261,8 +261,14 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 	if err != nil {
 		return err
 	}
-	// 构建退费备注，包含退费原因
+	// 构建退费备注，包含退费原因；截断到安全长度（remark 字段 varchar(255)，按字符计）
 	remark := fmt.Sprintf("%s失败退还", scene)
+	if reason != "" {
+		if r := []rune(reason); len(r) > 200 {
+			reason = string(r[:200]) + "…"
+		}
+		remark = fmt.Sprintf("%s失败退还：%s", scene, reason)
+	}
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:       userID,
 		Type:         "refund",

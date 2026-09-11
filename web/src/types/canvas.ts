@@ -203,6 +203,6 @@ export const NODE_TYPE_CONFIG: Record<NodeType, { label: string; color: string; 
   image: { label: '图像', color: '#3b82f6', icon: 'PictureOutlined' },
   video: { label: '视频', color: '#ef4444', icon: 'VideoCameraOutlined' },
   audio: { label: '音频', color: '#10b981', icon: 'AudioOutlined' },
-  script: { label: '脚本', color: '#f59e0b', icon: 'CodeOutlined' },
+  script: { label: '分镜', color: '#f59e0b', icon: 'CodeOutlined' },
   previz: { label: '白模预演', color: '#64748b', icon: 'DeploymentUnitOutlined' },
 };

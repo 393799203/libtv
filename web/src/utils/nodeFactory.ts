@@ -103,7 +103,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'script',
-        label: '分镜脚本',
+        label: '分镜',
         prompt: '',
         model: '',
         scriptContent: '',

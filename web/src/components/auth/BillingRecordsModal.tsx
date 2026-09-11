@@ -209,14 +209,25 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                         <td className="py-2.5">
                           <div className="flex items-center gap-1">
                             <Tag color={meta.color} className="!m-0">{meta.label}</Tag>
-                            {r.type === 'refund' && r.remark && (
-                              <Tooltip title={r.remark}>
+                            {r.type === 'refund' && (
+                              <Tooltip
+                                title={
+                                  <div className="text-[12px] leading-5">
+                                    <div>场景：{r.scene || '-'}</div>
+                                    <div>模型：{r.model || '-'}</div>
+                                    <div>动作：{r.action || '-'}</div>
+                                    <div>备注：{r.remark || '-'}</div>
+                                    <div>变动：{r.amount} 分 · 剩余：{r.balance_after} 分</div>
+                                  </div>
+                                }
+                                overlayInnerStyle={{ maxWidth: 360 }}
+                              >
                                 <QuestionCircleOutlined className="text-gray-400 text-[12px] cursor-help" />
                               </Tooltip>
                             )}
                           </div>
                         </td>
-                        <td className="py-2.5 text-gray-700 text-[13px]">{r.remark || r.scene || r.action || '-'}</td>
+                        <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
                         <td className="py-2.5 text-gray-500 text-[12px]">{r.model || '-'}</td>
                         <td
                           className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${

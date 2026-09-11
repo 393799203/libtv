@@ -57,7 +57,7 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
       // ✅ 使用统一的loading组件
       <NodeLoadingState
         status={status}
-        statusText={data.progressMessage || (status === 'pending' ? '等待生成脚本...' : '正在生成脚本...')}
+        statusText={data.progressMessage || (status === 'pending' ? '等待生成分镜...' : '正在生成分镜...')}
         iconBgColor="bg-amber-100"
         iconColor="text-amber-500"
       />    );
@@ -75,9 +75,9 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
 
           {/* 提示文字 */}
           <div className="flex flex-col items-center gap-1 text-center">
-            <span className="text-xs font-medium text-gray-700">脚本节点</span>
+            <span className="text-xs font-medium text-gray-700">分镜节点</span>
             <span className="text-[10px] text-gray-400 leading-relaxed">
-              从上游文本节点生成脚本
+              从上游文本节点生成分镜
               <br />
               或手动创建分镜内容
             </span>
@@ -110,7 +110,7 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
           onClick={handleOpenClick}
           className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs text-gray-700 font-medium transition-colors cursor-pointer"
         >
-          打开脚本节点
+          打开分镜节点
           <RightOutlined className="text-[10px]" />
         </button>
       </div>

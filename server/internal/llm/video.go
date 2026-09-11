@@ -506,7 +506,7 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("Video API error (status=%d): %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("Video API error (status=%d): %s", resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
 	}
 
 	var videoResp VideoResponse
@@ -601,6 +601,40 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 	}
 
 	return "", fmt.Errorf("poll timeout after %d attempts", maxAttempts)
+}
+
+// extractVideoAPIErrorMessage 从视频 API 错误响应体中提取可读的真实原因。
+// 兼容华数TokenHub网关两种格式：
+//   - 格式1: {"code":"...","message":"纯文本"} 或 {"code":"...","error":{"message":"..."}}
+//   - 格式2: {"code":"...","message":"{\"error\":{\"code\":\"...\",\"message\":\"可读信息\",...}}"}（message 内再嵌一层 JSON）
+// 提取失败时原样返回 body，保证错误信息不丢失
+func extractVideoAPIErrorMessage(body string) string {
+	var outer struct {
+		Message string `json:"message"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &outer); err != nil {
+		return body
+	}
+	if outer.Error != nil && outer.Error.Message != "" {
+		return outer.Error.Message
+	}
+	if outer.Message != "" {
+		// message 字段可能是内嵌的 JSON 字符串（网关格式），尝试二次解析
+		var inner struct {
+			Error *struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(outer.Message), &inner); err == nil && inner.Error != nil && inner.Error.Message != "" {
+			return fmt.Sprintf("%s: %s", inner.Error.Code, inner.Error.Message)
+		}
+		return outer.Message
+	}
+	return body
 }
 
 // findFFprobe 返回 ffprobe 路径
