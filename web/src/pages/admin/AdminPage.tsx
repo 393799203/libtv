@@ -62,7 +62,7 @@ export default function AdminPage() {
   const [userTotal, setUserTotal] = useState(0);      // 用户总数（分页用）
   const [billingUserId, setBillingUserId] = useState<string | null>(null); // 查看哪个用户的积分明细
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null); // 充值弹窗目标用户
-  const [rechargeAmount, setRechargeAmount] = useState<number>(100);
+  const [rechargeAmount, setRechargeAmount] = useState<number>(10000);
   const [rechargeRemark, setRechargeRemark] = useState('');
   const [recharging, setRecharging] = useState(false);
 
@@ -1085,7 +1085,7 @@ export default function AdminPage() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setRechargeUserId(user.id);
-                                    setRechargeAmount(100);
+                                    setRechargeAmount(10000);
                                     setRechargeRemark('');
                                   }}
                                   className="text-green-500 hover:text-green-600 hover:bg-green-50 px-2 py-1 rounded text-[12px] transition-colors cursor-pointer flex items-center gap-1"

@@ -64,31 +64,31 @@ models:
       description: "Kimi K2.6，长文本理解能力强"
 
     - id: doubao-seed-2.0-pro
-      name: "豆包 Seed 2.0 Pro"
+      name: "Seed 2.0 Pro"
       provider: wasu
       model_id: "doubao-seed-2.0-pro"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节豆包Seed 2.0 Pro，综合能力强"
+      description: "字节Seed 2.0 Pro，综合能力强"
 
     - id: doubao-seed-2.0-lite
-      name: "豆包 Seed 2.0 Lite"
+      name: "Seed 2.0 Lite"
       provider: wasu
       model_id: "doubao-seed-2.0-lite"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节豆包Seed 2.0 Lite，轻量快速"
+      description: "字节Seed 2.0 Lite，轻量快速"
 
     - id: doubao-seed-2.0-mini
-      name: "豆包 Seed 2.0 Mini"
+      name: "Seed 2.0 Mini"
       provider: wasu
       model_id: "doubao-seed-2.0-mini"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节豆包Seed 2.0 Mini，极速轻量"
+      description: "字节Seed 2.0 Mini，极速轻量"
 
   # ---------- 图像生成----------
   image:
@@ -132,64 +132,64 @@ models:
       description: "万象2.7图像专业版，画质更高"
 
     - id: doubao-seedream-4.0
-      name: "豆包 Seedream 4.0"
+      name: "Seedream 4.0"
       provider: wasu
       model_id: "doubao-seedream-4.0"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 4.0，综合图像生成"
+      description: "字节Seedream 4.0，综合图像生成"
 
     - id: doubao-seedream-4.5
-      name: "豆包 Seedream 4.5"
+      name: "Seedream 4.5"
       provider: wasu
       model_id: "doubao-seedream-4.5"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 4.5，画质提升"
+      description: "字节Seedream 4.5，画质提升"
 
     - id: doubao-seedream-5.0-lite
-      name: "豆包 Seedream 5.0 Lite"
+      name: "Seedream 5.0 Lite"
       provider: wasu
       model_id: "doubao-seedream-5.0-lite"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 5.0轻量版，生成速度快"
+      description: "字节Seedream 5.0轻量版，生成速度快"
       default: true  # ✅ 默认选中此模型
 
     - id: doubao-seedream-5.0-pro
-      name: "豆包 Seedream 5.0 Pro"
+      name: "Seedream 5.0 Pro"
       provider: wasu
       model_id: "doubao-seedream-5.0-pro"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "字节豆包Seedream 5.0专业版，画质最高"
+      description: "字节Seedream 5.0专业版，画质最高"
 
   # ---------- 视频生成 ----------
   video:
     - id: doubao-seedance-2.0
-      name: "豆包 Seedance 2.0"
+      name: "Seedance 2.0"
       provider: wasu
       model_id: "doubao-seedance-2.0"
       usage: [video]
-      description: "字节豆包Seedance 2.0视频生成"
+      description: "字节Seedance 2.0视频生成"
       resolutions: ["480p", "720p", "1080p", "4k"]
     - id: doubao-seedance-2.0-fast
-      name: "豆包 Seedance 2.0 Fast"
+      name: "Seedance 2.0 Fast"
       provider: wasu
       model_id: "doubao-seedance-2.0-fast"
       usage: [video]
-      description: "字节豆包Seedance 2.0快速版，生成速度更快"
+      description: "字节Seedance 2.0快速版，生成速度更快"
       resolutions: ["480p", "720p"]
     - id: wan3.0-video
-      name: "万相 Wan 3.0"
+      name: "Wan 3.0"
       provider: wasu
       model_id: "wan3.0-video"
       usage: [video]
-      description: "阿里万相Wan 3.0全能参考视频生成，最长30秒"
+      description: "阿里Wan 3.0全能参考视频生成，最长30秒"
       resolutions: ["480p", "720p", "1080p"]
 
   # ---------- 音频 / TTS ----------

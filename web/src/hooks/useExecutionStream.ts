@@ -375,6 +375,8 @@ export function useExecutionStream(
           }
           if (data.audioUrl !== undefined) updates.audioUrl = data.audioUrl;
           updates.stale = false;
+          // ✅ 成功后必须清除残留的 error（先失败后重试成功时，旧报错会一直留在节点 data 里）
+          updates.error = undefined;
           updates.status = 'success';
           if (Object.keys(updates).length > 0) {
             useCanvasStore.getState().updateNodeData(event.nodeId, updates as never);

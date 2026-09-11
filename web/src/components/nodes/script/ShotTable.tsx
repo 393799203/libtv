@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Table, Tag, Input, Select, Dropdown, Button } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -129,6 +129,60 @@ const EditableCell = memo<EditableCellProps>(function EditableCell({
 // 主组件
 // ============================================================
 
+/**
+ * 可编辑多行文本单元格
+ * - 聚焦编辑期间使用本地 draft，textarea 的 value 不再由 store 回环驱动
+ * - 避免每次按键经 store → React Flow → 整树重渲染后外部 value 回写导致光标跳到段尾
+ * - 失焦时对齐 store 最新值；非聚焦状态下外部更新（撤销/重做、AI 回填）正常同步
+ */
+interface DraftTextAreaProps {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  autoSize?: { minRows?: number; maxRows?: number };
+}
+
+const DraftTextArea = memo<DraftTextAreaProps>(function DraftTextArea({
+  value,
+  onChange,
+  placeholder,
+  autoSize,
+}) {
+  const [draft, setDraft] = useState(value);
+  const focusedRef = useRef(false);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  // 仅在非聚焦时跟随外部值变化（聚焦中回写会重置光标位置）
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(value);
+  }, [value]);
+
+  return (
+    <Input.TextArea
+      size="small"
+      value={draft}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onBlur={() => {
+        focusedRef.current = false;
+        // 若编辑期间 store 值被规范化，失焦时对齐
+        if (valueRef.current !== draft) setDraft(valueRef.current);
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(e.target.value);
+      }}
+      variant="borderless"
+      className="w-full"
+      style={{ fontSize: 12 }}
+      placeholder={placeholder}
+      autoSize={autoSize}
+    />
+  );
+});
+
 export const ShotTable = memo<ShotTableProps>(function ShotTable({
   shots,
   onChange,
@@ -258,13 +312,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       width: 250,
       render: (text: string, record) =>
         !readOnly ? (
-          <Input.TextArea
-            size="small"
+          <DraftTextArea
             value={text}
-            onChange={(e) => handleCellChange(record.id, 'visual', e.target.value)}
-            variant="borderless"
-            className="w-full"
-            style={{ fontSize: 12 }}
+            onChange={(val) => handleCellChange(record.id, 'visual', val)}
             autoSize={{ maxRows: 3 }}
           />
         ) : (
@@ -291,13 +341,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       width: 140,
       render: (v: string, record) =>
         !readOnly ? (
-          <Input.TextArea
-            size="small"
+          <DraftTextArea
             value={v}
-            onChange={(e) => handleCellChange(record.id, 'cameraMovement', e.target.value)}
-            variant="borderless"
-            className="w-full"
-            style={{ fontSize: 12 }}
+            onChange={(val) => handleCellChange(record.id, 'cameraMovement', val)}
             placeholder="如：俯视缓慢推镜头、仰视快速摇镜头"
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
@@ -311,13 +357,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       width: 220,
       render: (v: string, record) =>
         !readOnly ? (
-          <Input.TextArea
-            size="small"
+          <DraftTextArea
             value={v}
-            onChange={(e) => handleCellChange(record.id, 'dialogue', e.target.value)}
-            variant="borderless"
-            className="w-full"
-            style={{ fontSize: 12 }}
+            onChange={(val) => handleCellChange(record.id, 'dialogue', val)}
             autoSize={{ minRows: 1, maxRows: 4 }}
           />
         ) : (
@@ -330,13 +372,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       width: 120,
       render: (v: string, record) =>
         !readOnly ? (
-          <Input.TextArea
-            size="small"
+          <DraftTextArea
             value={v}
-            onChange={(e) => handleCellChange(record.id, 'soundEffect', e.target.value)}
-            variant="borderless"
-            className="w-full"
-            style={{ fontSize: 12 }}
+            onChange={(val) => handleCellChange(record.id, 'soundEffect', val)}
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         ) : (
@@ -349,13 +387,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       width: 140,
       render: (v: string, record) =>
         !readOnly ? (
-          <Input.TextArea
-            size="small"
+          <DraftTextArea
             value={v}
-            onChange={(e) => handleCellChange(record.id, 'lightingAtmosphere', e.target.value)}
-            variant="borderless"
-            className="w-full"
-            style={{ fontSize: 12 }}
+            onChange={(val) => handleCellChange(record.id, 'lightingAtmosphere', val)}
             placeholder="如：柔和自然光、强烈对比光、温暖夕阳光"
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
@@ -369,13 +403,9 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       width: 140,
       render: (v: string, record) =>
         !readOnly ? (
-          <Input.TextArea
-            size="small"
+          <DraftTextArea
             value={v}
-            onChange={(e) => handleCellChange(record.id, 'toneHint', e.target.value)}
-            variant="borderless"
-            className="w-full"
-            style={{ fontSize: 12 }}
+            onChange={(val) => handleCellChange(record.id, 'toneHint', val)}
             autoSize={{ minRows: 1, maxRows: 3 }}
           />
         ) : (
