@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, App, Empty } from 'antd';
 import { GoldOutlined, CheckCircleFilled, CrownFilled } from '@ant-design/icons';
 import { pointsPackageApi, type PointsPackage } from '@/services/pointsPackageApi';
 import { pricingApi } from '@/services/pricingApi';
+import { paymentApi } from '@/services/paymentApi';
+import api from '@/services/api';
+import { useAuthStore } from '@/stores/authStore';
 
 /** 容量估算参考模型：视频取 Seedance 2.0 480p，图片取默认的 Seedream 5.0 Lite */
 const REF_VIDEO_MODEL_ID = 'doubao-seedance-2.0';
@@ -76,8 +79,67 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  const handleBuy = (pkg: PointsPackage) => {
-    message.info(`「${pkg.name}」支付功能即将上线，敬请期待`);
+  const [payingPkgId, setPayingPkgId] = useState<number | null>(null);
+  // 支付轮询定时器（组件销毁时清理）
+  const payTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const payTriesRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (payTimerRef.current) clearInterval(payTimerRef.current);
+    };
+  }, []);
+
+  /** 刷新用户积分（拉取 /auth/me 后同步 store 与顶栏） */
+  const refreshCredits = async () => {
+    try {
+      const me = (await api.get('/auth/me')) as { credits?: number; [k: string]: unknown };
+      if (typeof me.credits === 'number') {
+        useAuthStore.getState().setUser({ credits: me.credits });
+      }
+    } catch {
+      // 刷新失败不阻塞（下次进入页面/刷新会同步）
+    }
+  };
+
+  /** 轮询订单直到支付成功（最多 5 分钟） */
+  const startPolling = (orderNo: string, points: number) => {
+    if (payTimerRef.current) clearInterval(payTimerRef.current);
+    payTriesRef.current = 0;
+    payTimerRef.current = setInterval(async () => {
+      payTriesRef.current += 1;
+      try {
+        const order = await paymentApi.getOrder(orderNo);
+        if (order.status === 'paid') {
+          if (payTimerRef.current) clearInterval(payTimerRef.current);
+          payTimerRef.current = null;
+          message.success(`支付成功，${points.toLocaleString()} 积分已到账`);
+          await refreshCredits();
+        }
+      } catch {
+        // 网络抖动忽略，继续轮询
+      }
+      if (payTriesRef.current >= 100) {
+        if (payTimerRef.current) clearInterval(payTimerRef.current);
+        payTimerRef.current = null;
+      }
+    }, 3000);
+  };
+
+  const handleBuy = async (pkg: PointsPackage) => {
+    if (payingPkgId !== null) return;
+    setPayingPkgId(pkg.id);
+    try {
+      const order = await paymentApi.createOrder(pkg.id);
+      // 打开支付宝收银台（新窗口），弹窗内轮询订单状态
+      window.open(order.pay_url, '_blank');
+      message.info('请在打开的支付宝页面完成支付');
+      startPolling(order.order_no, order.points);
+    } catch {
+      // 失败原因已由 axios 拦截器统一提示（如：支付功能未开启）
+    } finally {
+      setPayingPkgId(null);
+    }
   };
 
   // 底部参考单价说明（按已配置的单价动态拼接）
@@ -174,13 +236,18 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                 {/* 购买按钮 */}
                 <button
                   onClick={() => handleBuy(pkg)}
-                  className={`mt-4 w-full cursor-pointer rounded-lg py-2 text-[14px] font-medium text-white transition-all duration-200 hover:shadow-lg active:scale-95 ${
+                  disabled={payingPkgId !== null}
+                  className={`mt-4 w-full rounded-lg py-2 text-[14px] font-medium text-white transition-all duration-200 hover:shadow-lg active:scale-95 ${
+                    payingPkgId !== null
+                      ? 'cursor-not-allowed opacity-50'
+                      : 'cursor-pointer'
+                  } ${
                     pkg.recommended
                       ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
                       : 'bg-gradient-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black'
                   }`}
                 >
-                  立即购买
+                  {payingPkgId === pkg.id ? '正在跳转支付宝...' : '立即购买'}
                 </button>
               </div>
             );

@@ -184,6 +184,13 @@ models:
       usage: [video]
       description: "字节Seedance 2.0快速版，生成速度更快"
       resolutions: ["480p", "720p"]
+    - id: doubao-seedance-2.5
+      name: "Seedance 2.5"
+      provider: wasu
+      model_id: "doubao-seedance-2.5"
+      usage: [video]
+      description: "字节Seedance 2.5视频生成，长叙事能力强，擅长多镜头连贯剧情与复杂运镜"
+      resolutions: ["480p", "720p", "1080p"]
     - id: wan3.0-video
       name: "Wan 3.0"
       provider: wasu

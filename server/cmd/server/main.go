@@ -62,7 +62,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -113,6 +113,12 @@ func main() {
 		log.Printf("warning: seed default points packages failed: %v", err)
 	}
 
+	// 支付宝支付服务（积分超市充值；configs/config.yaml payment.alipay 未配置时支付功能关闭）
+	paymentService, err := service.NewPaymentService(db, billingService, config.C.Payment.Alipay)
+	if err != nil {
+		log.Fatalf("init payment service: %v", err)
+	}
+
 	// 初始化 LLM 客户端
 	llmClient := llm.NewScriptClient(config.C.AI)
 
@@ -161,6 +167,12 @@ func main() {
 	pricingHandler := handler.NewPricingHandler(pricingService)
 	generationHistoryHandler := handler.NewGenerationHistoryHandler(generationHistoryService)
 	pointsPackageHandler := handler.NewPointsPackageHandler(pointsPackageService)
+	// 支付回调完成后同步跳转回的前端地址（可用环境变量 FRONTEND_BASE 覆盖）
+	frontendBase := os.Getenv("FRONTEND_BASE")
+	if frontendBase == "" {
+		frontendBase = "http://192.168.110.115:8880"
+	}
+	paymentHandler := handler.NewPaymentHandler(paymentService, frontendBase)
 
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
@@ -211,6 +223,10 @@ func main() {
 	// 积分超市套餐列表（无需登录，仅启用中的套餐）
 	r.GET("/api/points-packages", pointsPackageHandler.ListPublic)
 
+	// 支付宝支付（公网接口，无需登录；异步通知 + 同步跳转）
+	r.POST("/api/payment/alipay/notify", paymentHandler.AlipayNotify)
+	r.GET("/api/payment/alipay/return", paymentHandler.AlipayReturn)
+
 	// 公开上传接口
 	publicUpload := r.Group("/api/upload")
 	{
@@ -242,6 +258,13 @@ func main() {
 		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
 		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
 		api.POST("/users/:id/recharge", userHandler.Recharge)   // 管理员：为用户充值积分
+
+		// 支付订单（积分超市充值，需登录）
+		payment := api.Group("/payment")
+		{
+			payment.POST("/orders", paymentHandler.CreateOrder) // 下单，返回支付宝收银台支付 URL
+			payment.GET("/orders/:orderNo", paymentHandler.GetOrder) // 查单（前端轮询支付结果）
+		}
 
 		// 项目 + 画布
 		projects := api.Group("/projects")

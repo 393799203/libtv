@@ -15,6 +15,7 @@ type Config struct {
 	JWT      JWTConfig      `yaml:"jwt"`
 	Storage  StorageConfig  `yaml:"storage"`
 	AI       AIConfig       `yaml:"ai"`
+	Payment  PaymentConfig  `yaml:"payment"`
 	CORS     CORSConfig     `yaml:"cors"`
 }
 
@@ -115,6 +116,23 @@ type AudioConfig struct {
 	Provider string `yaml:"provider"`
 }
 
+// PaymentConfig 支付配置
+type PaymentConfig struct {
+	Alipay AlipayConfig `yaml:"alipay"`
+}
+
+// AlipayConfig 支付宝开放平台配置（企业账户；RSA2 签名）
+type AlipayConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	AppID           string `yaml:"app_id"`
+	PrivateKey      string `yaml:"private_key"`       // 应用私钥（PEM，PKCS1/PKCS8 均可，可多行）
+	AlipayPublicKey string `yaml:"alipay_public_key"` // 支付宝公钥（PEM，PKIX）
+	Gateway         string `yaml:"gateway"`           // 生产 openapi.alipay.com/gateway.do；沙箱 openapi-sandbox.dl.alipaydev.com/gateway.do
+	NotifyURL       string `yaml:"notify_url"`        // 异步回调（必须公网可达）
+	ReturnURL       string `yaml:"return_url"`        // 同步跳转（支付宝先跳回本地址）
+	SubjectPrefix   string `yaml:"subject_prefix"`    // 商品标题前缀
+}
+
 var C Config
 
 func Load(path string) error {
@@ -156,6 +174,44 @@ func Load(path string) error {
 	// CORS 白名单环境变量覆盖（逗号分隔，CORS_ORIGINS=http://a,http://b）
 	if corsOrigins := os.Getenv("CORS_ORIGINS"); corsOrigins != "" {
 		C.CORS.Origins = splitCSV(corsOrigins)
+	}
+
+	// 支付宝支付环境变量覆盖（密钥/回调地址建议走环境变量，避免明文入库）
+	if v := os.Getenv("ALIPAY_ENABLED"); v != "" {
+		C.Payment.Alipay.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("ALIPAY_APP_ID"); v != "" {
+		C.Payment.Alipay.AppID = v
+	}
+	if v := os.Getenv("ALIPAY_PRIVATE_KEY"); v != "" {
+		C.Payment.Alipay.PrivateKey = v
+	}
+	if v := os.Getenv("ALIPAY_PUBLIC_KEY"); v != "" {
+		C.Payment.Alipay.AlipayPublicKey = v
+	}
+	if v := os.Getenv("ALIPAY_GATEWAY"); v != "" {
+		C.Payment.Alipay.Gateway = v
+	}
+	if v := os.Getenv("ALIPAY_NOTIFY_URL"); v != "" {
+		C.Payment.Alipay.NotifyURL = v
+	}
+	if v := os.Getenv("ALIPAY_RETURN_URL"); v != "" {
+		C.Payment.Alipay.ReturnURL = v
+	}
+	// 密钥走 PEM 文件（推荐：挂载进容器，避免私钥进镜像/环境变量换行问题）
+	if v := os.Getenv("ALIPAY_PRIVATE_KEY_FILE"); v != "" {
+		b, err := os.ReadFile(v)
+		if err != nil {
+			return fmt.Errorf("read ALIPAY_PRIVATE_KEY_FILE %s: %w", v, err)
+		}
+		C.Payment.Alipay.PrivateKey = string(b)
+	}
+	if v := os.Getenv("ALIPAY_PUBLIC_KEY_FILE"); v != "" {
+		b, err := os.ReadFile(v)
+		if err != nil {
+			return fmt.Errorf("read ALIPAY_PUBLIC_KEY_FILE %s: %w", v, err)
+		}
+		C.Payment.Alipay.AlipayPublicKey = string(b)
 	}
 
 	return nil

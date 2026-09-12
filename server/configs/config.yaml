@@ -75,3 +75,18 @@ ai:
     api_url: ""
   audio:
     provider: edge_tts  # edge_tts / fish_speech
+
+# ============================================
+#  支付（积分超市支付宝充值；默认关闭，配置并置 enabled: true 后生效）
+#  密钥/回调地址建议用环境变量 ALIPAY_* 注入，避免明文提交
+# ============================================
+payment:
+  alipay:
+    enabled: false
+    app_id: ""
+    private_key: ""          # RSA2 应用私钥 PEM（PKCS1/PKCS8）；环境变量 ALIPAY_PRIVATE_KEY
+    alipay_public_key: ""    # 支付宝公钥 PEM（PKIX）；环境变量 ALIPAY_PUBLIC_KEY
+    gateway: "https://openapi.alipay.com/gateway.do"   # 沙箱联调改 https://openapi-sandbox.dl.alipaydev.com/gateway.do
+    notify_url: ""           # 异步回调（公网可达）；环境变量 ALIPAY_NOTIFY_URL
+    return_url: ""           # 同步跳转；环境变量 ALIPAY_RETURN_URL
+    subject_prefix: "漫蛙AI积分"

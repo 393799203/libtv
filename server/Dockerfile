@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
@@ -6,11 +7,15 @@ RUN apk add --no-cache git
 
 ENV GOPROXY=https://goproxy.cn,direct
 
+# 依赖下载走 BuildKit 持久缓存（首次构建下载后长期复用，不随 --no-cache 失效）；
+# 加 5 次重试兜底，避免 goproxy 网络抖动导致构建失败
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    for i in 1 2 3 4 5; do go mod download && break; echo "go mod download 失败，第 ${i} 次重试"; sleep 3; done
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server/
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -o server ./cmd/server/
 
 FROM alpine:3.19
 

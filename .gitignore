@@ -32,3 +32,6 @@ pnpm-debug.log*
 *.db
 *.sqlite
 *.sqlite3
+
+# Go 依赖采用 Docker BuildKit 缓存构建，不入库
+server/vendor/

@@ -41,6 +41,7 @@ services:
     volumes:
       - uploads-data:/app/uploads
       - public-data:/app/public
+      - ./alipay:/app/alipay:ro   # 支付宝支付密钥（私钥/公钥 PEM，挂载进容器，不进镜像）
     # 使用extra_hosts确保容器能访问宿主机网络
     extra_hosts:
       - "minio-host:192.168.110.207"
