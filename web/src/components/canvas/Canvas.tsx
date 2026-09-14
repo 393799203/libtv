@@ -15,7 +15,7 @@ import {
   type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Button, Tooltip } from 'antd';
+import { Button, Tooltip, message } from 'antd';
 import {
   FullscreenOutlined,
   ZoomInOutlined,
@@ -29,7 +29,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
 import { useShallow } from 'zustand/react/shallow';
 import { NODE_TYPE_CONFIG } from '@/types/canvas';
-import type { LibTVNode, LibTVEdge, NodeType } from '@/types/canvas';
+import type { LibTVNode, LibTVEdge, NodeType, ImageNodeData, VideoNodeData, AudioNodeData } from '@/types/canvas';
 import { PromptCompose } from '@/components/panels/prompt';
 
 import { nodeTypes } from '@/components/nodes';
@@ -39,6 +39,7 @@ import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
+import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 
 const edgeTypes = {
   dataFlow: DataFlowEdge,
@@ -96,7 +97,7 @@ export const Canvas = memo(function Canvas() {
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, projectId } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -107,6 +108,7 @@ export const Canvas = memo(function Canvas() {
       updateNodeData: s.updateNodeData,
       addNode: s.addNode,
       addEdge: s.addEdge,
+      projectId: s.projectId,
     }))
   );
 
@@ -279,6 +281,91 @@ export const Canvas = memo(function Canvas() {
     [nodeSelectPopup, screenToFlowPosition, addNode, addEdge]
   );
 
+  // 拖拽本地/微信图片到画布：识别文件拖入并允许放置
+  const handleDragOverCanvas = useCallback((e: React.DragEvent) => {
+    try {
+      if (Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    } catch {
+      // 忽略（个别浏览器 types 实现不同）
+    }
+  }, []);
+
+  // 释放文件：按类型上传（图片/视频/音频）→ 在释放位置生成对应节点，多文件错开排列
+  const handleDropFiles = useCallback(
+    async (e: React.DragEvent) => {
+      const files = Array.from(e.dataTransfer.files || []);
+      if (files.length === 0) return;
+
+      const classify = (f: File): 'image' | 'video' | 'audio' | null => {
+        if (f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(f.name)) return 'image';
+        if (f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)$/i.test(f.name)) return 'video';
+        if (f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name)) return 'audio';
+        return null;
+      };
+      const items = files
+        .map((f) => ({ f, kind: classify(f) }))
+        .filter((x): x is { f: File; kind: 'image' | 'video' | 'audio' } => x.kind !== null);
+      if (items.length === 0) return;
+      e.preventDefault();
+
+      const base = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      let idx = 0;
+      for (const { f, kind } of items) {
+        const key = `canvas-drop-${f.name}-${Date.now()}-${idx}`;
+        try {
+          if (kind === 'image') {
+            const res = await uploadImage(f, projectId || undefined);
+            const node = createNode('image', { x: base.x + idx * 80, y: base.y + idx * 80 });
+            addNode(node);
+            updateNodeData(node.id, {
+              imageUrl: res.url,
+              thumbUrl: res.thumbUrl,
+              width: res.width,
+              height: res.height,
+            } as Partial<ImageNodeData>);
+          } else if (kind === 'video') {
+            message.loading({ content: `上传中「${f.name}」0%`, key, duration: 0 });
+            const res = await uploadVideo(
+              f,
+              (pct, phase) => {
+                message.loading({
+                  content: phase === 'processing' ? `转码中「${f.name}」${pct}%` : `上传中「${f.name}」${pct}%`,
+                  key,
+                  duration: 0,
+                });
+              },
+              projectId || undefined
+            );
+            const node = createNode('video', { x: base.x + idx * 80, y: base.y + idx * 80 });
+            addNode(node);
+            updateNodeData(node.id, { videoUrl: res.url } as Partial<VideoNodeData>);
+            message.success({ content: `「${f.name}」上传完成`, key, duration: 2 });
+          } else {
+            message.loading({ content: `上传中「${f.name}」0%`, key, duration: 0 });
+            const url = await uploadAudio(
+              f,
+              (pct) => message.loading({ content: `上传中「${f.name}」${pct}%`, key, duration: 0 }),
+              projectId || undefined
+            );
+            const node = createNode('audio', { x: base.x + idx * 80, y: base.y + idx * 80 });
+            addNode(node);
+            updateNodeData(node.id, { audioUrl: url } as Partial<AudioNodeData>);
+            message.success({ content: `「${f.name}」上传完成`, key, duration: 2 });
+          }
+          idx++;
+        } catch (err) {
+          message.destroy(key);
+          // HTTP 错误已由 axios 拦截器统一提示
+          console.error('画布拖拽上传失败:', err);
+        }
+      }
+    },
+    [screenToFlowPosition, addNode, updateNodeData, projectId]
+  );
+
   const onViewportChange = useCallback((viewport: Viewport) => {
     const now = Date.now();
     if (now - lastViewportUpdate.current > VIEWPORT_CHANGE_THROTTLE) {
@@ -435,7 +522,8 @@ export const Canvas = memo(function Canvas() {
           </div>
         </div>
       ) : (
-      <ReactFlow
+      <div className="w-full h-full" onDragOver={handleDragOverCanvas} onDrop={handleDropFiles}>
+        <ReactFlow
         nodes={displayNodes}
         edges={edges}
         onNodesChange={handleNodesChange}
@@ -534,6 +622,7 @@ export const Canvas = memo(function Canvas() {
         </Panel>
 
       </ReactFlow>
+      </div>
       )}
 
       {contextMenu && (
