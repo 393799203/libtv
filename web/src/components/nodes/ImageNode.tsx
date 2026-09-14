@@ -187,7 +187,21 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
               className="w-full block"
               loading="lazy"
               decoding="async"
-              onLoad={() => setImgStatus('loaded')}
+              onLoad={async (e) => {
+                const el = e.currentTarget;
+                // 以实际渲染的图片尺寸更新容器高度（避免探测 Image 与显示 img 不同步导致的高度错误/裁切）
+                if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+                  setLoadedSize({ width: el.naturalWidth, height: el.naturalHeight });
+                }
+                // 大图场景：onLoad 只表示下载完成，解码/上屏可能仍在进行——
+                // 等 decode() 真正可绘制后再收起 loading，避免"转圈没了图还没出来"
+                try {
+                  await el.decode();
+                } catch {
+                  // 解码失败按已加载处理，避免无限转圈
+                }
+                setImgStatus('loaded');
+              }}
               onError={() => setImgStatus('error')}
             />
             {/* 加载失败：提示 + 占位 */}

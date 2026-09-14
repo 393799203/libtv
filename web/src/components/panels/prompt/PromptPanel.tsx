@@ -1,4 +1,5 @@
 import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
@@ -189,6 +190,62 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     });
   });
   const projectId = useCanvasStore((s) => s.projectId);
+
+  // ===== 自绘拖拽：上游缩略图 → 提示词编辑器（替代 HTML5 DnD，避免被画布/浏览器劫持） =====
+  const [dragInfo, setDragInfo] = useState<{ input: UpstreamInput; startX: number; startY: number } | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const dragActiveRef = useRef(false); // 同步判断用 ref，避免 effect 反复重绑监听
+  const badgeRef = useRef<HTMLDivElement | null>(null); // 徽标 DOM 直接定位，避免拖动时 60fps setState 重渲染
+
+  /** 鼠标按下缩略图：记录拖拽起点（点击删除按钮等交互元素时不触发） */
+  const handleChipMouseDown = useCallback((e: React.MouseEvent, input: UpstreamInput) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    if (e.button !== 0) return;
+    e.preventDefault(); // 阻止文本选择/画布干扰
+    dragActiveRef.current = false;
+    setDragActive(false);
+    setDragInfo({ input, startX: e.clientX, startY: e.clientY });
+  }, []);
+
+  // 拖拽期间：全局监听 mousemove/mouseup，光标跟随显示绿底白色+号徽标
+  useEffect(() => {
+    if (!dragInfo) return;
+
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - dragInfo.startX;
+      const dy = e.clientY - dragInfo.startY;
+      if (!dragActiveRef.current && Math.hypot(dx, dy) > 4) {
+        dragActiveRef.current = true;
+        setDragActive(true);
+        document.body.style.userSelect = 'none';
+      }
+      if (dragActiveRef.current) {
+        // 徽标直接改 DOM 样式（不触发 React 重渲染）
+        if (badgeRef.current) {
+          badgeRef.current.style.left = `${e.clientX}px`;
+          badgeRef.current.style.top = `${e.clientY}px`;
+        }
+        // 光标跟随：在编辑器内悬停时显示文本插入光标（预览释放位置）
+        editorRef.current?.previewDropCaret(e.clientX, e.clientY);
+      }
+    };
+    const onUp = (e: MouseEvent) => {
+      if (dragActiveRef.current && editorRef.current) {
+        editorRef.current.insertMentionFromDrop(dragInfo.input, e.clientX, e.clientY);
+      }
+      document.body.style.userSelect = '';
+      dragActiveRef.current = false;
+      setDragActive(false);
+      setDragInfo(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+    };
+  }, [dragInfo]);
 
   // 节点生成 hook — 统一入口（处理单点生成 + SSE 订阅）
   const {
@@ -533,6 +590,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onRemoveMention={handleRemoveMention}
         targetNodeId={nodeId}
         showStyleSelector={nodeType === 'image'}
+        onChipMouseDown={handleChipMouseDown}
       />
 
       {/* 第二层：提示词编辑区（暂存按钮悬浮在右下角） */}
@@ -593,6 +651,21 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         audioReferenced={nodeType === 'video' && (mentions.some((m) => m.nodeType === 'audio') || hasUpstreamAudio)}
         charCount={audioCharCount}
       />
+
+      {/* 拖拽徽标：绿底圆形白色+号（小尺寸），跟随光标（pointer-events-none 不拦截落点） */}
+      {dragActive &&
+        createPortal(
+          <div
+            ref={badgeRef}
+            className="fixed z-[9999] pointer-events-none"
+            style={{ left: dragInfo?.startX ?? 0, top: dragInfo?.startY ?? 0, transform: 'translate(-50%, -50%)' }}
+          >
+            <div className="w-[18px] h-[18px] rounded-full bg-green-600 flex items-center justify-center shadow-md">
+              <span className="text-white text-[12px] font-bold leading-none">+</span>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 });

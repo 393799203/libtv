@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { memo, useState, useRef, useCallback, useMemo, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { UpstreamInput, MentionMarker } from '@/types/prompt';
 
 interface PromptEditorProps {
@@ -26,6 +26,10 @@ export interface PromptEditorHandle {
   getMentions: () => MentionMarker[];
   /** 删除 DOM 中所有 nodeId 匹配的 mention span */
   removeMentionByNodeId: (nodeId: string) => void;
+  /** 从画布坐标点插入上游引用（拖拽释放用）：在 (clientX, clientY) 处放置光标并插入 mention，成功返回 true */
+  insertMentionFromDrop: (input: UpstreamInput, clientX: number, clientY: number) => boolean;
+  /** 拖拽悬停预览：把文本光标移动到 (clientX, clientY)（仅当点在编辑器内），返回是否在编辑区内 */
+  previewDropCaret: (clientX: number, clientY: number) => boolean;
 }
 
 const NODE_TYPE_ICON_TEXT: Record<string, string> = {
@@ -221,6 +225,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   const editorRef = useRef<HTMLDivElement>(null);
   // @ 引用菜单的跟随定位（viewport 坐标，跟随光标/@ 位置）
   const [mentionMenuPos, setMentionMenuPos] = useState<{ left: number; top: number } | null>(null);
+  // 拖拽插入转发 ref（useImperativeHandle 先于 useCallback 定义，用 ref 绕开声明顺序限制）
+  const insertMentionFromDropRef = useRef<(input: UpstreamInput, clientX: number, clientY: number) => boolean>(
+    () => false
+  );
+  const previewDropCaretRef = useRef<(clientX: number, clientY: number) => boolean>(() => false);
   // 防抖定时器：避免每次按键都 cloneNode 提取文本
   const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -455,12 +464,18 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       // 先清掉挂起的防抖，再立即同步父组件
       if (removed) commitNow();
     },
+    insertMentionFromDrop: (input, clientX, clientY) => insertMentionFromDropRef.current(input, clientX, clientY),
+    previewDropCaret: (clientX, clientY) => previewDropCaretRef.current(clientX, clientY),
   }), [commitNow]);
 
   // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
-  const filteredInputs = mentionFilter
-    ? upstreamInputs.filter((input) => input.label.includes(mentionFilter))
-    : upstreamInputs;
+  const filteredInputs = useMemo(
+    () =>
+      mentionFilter
+        ? upstreamInputs.filter((input) => input.label.includes(mentionFilter))
+        : upstreamInputs,
+    [mentionFilter, upstreamInputs]
+  );
 
   /** 构建初始 HTML（只在初始化和 syncKey 变化时使用） */
   const buildHtml = useCallback((): string => {
@@ -559,6 +574,86 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     },
     [commitNow, insertMentionSpan]
   );
+
+  /** 拖拽插入：在光标处直接插入 mention（不要求光标前有 @，与手动 @ 的区别点） */
+  const insertMentionAtCaret = useCallback(
+    (input: UpstreamInput): string | null => {
+      const el = editorRef.current;
+      if (!el) return null;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      const range = sel.getRangeAt(0);
+      if (!el.contains(range.startContainer)) return null;
+
+      const id = genUniqueMentionId();
+      const span = buildMentionSpan(id, input);
+      range.insertNode(span);
+
+      // 标签后面插入一个不间断空格（独立文本节点，不在标签内）
+      const spaceNode = document.createTextNode('\u00A0');
+      span.after(spaceNode);
+
+      // 光标放到空格文本节点内部（offset=1，即空格之后）
+      range.setStart(spaceNode, 1);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      el.focus();
+      return id;
+    },
+    [buildMentionSpan, genUniqueMentionId]
+  );
+
+  /** 拖拽释放：在指定视口坐标插入上游引用（自绘拖拽用，无需 dataTransfer） */
+  const insertMentionFromDrop = useCallback(
+    (input: UpstreamInput, clientX: number, clientY: number): boolean => {
+      const el = editorRef.current;
+      if (!el) return false;
+      // 光标定位到释放点（caretRangeFromPoint 给出的是文本位置）
+      const point = document.caretRangeFromPoint
+        ? document.caretRangeFromPoint(clientX, clientY)
+        : null;
+      if (point && el.contains(point.startContainer)) {
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(point);
+        }
+      } else {
+        // 释放点不在编辑器内：直接放弃
+        return false;
+      }
+      const newId = insertMentionAtCaret(input);
+      if (!newId) return false;
+      internalMentionsRef.current.set(newId, {
+        id: newId,
+        nodeId: input.nodeId,
+        label: input.label,
+        nodeType: input.nodeType,
+      });
+      setShowMentionMenu(false);
+      commitNow();
+      return true;
+    },
+    [insertMentionAtCaret, commitNow]
+  );
+  // 供 useImperativeHandle 转发（ref 在组件顶部声明，此处赋值）
+  insertMentionFromDropRef.current = insertMentionFromDrop;
+  // 拖拽悬停预览：把文本光标移动到鼠标所在字符位置（仅编辑器内有效）
+  const previewDropCaret = useCallback((clientX: number, clientY: number): boolean => {
+    const el = editorRef.current;
+    if (!el) return false;
+    const point = document.caretRangeFromPoint
+      ? document.caretRangeFromPoint(clientX, clientY)
+      : null;
+    if (!point || !el.contains(point.startContainer)) return false;
+    const sel = window.getSelection();
+    if (!sel) return false;
+    sel.removeAllRanges();
+    sel.addRange(point);
+    return true;
+  }, []);
+  previewDropCaretRef.current = previewDropCaret;
 
   /** 键盘事件 */
   const handleKeyDown = useCallback(

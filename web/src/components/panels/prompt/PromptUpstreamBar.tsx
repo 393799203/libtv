@@ -21,6 +21,8 @@ interface PromptUpstreamBarProps {
   targetNodeId?: string;
   /** 是否显示风格选择按钮（仅图片节点） */
   showStyleSelector?: boolean;
+  /** 鼠标按下缩略图（自绘拖拽起点；由 PromptPanel 接管 mousemove/mouseup） */
+  onChipMouseDown?: (e: React.MouseEvent, input: UpstreamInput) => void;
 }
 
 const NODE_TYPE_ICON: Record<UpstreamInput['nodeType'], React.ReactNode> = {
@@ -36,6 +38,7 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   onRemoveMention,
   targetNodeId,
   showStyleSelector = false,
+  onChipMouseDown,
 }) {
   // 仅订阅 action 函数（zustand 中这些是稳定引用），不订阅 nodes/edges 数组
   const removeEdges = useCanvasStore((s) => s.removeEdges);
@@ -107,7 +110,10 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
           >
             {/* 缩略图 */}
             {input.thumbnail ? (
-              <div className="relative w-[44px] h-[44px] rounded-lg bg-gray-100 border border-gray-200">
+              <div
+                className="relative w-[44px] h-[44px] rounded-lg bg-gray-100 border border-gray-200 cursor-grab select-none"
+                onMouseDown={(e) => onChipMouseDown?.(e, input)}
+              >
                 {/* 图片：控制预览浮层的显示/隐藏 */}
                 <img
                   src={input.thumbnail}
@@ -132,7 +138,8 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
               </div>
             ) : (
               <div
-                className="relative w-[44px] h-[44px] rounded-lg bg-gray-50 border border-dashed border-gray-250 flex flex-col items-center justify-center gap-0.5"
+                className="relative w-[44px] h-[44px] rounded-lg bg-gray-50 border border-dashed border-gray-250 flex flex-col items-center justify-center gap-0.5 cursor-grab select-none"
+                onMouseDown={(e) => onChipMouseDown?.(e, input)}
                 onMouseEnter={(e) => handleThumbEnter(e, input)}
                 onMouseLeave={handleThumbLeave}
               >
