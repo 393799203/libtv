@@ -126,6 +126,26 @@ function applyToneTags(el: HTMLElement): void {
 }
 
 /** 获取当前光标前一个可见字符（不修改 DOM，使用 TreeWalker 向前遍历） */
+/** 计算 @ 引用菜单的跟随位置：光标（@ 输入位置）下方的容器内坐标。
+ *  必须用 getBoundingClientRect 差值（transform 感知）而不是 fixed/viewport 坐标——
+ *  画布被 ReactFlow 的 transform 容器包裹时，fixed 会以该变换祖先为参照系导致菜单飞出屏幕 */
+function computeCaretMenuPos(el: HTMLElement): { left: number; top: number } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  // 无有效光标矩形（如选区塌缩在隐藏节点）时放弃定位
+  if (rect.width === 0 && rect.height === 0 && rect.left === 0 && rect.top === 0) return null;
+  const wrap = el.parentElement;
+  if (!wrap) return null;
+  const wrapRect = wrap.getBoundingClientRect();
+  // 菜单尺寸：宽 w-52(208px)；水平左边缘对齐光标左边缘（紧贴 @ 输入位置向右展开）
+  const MENU_W = 216;
+  const left = Math.max(8, Math.min(rect.left - wrapRect.left, Math.max(8, wrapRect.width - MENU_W)));
+  // 垂直：始终显示在光标下方（编辑区容器很矮，不要做"翻到上方"的判断，否则永远不满足下方条件）
+  const top = rect.bottom - wrapRect.top + 6;
+  return { left, top };
+}
+
 function getCharBeforeCursor(el: HTMLElement): string | null {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return null;
@@ -199,6 +219,8 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   const editorRef = useRef<HTMLDivElement>(null);
+  // @ 引用菜单的跟随定位（viewport 坐标，跟随光标/@ 位置）
+  const [mentionMenuPos, setMentionMenuPos] = useState<{ left: number; top: number } | null>(null);
   // 防抖定时器：避免每次按键都 cloneNode 提取文本
   const emitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -512,6 +534,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       setSelectedIdx(0);
     }
     setMentionFilter(filter);
+    // 菜单跟随光标：每次输入/移动时刷新定位（在 @ 位置下方弹出）
+    const pos = computeCaretMenuPos(el);
+    if (pos) setMentionMenuPos(pos);
   }, [showMentionMenu, emitChangeDebounced]);
 
   /** 选择一个引用（点击或回车） */
@@ -801,7 +826,13 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       {showMentionMenu && filteredInputs.length > 0 && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setShowMentionMenu(false)} />
-          <div className="absolute left-0 top-0 mt-9 w-52 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-30">
+          <div
+            className="absolute z-30 w-52 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden"
+            style={{
+              left: mentionMenuPos?.left ?? 0,
+              top: mentionMenuPos?.top ?? 36,
+            }}
+          >
             <div className="max-h-[220px] overflow-y-auto py-1">
               {filteredInputs.map((input, idx) => (
                 <button

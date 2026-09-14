@@ -34,6 +34,14 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 图片尺寸：优先使用data中的值（后端返回），否则通过加载图片获取（fallback）
   const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
 
+  // 图片懒加载状态：loading（灰底+转圈）→ loaded / error
+  const [imgStatus, setImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+
+  // imageUrl 变化时重置加载状态（换图后重新走一遍加载流程）
+  useEffect(() => {
+    setImgStatus('loading');
+  }, [data.imageUrl]);
+
   // 最终尺寸：data中有值就用data的，否则用加载获取的
   const imageWidth = data.width || loadedSize?.width;
   const imageHeight = data.height || loadedSize?.height;
@@ -167,13 +175,28 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
             className="relative rounded-lg overflow-hidden bg-gray-100 w-[320px]"
             style={{ minHeight: `${imageContainerHeight}px` }}
           >
+            {/* 懒加载中：灰底 + 转圈标识 */}
+            {imgStatus === 'loading' && (
+              <div className="absolute inset-0 flex items-center justify-center z-10">
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
+              </div>
+            )}
             <img
               src={data.imageUrl}
               alt={data.label}
               className="w-full block"
               loading="lazy"
               decoding="async"
+              onLoad={() => setImgStatus('loaded')}
+              onError={() => setImgStatus('error')}
             />
+            {/* 加载失败：提示 + 占位 */}
+            {imgStatus === 'error' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-50 z-10">
+                <PictureOutlined className="text-2xl text-red-400" />
+                <span className="text-[11px] text-red-400">图片加载失败</span>
+              </div>
+            )}
           </div>
         ) : (
           <div
