@@ -109,6 +109,8 @@ interface PromptToolbarProps {
   // 视频节点专属：是否生成音频
   generateAudio?: boolean;
   onGenerateAudioChange?: (enabled: boolean) => void;
+  // 视频节点专属：是否已引用音频节点（引用后声音开关强制开启，不可关闭）
+  audioReferenced?: boolean;
   // 音频节点专属：输入字符数（用于计算费用）
   charCount?: number;
 }
@@ -562,6 +564,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onDurationChange,
   generateAudio = true,
   onGenerateAudioChange,
+  audioReferenced = false,
   charCount = 0,
 }) {
   const isVideo = nodeType === 'video';
@@ -846,21 +849,35 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           </div>
         )}
 
-        {/* 声音开关（仅视频节点，时长选择器右侧） */}
+        {/* 声音开关（仅视频节点，时长选择器右侧；已引用音频节点时锁定开启） */}
         {isVideo && (
           <button
-            onClick={() => onGenerateAudioChange?.(!generateAudio)}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer text-[13px] mr-1 ${
+            onClick={() => {
+              if (audioReferenced) return;
+              onGenerateAudioChange?.(!generateAudio);
+            }}
+            disabled={audioReferenced}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors text-[13px] mr-1 ${
+              audioReferenced ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+            } ${
               generateAudio
                 ? 'bg-gray-100 text-gray-800'
                 : 'text-gray-400 hover:bg-gray-100/80'
             }`}
-            title={generateAudio ? '声音：开（点击关闭）' : '声音：关（点击开启）'}
+            title={
+              audioReferenced
+                ? '已引用音频节点，声音自动开启（不可关闭）'
+                : generateAudio
+                  ? '声音：开（点击关闭）'
+                  : '声音：关（点击开启）'
+            }
           >
             {generateAudio
               ? <SoundOutlined style={{ fontSize: 14 }} />
               : <AudioMutedOutlined style={{ fontSize: 14 }} />}
-            <span className="text-[12px]">{generateAudio ? '声音' : '静音'}</span>
+            <span className="text-[12px]">
+              {audioReferenced ? '声音(音频参考)' : generateAudio ? '声音' : '静音'}
+            </span>
           </button>
         )}
 

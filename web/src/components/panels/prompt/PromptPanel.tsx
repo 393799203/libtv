@@ -179,6 +179,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 上游签名订阅：只在面板实际依赖的上游字段变化时才重渲染，
   // 画布上无关节点的拖动 / SSE 进度写回不会触发本面板更新
   const upstreamSignature = useCanvasStore((s) => computeUpstreamSignature(nodeId, s.nodes, s.edges));
+  // 上游连线是否存在音频节点（直接连线也算参考音频，声音开关需锁定）
+  const hasUpstreamAudio = useCanvasStore((s) => {
+    const sources = s.edges.filter((e) => e.target === nodeId).map((e) => e.source);
+    return sources.some((srcId) => {
+      const n = s.nodes.find((nd) => nd.id === srcId);
+      if (!n) return false;
+      return n.type === 'audio' || (n.data as { type?: string } | undefined)?.type === 'audio';
+    });
+  });
   const projectId = useCanvasStore((s) => s.projectId);
 
   // 节点生成 hook — 统一入口（处理单点生成 + SSE 订阅）
@@ -581,6 +590,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onDurationChange={handleDurationChange}
         generateAudio={generateAudio}
         onGenerateAudioChange={handleGenerateAudioChange}
+        audioReferenced={nodeType === 'video' && (mentions.some((m) => m.nodeType === 'audio') || hasUpstreamAudio)}
         charCount={audioCharCount}
       />
     </div>

@@ -1196,6 +1196,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 解析 mentions，收集上游图片URL和视频URL
 	var imageURLs []string
 	var videoURLs []string
+	var audioURLs []string
 	var mentions []struct {
 		ID       string `json:"id"`
 		NodeID   string `json:"nodeId"`
@@ -1236,22 +1237,34 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 						log.Printf("[VideoExecutor] ✅ 参考视频: nodeId=%s videoUrl=%s", m.NodeID, nd.VideoUrl)
 					}
 				}
+			} else if m.NodeType == "audio" {
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						AudioUrl string `json:"audioUrl"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil && nd.AudioUrl != "" {
+						audioURLs = append(audioURLs, nd.AudioUrl)
+						log.Printf("[VideoExecutor] ✅ 参考音频: nodeId=%s audioUrl=%s", m.NodeID, nd.AudioUrl)
+					}
+				}
 			}
 		}
 	}
 
-	// fallback: 查找上游连接的图片/视频节点
+	// fallback: 查找上游连接的图片/视频/音频节点
 	// 仅当 mentions 完全没有提供某类资源时，才从上游补充（尊重用户 @mentions 的选择）
 	// 首尾帧模式需要2张图，所以不能只收集1张；video.go 会按模式截断数量
 	mentionsImageCount := len(imageURLs)
 	mentionsVideoCount := len(videoURLs)
-	if mentionsImageCount == 0 || mentionsVideoCount == 0 {
+	mentionsAudioCount := len(audioURLs)
+	if mentionsImageCount == 0 || mentionsVideoCount == 0 || mentionsAudioCount == 0 {
 		upstreamSources := execCtx.GetUpstreamSources(node.ID)
 		for _, sourceNodeID := range upstreamSources {
 			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
 				var nd struct {
 					ImageUrl string `json:"imageUrl"`
 					VideoUrl string `json:"videoUrl"`
+					AudioUrl string `json:"audioUrl"`
 					Type     string `json:"type"`
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil {
@@ -1261,10 +1274,23 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					} else if nd.Type == "video" && nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {
 						videoURLs = append(videoURLs, nd.VideoUrl)
 						log.Printf("[VideoExecutor] ✅ 从上游视频节点获取参考视频: nodeId=%s", sourceNodeID)
+					} else if nd.Type == "audio" && nd.AudioUrl != "" && mentionsAudioCount == 0 {
+						audioURLs = append(audioURLs, nd.AudioUrl)
+						log.Printf("[VideoExecutor] ✅ 从上游音频节点获取参考音频: nodeId=%s", sourceNodeID)
 					}
 				}
 			}
 		}
+	}
+
+	// 参考音频约束：① 不能作为唯一参考（华数要求 reference_audio 必须搭配图片/视频参考）；
+	// ② 带参考音频时强制开启声音生成（generateAudio=true）
+	if len(audioURLs) > 0 && len(imageURLs) == 0 && len(videoURLs) == 0 {
+		return nil, fmt.Errorf("参考音频需搭配图片或视频参考素材（音频不能作为唯一参考）")
+	}
+	if len(audioURLs) > 0 && !generateAudio {
+		log.Printf("[VideoExecutor] 检测到参考音频，强制开启声音生成 generateAudio=false→true")
+		generateAudio = true
 	}
 
 	// 确定模型
@@ -1301,6 +1327,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		data.AspectRatio,
 		imageURLs,
 		videoURLs,
+		audioURLs,
 		data.VideoMode,
 		generateAudio,
 	)

@@ -50,13 +50,14 @@ func NewVideoClient(cfg config.AIConfig, providerName string) *VideoClient {
 	}
 }
 
-// VideoContentItem 视频生成的参考资源条目（图片或视频）
-// Role 为空时是参考模式，非空时是首尾帧模式（first_frame/last_frame）
+// VideoContentItem 视频生成的参考资源条目（图片/视频/音频）
+// Role 为空时是参考模式，非空时是首尾帧模式（first_frame/last_frame）或音频参考（reference_audio）
 type VideoContentItem struct {
-	Type     string             `json:"type"`                // "image_url" 或 "video_url"
+	Type     string             `json:"type"`                // "image_url" / "video_url" / "audio_url"
 	ImageURL *VideoContentImage `json:"image_url,omitempty"` // type=image_url 时使用
 	VideoURL *VideoContentImage `json:"video_url,omitempty"` // type=video_url 时使用
-	Role     string             `json:"role,omitempty"`      // 参考模式留空；首尾帧模式填 first_frame/last_frame
+	AudioURL *VideoContentImage `json:"audio_url,omitempty"` // type=audio_url 时使用（华数 r2v 音频参考，role=reference_audio）
+	Role     string             `json:"role,omitempty"`      // 参考模式留空；首尾帧模式填 first_frame/last_frame；音频参考填 reference_audio
 }
 
 // VideoContentImage 图片URL容器
@@ -144,12 +145,13 @@ type VideoTaskResponse struct {
 }
 
 // mediaItem 统一收集的参考素材。
-// role 词汇两家 API 相同（first_frame/last_frame/reference_image/reference_video），
+// role 词汇华数/火山两家 API 相同（first_frame/last_frame/reference_image/reference_video/reference_audio），
 // 由各自的模型构建器转换成各自的请求格式
 type mediaItem struct {
 	url     string
 	role    string // 空 = seedance 单图参考（无 role）
 	isVideo bool
+	isAudio bool
 }
 
 // GenerateVideo 调用视频生成API，按模型分派到对应的请求构建器：
@@ -157,7 +159,7 @@ type mediaItem struct {
 // imageURLs: 参考图列表。videoURLs: 参考视频列表。
 // videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=参考
 // generateAudio: 是否生成音频（true=生成声音，false=静音）
-func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) (string, error) {
+func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
 	if resolution == "" {
 		resolution = "1080p"
 	}
@@ -168,9 +170,9 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	var payload []byte
 	var err error
 	if strings.Contains(model, "wan3.0") {
-		payload, err = c.buildWanRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, videoMode, generateAudio)
+		payload, err = c.buildWanRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 	} else {
-		payload, err = c.buildSeedanceRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, videoMode, generateAudio)
+		payload, err = c.buildSeedanceRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 	}
 	if err != nil {
 		return "", err
@@ -189,7 +191,7 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 
 // buildSeedanceRequest 构建豆包 Seedance 请求体：
 // 平铺 metadata（resolution/ratio/generate_audio + content[image_url/video_url + role]）
-func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) ([]byte, error) {
+func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) ([]byte, error) {
 	origDuration := duration
 	duration, err := normalizeSeedanceParams(ctx, model, duration, videoURLs)
 	if err != nil {
@@ -198,8 +200,8 @@ func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, pr
 	logDurationNormalized(origDuration, duration)
 
 	// seedance 角色规则：首尾帧=first_frame/last_frame；全能参考=reference_image；
-	// 单图无 mode=不填 role；参考视频=reference_video
-	items := c.collectMedia(ctx, imageURLs, videoURLs, videoMode, "")
+	// 单图无 mode=不填 role；参考视频=reference_video；参考音频=reference_audio
+	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "")
 
 	content := make([]VideoContentItem, 0, len(items))
 	for _, it := range items {
@@ -207,6 +209,9 @@ func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, pr
 		if it.isVideo {
 			entry.Type = "video_url"
 			entry.VideoURL = &VideoContentImage{URL: it.url}
+		} else if it.isAudio {
+			entry.Type = "audio_url"
+			entry.AudioURL = &VideoContentImage{URL: it.url}
 		} else {
 			entry.Type = "image_url"
 			entry.ImageURL = &VideoContentImage{URL: it.url}
@@ -258,7 +263,7 @@ func normalizeSeedanceParams(ctx context.Context, model string, duration int, vi
 // 嵌套 metadata（input.media[type/url] + parameters[resolution/ratio/audio/watermark]）。
 // 网关（new-api ali 渠道）会把 metadata 按键名合并进 DashScope 请求的
 // input/parameters 两个对象，平铺键会被静默丢弃，不能用 seedance 的格式
-func (c *VideoClient) buildWanRequest(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, videoMode string, generateAudio bool) ([]byte, error) {
+func (c *VideoClient) buildWanRequest(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) ([]byte, error) {
 	origDuration := duration
 	duration, err := normalizeWanParams(ctx, duration, videoURLs)
 	if err != nil {
@@ -267,7 +272,7 @@ func (c *VideoClient) buildWanRequest(ctx context.Context, model string, prompt 
 	logDurationNormalized(origDuration, duration)
 
 	// wan3.0 角色规则：与 seedance 相同，但单图无 mode 也必须带 type，归为 reference_image
-	items := c.collectMedia(ctx, imageURLs, videoURLs, videoMode, "reference_image")
+	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
 
 	wanMedia := make([]WanMediaItem, 0, len(items))
 	for _, it := range items {
@@ -341,7 +346,7 @@ func normalizeWanParams(ctx context.Context, duration int, videoURLs []string) (
 // defaultImageRole：单图无 mode 时的角色（seedance 传 ""；wan3.0 传 "reference_image"）
 // 首尾帧模式忽略参考视频：wan3.0 规定 first_frame/last_frame 与 reference_* 互斥，
 // 混合会被整单拒绝（且首尾帧模式下参考视频本来也没有意义）
-func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, videoURLs []string, videoMode string, defaultImageRole string) []mediaItem {
+func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, defaultImageRole string) []mediaItem {
 	var items []mediaItem
 
 	// 参考图：0张=文生视频；1张=参考；首尾帧模式=first_frame+last_frame
@@ -386,6 +391,20 @@ func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, vide
 		}
 		items = append(items, mediaItem{url: finalURL, role: "reference_video", isVideo: true})
 		log.Printf("[VideoGen] ✅ 参考视频[%d]已添加: role=reference_video urlLen=%d", i, len(finalURL))
+	}
+
+	// 参考音频（华数 r2v 音频参考）：role=reference_audio，时长须≤15.2s，不能作为唯一参考（平台校验）
+	for i, rawURL := range audioURLs {
+		if videoMode == "first-last-frame" {
+			log.Printf("[VideoGen] ⚠️ 首尾帧模式忽略参考音频[%d]（首尾帧与参考互斥）", i)
+			continue
+		}
+		if rawURL == "" {
+			continue
+		}
+		// 音频 URL 直接透传（音频节点/上传产物均为公网可访问地址）
+		items = append(items, mediaItem{url: rawURL, role: "reference_audio", isAudio: true})
+		log.Printf("[VideoGen] ✅ 参考音频[%d]已添加: role=reference_audio urlLen=%d", i, len(rawURL))
 	}
 
 	// 首尾帧模式限制2张
