@@ -27,91 +27,82 @@ models:
       temperature: 0.7
       description: "DeepSeek V4 Pro，推理能力更强，适合复杂剧本和提示词生成"
 
-    - id: qwen3.6-plus
-      name: "Qwen 3.6 Plus"
+    - id: qwen3.7-plus
+      name: "Qwen 3.7 Plus"
       provider: wasu
-      model_id: "qwen3.6-plus"
+      model_id: "qwen3.7-plus"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "通义千问3.6增强版，中文能力强"
+      description: "通义千问3.7增强版，中文能力强"
 
-    - id: qwen3.6-flash
-      name: "Qwen 3.6 Flash"
+    - id: qwen3.7-max
+      name: "Qwen 3.7 Max"
       provider: wasu
-      model_id: "qwen3.6-flash"
+      model_id: "qwen3.7-max"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "通义千问3.6快速版，响应速度快"
+      description: "通义千问3.7旗舰版，推理与创作能力最强"
 
-    - id: glm-5.1
-      name: "GLM-5.1"
+    - id: glm-5.2
+      name: "GLM-5.2"
       provider: wasu
-      model_id: "glm-5.1"
+      model_id: "glm-5.2"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "智谱GLM-5.1，综合能力均衡"
+      description: "智谱GLM-5.2，综合能力均衡"
 
-    - id: kimi-k2.6
-      name: "Kimi K2.6"
+    - id: glm-5.2-fast-preview
+      name: "GLM-5.2 Fast"
       provider: wasu
-      model_id: "kimi-k2.6"
+      model_id: "glm-5.2-fast-preview"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "Kimi K2.6，长文本理解能力强"
+      description: "智谱GLM-5.2快速预览版，响应更快"
 
-    - id: doubao-seed-2.0-pro
-      name: "Seed 2.0 Pro"
+    - id: doubao-seed-2.1-pro
+      name: "Seed 2.1 Pro"
       provider: wasu
-      model_id: "doubao-seed-2.0-pro"
+      model_id: "doubao-seed-2.1-pro"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节Seed 2.0 Pro，综合能力强"
+      description: "字节Seed 2.1 Pro，综合能力强"
 
-    - id: doubao-seed-2.0-lite
-      name: "Seed 2.0 Lite"
+    - id: doubao-seed-2.1-turbo
+      name: "Seed 2.1 Turbo"
       provider: wasu
-      model_id: "doubao-seed-2.0-lite"
+      model_id: "doubao-seed-2.1-turbo"
       usage: [text, script]
       max_tokens: 8192
       temperature: 0.7
-      description: "字节Seed 2.0 Lite，轻量快速"
-
-    - id: doubao-seed-2.0-mini
-      name: "Seed 2.0 Mini"
-      provider: wasu
-      model_id: "doubao-seed-2.0-mini"
-      usage: [text, script]
-      max_tokens: 8192
-      temperature: 0.7
-      description: "字节Seed 2.0 Mini，极速轻量"
+      description: "字节Seed 2.1 Turbo，快速响应"
 
   # ---------- 图像生成----------
   image:
-    - id: qwen-image-2.0
-      name: "Qwen Image 2.0"
+    - id: qwen-image-3.0
+      name: "Qwen Image 3.0"
       provider: wasu
-      model_id: "qwen-image-2.0"
+      model_id: "qwen-image-3.0"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "通义千问图像2.0，适合角色/场景/道具图生成"
+      description: "通义千问图像3.0，适合角色/场景/道具图生成"
       parameters:
         width: 1920   # ✅ 16:9 比例，适合视频分镜场景
         height: 1080
 
-    - id: qwen-image-2.0-pro
-      name: "Qwen Image 2.0 Pro"
+    - id: qwen-image-3.0-pro
+      name: "Qwen Image 3.0 Pro"
       provider: wasu
-      model_id: "qwen-image-2.0-pro"
+      model_id: "qwen-image-3.0-pro"
       usage: [image, character, scene, prop]
       max_tokens: 2048
       temperature: 0.7
-      description: "通义千问图像2.0专业版，画质更高"
+      description: "通义千问图像3.0专业版，画质更高"
 
     - id: wan2.7-image
       name: "Wan 2.7 Image"
@@ -130,15 +121,6 @@ models:
       max_tokens: 2048
       temperature: 0.7
       description: "万象2.7图像专业版，画质更高"
-
-    - id: doubao-seedream-4.0
-      name: "Seedream 4.0"
-      provider: wasu
-      model_id: "doubao-seedream-4.0"
-      usage: [image, character, scene, prop]
-      max_tokens: 2048
-      temperature: 0.7
-      description: "字节Seedream 4.0，综合图像生成"
 
     - id: doubao-seedream-4.5
       name: "Seedream 4.5"
