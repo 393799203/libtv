@@ -40,6 +40,7 @@ import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
+import { canvasApi } from '@/services/canvasApi';
 
 const edgeTypes = {
   dataFlow: DataFlowEdge,
@@ -360,6 +361,19 @@ export const Canvas = memo(function Canvas() {
           message.destroy(key);
           // HTTP 错误已由 axios 拦截器统一提示
           console.error('画布拖拽上传失败:', err);
+        }
+      }
+
+      // 上传完成后自动保存画布，避免未手动保存时刷新丢失新增节点
+      if (idx > 0 && projectId) {
+        try {
+          const { exportCanvas, setDirty } = useCanvasStore.getState();
+          await canvasApi.saveCanvas(projectId, exportCanvas());
+          setDirty(false);
+          message.success(`已添加 ${idx} 个节点并自动保存`);
+        } catch (err) {
+          // 保存失败：拦截器已提示；节点仍在内存（isDirty=true），可手动保存兜底
+          console.error('拖拽上传后自动保存失败:', err);
         }
       }
     },
