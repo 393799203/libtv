@@ -1057,21 +1057,28 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 逐个下载图片并使用 FileUploadService 上传
 	// 失败的图片回退使用原始 URL，确保功能可用
 	ownURLs := make([]string, 0, len(generatedURLs))
+	thumbURLs := make([]string, 0, len(generatedURLs))
 	for idx, generatedURL := range generatedURLs {
 		imageInfo, dlErr := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID(), width, height)
 		if dlErr != nil {
 			log.Printf("[ImageExecutor] 下载上传失败(idx=%d)，使用原始URL: %v", idx, dlErr)
 			ownURLs = append(ownURLs, generatedURL)
+			thumbURLs = append(thumbURLs, "")
 		} else {
 			log.Printf("[ImageExecutor] 图片上传成功(idx=%d): generatedURL=%s -> ownURL=%s size=%dx%d", idx, generatedURL, imageInfo.url, imageInfo.width, imageInfo.height)
 			ownURLs = append(ownURLs, imageInfo.url)
+			thumbURLs = append(thumbURLs, imageInfo.thumbURL)
 		}
 	}
 
 	// 第一个 URL（兼容现有前端逻辑读取 data.imageUrl）
 	firstURL := ""
+	firstThumbURL := ""
 	if len(ownURLs) > 0 {
 		firstURL = ownURLs[0]
+		if len(thumbURLs) > 0 {
+			firstThumbURL = thumbURLs[0]
+		}
 	}
 
 	// 记录生成历史
@@ -1091,19 +1098,22 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		NodeID: node.ID,
 		Status: "success",
 		Data: map[string]interface{}{
-			"imageUrl":  firstURL, // ✅ 第一个，兼容现有前端逻辑
-			"imageUrls": ownURLs,  // ✅ 全部 URL，供前端创建多节点
-			"width":     width,    // ✅ 返回实际图片宽度
-			"height":    height,   // ✅ 返回实际图片高度
+			"imageUrl":  firstURL,      // ✅ 第一个，兼容现有前端逻辑
+			"imageUrls": ownURLs,       // ✅ 全部 URL，供前端创建多节点
+			"thumbUrl":  firstThumbURL, // ✅ 第一张缩略图（640px webp）
+			"thumbUrls": thumbURLs,     // ✅ 全部缩略图
+			"width":     width,         // ✅ 返回实际图片宽度
+			"height":    height,        // ✅ 返回实际图片高度
 		},
 	}, nil
 }
 
 // imageInfo 包含图片URL和尺寸信息
 type imageInfo struct {
-	url    string
-	width  int
-	height int
+	url      string
+	thumbURL string
+	width    int
+	height   int
 }
 
 // downloadAndUpload 下载图片并使用 FileUploadService 上传（复用哈希去重等逻辑）
@@ -1143,10 +1153,24 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 
 	log.Printf("[ImageExecutor] 图片上传成功: objectName=%s url=%s cached=%v", result.ObjectName, result.URL, result.Cached)
 
+	// ✅ 生成 640px webp 缩略图（失败不阻断主流程）
+	thumbURL := ""
+	if thumbBytes, terr := service.GenerateImageThumbnail(imageData); terr == nil {
+		thumbObject := service.ThumbnailObjectName(result.ObjectName)
+		if perr := i.fileUploadService.PutBytes(thumbObject, thumbBytes, "image/webp"); perr != nil {
+			log.Printf("[ImageExecutor] 缩略图写入失败: object=%s err=%v", thumbObject, perr)
+		} else {
+			thumbURL = i.fileUploadService.ObjectURL(thumbObject)
+		}
+	} else {
+		log.Printf("[ImageExecutor] 缩略图生成跳过: %v", terr)
+	}
+
 	return &imageInfo{
-		url:    result.URL,
-		width:  width,
-		height: height,
+		url:      result.URL,
+		thumbURL: thumbURL,
+		width:    width,
+		height:   height,
 	}, nil
 }
 

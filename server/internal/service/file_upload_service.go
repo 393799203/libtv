@@ -307,6 +307,16 @@ func (s *FileUploadService) urlFor(objectName string, opts UploadOptions) string
 	return s.storage.GetURL(objectName)
 }
 
+// PutBytes 直接写入对象（缩略图等派生文件；不参与哈希去重）
+func (s *FileUploadService) PutBytes(objectName string, data []byte, contentType string) error {
+	return s.storage.PutObject(objectName, bytes.NewReader(data), int64(len(data)), contentType)
+}
+
+// ObjectURL 生成对象公网访问 URL
+func (s *FileUploadService) ObjectURL(objectName string) string {
+	return s.storage.GetURL(objectName)
+}
+
 // ========== Content-Type 辅助函数（调用方可直接传入 ContentTypeFor） ==========
 
 // ContentTypeForImage 图片扩展名 → Content-Type

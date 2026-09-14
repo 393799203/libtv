@@ -43,6 +43,7 @@ export interface ImageNodeData extends BaseNodeFields, Record<string, unknown> {
   aspectRatio?: string;  // 比例：'16:9' | '9:16' | '1:1' 等
   quality?: string;     // 画质：'低画质' | '标准画质' | '高画质'
   imageUrl?: string;
+  thumbUrl?: string;     // 640px webp 缩略图（画布展示用；老数据为空时回退原图）
   width?: number;       // 实际图片宽度（从后端生成结果获取）
   height?: number;      // 实际图片高度（从后端生成结果获取）
 }

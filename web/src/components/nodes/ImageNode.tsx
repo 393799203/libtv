@@ -16,6 +16,14 @@ import { uploadImage } from '@/services/uploadApi';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
 
+/** 按后端约定推导缩略图 URL：images/hash.png → images/hash.thumb.webp（存量图已批量回填） */
+function deriveThumbUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  const m = url.match(/^(.+)\.(png|jpe?g|webp|gif)(\?.*)?$/i);
+  if (!m) return undefined;
+  return `${m[1]}.thumb.webp${m[3] || ''}`;
+}
+
 export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   id,
   data,
@@ -37,10 +45,18 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 图片懒加载状态：loading（灰底+转圈）→ loaded / error
   const [imgStatus, setImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
-  // imageUrl 变化时重置加载状态（换图后重新走一遍加载流程）
+  // imageUrl 变化（含缩略图）时重置加载状态（换图后重新走一遍加载流程）
   useEffect(() => {
     setImgStatus('loading');
-  }, [data.imageUrl]);
+    setThumbFailed(false);
+  }, [data.imageUrl, data.thumbUrl]);
+
+  // 画布展示用小图：优先节点自带 thumbUrl → 按约定推导（存量图已回填）→ 回退原图
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const displayImageUrl =
+    thumbFailed || !data.thumbUrl && !deriveThumbUrl(data.imageUrl)
+      ? data.imageUrl
+      : data.thumbUrl || deriveThumbUrl(data.imageUrl) || data.imageUrl;
 
   // 最终尺寸：data中有值就用data的，否则用加载获取的
   const imageWidth = data.width || loadedSize?.width;
@@ -76,6 +92,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         const result = await uploadImage(file, projectId || undefined);
         useCanvasStore.getState().updateNodeData(id, {
           imageUrl: result.url,
+          thumbUrl: result.thumbUrl,   // ✅ 缩略图（画布展示用）
           width: result.width,    // ✅ 保存宽度
           height: result.height,  // ✅ 保存高度
         } as Partial<ImageNodeData>);
@@ -92,11 +109,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     [id, projectId]
   );
 
-  // 从资产库选中图片：替换节点图片（清掉旧尺寸，由加载 fallback 重新计算）
+  // 从资产库选中图片：替换节点图片（清掉旧尺寸/缩略图，由加载 fallback 重新计算）
   const handlePickAsset = useCallback(
     (asset: UserAsset) => {
       useCanvasStore.getState().updateNodeData(id, {
         imageUrl: asset.url,
+        thumbUrl: undefined,
         width: undefined,
         height: undefined,
       } as Partial<ImageNodeData>);
@@ -182,7 +200,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
               </div>
             )}
             <img
-              src={data.imageUrl}
+              src={displayImageUrl}
               alt={data.label}
               className="w-full block"
               loading="lazy"
@@ -202,7 +220,16 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
                 }
                 setImgStatus('loaded');
               }}
-              onError={() => setImgStatus('error')}
+              onError={() => {
+                // 缩略图加载失败（如外部 URL 无同目录 thumb）→ 回退原图；原图也失败才进 error 态
+                const derived = data.thumbUrl || deriveThumbUrl(data.imageUrl);
+                if (derived && derived !== data.imageUrl && !thumbFailed) {
+                  setThumbFailed(true);
+                  setImgStatus('loading');
+                } else {
+                  setImgStatus('error');
+                }
+              }}
             />
             {/* 加载失败：提示 + 占位 */}
             {imgStatus === 'error' && (

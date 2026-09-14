@@ -188,8 +188,23 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 	}
 
 	// ✅ 返回图片尺寸信息，统一数据格式
+	// ✅ 同时尝试生成 640px webp 缩略图（失败不阻断主流程），供画布等轻量展示
+	thumbURL := ""
+	if thumbBytes, terr := service.GenerateImageThumbnail(imageData); terr == nil {
+		thumbObject := service.ThumbnailObjectName(result.ObjectName)
+		if perr := h.fileUploadService.PutBytes(thumbObject, thumbBytes, "image/webp"); perr != nil {
+			log.Printf("[UploadImage] 缩略图写入失败: object=%s err=%v", thumbObject, perr)
+		} else {
+			thumbURL = h.fileUploadService.ObjectURL(thumbObject)
+			log.Printf("[UploadImage] 缩略图生成成功: %s", thumbURL)
+		}
+	} else {
+		log.Printf("[UploadImage] 缩略图生成跳过: %v", terr)
+	}
+
 	response.OKWithMsg(c, "上传成功", gin.H{
 		"url":          result.URL,
+		"thumb_url":    thumbURL,
 		"storage_type": result.StorageType,
 		"filename":     result.ObjectName,
 		"cached":       result.Cached,

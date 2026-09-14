@@ -19,12 +19,12 @@ export interface VideoTaskResult {
 export async function uploadImage(
   file: File,
   projectId?: string,
-): Promise<{ url: string; width: number; height: number }> {
+): Promise<{ url: string; width: number; height: number; thumbUrl?: string }> {
   const formData = new FormData();
   formData.append('file', file);
   if (projectId) formData.append('project_id', projectId);
 
-  const res = await api.post<{ url: string; width: number; height: number }>('/upload/image', formData, {
+  const res = await api.post<{ url: string; width: number; height: number; thumb_url?: string }>('/upload/image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 
@@ -32,6 +32,7 @@ export async function uploadImage(
     url: res.url,
     width: res.width,
     height: res.height,
+    thumbUrl: res.thumb_url,
   };
 }
 
