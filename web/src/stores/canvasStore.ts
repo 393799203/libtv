@@ -641,14 +641,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
       const projectData: ProjectCanvasData = {
         nodes: data.nodes.map((node) => {
+          // 打开画布不恢复上次的选中状态（保存的 JSON 里可能残留 selected:true，
+          // 会导致"打开就默认选中某节点"并弹它的编辑面板）
+          const base = { ...node, selected: false } as LibTVNode;
           // 文本节点：确保有最小宽高，避免内容为空时塌陷
           if (node.type === 'text') {
             const style = { ...node.style };
             if (!style.minWidth) style.minWidth = 320;
             if (!style.minHeight) style.minHeight = 200;
-            return { ...node, style };
+            return { ...base, style };
           }
-          return node;
+          return base;
         }),
         edges: data.edges,
         selectedNodeIds: [],
