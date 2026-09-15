@@ -20,6 +20,19 @@ import AddShowDialog from '@/components/AddShowDialog';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { showApi, type ShowCategoryItem } from '@/services/showApi';
 
+/** 画布是否"效果为空"：无节点，或所有节点都是空内容（未填输入、无产出） */
+function isEffectivelyEmptyCanvas(nodes: { data?: Record<string, unknown> }[]): boolean {
+  if (nodes.length === 0) return true;
+  return nodes.every((n) => {
+    const d = n.data ?? {};
+    if (d.type === 'text' || d.type === 'script') return !(d.content || d.scriptContent || d.prompt);
+    if (d.type === 'image') return !(d.imageUrl || d.prompt);
+    if (d.type === 'video') return !(d.videoUrl || d.prompt);
+    if (d.type === 'audio') return !(d.audioUrl);
+    return false; // 未知节点类型：保守视为"非空"，不删除
+  });
+}
+
 // 单个 SSE 订阅实例（按 executionId 建立独立 EventSource）
 // 不渲染任何 UI，仅用于 hooks 内部订阅
 function StreamSubscriber({ stream }: { stream: ActiveStream }) {
@@ -169,7 +182,19 @@ function WorkspaceInner() {
             type="text"
             size="small"
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/')}
+            onClick={async () => {
+              // 空画布（无节点，或所有节点都是空内容）返回时自动删除当前项目
+              const { nodes, projectId } = useCanvasStore.getState();
+              if (projectId && isEffectivelyEmptyCanvas(nodes)) {
+                try {
+                  await projectApi.deleteProject(projectId);
+                } catch (err) {
+                  // 删除失败不阻塞返回（HTTP 错误已由拦截器提示）
+                  console.error('空画布项目删除失败:', err);
+                }
+              }
+              navigate('/');
+            }}
           />
         </Tooltip>
         {isEditingName ? (

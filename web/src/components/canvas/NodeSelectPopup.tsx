@@ -16,7 +16,7 @@ const iconMap: Record<string, React.ReactNode> = {
   CodeOutlined: <CodeOutlined />,
 };
 
-const nodeTypeList: NodeType[] = ['text', 'image', 'video', 'audio', 'script'];
+const nodeTypeList: NodeType[] = ['text', 'image', 'video', 'audio', 'script', 'previz'];
 
 interface NodeSelectPopupProps {
   position: { x: number; y: number };

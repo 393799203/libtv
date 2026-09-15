@@ -23,6 +23,13 @@ import {
   UndoOutlined,
   RedoOutlined,
   AimOutlined,
+  PlusOutlined,
+  FileTextOutlined,
+  SnippetsOutlined,
+  PictureOutlined,
+  VideoCameraOutlined,
+  AudioOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -34,13 +41,21 @@ import { PromptCompose } from '@/components/panels/prompt';
 
 import { nodeTypes } from '@/components/nodes';
 import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
-import { CanvasContextMenu } from './CanvasContextMenu';
 import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 import { canvasApi } from '@/services/canvasApi';
+
+/** 空画布引导卡片的节点入口 */
+const EMPTY_GUIDE_TYPES: { type: NodeType; label: string; desc: string; icon: React.ReactNode }[] = [
+  { type: 'text', label: '文本', desc: '创作剧本/台词', icon: <FileTextOutlined /> },
+  { type: 'script', label: '分镜', desc: '生成分镜剧本', icon: <SnippetsOutlined /> },
+  { type: 'image', label: '图片', desc: '角色/场景/道具图', icon: <PictureOutlined /> },
+  { type: 'video', label: '视频', desc: '生成/导入视频', icon: <VideoCameraOutlined /> },
+  { type: 'audio', label: '音频', desc: '配音/配乐', icon: <AudioOutlined /> },
+];
 
 const edgeTypes = {
   dataFlow: DataFlowEdge,
@@ -66,7 +81,6 @@ export const Canvas = memo(function Canvas() {
   const pendingViewportRef = useRef<Viewport | null>(null);
   const viewportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   // 图片/视频节点右键菜单状态（下载 / 存到个人资产库 / 查看生成历史）
   const [nodeMenu, setNodeMenu] = useState<{
     x: number;
@@ -95,6 +109,8 @@ export const Canvas = memo(function Canvas() {
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [connectTargetId, setConnectTargetId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+  // 空画布引导卡片：手动关闭后本次会话不再弹出
+  const [dismissedEmptyGuide, setDismissedEmptyGuide] = useState(false);
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
@@ -177,14 +193,12 @@ export const Canvas = memo(function Canvas() {
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     setNodeMenu(null);
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
+    // 空白画布右键与右下角 + 统一使用同一个节点选择弹窗（纯添加模式）
+    setNodeSelectPopup({
+      position: { x: event.clientX, y: event.clientY },
+      sourceNodeId: null,
+      sourceHandle: null,
     });
-  }, []);
-
-  const handleCloseContextMenu = useCallback(() => {
-    setContextMenu(null);
   }, []);
 
   // 节点右键：一律阻止冒泡到容器的空白区右键菜单（所有节点类型）；
@@ -192,7 +206,7 @@ export const Canvas = memo(function Canvas() {
   const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: LibTVNode) => {
     event.preventDefault();
     event.stopPropagation();
-    setContextMenu(null);
+    setNodeSelectPopup(null);
     if (node.type !== 'image' && node.type !== 'video') return;
     const url = node.type === 'image'
       ? (node.data.imageUrl as string)
@@ -270,13 +284,16 @@ export const Canvas = memo(function Canvas() {
       const newNode = createNode(nodeType, flowPos);
 
       addNode(newNode);
-      addEdge({
-        id: `e-${sourceNodeId}-${newNode.id}`,
-        source: sourceNodeId,
-        target: newNode.id,
-        type: 'dataFlow',
-        sourceHandle: sourceHandle || undefined,
-      });
+      // 纯添加（FAB/空画布引导，无来源节点）时不建立连线
+      if (sourceNodeId) {
+        addEdge({
+          id: `e-${sourceNodeId}-${newNode.id}`,
+          source: sourceNodeId,
+          target: newNode.id,
+          type: 'dataFlow',
+          sourceHandle: sourceHandle || undefined,
+        });
+      }
       setNodeSelectPopup(null);
     },
     [nodeSelectPopup, screenToFlowPosition, addNode, addEdge]
@@ -378,6 +395,23 @@ export const Canvas = memo(function Canvas() {
       }
     },
     [screenToFlowPosition, addNode, updateNodeData, projectId]
+  );
+
+    // 在画布中心添加节点并自动选中（空画布引导卡 / FAB 共用）
+  const addNodeAtCenter = useCallback(
+    (nodeType: NodeType) => {
+      const el = containerRef.current;
+      const rect = el?.getBoundingClientRect();
+      const center = rect
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+      const flowPos = screenToFlowPosition(center);
+      const node = createNode(nodeType, flowPos);
+      addNode(node);
+      // 选中新节点 → 自动打开提示词面板
+      onNodesChange([{ type: 'select', id: node.id, selected: true }]);
+    },
+    [screenToFlowPosition, addNode, onNodesChange]
   );
 
   const onViewportChange = useCallback((viewport: Viewport) => {
@@ -558,7 +592,6 @@ export const Canvas = memo(function Canvas() {
         onNodeContextMenu={handleNodeContextMenu}
         onViewportChange={onViewportChange}
         onPaneClick={() => {
-          handleCloseContextMenu();
           setNodeMenu(null);
           if (!connectingRef.current) setNodeSelectPopup(null);
         }}
@@ -635,15 +668,70 @@ export const Canvas = memo(function Canvas() {
           </div>
         </Panel>
 
+        {/* 常驻添加节点按钮（右下角） */}
+        <Panel position="bottom-right">
+          <Tooltip title="添加节点">
+            <Button
+              type="primary"
+              shape="circle"
+              size="large"
+              icon={<PlusOutlined />}
+              onClick={(e) => {
+                // 弹窗出现在 + 按钮的左上方，右缘紧贴按钮（更贴合 +）
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setNodeSelectPopup({
+                  position: { x: r.left - 186, y: r.top - 272 },
+                  sourceNodeId: null,
+                  sourceHandle: null,
+                });
+              }}
+            />
+          </Tooltip>
+        </Panel>
       </ReactFlow>
       </div>
       )}
 
-      {contextMenu && (
-        <CanvasContextMenu
-          position={contextMenu}
-          onClose={handleCloseContextMenu}
-        />
+      {/* 空画布引导：融入画布的虚线占位（非弹窗），0 节点且未手动关闭时展示 */}
+      {!dismissedEmptyGuide && !isLoading && nodes.length === 0 && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          <div className="relative w-[620px] max-w-[94%] rounded-2xl border-2 border-dashed border-gray-300/80 bg-white/40 backdrop-blur-[2px] px-8 py-9">
+            <button
+              className="absolute top-3 right-3 text-gray-300 hover:text-gray-500 cursor-pointer pointer-events-auto"
+              onClick={() => setDismissedEmptyGuide(true)}
+              title="关闭引导"
+            >
+              <CloseOutlined />
+            </button>
+            <div className="text-center">
+              <div className="text-[16px] font-medium text-gray-600">从一条素材开始你的第一个镜头</div>
+              <div className="text-[12px] text-gray-400 mt-1">
+                选择节点开始，或直接把图片 / 视频 / 音频拖进画布
+              </div>
+            </div>
+            <div className="flex justify-center gap-3 mt-7">
+              {EMPTY_GUIDE_TYPES.map((t) => (
+                <button
+                  key={t.type}
+                  onClick={() => addNodeAtCenter(t.type)}
+                  className="pointer-events-auto flex flex-col items-center gap-1.5 w-[108px] rounded-xl bg-white border border-gray-200 hover:border-blue-400 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer py-3.5"
+                >
+                  <span
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-[18px]"
+                    style={{ backgroundColor: NODE_TYPE_CONFIG[t.type].color }}
+                  >
+                    {t.icon}
+                  </span>
+                  <span className="text-[13px] font-medium text-gray-700">{t.label}</span>
+                  <span className="text-[11px] text-gray-400 leading-none">{t.desc}</span>
+                </button>
+              ))}
+            </div>
+            <div className="text-[11px] text-gray-400 mt-6 text-center">
+              右键画布或右下角 + 亦可随时添加节点
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 图片/视频节点右键菜单 */}
