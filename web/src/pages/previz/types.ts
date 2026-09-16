@@ -44,7 +44,11 @@ export type PrevizObjectType =
   | 'rock' // 岩石
   | 'bush' // 灌木
   | 'water' // 水面
-  | 'hill'; // 土坡/山丘
+  | 'hill' // 土坡/山丘
+  | 'pool' // 游泳池
+  | 'mountain' // 山
+  | 'fountain' // 喷泉
+  | 'bridge'; // 桥
 
 // 元素分类（添加面板分组、AI 词汇表共用）
 export interface PrevizObjectCategory {
@@ -67,7 +71,7 @@ export const OBJECT_CATEGORIES: PrevizObjectCategory[] = [
   },
   { key: 'furniture', label: '家具', types: ['table', 'chair', 'sofa', 'bed', 'cabinet', 'screen'] },
   { key: 'vehicle', label: '载具', types: ['car', 'truck', 'motorcycle', 'bicycle'] },
-  { key: 'nature', label: '自然', types: ['tree', 'rock', 'bush', 'water', 'hill'] },
+  { key: 'nature', label: '自然', types: ['tree', 'rock', 'bush', 'water', 'hill', 'pool', 'mountain', 'fountain', 'bridge'] },
 ];
 
 // 三元组（位置/旋转/缩放）

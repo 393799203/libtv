@@ -668,7 +668,8 @@ export const Canvas = memo(function Canvas() {
           </div>
         </Panel>
 
-        {/* 常驻添加节点按钮（右下角） */}
+        {/* 常驻添加节点按钮（右下角；空画布由引导卡承担，不显示） */}
+        {nodes.length > 0 && (
         <Panel position="bottom-right">
           <Tooltip title="添加节点">
             <Button
@@ -688,6 +689,7 @@ export const Canvas = memo(function Canvas() {
             />
           </Tooltip>
         </Panel>
+        )}
       </ReactFlow>
       </div>
       )}

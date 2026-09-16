@@ -28,6 +28,7 @@ type priceNodeDef struct {
 	ModelGroup  string
 	BillingType string
 	Usage       string
+	ModelIDs    []string // 可选模型白名单：仅展示这些模型（如白模解析只挂 Seed 2.1）
 }
 
 // priceNodeDefs 价格管理页签的节点顺序（文本/剧本/图片按次，视频按秒，语音按字）
@@ -37,6 +38,7 @@ var priceNodeDefs = []priceNodeDef{
 	{NodeType: "image", NodeName: "图片节点", ModelGroup: "image", BillingType: BillingTypePerCall, Usage: "image"},
 	{NodeType: "video", NodeName: "视频节点", ModelGroup: "video", BillingType: BillingTypePerSecond, Usage: "video"},
 	{NodeType: "audio", NodeName: "语音节点", ModelGroup: "audio", BillingType: BillingTypePerChar, Usage: "audio"},
+	{NodeType: "previz", NodeName: "白模解析", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"doubao-seed-2.1-turbo", "doubao-seed-2.1-pro"}},
 }
 
 // ErrInvalidPriceConfig 价格配置参数非法（HTTP 400）
@@ -119,6 +121,9 @@ func (s *PricingService) ListPrices(ctx context.Context) (*PriceListResult, erro
 			if !containsUsage(m.Usage, def.Usage) {
 				continue
 			}
+			if len(def.ModelIDs) > 0 && !containsString(def.ModelIDs, m.ID) {
+				continue
+			}
 			// 视频模型按分辨率拆分：每个分辨率一行
 			if def.NodeType == "video" && len(m.Resolutions) > 0 {
 				for _, res := range m.Resolutions {
@@ -187,6 +192,15 @@ func (s *PricingService) SavePrices(ctx context.Context, items []PriceSaveItem) 
 func containsUsage(usage []string, keyword string) bool {
 	for _, u := range usage {
 		if u == keyword {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(list []string, target string) bool {
+	for _, s := range list {
+		if s == target {
 			return true
 		}
 	}

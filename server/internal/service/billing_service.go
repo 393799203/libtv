@@ -62,7 +62,7 @@ var actionNodeTypes = map[string]string{
 	BillingActionImage:          "image",
 	BillingActionVideo:          "video",
 	BillingActionAudio:          "audio",
-	BillingActionPrevizAnalyze:  "text", // 视觉模型按文本节点维度定价
+	BillingActionPrevizAnalyze:  "previz", // 白模解析独立定价维度（价格管理页「白模解析」分组）
 }
 
 // BillingService 积分扣费服务：

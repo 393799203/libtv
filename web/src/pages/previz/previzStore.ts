@@ -56,6 +56,10 @@ export const OBJECT_TYPE_LABELS: Record<PrevizObjectType, string> = {
   bush: '灌木',
   water: '水面',
   hill: '土坡',
+  pool: '游泳池',
+  mountain: '山',
+  fountain: '喷泉',
+  bridge: '桥',
 };
 
 // 白模默认灰色系颜色
@@ -114,6 +118,14 @@ const OBJECT_DEFAULTS: Record<
   bush: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [0.8, 0.6, 0.8] },
   water: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4, 1, 4], color: WATER_COLOR },
   hill: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 4, 8] },
+  // 游泳池：水体低盒 + 沿口（颜色蓝）
+  pool: { position: [0, 0.35, 0], rotation: [0, 0, 0], scale: [5, 0.7, 3], color: WATER_COLOR },
+  // 山：尖顶锥体
+  mountain: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [6, 4, 6] },
+  // 喷泉：底座圆柱 + 顶部球
+  fountain: { position: [0, 0.4, 0], rotation: [0, 0, 0], scale: [1.6, 0.9, 1.6] },
+  // 桥：桥面 + 两端桥墩 + 栏杆
+  bridge: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4, 0.8, 8] },
 };
 
 // 新角色默认位置（原点，面向 -Z 以外的默认朝向）

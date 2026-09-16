@@ -16,11 +16,11 @@ export interface AnalyzeSceneResult {
 }
 
 export const previzApi = {
-  // AI 建白模：参考图 → 几何体布局（视觉模型解析较慢，放宽超时到 2 分钟）
+  // AI 建白模：参考图 → 几何体布局（视觉模型解析约 1-2 分钟，超时放宽到 5 分钟与后端对齐）
   analyzeScene: (imageUrl: string, model?: string) =>
     api.post<AnalyzeSceneResult>(
       '/previz/analyze-scene',
       { image_url: imageUrl, model },
-      { timeout: 120000 }
+      { timeout: 300000 }
     ),
 };

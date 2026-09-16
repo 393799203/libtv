@@ -6,6 +6,7 @@ import {
   PictureOutlined,
   VideoCameraOutlined,
   AudioOutlined,
+  DeploymentUnitOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
 import { pricingApi, type NodePriceGroup } from '@/services/pricingApi';
@@ -17,6 +18,7 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
   image: <PictureOutlined />,
   video: <VideoCameraOutlined />,
   audio: <AudioOutlined />,
+  previz: <DeploymentUnitOutlined />,
 };
 
 /**

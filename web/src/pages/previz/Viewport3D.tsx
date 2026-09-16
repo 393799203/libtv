@@ -442,6 +442,58 @@ function ObjectContent({ obj, selected }: { obj: PrevizObject; selected: boolean
           {mat}
         </mesh>
       );
+
+    // 游泳池：低矮水体 + 四周边沿
+    case 'pool':
+      return (
+        <group>
+          <BBox args={[0.86, 0.06, 0.86]} position={[0, 0, 0]} />
+          <BBox args={[1, 0.12, 0.08]} position={[0, 0.08, 0.46]} />
+          <BBox args={[1, 0.12, 0.08]} position={[0, 0.08, -0.46]} />
+          <BBox args={[0.08, 0.12, 1]} position={[0.46, 0.08, 0]} />
+          <BBox args={[0.08, 0.12, 1]} position={[-0.46, 0.08, 0]} />
+        </group>
+      );
+
+    // 山：尖顶锥体（比土坡更高耸）
+    case 'mountain':
+      return (
+        <mesh position={[0, 0, 0]}>
+          <coneGeometry args={[0.6, 1, 24]} />
+          {mat}
+        </mesh>
+      );
+
+    // 喷泉：宽底圆柱 + 顶部球 + 水柱
+    case 'fountain':
+      return (
+        <group>
+          <mesh position={[0, -0.15, 0]}>
+            <cylinderGeometry args={[0.5, 0.6, 0.4, 24]} />
+            {mat}
+          </mesh>
+          <mesh position={[0, 0.25, 0]}>
+            <sphereGeometry args={[0.22, 20, 12]} />
+            {mat}
+          </mesh>
+          <mesh position={[0, 0.02, 0]}>
+            <cylinderGeometry args={[0.12, 0.12, 0.5, 12]} />
+            {mat}
+          </mesh>
+        </group>
+      );
+
+    // 桥：桥面 + 两端桥墩 + 栏杆
+    case 'bridge':
+      return (
+        <group>
+          <BBox args={[0.8, 0.1, 1]} position={[0, 0.1, 0]} />
+          <BBox args={[0.7, 0.3, 0.5]} position={[0, -0.1, 0.28]} />
+          <BBox args={[0.7, 0.3, 0.5]} position={[0, -0.1, -0.28]} />
+          <BBox args={[0.06, 0.35, 1]} position={[0.33, 0.28, 0]} />
+          <BBox args={[0.06, 0.35, 1]} position={[-0.33, 0.28, 0]} />
+        </group>
+      );
   }
 }
 

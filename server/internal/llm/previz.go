@@ -17,17 +17,17 @@ const PrevizAnalyzeSystemPrompt = `你是一个 3D 白模场景搭建助手。�
 {"objects":[...], "description":"场景一句话概述"}
 
 objects 数组中每个对象的字段：
-- type：元素类型，共 35 种，按分类如下（只能用这些）：
+- type：元素类型，共 39 种，按分类如下（只能用这些）：
   - 基础几何：box=块状物（家具/箱体等）、cylinder=柱状物（柱子/杆）、sphere=球体/球形装饰、plane=水平面（地面/桌面）、wall=竖直薄板（墙体/隔断）
   - 建筑结构：stairs=楼梯/台阶（沿 -z 方向上行）、house=房屋/建筑（自带屋顶，不要再拆成 box+屋顶）、fence=栅栏/围栏/护栏、ramp=斜坡/坡道、platform=平台/高台/舞台、door=门、window=窗、arch=拱门/门洞、railing=栏杆
   - 街道设施：road=街道/路面/跑道（薄长条）、streetlamp=路灯/灯杆、bench=长椅/座椅、signboard=招牌/广告牌、sidewalk=人行道、utilitypole=电线杆
   - 家具：table=桌子、chair=椅子/凳子、sofa=沙发、bed=床、cabinet=柜子/衣柜/书架、screen=屏幕/电视/显示器
   - 载具：car=轿车/车辆、truck=卡车/货车、motorcycle=摩托车、bicycle=自行车/单车
-  - 自然：tree=树木/绿植、rock=岩石/石头、bush=灌木/草丛、water=水面/泳池/河流、hill=土坡/山丘
+  - 自然：tree=树木/绿植、rock=岩石/石头、bush=灌木/草丛、water=水面/泳池/河流、hill=土坡/山丘、pool=游泳池（水体+池沿）、mountain=山（尖顶山体）、fountain=喷泉、bridge=桥
 - name：中文名称（如"桌子""承重柱""东墙""住宅楼"）
 - position：元素中心坐标 [x, y, z]
 - rotation：弧度欧拉角 [rx, ry, rz]，一般给 [0,0,0]，墙体/房屋/车辆可给绕 y 的旋转
-- scale：元素三轴实际尺寸米数 [sx, sy, sz]（各类型内部比例已内置，scale 即实际米数；典型值：楼梯 [2,1.5,3]、房子 [6,4,6]、路面 [4,1,12]、树 [2,3,2]、栅栏 [2,1,1]、轿车 [4.5,1.6,1.8]、卡车 [6,2.6,2.2]、桌子 [1.6,0.75,0.9]、沙发 [2,0.85,0.9]、路灯 [1,3.5,1]、电线杆 [1,6,1]）
+- scale：元素三轴实际尺寸米数 [sx, sy, sz]（各类型内部比例已内置，scale 即实际米数；典型值：楼梯 [2,1.5,3]、房子 [6,4,6]、路面 [4,1,12]、树 [2,3,2]、栅栏 [2,1,1]、轿车 [4.5,1.6,1.8]、卡车 [6,2.6,2.2]、桌子 [1.6,0.75,0.9]、沙发 [2,0.85,0.9]、路灯 [1,3.5,1]、电线杆 [1,6,1]、游泳池 [5,0.7,3]、山 [6,4,6]、喷泉 [1.6,0.9,1.6]、桥 [4,0.8,8]）
 
 坐标系约定：
 - y 轴向上，地面为 y=0；x 向右；z 朝向观察者
@@ -58,7 +58,7 @@ type previzSceneObjectRaw struct {
 	Scale    []float64 `json:"scale"`
 }
 
-// 合法元素类型（与前端 PrevizObjectType 一致，共 35 种）
+// 合法元素类型（与前端 PrevizObjectType 一致，共 39 种）
 var previzObjectTypes = map[string]bool{
 	// 基础几何
 	"box": true, "cylinder": true, "sphere": true, "plane": true, "wall": true,
@@ -73,6 +73,7 @@ var previzObjectTypes = map[string]bool{
 	"car": true, "truck": true, "motorcycle": true, "bicycle": true,
 	// 自然
 	"tree": true, "rock": true, "bush": true, "water": true, "hill": true,
+	"pool": true, "mountain": true, "fountain": true, "bridge": true,
 }
 
 // 数值钳制

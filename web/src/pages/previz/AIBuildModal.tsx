@@ -1,18 +1,19 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { Modal, Select, App } from 'antd';
 import { UploadOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { uploadImage } from '@/services/uploadApi';
+import { pricingApi } from '@/services/pricingApi';
 import { previzApi, type AnalyzedSceneObject } from '@/services/previzApi';
 import { usePrevizStore } from './previzStore';
 
 // 图片来源 tab
 type SourceTab = 'upload' | 'image' | 'video';
 
-// 视觉模型选项（lite 快/便宜，pro 更准）
+// 视觉模型选项（turbo 快/便宜，pro 更准）
 const MODEL_OPTIONS = [
-  { value: 'doubao-seed-2.0-lite', label: 'doubao-seed-2.0-lite（默认，快/便宜）' },
-  { value: 'doubao-seed-2.0-pro', label: 'doubao-seed-2.0-pro（更准）' },
+  { value: 'doubao-seed-2.1-turbo', label: 'Seed 2.1 Turbo（默认，快/便宜）' },
+  { value: 'doubao-seed-2.1-pro', label: 'Seed 2.1 Pro（更准）' },
 ];
 
 // AI 建白模弹窗：上传图片 / 画布图片节点 / 视频节点抽帧 → 视觉模型解析 → 自动搭建白模场景
@@ -28,7 +29,24 @@ export function AIBuildModal({
 
   const [sourceTab, setSourceTab] = useState<SourceTab>('upload');
   const [imageUrl, setImageUrl] = useState(''); // 最终用于解析的图片 URL
-  const [model, setModel] = useState('doubao-seed-2.0-lite');
+  const [model, setModel] = useState('doubao-seed-2.1-turbo');
+  // 白模解析各模型单价（价格管理页「白模解析」分组；未配置/加载失败则隐藏）
+  const [previzPrices, setPrevizPrices] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    pricingApi
+      .list()
+      .then((res) => {
+        const group = (res?.nodes || []).find((n) => n.node_type === 'previz');
+        if (!group) return;
+        const prices: Record<string, number> = {};
+        (group.models || []).forEach((m) => {
+          prices[m.model_id] = m.price;
+        });
+        setPrevizPrices(prices);
+      })
+      .catch(() => {});
+  }, []);
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   // 解析完成且场景已有对象时，暂存结果等用户选择追加/重建
@@ -137,8 +155,12 @@ export function AIBuildModal({
       return;
     }
     setAnalyzing(true);
+    // 视觉模型解析较慢（约 1-2 分钟），先提示用户避免误以为卡住
+    const hintKey = `analyze-${Date.now()}`;
+    message.loading({ content: 'AI 正在解析场景（约 1-2 分钟）…', key: hintKey, duration: 0 });
     try {
       const res = await previzApi.analyzeScene(imageUrl, model);
+      message.destroy(hintKey);
       if (!res.objects || res.objects.length === 0) {
         message.warning('未解析出场景对象，请换一张更清晰的参考图');
         return;
@@ -151,6 +173,7 @@ export function AIBuildModal({
         applyObjects(res.objects, 'append');
       }
     } catch (err) {
+      message.destroy(hintKey);
       console.error('AI 建白模失败:', err);
       // HTTP 错误已由 api.ts 拦截器统一 message.error()
     } finally {
@@ -337,6 +360,11 @@ export function AIBuildModal({
             options={MODEL_OPTIONS}
             onChange={setModel}
           />
+          {previzPrices[model] > 0 && (
+            <span className="text-[11px] text-amber-600 whitespace-nowrap shrink-0">
+              每次约 {previzPrices[model]} 积分
+            </span>
+          )}
         </div>
 
         {/* 解析结果概述 */}
