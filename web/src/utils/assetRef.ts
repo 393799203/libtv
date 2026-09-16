@@ -15,13 +15,24 @@ export interface PromptRefToken {
   raw: string;
 }
 
-/** 提取提示词中所有 (@类型-名称) 引用标记 */
+/**
+ * 提取提示词中所有资产引用标记。
+ * 兼容两种写法（LLM 可能漏写括号，漏了也要能识别）：
+ *   1. 括号形式：(@角色-南方) / （@场景-水下洞穴主通道）——匹配整段含括号
+ *   2. 裸写形式：@道具-古代剑——不带括号
+ * 括号形式在裸写之前匹配（正则按顺序消费文本），避免同一处被拆成两条
+ */
 export function extractPromptRefTokens(prompt: string): PromptRefToken[] {
   const tokens: PromptRefToken[] = [];
-  const regex = /[（(]@(角色|场景|道具)-([^（()）]+)[）)]/g;
+  const regex =
+    /[（(]@(角色|场景|道具)-([^（()）]+)[）)]|@(角色|场景|道具)-([^（()）\s，。、；;：:]+)/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(prompt)) !== null) {
-    tokens.push({ type: match[1], name: match[2].trim(), raw: match[0] });
+    // 括号形式命中组 1/2，裸写形式命中组 3/4
+    const type = match[1] || match[3];
+    const name = (match[2] || match[4] || '').trim();
+    if (!type || !name) continue;
+    tokens.push({ type, name, raw: match[0] });
   }
   return tokens;
 }

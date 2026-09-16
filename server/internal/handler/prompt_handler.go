@@ -2,6 +2,8 @@ package handler
 
 import (
 	"log"
+	"strings"
+	"unicode/utf8"
 
 	"libtv/internal/llm"
 	"libtv/internal/middleware"
@@ -11,6 +13,41 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// normalizeAssetRefs 规范化资产引用：把裸写的 @类型-资产名 强制补成（@类型-资产名）全角括号形式。
+// 基于已知资产名单做精确匹配（LLM 输出的名称来自该名单），避免贪婪正则把后续汉字吞进名称。
+// 已处于（@…）或 (@…) 内的引用跳过（不重复包裹）。
+func normalizeAssetRefs(text string, refs []llm.AssetReference, refType string) string {
+	if !strings.Contains(text, "@") {
+		return text
+	}
+	for _, ref := range refs {
+		name := strings.TrimSpace(ref.Name)
+		if name == "" {
+			continue
+		}
+		needle := "@" + refType + "-" + name
+		pos := 0
+		for {
+			idx := strings.Index(text[pos:], needle)
+			if idx < 0 {
+				break
+			}
+			abs := pos + idx
+			prev := rune(0)
+			if abs > 0 {
+				prev, _ = utf8.DecodeLastRuneInString(text[:abs])
+			}
+			if prev == '（' || prev == '(' {
+				pos = abs + len(needle)
+				continue
+			}
+			text = text[:abs] + "（" + needle + "）" + text[abs+len(needle):]
+			pos = abs + len(needle) + 2
+		}
+	}
+	return text
+}
 
 type PromptHandler struct {
 	llmClient    *llm.Client
@@ -130,7 +167,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	}
 
 	response.OK(c, GeneratePromptResponse{
-		StoryboardPrompt: storyboardPrompt,
-		MotionPrompt:     motionPrompt,
+		StoryboardPrompt: normalizeAssetRefs(normalizeAssetRefs(storyboardPrompt, characters, "角色"), scenes, "场景"),
+		MotionPrompt:     normalizeAssetRefs(normalizeAssetRefs(normalizeAssetRefs(motionPrompt, characters, "角色"), scenes, "场景"), props, "道具"),
 	})
 }
