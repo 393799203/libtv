@@ -19,29 +19,23 @@ import (
 type Client struct {
 	apiKey  string
 	baseURL string
-	model   string
 	httpCli *http.Client
+	router  *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
 }
 
-// NewClient 创建 LLM 客户端
-// 优先从 provider 配置取凭据，fallback 到 llm 字段
-func NewClient(cfg config.AIConfig, providerName string) *Client {
+// NewClient 创建 LLM 客户端（凭据取自 provider 配置）
+func NewClient(cfg config.AIConfig, providerName string, router ...*ChannelRouter) *Client {
 	p := cfg.Providers[providerName]
-	apiKey := p.APIKey
-	baseURL := p.BaseURL
 
-	// fallback
-	if apiKey == "" {
-		apiKey = cfg.LLM.APIKey
-	}
-	if baseURL == "" {
-		baseURL = cfg.LLM.BaseURL
+	var r *ChannelRouter
+	if len(router) > 0 {
+		r = router[0]
 	}
 
 	return &Client{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		model:   cfg.LLM.Model,
+		apiKey:  p.APIKey,
+		baseURL: p.BaseURL,
+		router:  r,
 		httpCli: &http.Client{
 			// 整体客户端超时：放宽到 5 分钟，脚本/图像生成长 prompt + 大输出需要更久
 			Timeout: 5 * time.Minute,
@@ -105,11 +99,6 @@ type ChatResponse struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error,omitempty"`
-}
-
-// Chat 发起聊天补全请求（使用客户端默认模型）
-func (c *Client) Chat(ctx context.Context, systemPrompt, userMessage string, opts ...Option) (*ChatResponse, error) {
-	return c.ChatWithModel(ctx, c.model, systemPrompt, userMessage, opts...)
 }
 
 // ChatWithModel 发起聊天补全请求（指定模型）
@@ -207,15 +196,23 @@ func (c *Client) ChatWithImages(ctx context.Context, model, systemPrompt, userTe
 
 // doChatRequest 发送 /chat/completions 请求并解析响应（纯文本与视觉调用共用）
 func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte, userMsgLen int) (*ChatResponse, error) {
-	url := fmt.Sprintf("%s/chat/completions", c.baseURL)
-	log.Printf("[LLM] request: model=%s url=%s userMsgLen=%d", model, url, userMsgLen)
+	// 多渠道路由：按 ctx 中的用户渠道动态取 apiKey/baseURL；无 router 时用固定凭据
+	apiKey, baseURL := c.apiKey, c.baseURL
+	if c.router != nil {
+		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
+			apiKey, baseURL = p.APIKey, p.BaseURL
+		}
+	}
+
+	url := fmt.Sprintf("%s/chat/completions", baseURL)
+	log.Printf("[LLM] request: model=%s url=%s userMsgLen=%d channel=%s", model, url, userMsgLen, ChannelFrom(ctx))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	log.Printf("[LLM] sending request...")
 	start := time.Now()

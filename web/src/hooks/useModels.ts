@@ -55,23 +55,14 @@ export function useModels(nodeType: NodeType): ModelOption[] {
     videoModels,
     llmModels,  // 后端返回的是 llm 而不是 text
     audioModels,
-    isLoading,
-    error,
-    loadModels
+    loadModels,
   } = useModelStore();
 
-  // 组件初始化时加载模型配置；失败后最多自动重试一次
-  // （loadModels 开始时会重置 isLoading/error，仅靠 deps 判断会在持续失败时无限重试，故用 ref 限制次数）
-  const retriedRef = useRef(false);
+  // 挂载时加载模型配置；模块级 promise 缓存保证同一会话内只请求一次，
+  // 页面刷新后自动重新获取最终渠道 + 对应渠道模型
   useEffect(() => {
-    if (imageModels.length === 0 && !isLoading) {
-      if (error) {
-        if (retriedRef.current) return;
-        retriedRef.current = true;
-      }
-      loadModels();
-    }
-  }, [imageModels.length, isLoading, error, loadModels]);
+    useModelStore.getState().loadModels();
+  }, []);
 
   // ✅ 使用 useMemo 缓存结果，避免每次渲染都返回新数组引用
   // zustand store 中的数组引用在 set 之前保持稳定，直接作为依赖即可

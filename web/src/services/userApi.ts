@@ -5,6 +5,8 @@ export interface UserItem {
   email: string;
   nickname: string;
   role: string; // 'admin' | 'user'
+  /** AI 渠道：wasu=华数 / dianxin=电信 */
+  channel?: string;
   created_at: string;
   /** 剩余积分（AI 调用扣费用） */
   credits?: number;

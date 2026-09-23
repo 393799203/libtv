@@ -9,10 +9,14 @@ set -e
 #   bash deploy-docker.sh --backend    # 仅部署后端
 # ============================================================
 
-SERVER_IP="192.168.110.115"
+SERVER_IP="60.188.49.208"
 SERVER_USER="root"
 PROJECT_DIR="/opt/libtv"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# 公网访问端口（备案期用非 Web 端口规避 80/443/8080 拦截；与 docker-compose.yml 一致）
+FRONTEND_PORT="8880"
+BACKEND_PORT="38080"
 
 # 解析参数
 FRONTEND_ONLY=false
@@ -169,17 +173,17 @@ echo ""
 echo "[6/7] 验证部署..."
 sleep 3
 
-# 检查前端
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${SERVER_IP}/ --connect-timeout 10 || echo "000")
+# 检查前端（备案期用 8880 端口）
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${SERVER_IP}:${FRONTEND_PORT}/ --connect-timeout 10 || echo "000")
 if [ "$HTTP_CODE" = "200" ]; then
     echo "  前端服务: 正常 (HTTP $HTTP_CODE)"
 else
     echo "  前端服务: 启动中... (HTTP $HTTP_CODE)"
 fi
 
-# 检查后端 (非仅前端模式)
+# 检查后端 (非仅前端模式，备案期用 38080 端口)
 if [ "$FRONTEND_ONLY" = false ]; then
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${SERVER_IP}/api/auth/login --connect-timeout 10 || echo "000")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${SERVER_IP}:${BACKEND_PORT}/api/auth/login --connect-timeout 10 || echo "000")
     if [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "405" ] || [ "$HTTP_CODE" = "400" ]; then
         echo "  后端API: 正常 (HTTP $HTTP_CODE, 接口可达)"
     else
@@ -192,7 +196,11 @@ echo ""
 echo "=========================================="
 echo "部署完成！"
 echo ""
-echo "访问地址:"
+echo "访问地址（备案期非 Web 端口）:"
+echo "  前端页面: http://${SERVER_IP}:${FRONTEND_PORT}"
+echo "  后端API:  http://${SERVER_IP}:${BACKEND_PORT}/api"
+echo ""
+echo "ICP 备案通过后（改回标准端口 80/443）:"
 echo "  前端页面: http://${SERVER_IP}"
 echo "  后端API:  http://${SERVER_IP}/api"
 echo ""

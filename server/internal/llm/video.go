@@ -21,24 +21,22 @@ type VideoClient struct {
 	apiKey  string
 	baseURL string
 	httpCli *http.Client
+	router  *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
 }
 
 // NewVideoClient 创建视频生成客户端
-func NewVideoClient(cfg config.AIConfig, providerName string) *VideoClient {
+func NewVideoClient(cfg config.AIConfig, providerName string, router ...*ChannelRouter) *VideoClient {
 	p := cfg.Providers[providerName]
-	apiKey := p.APIKey
-	baseURL := p.BaseURL
 
-	if apiKey == "" {
-		apiKey = cfg.LLM.APIKey
-	}
-	if baseURL == "" {
-		baseURL = cfg.LLM.BaseURL
+	var r *ChannelRouter
+	if len(router) > 0 {
+		r = router[0]
 	}
 
 	return &VideoClient{
-		apiKey:  apiKey,
-		baseURL: baseURL,
+		apiKey:  p.APIKey,
+		baseURL: p.BaseURL,
+		router:  r,
 		httpCli: &http.Client{
 			Timeout: 10 * time.Minute, // 视频生成耗时较长
 			Transport: &http.Transport{
@@ -48,6 +46,16 @@ func NewVideoClient(cfg config.AIConfig, providerName string) *VideoClient {
 			},
 		},
 	}
+}
+
+// creds 按 ctx 渠道解析 apiKey/baseURL（router 非空时动态切换）
+func (c *VideoClient) creds(ctx context.Context) (string, string) {
+	if c.router != nil {
+		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
+			return p.APIKey, p.BaseURL
+		}
+	}
+	return c.apiKey, c.baseURL
 }
 
 // VideoContentItem 视频生成的参考资源条目（图片/视频/音频）
@@ -500,14 +508,15 @@ func (c *VideoClient) processImageURL(ctx context.Context, imageURL string) (str
 
 // doRequest 发送视频生成请求，处理同步和异步响应
 func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, error) {
-	url := fmt.Sprintf("%s/video/generations", c.baseURL)
+	apiKey, baseURL := c.creds(ctx)
+	url := fmt.Sprintf("%s/video/generations", baseURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	start := time.Now()
 	resp, err := c.httpCli.Do(httpReq)
@@ -559,7 +568,8 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 
 // pollVideoTask 轮询异步视频生成任务
 func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string, error) {
-	url := fmt.Sprintf("%s/video/generations/%s", c.baseURL, taskID)
+	apiKey, baseURL := c.creds(ctx)
+	url := fmt.Sprintf("%s/video/generations/%s", baseURL, taskID)
 	maxAttempts := 120 // 最多轮询120次（每5秒一次，共10分钟）
 
 	for i := 0; i < maxAttempts; i++ {
@@ -573,7 +583,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 		if err != nil {
 			return "", fmt.Errorf("create poll request: %w", err)
 		}
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 		resp, err := c.httpCli.Do(httpReq)
 		if err != nil {

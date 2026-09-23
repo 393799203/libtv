@@ -60,9 +60,10 @@ type JWTConfig struct {
 }
 
 type StorageConfig struct {
-	Type   string        `yaml:"type"`
-	Local  LocalConfig   `yaml:"local"`
+	Type   string          `yaml:"type"`
+	Local  LocalConfig     `yaml:"local"`
 	MinIO  MinIOConfigYaml `yaml:"minio"`
+	ZOS    ZOSConfigYaml   `yaml:"zos"`
 }
 
 type LocalConfig struct {
@@ -80,40 +81,25 @@ type MinIOConfigYaml struct {
 	CheckTimeout    string `yaml:"check_timeout"`
 }
 
+// ZOSConfigYaml 天翼云对象存储（ZOS）配置
+type ZOSConfigYaml struct {
+	Endpoint       string `yaml:"endpoint"`        // 如 https://oos-cn-north-2.ctyun.cn（天翼云 ZOS 兼容 S3 协议）
+	AccessKey      string `yaml:"access_key"`      // AccessKey ID（天翼云控制台-访问密钥）
+	SecretKey      string `yaml:"secret_key"`      // AccessKey Secret
+	Bucket         string `yaml:"bucket"`          // bucket 名
+	UseSSL         bool   `yaml:"use_ssl"`         // endpoint 是否走 HTTPS（默认 true 更稳妥）
+	PublicEndpoint string `yaml:"public_endpoint"` // 公网访问前缀（如 https://libtv.oos-cn-north-2.ctyun.cn 或 CDN 域名）
+	CheckInterval  string `yaml:"check_interval"`  // 健康检查间隔
+}
+
 type AIConfig struct {
 	Providers map[string]ProviderConfig `yaml:"providers"`
-	LLM       LLMConfig                 `yaml:"llm"`
-	Image     ImageConfig               `yaml:"image"`
-	Video     VideoConfig               `yaml:"video"`
-	Audio     AudioConfig               `yaml:"audio"`
 }
 
 // ProviderConfig AI Provider 运行时凭据
 type ProviderConfig struct {
 	APIKey  string `yaml:"api_key"`
 	BaseURL string `yaml:"base_url"`
-}
-
-type LLMConfig struct {
-	Provider string `yaml:"provider"`
-	APIKey   string `yaml:"api_key"`
-	BaseURL  string `yaml:"base_url"`
-	Model    string `yaml:"model"`
-}
-
-type ImageConfig struct {
-	Provider string `yaml:"provider"`
-	APIUrl   string `yaml:"api_url"`
-}
-
-type VideoConfig struct {
-	Provider string `yaml:"provider"`
-	APIKey   string `yaml:"api_key"`
-	APIUrl   string `yaml:"api_url"`
-}
-
-type AudioConfig struct {
-	Provider string `yaml:"provider"`
 }
 
 // PaymentConfig 支付配置
@@ -164,6 +150,26 @@ func Load(path string) error {
 	}
 	if secretKey := os.Getenv("MINIO_SECRET_KEY"); secretKey != "" {
 		C.Storage.MinIO.SecretKey = secretKey
+	}
+
+	// ZOS配置环境变量覆盖（天翼云对象存储，兼容 S3 协议）
+	if endpoint := os.Getenv("ZOS_ENDPOINT"); endpoint != "" {
+		C.Storage.ZOS.Endpoint = endpoint
+	}
+	if publicEndpoint := os.Getenv("ZOS_PUBLIC_ENDPOINT"); publicEndpoint != "" {
+		C.Storage.ZOS.PublicEndpoint = publicEndpoint
+	}
+	if accessKey := os.Getenv("ZOS_ACCESS_KEY"); accessKey != "" {
+		C.Storage.ZOS.AccessKey = accessKey
+	}
+	if secretKey := os.Getenv("ZOS_SECRET_KEY"); secretKey != "" {
+		C.Storage.ZOS.SecretKey = secretKey
+	}
+	if bucket := os.Getenv("ZOS_BUCKET"); bucket != "" {
+		C.Storage.ZOS.Bucket = bucket
+	}
+	if useSSL := os.Getenv("ZOS_USE_SSL"); useSSL != "" {
+		C.Storage.ZOS.UseSSL = useSSL == "1" || strings.EqualFold(useSSL, "true")
 	}
 
 	// 存储类型环境变量覆盖（docker-compose中设置）

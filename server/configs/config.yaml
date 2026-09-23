@@ -11,6 +11,8 @@ cors:
     - http://192.168.110.115:8880
     - http://39.171.58.10:38880
     - http://yunqueai.cloud:38880
+    - http://60.188.49.208:8880
+    # 备案后正式域名上线时在此追加（http/https、www/无www 均需分别添加）
 
 database:
   host: localhost
@@ -31,7 +33,7 @@ jwt:
   expire_hours: 72
 
 storage:
-  type: fallback  # fallback / minio / local (fallback=MinIO优先，失败降级local)
+  type: fallback  # fallback / minio / local / zos (fallback=MinIO优先，失败降级local；zos=天翼云对象存储)
   local:
     base_path: ../public  # 与 getPublicDir 一致，匹配历史文件位置
   minio:
@@ -43,6 +45,18 @@ storage:
     public_endpoint: http://39.171.58.10:9990  # 公网访问地址（MinIO端口映射）
     check_interval: 30s  # 健康检查间隔
     check_timeout: 3s    # 健康检查超时
+  # 天翼云对象存储 ZOS（官方兼容 AWS S3 协议，用 minio-go 客户端对接即可）
+  # 启用：type 改为 zos，或保持 fallback（配了下方 zos 配置后 fallback 自动优先 ZOS、本地降级）
+  # endpoint：控制台"终端节点（Endpoint）"，不带协议（use_ssl 决定 https）
+  # public_endpoint：控制台"Bucket外网访问"域名（虚拟主机风格，bucket 已在子域中，勿再拼 /bucket/）
+  zos:
+    endpoint: huadong-1.ctyunzos.cn   # 天翼云 ZOS 终端节点
+    access_key: ""                    # AccessKey ID（天翼云控制台-访问密钥；生产建议用环境变量注入）
+    secret_key: ""                    # AccessKey Secret
+    bucket: manwa
+    use_ssl: true                     # endpoint 为 https 时 true
+    public_endpoint: https://manwa.huadong-1.ctyunzos.cn  # Bucket 外网访问域名（虚拟主机风格）
+    check_interval: 30s               # 健康检查间隔
 
 ai:
   # ---- Provider 运行时凭据（对应 models.yaml 中的 providers）----
@@ -50,31 +64,9 @@ ai:
     wasu:
       api_key: "sk-jHYp7jAAqZLqLGUffjHrLZBtGaIhLjexdjesHLpq5S84qpC4"
       base_url: "https://token.wasu.cn/v1"
-    deepseek:
-      api_key: "sk-3e68514aee094c89b4c1c3b751a45f51"
-      base_url: "https://api.deepseek.com/v1"
-    openai:
-      api_key: ""
-      base_url: "https://api.openai.com/v1"
-    qwen:
-      api_key: ""
-      base_url: ""
-
-  # ---- LLM 默认配置（向后兼容）----
-  llm:
-    provider: wasu
-    api_key: ""  # 优先使用 providers.<name>.api_key
-    base_url: ""
-    model: "deepseek-v4-flash"
-  image:
-    provider: sd_webui  # sd_webui / comfyui
-    api_url: "http://localhost:7860"
-  video:
-    provider: kling  # kling / seedance
-    api_key: ""
-    api_url: ""
-  audio:
-    provider: edge_tts  # edge_tts / fish_speech
+    dianxin:
+      api_key: "d15dd4bcdf524c0d91c39329cbe3a405"
+      base_url: "https://ai.ctaigw.cn/v1"
 
 # ============================================
 #  支付（积分超市支付宝充值；默认关闭，配置并置 enabled: true 后生效）

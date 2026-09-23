@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"libtv/internal/middleware"
 	"libtv/internal/pkg/response"
 	"libtv/internal/service"
 
@@ -12,15 +13,28 @@ import (
 // PricingHandler 模型价格配置（运营后台「价格管理」页签）
 type PricingHandler struct {
 	pricingService *service.PricingService
+	channelService *service.ChannelService
 }
 
-func NewPricingHandler(pricingService *service.PricingService) *PricingHandler {
-	return &PricingHandler{pricingService: pricingService}
+func NewPricingHandler(pricingService *service.PricingService, channelService ...*service.ChannelService) *PricingHandler {
+	h := &PricingHandler{pricingService: pricingService}
+	if len(channelService) > 0 {
+		h.channelService = channelService[0]
+	}
+	return h
 }
 
 // List 返回各节点下模型的价格配置（按次 / 按秒，见 billing_type）
+//   - 显式传 ?channel=wasu|dianxin（后台价格管理页按渠道 tab 查看）→ 用指定渠道
+//   - 未传 channel（前端提示词面板算扣费）→ 按登录用户最终渠道（全局策略 + 用户 channel）
+//     这样电信用户看到的扣费金额按电信模型价格计算，华数用户按华数价格
 func (h *PricingHandler) List(c *gin.Context) {
-	result, err := h.pricingService.ListPrices(c.Request.Context())
+	channel := c.Query("channel")
+	if channel == "" && h.channelService != nil {
+		userID := middleware.GetUserID(c)
+		channel = h.channelService.ResolveUserChannel(c.Request.Context(), userID)
+	}
+	result, err := h.pricingService.ListPrices(c.Request.Context(), channel)
 	if err != nil {
 		response.FailWith(c, err)
 		return

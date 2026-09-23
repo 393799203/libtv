@@ -74,29 +74,18 @@ const maxGenerationTokens = 65536
 // GenerateStory 根据用户提示词生成故事剧本文本
 // 用于 TextNode：用户输入 prompt → LLM 生成故事 → 填充 content
 func GenerateStory(ctx context.Context, client *Client, userPrompt string, model string) (string, error) {
-	var resp *ChatResponse
-	var err error
-
-	if model != "" {
-		// 使用指定的模型
-		resp, err = client.ChatWithModel(
-			ctx,
-			model,
-			StorySystemPrompt,
-			BuildStoryUserPrompt(userPrompt),
-			WithTemperature(0.8),
-			WithMaxTokens(maxGenerationTokens),
-		)
-	} else {
-		// 使用默认模型
-		resp, err = client.Chat(
-			ctx,
-			StorySystemPrompt,
-			BuildStoryUserPrompt(userPrompt),
-			WithTemperature(0.8),
-			WithMaxTokens(maxGenerationTokens),
-		)
+	if model == "" {
+		return "", fmt.Errorf("未指定文本模型：请在节点上选择模型后重试")
 	}
+
+	resp, err := client.ChatWithModel(
+		ctx,
+		model,
+		StorySystemPrompt,
+		BuildStoryUserPrompt(userPrompt),
+		WithTemperature(0.8),
+		WithMaxTokens(maxGenerationTokens),
+	)
 
 	if err != nil {
 		return "", fmt.Errorf("llm chat: %w", err)
@@ -120,29 +109,18 @@ func GenerateStory(ctx context.Context, client *Client, userPrompt string, model
 
 // GenerateScript 从文本内容生成结构化分镜剧本（后续脚本节点用）
 func GenerateScript(ctx context.Context, client *Client, textContent string, model string) (*ScriptResult, error) {
-	var resp *ChatResponse
-	var err error
-
-	if model != "" {
-		// 使用指定的模型
-		resp, err = client.ChatWithModel(
-			ctx,
-			model,
-			ScriptSystemPrompt,
-			BuildScriptUserPrompt(textContent),
-			WithTemperature(0.7),
-			WithMaxTokens(maxGenerationTokens),
-		)
-	} else {
-		// 使用默认模型
-		resp, err = client.Chat(
-			ctx,
-			ScriptSystemPrompt,
-			BuildScriptUserPrompt(textContent),
-			WithTemperature(0.7),
-			WithMaxTokens(maxGenerationTokens),
-		)
+	if model == "" {
+		return nil, fmt.Errorf("未指定文本模型：请在节点上选择模型后重试")
 	}
+
+	resp, err := client.ChatWithModel(
+		ctx,
+		model,
+		ScriptSystemPrompt,
+		BuildScriptUserPrompt(textContent),
+		WithTemperature(0.7),
+		WithMaxTokens(maxGenerationTokens),
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("llm chat: %w", err)
@@ -210,8 +188,8 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 }
 
 // NewScriptClient 创建用于剧本生成的 LLM 客户端
-func NewScriptClient(cfg config.AIConfig) *Client {
-	return NewClient(cfg, cfg.LLM.Provider)
+func NewScriptClient(cfg config.AIConfig, router ...*ChannelRouter) *Client {
+	return NewClient(cfg, ChannelWasu, router...)
 }
 
 // cleanJSONMarkdown 清理 LLM 返回中可能包裹的 ```json ... ``` 标记

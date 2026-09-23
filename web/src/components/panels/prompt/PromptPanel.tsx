@@ -308,35 +308,27 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const mentionsRef = useRef(mentions);
 
   // 模型选择状态（使用动态模型列表）
-  // 初始化时：如果节点data中有model（modelId），根据modelId找到对应的模型value
-  // 否则使用配置的默认模型
+  // 初始化时：优先使用节点 data.model 原始值（无论是否在当前渠道列表，
+  // 不在列表时由 ModelSelector 置灰显示"渠道不可用"）；data.model 为空时用配置默认模型
   const initialModel = ('model' in data && (data as { model?: string }).model)
-    ? (() => {
-        const savedModelId = (data as { model: string }).model;
-        // 根据保存的modelId找到对应的模型配置
-        const matchedModel = availableModels.find(m => m.modelId === savedModelId);
-        return matchedModel?.value || config.defaultModel;
-      })()
+    ? (data as { model: string }).model
     : config.defaultModel;
   const [selectedModel, setSelectedModel] = useState(initialModel);
 
   // 注意：Canvas.tsx 用 key={selectedNode.id} 重挂载本组件，切换节点时 useState 初始化器
   // 已经生效，因此不再需要「监听 nodeId/data 变化并重置本地状态」的 effect。
 
-  // 当模型列表加载完成时，自动选择默认模型或合适的模型
-  // 只在初始化时或当前模型不在可用列表中时才重置，避免强制重置用户的选择
+  // 模型列表加载后的处理：
+  // - 当前模型为空（新节点）：自动选择当前渠道的默认模型（isDefault 或第一个）
+  // - 当前模型不在可用列表（渠道切换后旧模型）：【不重置】——保留原值，
+  //   由 ModelSelector 置灰提示"渠道不可用"，让用户自行重新选择新渠道模型
   useEffect(() => {
-    if (availableModels.length > 0) {
-      // 检查当前选中的模型是否在可用列表中
-      const currentModelAvailable = availableModels.find(m => m.value === selectedModel);
-
-      // 如果当前模型不在可用列表中，才重置到默认模型
-      if (!currentModelAvailable) {
-        const defaultModel = availableModels.find(m => m.isDefault === true);
-        setSelectedModel(defaultModel ? defaultModel.value : availableModels[0].value);
-      }
+    if (availableModels.length > 0 && !selectedModel) {
+      const defaultModel = availableModels.find(m => m.isDefault === true);
+      setSelectedModel(defaultModel ? defaultModel.value : availableModels[0].value);
     }
-  }, [availableModels, nodeType]); // 移除 selectedModel 依赖，避免每次切换都重置
+    // 注意：不依赖 selectedModel——只处理"为空"的情形；旧模型不可用时保持原值置灰
+  }, [availableModels]);
 
   // 图片/视频节点的分辨率、比例：onChange 已即时写回 data，直接从 data 派生，不再保留本地 state
   const selectedResolution: ResolutionOption = ('resolution' in data && (data as any).resolution)

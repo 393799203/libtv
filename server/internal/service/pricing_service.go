@@ -96,8 +96,10 @@ func NewPricingService(modelManager *llm.ModelManager, priceRepo repository.Mode
 }
 
 // ListPrices 返回各节点下模型的价格配置（模型清单以 models.yaml 为准，未配置价格的模型价格为 0）
+// channel 指定渠道（wasu/dianxin）：只展示该渠道的模型清单与价格；
+// channel 为空时按华数（wasu）展示（兼容默认）
 // 视频节点按分辨率拆分展示：同一模型不同分辨率各占一行
-func (s *PricingService) ListPrices(ctx context.Context) (*PriceListResult, error) {
+func (s *PricingService) ListPrices(ctx context.Context, channel string) (*PriceListResult, error) {
 	records, err := s.priceRepo.ListAll(ctx)
 	if err != nil {
 		return nil, err
@@ -108,7 +110,10 @@ func (s *PricingService) ListPrices(ctx context.Context) (*PriceListResult, erro
 		priceByKey[r.NodeType+"|"+r.ModelID+"|"+r.Resolution] = r.Price
 	}
 
-	registry := s.modelManager.ListModels()
+	if channel == "" {
+		channel = "wasu"
+	}
+	registry := s.modelManager.ListModelsForChannel(channel)
 	result := &PriceListResult{Nodes: make([]NodePriceGroup, 0, len(priceNodeDefs))}
 	for _, def := range priceNodeDefs {
 		group := NodePriceGroup{

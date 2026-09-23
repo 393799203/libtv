@@ -35,3 +35,6 @@ pnpm-debug.log*
 
 # Go 依赖采用 Docker BuildKit 缓存构建，不入库
 server/vendor/
+
+# ---- SSH 部署密钥（勿提交！）----
+.ssh-deploy/

@@ -20,24 +20,22 @@ type AudioClient struct {
 	apiKey  string
 	baseURL string
 	httpCli *http.Client
+	router  *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
 }
 
 // NewAudioClient 创建音频生成客户端
-func NewAudioClient(cfg config.AIConfig, providerName string) *AudioClient {
+func NewAudioClient(cfg config.AIConfig, providerName string, router ...*ChannelRouter) *AudioClient {
 	p := cfg.Providers[providerName]
-	apiKey := p.APIKey
-	baseURL := p.BaseURL
 
-	if apiKey == "" {
-		apiKey = cfg.LLM.APIKey
-	}
-	if baseURL == "" {
-		baseURL = cfg.LLM.BaseURL
+	var r *ChannelRouter
+	if len(router) > 0 {
+		r = router[0]
 	}
 
 	return &AudioClient{
-		apiKey:  apiKey,
-		baseURL: baseURL,
+		apiKey:  p.APIKey,
+		baseURL: p.BaseURL,
+		router:  r,
 		httpCli: &http.Client{
 			Timeout: 5 * time.Minute,
 			Transport: &http.Transport{
@@ -47,6 +45,16 @@ func NewAudioClient(cfg config.AIConfig, providerName string) *AudioClient {
 			},
 		},
 	}
+}
+
+// creds 按 ctx 渠道解析 apiKey/baseURL（router 非空时动态切换）
+func (c *AudioClient) creds(ctx context.Context) (string, string) {
+	if c.router != nil {
+		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
+			return p.APIKey, p.BaseURL
+		}
+	}
+	return c.apiKey, c.baseURL
 }
 
 // TTSRequest TTS 请求体
@@ -86,8 +94,9 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 		return nil, fmt.Errorf("marshal tts request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/audio/speech", c.baseURL)
-	log.Printf("[AudioGen] TTS请求: model=%s voice=%s url=%s inputLen=%d processedLen=%d", model, voice, url, len(input), len(processedInput))
+	apiKey, baseURL := c.creds(ctx)
+	url := fmt.Sprintf("%s/audio/speech", baseURL)
+	log.Printf("[AudioGen] TTS请求: model=%s voice=%s url=%s inputLen=%d processedLen=%d channel=%s", model, voice, url, len(input), len(processedInput), ChannelFrom(ctx))
 	log.Printf("[AudioGen] TTS payload: %s", string(payload))
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
@@ -95,7 +104,7 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 		return nil, fmt.Errorf("create tts request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	start := time.Now()
 	resp, err := c.httpCli.Do(httpReq)

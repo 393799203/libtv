@@ -21,11 +21,13 @@ import {
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
+import { channelApi } from '@/services/channelApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import AddShowDialog from '@/components/AddShowDialog';
 import PricingManagement from './PricingManagement';
 import PointsPackageManagement from './PointsPackageManagement';
+import ChannelManagement from './ChannelManagement';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
@@ -107,8 +109,8 @@ export default function AdminPage() {
   const [authorSearching, setAuthorSearching] = useState(false);
 
   // ========== 系统设置状态 ==========
-  // 系统设置页内子页签（价格管理 / 套餐管理）
-  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages'>('pricing');
+  // 系统设置页内子页签（价格管理 / 套餐管理 / 渠道管理）
+  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages' | 'channel'>('pricing');
 
   // 远程搜索作者（供风格弹窗使用）：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
   const fetchAuthors = (keyword?: string) => {
@@ -1026,11 +1028,11 @@ export default function AdminPage() {
                   <table className="w-full text-[13px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
-                        <th className="px-4 py-3 text-left font-medium text-gray-600">ID</th>
-                        <th className="px-4 py-3 text-left font-medium text-gray-600">邮箱</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">用户（ID / 邮箱）</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">昵称</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">AI渠道</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">剩余积分</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
@@ -1041,8 +1043,10 @@ export default function AdminPage() {
                         const isCurrentUser = currentUser && user.id === currentUser.id;
                         return (
                           <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{user.id}</td>
-                            <td className="px-4 py-3 text-gray-800">{user.email}</td>
+                            <td className="px-4 py-3">
+                              <div className="text-gray-800 break-all">{user.email}</div>
+                              <div className="text-gray-400 font-mono text-[11px] mt-0.5 break-all">{user.id}</div>
+                            </td>
                             <td className="px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
                             <td className="px-4 py-3 text-gray-500 text-[12px]">
                               <span>项目 {user.project_count || 0}</span>
@@ -1065,6 +1069,27 @@ export default function AdminPage() {
                                   userApi.updateRole(user.id, value as 'user' | 'admin')
                                     .then(() => {
                                       message.success('角色已更新');
+                                      loadUsers();
+                                    })
+                                    .catch(() => {
+                                      // HTTP 错误已由 api.ts 拦截器统一 message.error()
+                                    });
+                                }}
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <Select
+                                value={user.channel || 'wasu'}
+                                size="small"
+                                style={{ width: 100 }}
+                                options={[
+                                  { value: 'wasu', label: '华数' },
+                                  { value: 'dianxin', label: '电信' },
+                                ]}
+                                onChange={(value) => {
+                                  channelApi.updateUserChannel(user.id, value as 'wasu' | 'dianxin')
+                                    .then(() => {
+                                      message.success('渠道已更新');
                                       loadUsers();
                                     })
                                     .catch(() => {
@@ -1379,6 +1404,16 @@ export default function AdminPage() {
               >
                 套餐管理
               </button>
+              <button
+                onClick={() => setSettingsSubTab('channel')}
+                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
+                  settingsSubTab === 'channel'
+                    ? 'border-blue-600 text-blue-700 font-medium'
+                    : 'border-transparent text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                渠道管理
+              </button>
             </div>
 
             {/* 价格管理页签 */}
@@ -1386,6 +1421,9 @@ export default function AdminPage() {
 
             {/* 套餐管理页签 */}
             {settingsSubTab === 'packages' && <PointsPackageManagement />}
+
+            {/* 渠道管理页签 */}
+            {settingsSubTab === 'channel' && <ChannelManagement />}
           </div>
         )}
       </main>

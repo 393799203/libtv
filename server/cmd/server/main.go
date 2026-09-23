@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"libtv/internal/config"
 	"libtv/internal/engine"
@@ -62,7 +63,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -119,17 +120,17 @@ func main() {
 		log.Fatalf("init payment service: %v", err)
 	}
 
-	// 初始化 LLM 客户端
-	llmClient := llm.NewScriptClient(config.C.AI)
+	// 初始化 LLM 客户端（多渠道 token 路由：wasu=华数 / dianxin=电信，后台三档切换）
+	settingRepo := repository.NewSettingRepo(db)
+	channelRouter := llm.NewChannelRouter(nil, config.C.AI.Providers)
+	channelService := service.NewChannelService(settingRepo, userRepo, channelRouter)
+	// 渠道路由读取全局策略（带 5s 缓存：后台切换后最多 5s 生效）
+	channelRouter.SetPolicyFunc(llm.CachedPolicyFunc(channelService.GetPolicy, 5*time.Second))
 
-	// 初始化图像生成客户端（华数TokenHub）
-	imageClient := llm.NewImageClient(config.C.AI, "wasu")
-
-	// 初始化视频生成客户端（华数TokenHub doubao-seedance）
-	videoClient := llm.NewVideoClient(config.C.AI, "wasu")
-
-	// 初始化音频生成客户端（TTS）
-	audioClient := llm.NewAudioClient(config.C.AI, "wasu")
+	llmClient := llm.NewScriptClient(config.C.AI, channelRouter)
+	imageClient := llm.NewImageClient(config.C.AI, "wasu", channelRouter)
+	videoClient := llm.NewVideoClient(config.C.AI, "wasu", channelRouter)
+	audioClient := llm.NewAudioClient(config.C.AI, "wasu", channelRouter)
 
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)
@@ -140,6 +141,10 @@ func main() {
 	// 初始化工作流引擎
 	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService)
 	eng := engine.NewWorkflowEngine(registry)
+	// 执行时按全局策略 + 用户渠道解析最终 AI 渠道（wasu/dianxin）
+	eng.SetChannelResolver(func(ctx context.Context, userID string) string {
+		return channelService.ResolveUserChannel(ctx, userID)
+	})
 
 	// 视频转码服务（独立模块，承载 ffmpeg 调用 + 任务状态注册表）
 	transcodeService := service.NewTranscodeService(appStorage)
@@ -159,12 +164,13 @@ func main() {
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
 	commentHandler := handler.NewCommentHandler(commentService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
-	modelHandler := handler.NewModelHandler(modelManager)
+	modelHandler := handler.NewModelHandler(modelManager, channelService)
+	channelHandler := handler.NewChannelHandler(channelService, userService)
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
 	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
-	pricingHandler := handler.NewPricingHandler(pricingService)
+	pricingHandler := handler.NewPricingHandler(pricingService, channelService)
 	generationHistoryHandler := handler.NewGenerationHistoryHandler(generationHistoryService)
 	pointsPackageHandler := handler.NewPointsPackageHandler(pointsPackageService)
 	// 支付回调完成后同步跳转回的前端地址（可用环境变量 FRONTEND_BASE 覆盖）
@@ -217,9 +223,6 @@ func main() {
 		publicBanners.GET("/:id", bannerHandler.GetBanner)
 	}
 
-	// 公开模型配置接口（无需登录）
-	r.GET("/api/models", modelHandler.ListModels)
-
 	// 积分超市套餐列表（无需登录，仅启用中的套餐）
 	r.GET("/api/points-packages", pointsPackageHandler.ListPublic)
 
@@ -258,6 +261,13 @@ func main() {
 		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
 		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
 		api.POST("/users/:id/recharge", userHandler.Recharge)   // 管理员：为用户充值积分
+		api.GET("/models", modelHandler.ListModels)             // 模型清单（按登录用户渠道返回各自渠道模型）
+
+		// AI 渠道管理（多渠道 token 路由：华数/电信）
+		api.GET("/channel/my", channelHandler.GetMyChannel)     // 当前用户自己的渠道
+		api.GET("/channel/policy", channelHandler.GetPolicy)    // 管理员：查询全局渠道策略
+		api.PUT("/channel/policy", middleware.RequireAdmin(userService), channelHandler.SetPolicy) // 管理员：切换全局策略（全A/全B/按用户）
+		api.PUT("/users/:id/channel", middleware.RequireAdmin(userService), channelHandler.UpdateUserChannel) // 管理员：修改用户渠道
 
 		// 支付订单（积分超市充值，需登录）
 		payment := api.Group("/payment")

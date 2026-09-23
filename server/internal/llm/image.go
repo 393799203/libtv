@@ -22,26 +22,25 @@ type ImageClient struct {
 	baseURL string
 	model   string
 	httpCli *http.Client
+	router  *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
 }
 
 // NewImageClient 创建图像生成客户端
-func NewImageClient(cfg config.AIConfig, providerName string) *ImageClient {
+func NewImageClient(cfg config.AIConfig, providerName string, router ...*ChannelRouter) *ImageClient {
 	p := cfg.Providers[providerName]
-	apiKey := p.APIKey
-	baseURL := p.BaseURL
 
-	// fallback
-	if apiKey == "" {
-		apiKey = cfg.LLM.APIKey
-	}
-	if baseURL == "" {
-		baseURL = cfg.LLM.BaseURL
+	var r *ChannelRouter
+	if len(router) > 0 {
+		r = router[0]
 	}
 
 	return &ImageClient{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		model:   "qwen-image-2.0",
+		apiKey:  p.APIKey,
+		baseURL: p.BaseURL,
+		router:  r,
+		// 兜底默认模型（业务路径由 ImageExecutor 从 data.Model 传入，此值仅在无 model 参数时使用）；
+		// 与 models.yaml 注册的图像模型保持一致
+		model: "doubao-seedream-5.0-lite",
 		httpCli: &http.Client{
 			Timeout: 180 * time.Second,
 			Transport: &http.Transport{
@@ -180,14 +179,22 @@ func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, mo
 
 // doRequest 统一发送图像生成请求，返回所有生成图片的 URL 列表
 func (c *ImageClient) doRequest(ctx context.Context, payload []byte) ([]string, error) {
-	url := fmt.Sprintf("%s/images/generations", c.baseURL)
+	// 多渠道路由：按 ctx 中的用户渠道动态取 apiKey/baseURL；无 router 时用固定凭据
+	apiKey, baseURL := c.apiKey, c.baseURL
+	if c.router != nil {
+		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
+			apiKey, baseURL = p.APIKey, p.BaseURL
+		}
+	}
+
+	url := fmt.Sprintf("%s/images/generations", baseURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	start := time.Now()
 	resp, err := c.httpCli.Do(httpReq)

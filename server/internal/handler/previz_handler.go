@@ -44,10 +44,10 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		return
 	}
 
-	// 默认视觉模型（快/便宜）
+	// 默认视觉模型（快/便宜）；必须存在于 models.yaml（FindModelByID 查不到会 400）
 	modelID := req.Model
 	if modelID == "" {
-		modelID = "doubao-seed-2.0-lite"
+		modelID = "doubao-seed-2.1-turbo"
 	}
 
 	// 模型 ID 映射：前端传 ID，需要转换为 model_id

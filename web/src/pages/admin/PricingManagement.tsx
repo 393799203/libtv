@@ -33,19 +33,21 @@ export default function PricingManagement() {
   const [nodes, setNodes] = useState<NodePriceGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 当前查看的渠道（价格按渠道独立配置）
+  const [channel, setChannel] = useState<'wasu' | 'dianxin'>('wasu');
   // 编辑中的价格：「node_type|model_id|resolution」-> 新价格（各节点独立编辑，互不影响）
   const [edits, setEdits] = useState<Record<string, number>>({});
 
-  const load = useCallback(() => {
+  const load = useCallback((ch: 'wasu' | 'dianxin' = channel) => {
     setLoading(true);
-    pricingApi.list()
+    pricingApi.list(ch)
       .then((res) => {
         setNodes(res?.nodes || []);
         setEdits({});
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [channel]);
 
   useEffect(() => {
     load();
@@ -93,12 +95,31 @@ export default function PricingManagement() {
           </div>
         </div>
         <div className="flex-1" />
+        {/* 渠道 Tab：华数 / 电信 价格独立配置 */}
+        <div className="flex items-center gap-1 rounded-lg bg-gray-100 p-0.5">
+          {(['wasu', 'dianxin'] as const).map((ch) => (
+            <button
+              key={ch}
+              onClick={() => {
+                setChannel(ch);
+                load(ch);
+              }}
+              className={`px-3 py-1 rounded-md text-[12px] font-medium transition-colors cursor-pointer ${
+                channel === ch
+                  ? 'bg-white shadow-sm text-blue-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {ch === 'wasu' ? '华数' : '电信'}
+            </button>
+          ))}
+        </div>
         {dirtyItems.length > 0 && (
           <span className="text-[12px] text-orange-500">{dirtyItems.length} 项未保存</span>
         )}
         <Button
           size="small"
-          onClick={load}
+          onClick={() => load()}
           disabled={saving}
         >
           刷新

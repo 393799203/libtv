@@ -18,6 +18,8 @@ type User struct {
 	// PasswordVersion 密码版本号：每次改密码 +1，写入 JWT，使旧 token 全部失效
 	PasswordVersion int    `gorm:"not null;default:0" json:"-"`
 	Role            string `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
+	// Channel 用户所属 AI Token 渠道：wasu=华数 / dianxin=电信（默认 wasu，后台可改）
+	Channel string `gorm:"size:20;default:'wasu';not null;index" json:"channel"`
 	// Credits 剩余积分：AI 调用前由扣费中间件校验并原子扣减（见 service/billing_service.go）
 	Credits   int64     `gorm:"not null;default:0" json:"credits"`
 	CreatedAt time.Time `json:"created_at"`
@@ -395,3 +397,14 @@ func (a *UserAsset) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// ========== 系统设置（KV）==========
+
+// Setting 系统键值配置（如 AI 渠道策略 channel_policy），后台可动态修改，无需重启
+type Setting struct {
+	Key       string    `gorm:"primaryKey;size:100" json:"key"`
+	Value     string    `gorm:"size:1000;not null;default:''" json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (Setting) TableName() string { return "settings" }

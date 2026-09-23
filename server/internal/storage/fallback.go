@@ -11,9 +11,9 @@ import (
 	"libtv/internal/config"
 )
 
-// FallbackStorage 降级存储（MinIO优先，本地降级）
+// FallbackStorage 降级存储（云存储优先，本地降级）
 type FallbackStorage struct {
-	Primary   Storage // MinIO（优先）
+	Primary   Storage // 云存储（ZOS/MinIO，优先）
 	Fallback  Storage // 本地存储（降级）
 	mu        sync.Mutex
 	syncQueue []string // 待同步文件队列
@@ -37,17 +37,6 @@ func NewFallbackStorage(primary, fallback Storage) *FallbackStorage {
 
 func init() {
 	Register("fallback", func(cfg config.StorageConfig, publicDir string) (Storage, error) {
-		// MinIO 优先
-		minioStorage, err := NewMinIOStorage(&MinIOConfig{
-			Endpoint:       cfg.MinIO.Endpoint,
-			AccessKey:      cfg.MinIO.AccessKey,
-			SecretKey:      cfg.MinIO.SecretKey,
-			Bucket:         cfg.MinIO.Bucket,
-			UseSSL:         cfg.MinIO.UseSSL,
-			PublicEndpoint: cfg.MinIO.PublicEndpoint,
-			CheckInterval:  parseCheckInterval(cfg.MinIO.CheckInterval),
-		})
-
 		// 本地存储作为兜底（必须成功）
 		basePath := cfg.Local.BasePath
 		if basePath == "" {
@@ -58,14 +47,40 @@ func init() {
 			return nil, fmt.Errorf("本地存储初始化失败: %w", err2)
 		}
 
-		// MinIO 失败：只使用本地
-		if err != nil {
-			log.Printf("⚠️ MinIO初始化失败，只使用本地存储: %v", err)
+		// 云存储优先：配置了 ZOS 就用 ZOS，否则退回 MinIO
+		// （ZOS/MinIO 都兼容 S3 协议，同一套 minio-go 客户端）
+		var primary Storage
+		var primaryErr error
+		if cfg.ZOS.Endpoint != "" && cfg.ZOS.AccessKey != "" && cfg.ZOS.Bucket != "" {
+			primary, primaryErr = NewZOSStorage(&ZOSConfig{
+				Endpoint:       cfg.ZOS.Endpoint,
+				AccessKey:      cfg.ZOS.AccessKey,
+				SecretKey:      cfg.ZOS.SecretKey,
+				Bucket:         cfg.ZOS.Bucket,
+				UseSSL:         cfg.ZOS.UseSSL,
+				PublicEndpoint: cfg.ZOS.PublicEndpoint,
+				CheckInterval:  parseCheckInterval(cfg.ZOS.CheckInterval),
+			})
+		} else {
+			primary, primaryErr = NewMinIOStorage(&MinIOConfig{
+				Endpoint:       cfg.MinIO.Endpoint,
+				AccessKey:      cfg.MinIO.AccessKey,
+				SecretKey:      cfg.MinIO.SecretKey,
+				Bucket:         cfg.MinIO.Bucket,
+				UseSSL:         cfg.MinIO.UseSSL,
+				PublicEndpoint: cfg.MinIO.PublicEndpoint,
+				CheckInterval:  parseCheckInterval(cfg.MinIO.CheckInterval),
+			})
+		}
+
+		// 云存储失败：只使用本地
+		if primaryErr != nil {
+			log.Printf("⚠️ 云存储初始化失败，只使用本地存储: %v", primaryErr)
 			return localStorage, nil
 		}
 
-		// MinIO 成功：使用降级存储
-		return NewFallbackStorage(minioStorage, localStorage), nil
+		// 云存储成功：使用降级存储
+		return NewFallbackStorage(primary, localStorage), nil
 	})
 }
 
@@ -75,29 +90,29 @@ func (f *FallbackStorage) IsAvailable() bool {
 	return f.Primary.IsAvailable() || f.Fallback.IsAvailable()
 }
 
-// GetType 获取当前使用的存储类型
+// GetType 获取当前使用的存储类型（云存储为 zos/minio，降级为 local）
 func (f *FallbackStorage) GetType() string {
 	if f.Primary.IsAvailable() {
-		return "minio"
+		return f.Primary.GetType()
 	}
 	return "local"
 }
 
-// PutObject 上传文件（优先MinIO，降级本地）
+// PutObject 上传文件（优先云存储，降级本地）
 func (f *FallbackStorage) PutObject(objectName string, reader io.Reader, objectSize int64, contentType string) error {
 	// 缓存reader数据（因为可能需要重试）
 	buf := &bytes.Buffer{}
 	teeReader := io.TeeReader(reader, buf)
 
-	// 优先尝试MinIO
+	// 优先尝试云存储
 	if f.Primary.IsAvailable() {
 		err := f.Primary.PutObject(objectName, teeReader, objectSize, contentType)
 		if err == nil {
-			log.Printf("✅ 文件上传到MinIO成功: %s", objectName)
+			log.Printf("✅ 文件上传到云存储成功: %s", objectName)
 			return nil
 		}
 
-		log.Printf("⚠️ MinIO上传失败，降级到本地存储: %v", err)
+		log.Printf("⚠️ 云存储上传失败，降级到本地存储: %v", err)
 	}
 
 	// 降级到本地存储
@@ -109,38 +124,38 @@ func (f *FallbackStorage) PutObject(objectName string, reader io.Reader, objectS
 
 	log.Printf("✅ 文件降级存储到本地成功: %s", objectName)
 
-	// 添加到同步队列（MinIO恢复后同步）
+	// 添加到同步队列（云存储恢复后同步）
 	f.addToSyncQueue(objectName)
 
 	return nil
 }
 
-// GetObject 获取文件（优先MinIO，降级本地）
+// GetObject 获取文件（优先云存储，降级本地）
 func (f *FallbackStorage) GetObject(objectName string) (io.ReadCloser, error) {
-	// 优先从MinIO获取
+	// 优先从云存储获取
 	if f.Primary.IsAvailable() {
 		reader, err := f.Primary.GetObject(objectName)
 		if err == nil {
 			return reader, nil
 		}
 
-		log.Printf("⚠️ MinIO获取失败，尝试本地存储: %v", err)
+		log.Printf("⚠️ 云存储获取失败，尝试本地存储: %v", err)
 	}
 
 	// 降级到本地存储
 	return f.Fallback.GetObject(objectName)
 }
 
-// GetObjectRange 获取文件指定范围（优先MinIO，降级本地）
+// GetObjectRange 获取文件指定范围（优先云存储，降级本地）
 func (f *FallbackStorage) GetObjectRange(objectName string, start, end int64) (io.ReadCloser, error) {
-	// 优先从MinIO获取
+	// 优先从云存储获取
 	if f.Primary.IsAvailable() {
 		reader, err := f.Primary.GetObjectRange(objectName, start, end)
 		if err == nil {
 			return reader, nil
 		}
 
-		log.Printf("⚠️ MinIO获取范围失败，尝试本地存储: %v", err)
+		log.Printf("⚠️ 云存储获取范围失败，尝试本地存储: %v", err)
 	}
 
 	// 降级到本地存储
@@ -148,13 +163,13 @@ func (f *FallbackStorage) GetObjectRange(objectName string, start, end int64) (i
 }
 
 // DeleteObject 删除文件（两个存储都删除）
-// 注意：MinIO 删除不受健康检查开关限制——否则探测瞬时不可用会导致文件静默泄漏
+// 注意：云存储删除不受健康检查开关限制——否则探测瞬时不可用会导致文件静默泄漏
 func (f *FallbackStorage) DeleteObject(objectName string) error {
 	var errors []error
 
-	// 删除MinIO中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
+	// 删除云存储中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
 	if err := f.Primary.DeleteObject(objectName); err != nil {
-		errors = append(errors, fmt.Errorf("MinIO删除失败: %w", err))
+		errors = append(errors, fmt.Errorf("云存储删除失败: %w", err))
 	}
 
 	// 删除本地存储中的文件
@@ -170,16 +185,16 @@ func (f *FallbackStorage) DeleteObject(objectName string) error {
 	return nil
 }
 
-// StatObject 获取文件信息（优先MinIO，降级本地）
+// StatObject 获取文件信息（优先云存储，降级本地）
 func (f *FallbackStorage) StatObject(objectName string) (ObjectInfo, error) {
-	// 优先从MinIO获取
+	// 优先从云存储获取
 	if f.Primary.IsAvailable() {
 		info, err := f.Primary.StatObject(objectName)
 		if err == nil {
 			return info, nil
 		}
 
-		log.Printf("⚠️ MinIO获取信息失败，尝试本地存储: %v", err)
+		log.Printf("⚠️ 云存储获取信息失败，尝试本地存储: %v", err)
 	}
 
 	// 降级到本地存储
@@ -188,11 +203,11 @@ func (f *FallbackStorage) StatObject(objectName string) (ObjectInfo, error) {
 
 // GetURL 获取访问URL
 func (f *FallbackStorage) GetURL(objectName string) string {
-	// 如果MinIO可用，返回MinIO的公网URL
+	// 如果云存储可用，返回云存储的公网URL
 	if f.Primary.IsAvailable() {
 		return f.Primary.GetURL(objectName)
 	}
-	// MinIO不可用时，返回本地存储路径
+	// 云存储不可用时，返回本地存储路径
 	return f.Fallback.GetURL(objectName)
 }
 
@@ -206,7 +221,7 @@ func (f *FallbackStorage) ParseObjectName(url string) (string, bool) {
 	return f.Fallback.ParseObjectName(url)
 }
 
-// ListObjects 列出指定前缀的所有文件（优先MinIO，降级本地）
+// ListObjects 列出指定前缀的所有文件（优先云存储，降级本地）
 func (f *FallbackStorage) ListObjects(prefix string) ([]string, error) {
 	// 优先从MinIO列出
 	if f.Primary.IsAvailable() {
@@ -214,7 +229,7 @@ func (f *FallbackStorage) ListObjects(prefix string) ([]string, error) {
 		if err == nil {
 			return objects, nil
 		}
-		log.Printf("⚠️ MinIO列出文件失败，尝试本地存储: %v", err)
+		log.Printf("⚠️ 云存储列出文件失败，尝试本地存储: %v", err)
 	}
 
 	// 降级到本地存储
@@ -222,18 +237,18 @@ func (f *FallbackStorage) ListObjects(prefix string) ([]string, error) {
 }
 
 // DeleteObjectsByPrefix 删除指定前缀的所有文件（两个存储都删除）
-// 注意：MinIO 删除不受健康检查开关限制——否则探测瞬时不可用会导致目录静默泄漏
+// 注意：云存储删除不受健康检查开关限制——否则探测瞬时不可用会导致目录静默泄漏
 func (f *FallbackStorage) DeleteObjectsByPrefix(prefix string) error {
 	var errors []error
 
 	log.Printf("[FallbackStorage] 开始删除目录: prefix=%s", prefix)
 
-	// 删除MinIO中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
+	// 删除云存储中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
 	if err := f.Primary.DeleteObjectsByPrefix(prefix); err != nil {
-		errors = append(errors, fmt.Errorf("MinIO删除目录失败: %w", err))
-		log.Printf("[FallbackStorage] MinIO删除失败: prefix=%s err=%v", prefix, err)
+		errors = append(errors, fmt.Errorf("云存储删除目录失败: %w", err))
+		log.Printf("[FallbackStorage] 云存储删除失败: prefix=%s err=%v", prefix, err)
 	} else {
-		log.Printf("[FallbackStorage] MinIO删除成功: prefix=%s", prefix)
+		log.Printf("[FallbackStorage] 云存储删除成功: prefix=%s", prefix)
 	}
 
 	// 删除本地存储中的文件
@@ -264,7 +279,7 @@ func (f *FallbackStorage) startSyncService() {
 	ticker := time.NewTicker(30 * time.Second)
 
 	for range ticker.C {
-		// 检查MinIO是否恢复
+		// 检查云存储是否恢复
 		if !f.Primary.IsAvailable() {
 			continue
 		}
@@ -285,13 +300,13 @@ func (f *FallbackStorage) syncPendingFiles() {
 		return
 	}
 
-	log.Printf("🔄 开始同步 %d 个文件到MinIO...", len(queue))
+	log.Printf("🔄 开始同步 %d 个文件到云存储...", len(queue))
 
 	for _, objectName := range queue {
-		// 检查MinIO是否已有该文件
+		// 检查云存储是否已有该文件
 		_, err := f.Primary.StatObject(objectName)
 		if err == nil {
-			log.Printf("⏭️ MinIO已有文件，跳过: %s", objectName)
+			log.Printf("⏭️ 云存储已有文件，跳过: %s", objectName)
 			continue
 		}
 
@@ -309,7 +324,7 @@ func (f *FallbackStorage) syncPendingFiles() {
 			continue
 		}
 
-		// 上传到MinIO
+		// 上传到云存储
 		err = f.Primary.PutObject(objectName, reader, info.Size, info.ContentType)
 		reader.Close()
 

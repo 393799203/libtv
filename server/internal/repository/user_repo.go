@@ -28,6 +28,8 @@ type UserRepo interface {
 	// StatsByUserIDs 批量统计指定用户的项目数与分类型资产数（管理员列表展示用）
 	StatsByUserIDs(ctx context.Context, userIDs []string) (map[string]UserStats, error)
 	UpdateRole(ctx context.Context, id, role string) error
+	// UpdateChannel 更新用户 AI 渠道（wasu/dianxin）
+	UpdateChannel(ctx context.Context, id, channel string) error
 	// UpdateProfile 更新用户昵称/头像（零值字段不更新）
 	UpdateProfile(ctx context.Context, id string, fields map[string]interface{}) error
 	// UpdatePasswordHash 更新密码哈希并将密码版本号 +1（使旧 JWT 全部失效）
@@ -171,6 +173,11 @@ func (r *userRepo) StatsByUserIDs(ctx context.Context, userIDs []string) (map[st
 
 func (r *userRepo) UpdateRole(ctx context.Context, id, role string) error {
 	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("role", role).Error
+}
+
+// UpdateChannel 更新用户 AI 渠道（wasu/dianxin）
+func (r *userRepo) UpdateChannel(ctx context.Context, id, channel string) error {
+	return r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("channel", channel).Error
 }
 
 func (r *userRepo) UpdateProfile(ctx context.Context, id string, fields map[string]interface{}) error {

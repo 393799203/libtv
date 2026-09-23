@@ -50,6 +50,11 @@ func (s *UserService) GetUserRole(ctx context.Context, userID string) (string, e
 }
 
 func (s *UserService) Register(ctx context.Context, email, password, nickname string) (*model.User, error) {
+	return s.RegisterWithChannel(ctx, email, password, nickname, "")
+}
+
+// RegisterWithChannel 注册（可指定来源渠道：wasu/dianxin；空值默认 wasu）
+func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, nickname, channel string) (*model.User, error) {
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -63,10 +68,15 @@ func (s *UserService) Register(ctx context.Context, email, password, nickname st
 		return nil, err
 	}
 
+	if channel != "dianxin" {
+		channel = "wasu" // 默认华数
+	}
+
 	user := &model.User{
 		Email:        email,
 		PasswordHash: string(hash),
 		Nickname:     nickname,
+		Channel:      channel,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
@@ -293,4 +303,41 @@ func (s *UserService) generateToken(user *model.User) (string, error) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(config.C.JWT.Secret))
+}
+
+// GetUserChannel 查询用户 AI 渠道（管理员修改/渠道路由用）
+func (s *UserService) GetUserChannel(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		return "wasu", nil
+	}
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "wasu", nil
+		}
+		return "", err
+	}
+	if user.Channel == "" {
+		return "wasu", nil
+	}
+	return user.Channel, nil
+}
+
+// UpdateChannel 更新用户 AI 渠道（管理员操作：wasu/dianxin）
+func (s *UserService) UpdateChannel(ctx context.Context, id, channel string) (*model.User, error) {
+	if channel != "dianxin" && channel != "wasu" {
+		return nil, apperror.New(2006, http.StatusBadRequest, "渠道必须是 wasu 或 dianxin")
+	}
+	user, err := s.userRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	if err := s.userRepo.UpdateChannel(ctx, id, channel); err != nil {
+		return nil, err
+	}
+	user.Channel = channel
+	return user, nil
 }

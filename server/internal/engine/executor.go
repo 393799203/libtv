@@ -50,6 +50,8 @@ type ExecutionContext struct {
 	projectID string
 	// userID 项目属主用户ID，画布文件存到 users/<userID>/canvas/<projectID>/
 	userID string
+	// channel 项目属主用户的 AI 渠道（wasu/dianxin，经全局策略解析后的最终渠道）
+	channel string
 }
 
 func NewExecutionContext() *ExecutionContext {
@@ -137,6 +139,23 @@ func (ec *ExecutionContext) GetUserID() string {
 	return ec.userID
 }
 
+// SetChannel 设置项目属主用户的 AI 渠道（wasu/dianxin，经全局策略解析后的最终渠道）
+func (ec *ExecutionContext) SetChannel(channel string) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.channel = channel
+}
+
+// GetChannel 获取用户 AI 渠道；未设置时回退 wasu
+func (ec *ExecutionContext) GetChannel() string {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	if ec.channel == "" {
+		return "wasu"
+	}
+	return ec.channel
+}
+
 // GetCanvasDir 返回画布文件的存储目录前缀：
 // 有 userID 时存 users/<userID>/canvas（落到用户目录，删用户时级联清理），
 // 否则降级存公共 canvas 目录（历史兼容）
@@ -182,6 +201,8 @@ type WorkflowEngine struct {
 	// subscribers 多播：每个 SSE 连接订阅一份
 	mu          sync.Mutex
 	subscribers map[int64]map[chan WorkflowEvent]struct{} // executionID -> set of chans
+	// channelResolver 解析用户最终 AI 渠道（全局策略 + 用户渠道）；nil 时回退 wasu
+	channelResolver func(ctx context.Context, userID string) string
 }
 
 func NewWorkflowEngine(registry *ExecutorRegistry) *WorkflowEngine {
@@ -189,6 +210,11 @@ func NewWorkflowEngine(registry *ExecutorRegistry) *WorkflowEngine {
 		registry:    registry,
 		subscribers: make(map[int64]map[chan WorkflowEvent]struct{}),
 	}
+}
+
+// SetChannelResolver 设置渠道路由回调（由 main.go 注入：全局策略 + 用户渠道 → 最终渠道）
+func (e *WorkflowEngine) SetChannelResolver(fn func(ctx context.Context, userID string) string) {
+	e.channelResolver = fn
 }
 
 // Subscribe 订阅某个 execution 的事件。返回只读 channel；调用方在断开时调 Unsubscribe。
@@ -242,6 +268,14 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 	// 设置项目ID与属主用户ID，供节点执行器使用（确定存储路径）
 	execCtx.SetProjectID(projectID)
 	execCtx.SetUserID(userID)
+
+	// 解析用户最终 AI 渠道（全局策略 + 用户渠道），供执行器调用 LLM 时选择 token 渠道
+	if e.channelResolver != nil {
+		execCtx.SetChannel(e.channelResolver(ctx, userID))
+		log.Printf("[Engine] user channel resolved: userID=%s channel=%s", userID, execCtx.GetChannel())
+	} else {
+		log.Printf("[Engine] channelResolver 未配置，默认渠道 wasu")
+	}
 
 	// 构造上游映射表（target -> [source, ...]），供 ScriptExecutor 等需要读上游的节点使用
 	upstreamByTarget := make(map[string][]string, len(plan.Schema.Connections))
@@ -501,13 +535,18 @@ func eventTypeToWSName(t EventType) string {
 
 // TextExecutor 文本节点执行器（调用 LLM 生成故事剧本文本）
 type TextExecutor struct {
-	llmClient *llm.Client
-	biller    *service.BillingService
+	llmClient    *llm.Client
+	biller       *service.BillingService
+	modelManager *llm.ModelManager
 }
 
 // NewTextExecutor 创建文本执行器
-func NewTextExecutor(client *llm.Client, biller *service.BillingService) *TextExecutor {
-	return &TextExecutor{llmClient: client, biller: biller}
+func NewTextExecutor(client *llm.Client, biller *service.BillingService, modelManager ...*llm.ModelManager) *TextExecutor {
+	var mm *llm.ModelManager
+	if len(modelManager) > 0 {
+		mm = modelManager[0]
+	}
+	return &TextExecutor{llmClient: client, biller: biller, modelManager: mm}
 }
 
 func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -541,7 +580,9 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 		return nil, err
 	}
 
-	// 调用 LLM 生成故事文本（直接使用data.Model作为model_id）
+	// 调用 LLM 生成故事文本（模型 ID 由前端按用户渠道选择，直接使用）
+	// 注入用户渠道供多 token 路由
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
@@ -560,13 +601,18 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 
 // ScriptExecutor 脚本节点执行器：用户输入 prompt + 上游文本 → LLM 生成分镜剧本
 type ScriptExecutor struct {
-	llmClient *llm.Client
-	biller    *service.BillingService
+	llmClient    *llm.Client
+	biller       *service.BillingService
+	modelManager *llm.ModelManager
 }
 
 // NewScriptExecutor 创建脚本执行器
-func NewScriptExecutor(client *llm.Client, biller *service.BillingService) *ScriptExecutor {
-	return &ScriptExecutor{llmClient: client, biller: biller}
+func NewScriptExecutor(client *llm.Client, biller *service.BillingService, modelManager ...*llm.ModelManager) *ScriptExecutor {
+	var mm *llm.ModelManager
+	if len(modelManager) > 0 {
+		mm = modelManager[0]
+	}
+	return &ScriptExecutor{llmClient: client, biller: biller, modelManager: mm}
 }
 
 func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -691,7 +737,9 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	if err != nil {
 		return nil, err
 	}
-	// 调用 LLM 生成分镜剧本（直接使用data.Model作为model_id）
+	// 调用 LLM 生成分镜剧本（模型 ID 由前端按用户渠道选择，直接使用）
+	// 注入用户渠道供多 token 路由
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
@@ -987,7 +1035,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 普通图片节点: nodeID=%s", node.ID)
 	}
 
-	// 确定使用的模型 ID（传递给图像生成 API）
+	// 确定使用的模型 ID（前端已按用户渠道选择，直接使用）
 	apiModelID := data.Model
 
 	// 华数TokenHub部分模型有最小像素要求，自动提升分辨率
@@ -1015,7 +1063,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
-	// 返回所有生成图片的 URL 列表（N>1 时有多个）
+	// 返回所有生成图片的 URL 列表（N>1 时有多个）；注入用户渠道供多 token 路由
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	var generatedURLs []string
 
 	if len(upstreamImageURLs) > 0 {
@@ -1180,15 +1229,21 @@ type VideoExecutor struct {
 	fileUploadService        *service.FileUploadService
 	biller                   *service.BillingService
 	generationHistoryService *service.GenerationHistoryService
+	modelManager             *llm.ModelManager
 }
 
 // NewVideoExecutor 创建视频执行器
-func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *VideoExecutor {
+func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService, modelManager ...*llm.ModelManager) *VideoExecutor {
+	var mm *llm.ModelManager
+	if len(modelManager) > 0 {
+		mm = modelManager[0]
+	}
 	return &VideoExecutor{
 		videoClient:              videoClient,
 		fileUploadService:        fileUploadService,
 		biller:                   biller,
 		generationHistoryService: generationHistoryService,
+		modelManager:             mm,
 	}
 }
 
@@ -1317,7 +1372,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generateAudio = true
 	}
 
-	// 确定模型
+	// 确定模型：计费用逻辑 ID（data.Model），API 调用用渠道解析后的真实 ID
 	model := data.Model
 	if model == "" {
 		model = "doubao-seedance-2.0-fast"
@@ -1341,7 +1396,8 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return nil, err
 	}
 
-	// 调用视频生成API
+	// 调用视频生成API；注入用户渠道供多 token 路由
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	videoURL, err := v.videoClient.GenerateVideo(
 		ctx,
 		model,
@@ -1460,14 +1516,20 @@ type AudioExecutor struct {
 	audioClient       *llm.AudioClient
 	fileUploadService *service.FileUploadService
 	biller            *service.BillingService
+	modelManager      *llm.ModelManager
 }
 
 // NewAudioExecutor 创建音频执行器
-func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService, biller *service.BillingService) *AudioExecutor {
+func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService, biller *service.BillingService, modelManager ...*llm.ModelManager) *AudioExecutor {
+	var mm *llm.ModelManager
+	if len(modelManager) > 0 {
+		mm = modelManager[0]
+	}
 	return &AudioExecutor{
 		audioClient:       audioClient,
 		fileUploadService: fileUploadService,
 		biller:            biller,
+		modelManager:      mm,
 	}
 }
 
@@ -1487,7 +1549,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return nil, fmt.Errorf("parse audio node data: %w", err)
 	}
 
-	// 确定模型
+	// 确定模型：计费用逻辑 ID（data.Model），API 调用用渠道解析后的真实 ID
 	model := data.Model
 	if model == "" {
 		model = "qwen3-tts-instruct-flash"
@@ -1542,7 +1604,8 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return nil, err
 	}
 
-	// 调用 TTS API
+	// 调用 TTS API；注入用户渠道供多 token 路由
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
@@ -1731,10 +1794,10 @@ func roundTo8(n int) int {
 // NewDefaultRegistry 创建默认执行器注册表（biller 为积分扣费服务，各执行器在真实 AI 调用前扣费并记账）
 func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
-	registry.Register("text", NewTextExecutor(llmClient, biller))
-	registry.Register("script", NewScriptExecutor(llmClient, biller))
+	registry.Register("text", NewTextExecutor(llmClient, biller, modelManager))
+	registry.Register("script", NewScriptExecutor(llmClient, biller, modelManager))
 	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService))
-	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService))
-	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller))
+	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService, modelManager))
+	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller, modelManager))
 	return registry
 }

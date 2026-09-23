@@ -1,15 +1,5 @@
 import { memo, useMemo, useState, useEffect } from 'react';
-import {
-  LinkOutlined,
-  BarChartOutlined,
-  RobotOutlined,
-  VideoCameraOutlined,
-  ThunderboltOutlined,
-  CloudOutlined,
-  AudioOutlined,
-  SoundOutlined,
-  AudioMutedOutlined,
-} from '@ant-design/icons';
+import { SoundOutlined } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
 import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS } from '@/configs/promptConfig';
@@ -17,6 +7,7 @@ import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services
 
 // 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；
 // 失败时清空缓存，允许下次挂载时重试
+// 按渠道缓存：电信用户看到电信价格，华数用户看到华数价格（后端按登录用户渠道返回）
 let pricingNodesPromise: Promise<NodePriceGroup[]> | null = null;
 function loadPricingNodes(): Promise<NodePriceGroup[]> {
   if (!pricingNodesPromise) {
@@ -49,18 +40,6 @@ function findVideoPricing(
     ) ?? null
   );
 }
-
-// 模型图标映射（匹配截图中的图标风格）
-const MODEL_ICON_MAP: Record<string, React.ReactNode> = {
-  link: <LinkOutlined style={{ fontSize: 16 }} />,
-  'bar-chart': <BarChartOutlined style={{ fontSize: 16 }} />,
-  robot: <RobotOutlined style={{ fontSize: 16 }} />,
-  'video-camera': <VideoCameraOutlined style={{ fontSize: 16 }} />,
-  thunderbolt: <ThunderboltOutlined style={{ fontSize: 16 }} />,
-  cloud: <CloudOutlined style={{ fontSize: 16 }} />,
-  audio: <AudioOutlined style={{ fontSize: 16 }} />,
-  sound: <SoundOutlined style={{ fontSize: 16 }} />,
-};
 
 // 展开指示箭头（替代原来的文本 "^"）
 function ChevronIcon({ className = '' }: { className?: string }) {
@@ -115,6 +94,21 @@ interface PromptToolbarProps {
   charCount?: number;
 }
 
+// ==================== 统一控件样式（工具栏视觉语言）====================
+
+// 触发按钮：紧凑、浅圆角、悬浮高亮
+const TBTN = 'flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-all duration-150 cursor-pointer';
+// 触发按钮中"当前值"强调
+const TVAL = 'font-medium text-gray-800';
+// 下拉面板：统一圆角/阴影/边框
+const TDROP = 'absolute bottom-full left-0 mb-1.5 bg-white rounded-xl shadow-lg border border-gray-200/80 ring-1 ring-black/5 overflow-hidden z-30';
+// 下拉项：紧凑
+const TITEM = 'w-full px-3 py-1.5 text-left text-[12px] text-gray-600 hover:bg-gray-50 transition-colors';
+// 下拉项选中态
+const TITEM_ACTIVE = 'bg-blue-50 text-blue-700 font-medium';
+// 下拉分组头
+const TGP = 'px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0 font-medium tracking-wide';
+
 // ==================== 模型选择器（截图2）====================
 
 const ModelSelector = memo(function ModelSelector({
@@ -128,66 +122,101 @@ const ModelSelector = memo(function ModelSelector({
 }) {
   const [open, setOpen] = useState(false);
   const currentModel = models.find((m) => m.value === value);
+  // 当前选中模型不在本渠道可用列表：置灰提示，需重新选择
+  const unavailable = !!value && !currentModel;
 
   return (
     <div className="relative">
-      {/* 触发按钮 */}
+      {/* 触发按钮：当前模型名 + 小箭头，悬浮有质感 */}
       <button
-        className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer"
+        className={`flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg transition-all duration-150 cursor-pointer group ${
+          unavailable
+            ? 'text-red-500'
+            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+        }`}
         onClick={() => setOpen(!open)}
+        title={unavailable ? '当前模型在当前渠道不可用，请重新选择' : undefined}
       >
-        <span className="text-gray-600">
-          {MODEL_ICON_MAP[currentModel?.icon || ''] || <RobotOutlined style={{ fontSize: 16 }} />}
+        {/* 模型名（带品牌色小圆点） */}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              unavailable ? 'bg-red-400' : currentModel ? 'bg-blue-400' : 'bg-gray-300'
+            }`}
+          />
+          <span className={`max-w-[120px] truncate text-[12px] ${unavailable ? 'line-through' : TVAL}`}>
+            {unavailable ? `${value}（渠道不可用）` : currentModel?.label || '选择模型'}
+          </span>
         </span>
-        <span className="text-[13px] font-medium text-gray-800">{currentModel?.label || '选择模型'}</span>
-        <ChevronIcon className="text-gray-400 ml-0.5" />
+        <ChevronIcon className="text-gray-400 w-3 h-3 shrink-0 transition-transform duration-150 group-hover:translate-y-px" />
       </button>
 
-      {/* 下拉面板：截图2 样式 */}
+      {/* 下拉面板：精致卡片 */}
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-2 w-[288px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30">
-            {models.map((model) => (
-              <button
-                key={model.value}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-                  value === model.value ? 'bg-gray-100' : 'hover:bg-gray-50'
-                }`}
-                onClick={() => {
-                  onChange(model.value);
-                  setOpen(false);
-                }}
-              >
-                {/* 左侧图标 */}
-                <span className="text-gray-600 w-6 flex-shrink-0 flex justify-center">
-                  {MODEL_ICON_MAP[model.icon || ''] || <RobotOutlined style={{ fontSize: 17 }} />}
-                </span>
-
-                {/* 中间：名称 + 描述 */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[14px] font-medium text-gray-800">{model.label}</span>
-                    {model.tag && (
-                      <span
-                        className="px-1.5 py-0.5 rounded text-[10px] font-medium leading-none"
-                        style={{
-                          backgroundColor: `${model.tagColor || '#f59e0b'}15`,
-                          color: model.tagColor || '#f59e0b',
-                        }}
-                      >
-                        {model.tag}
+          <div className={`${TDROP} w-[260px]`}>
+            {/* 面板头：标题 + 当前渠道提示 */}
+            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-gray-400 tracking-wider uppercase">选择模型</span>
+              <span className="text-[10px] text-gray-300">本渠道可用</span>
+            </div>
+            {/* 当前渠道不可用模型提示 */}
+            {unavailable && (
+              <div className="px-3 py-1.5 bg-red-50 border-b border-red-100 text-[11px] text-red-500 leading-snug">
+                当前模型在本渠道不可用，请重新选择
+              </div>
+            )}
+            <div className="max-h-64 overflow-y-auto py-1">
+              {models.map((model) => {
+                const active = value === model.value;
+                return (
+                  <button
+                    key={model.value}
+                    className={`${TITEM} group/item border-l-2 transition-all ${
+                      active
+                        ? 'border-blue-500 bg-blue-50/70'
+                        : 'border-transparent hover:bg-gray-50'
+                    }`}
+                    onClick={() => {
+                      onChange(model.value);
+                      setOpen(false);
+                    }}
+                  >
+                    {/* 名称 + tag + 对勾 */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`text-[12px] truncate ${active ? 'text-blue-700 font-medium' : 'text-gray-700'}`}>
+                        {model.label}
                       </span>
-                    )}
-                  </div>
-                  {model.description && (
-                    <div className="text-[12px] text-gray-400 mt-0.5 leading-tight">
-                      {model.description}
+                      {model.tag && (
+                        <span
+                          className="px-1 py-px rounded text-[9px] font-medium leading-none shrink-0"
+                          style={{
+                            backgroundColor: `${model.tagColor || '#f59e0b'}15`,
+                            color: model.tagColor || '#f59e0b',
+                          }}
+                        >
+                          {model.tag}
+                        </span>
+                      )}
+                      <span className="ml-auto shrink-0">
+                        {active && (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="text-blue-500">
+                            <path d="M2.5 6.5L5 9L9.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </span>
                     </div>
-                  )}
-                </div>
-              </button>
-            ))}
+                    {/* 描述：最多两行，精致小字 */}
+                    {model.description && (
+                      <div className="text-[10px] text-gray-400 mt-0.5 pr-4 line-clamp-2 leading-snug">
+                        {model.description}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </>
       )}
@@ -312,11 +341,11 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
     <div className="relative">
       {/* 触发按钮 */}
       <button
-        className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer"
+        className={TBTN}
         onClick={() => setOpen(!open)}
       >
         <RatioIcon value={effectiveAspectRatio} active={true} />
-        <span className="text-[13px] font-medium text-gray-800">{effectiveAspectRatio}</span>
+        <span className={TVAL}>{effectiveAspectRatio}</span>
         <span className="px-1.5 py-px rounded-md bg-gray-100 text-[10px] font-semibold text-gray-500 leading-relaxed">
           {effectiveResolution}
         </span>
@@ -626,7 +655,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, selectedResolution, charCount]);
 
   return (
-    <div className="flex items-center gap-0.5 pt-2.5 mt-0.5 border-t border-gray-100">
+    <div className="flex items-center gap-1 pt-2 mt-0.5 border-t border-gray-100">
       {/* 模型选择器 */}
       <ModelSelector
         models={models}
@@ -635,34 +664,32 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       />
 
       {/* 分隔 */}
-      <span className="w-px h-4 bg-gray-200 mx-0.5" />
+      <span className="w-px h-4 bg-gray-200/70 mx-0.5" />
 
       {/* 音色选择器（仅音频节点，分组显示） */}
       {isAudio && (
         <div className="relative">
           <button
             onClick={() => setVoiceOpen(!voiceOpen)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+            className={TBTN}
           >
-            <SoundOutlined className="text-gray-500 text-xs" />
-            <span className="text-gray-800 font-medium">
+            <SoundOutlined className="text-gray-400 text-xs" />
+            <span className={TVAL}>
               {VOICE_OPTIONS.find((v) => v.value === selectedVoice)?.label || '音色'}
             </span>
-            <ChevronIcon className="text-gray-400" />
+            <ChevronIcon className="text-gray-400 w-3 h-3" />
           </button>
           {voiceOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setVoiceOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[160px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 z-30">
+              <div className={`${TDROP} w-[160px] max-h-[320px] overflow-y-auto`}>
                 {VOICE_GROUPS.map(([groupName, voices]) => (
                   <div key={groupName}>
-                    <div className="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0">{groupName}</div>
+                    <div className={TGP}>{groupName}</div>
                     {voices.map((opt) => (
                       <button
                         key={opt.value}
-                        className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                          selectedVoice === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                        }`}
+                        className={`${TITEM} ${selectedVoice === opt.value ? TITEM_ACTIVE : ''}`}
                         onClick={() => { onVoiceChange?.(opt.value); setVoiceOpen(false); }}
                       >
                         {opt.label}
@@ -681,21 +708,19 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         <div className="relative">
           <button
             onClick={() => setSpeedOpen(!speedOpen)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+            className={TBTN}
           >
-            <span className="text-gray-600">{selectedSpeed}x</span>
-            <ChevronIcon className="text-gray-400" />
+            <span className={TVAL}>{selectedSpeed}x</span>
+            <ChevronIcon className="text-gray-400 w-3 h-3" />
           </button>
           {speedOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setSpeedOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[120px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30">
+              <div className={`${TDROP} w-[120px]`}>
                 {SPEED_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
-                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                      selectedSpeed === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                    }`}
+                    className={`${TITEM} ${selectedSpeed === opt.value ? TITEM_ACTIVE : ''}`}
                     onClick={() => { onSpeedChange?.(opt.value); setSpeedOpen(false); }}
                   >
                     {opt.label}
@@ -712,23 +737,21 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         <div className="relative">
           <button
             onClick={() => setStyleOpen(!styleOpen)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+            className={TBTN}
           >
-            <span className="text-gray-800 font-medium">
+            <span className={TVAL}>
               {STYLE_OPTIONS.find((s) => s.value === selectedStyle)?.label || '风格'}
             </span>
-            <ChevronIcon className="text-gray-400" />
+            <ChevronIcon className="text-gray-400 w-3 h-3" />
           </button>
           {styleOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setStyleOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[130px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30">
+              <div className={`${TDROP} w-[130px]`}>
                 {STYLE_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
-                    className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                      selectedStyle === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                    }`}
+                    className={`${TITEM} ${selectedStyle === opt.value ? TITEM_ACTIVE : ''}`}
                     onClick={() => { onStyleChange?.(opt.value); setStyleOpen(false); }}
                   >
                     {opt.label}
@@ -745,36 +768,32 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         <div className="relative">
           <button
             onClick={() => setToneOpen(!toneOpen)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px]"
+            className={TBTN}
           >
-            <span className="font-mono text-[10px] text-orange-500">（）</span>
-            <span className="text-gray-800 font-medium">
+            <span className="font-mono text-[10px] text-orange-400 shrink-0">（）</span>
+            <span className={TVAL}>
               {TONE_OPTIONS.find((t) => t.value === selectedTone)?.label || '语气词'}
             </span>
-            <ChevronIcon className="text-gray-400" />
+            <ChevronIcon className="text-gray-400 w-3 h-3" />
           </button>
           {toneOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setToneOpen(false)} />
-              <div className="absolute bottom-full left-0 mb-2 w-[128px] max-h-[320px] overflow-y-auto bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 z-30">
+              <div className={`${TDROP} w-[128px] max-h-[320px] overflow-y-auto`}>
                 {/* 默认项 */}
                 <button
-                  className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                    selectedTone === '' ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                  }`}
+                  className={`${TITEM} ${selectedTone === '' ? TITEM_ACTIVE : ''}`}
                   onClick={() => { onToneChange?.(''); setToneOpen(false); }}
                 >
                   默认
                 </button>
                 {TONE_GROUPS.map(([groupName, tones]) => (
                   <div key={groupName}>
-                    <div className="px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0">{groupName}</div>
+                    <div className={TGP}>{groupName}</div>
                     {tones.map((opt) => (
                       <button
                         key={opt.value}
-                        className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                          selectedTone === opt.value ? 'bg-gray-100 font-medium' : 'hover:bg-gray-50'
-                        }`}
+                        className={`${TITEM} ${selectedTone === opt.value ? TITEM_ACTIVE : ''}`}
                         onClick={() => { onToneChange?.(opt.value); setToneOpen(false); }}
                       >
                         {opt.label}
@@ -815,26 +834,24 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           <div className="relative mr-1">
             <button
               onClick={() => setDurationOpen(!durationOpen)}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100/80 transition-colors cursor-pointer text-[13px] text-gray-600"
+              className={`${TBTN} text-gray-500`}
               title="视频时长（秒）"
             >
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
                 <circle cx="7" cy="7" r="5.5" stroke="#6B7280" strokeWidth="1.3" />
                 <path d="M7 4v3l2 1.5" stroke="#6B7280" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="font-medium text-gray-800">{selectedDuration}s</span>
-              <ChevronIcon className="text-gray-400" />
+              <span className={TVAL}>{selectedDuration}s</span>
+              <ChevronIcon className="text-gray-400 w-3 h-3" />
             </button>
             {durationOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setDurationOpen(false)} />
-                <div className="absolute bottom-full right-0 mb-2 w-[64px] bg-white rounded-xl shadow-2xl border border-gray-100 ring-1 ring-black/5 overflow-hidden z-30 max-h-[260px] overflow-y-auto">
+                <div className={`${TDROP} right-0 w-[64px] max-h-[260px] overflow-y-auto`}>
                   {durationOptions.map((opt) => (
                     <button
                       key={opt}
-                      className={`w-full px-3 py-1.5 text-left text-[13px] transition-colors ${
-                        selectedDuration === opt ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-600 hover:bg-gray-50'
-                      }`}
+                      className={`${TITEM} ${selectedDuration === opt ? TITEM_ACTIVE : ''}`}
                       onClick={() => {
                         onDurationChange?.(opt);
                         setDurationOpen(false);
@@ -857,13 +874,11 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
               onGenerateAudioChange?.(!generateAudio);
             }}
             disabled={audioReferenced}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors text-[13px] mr-1 ${
-              audioReferenced ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-            } ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer mr-1 ${
               generateAudio
-                ? 'bg-gray-100 text-gray-800'
+                ? 'bg-gray-100 text-gray-700'
                 : 'text-gray-400 hover:bg-gray-100/80'
-            }`}
+            } ${audioReferenced ? 'opacity-60 cursor-not-allowed' : ''}`}
             title={
               audioReferenced
                 ? '已引用音频节点，声音自动开启（不可关闭）'

@@ -34,9 +34,9 @@ export interface PriceSaveItem {
 }
 
 export const pricingApi = {
-  /** 获取各节点下模型的价格配置 */
-  list(): Promise<PricingListResponse> {
-    return api.get<PricingListResponse>('/pricing');
+  /** 获取各节点下模型的价格配置；channel 指定渠道（wasu/dianxin），缺省 wasu */
+  list(channel?: string): Promise<PricingListResponse> {
+    return api.get<PricingListResponse>('/pricing', { params: channel ? { channel } : undefined });
   },
 
   /** 批量保存价格配置（仅管理员） */
