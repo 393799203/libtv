@@ -157,7 +157,8 @@ func (m *MinIOStorage) PutObject(objectName string, reader io.Reader, objectSize
 	}
 
 	_, err := m.client.PutObject(ctx, m.bucket, objectName, reader, objectSize, minio.PutObjectOptions{
-		ContentType: contentType,
+		ContentType:  contentType,
+		CacheControl: cacheControlImmutable,
 	})
 	if err != nil {
 		return fmt.Errorf("MinIO上传失败: %w", err)

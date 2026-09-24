@@ -164,7 +164,8 @@ func (z *ZOSStorage) PutObject(objectName string, reader io.Reader, objectSize i
 	}
 
 	_, err := z.client.PutObject(ctx, z.bucket, objectName, reader, objectSize, minio.PutObjectOptions{
-		ContentType: contentType,
+		ContentType:  contentType,
+		CacheControl: cacheControlImmutable,
 	})
 	if err != nil {
 		return fmt.Errorf("ZOS上传失败: %w", err)

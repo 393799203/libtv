@@ -7,6 +7,14 @@ import (
 )
 
 // Storage 存储接口（支持MinIO和本地存储）
+// cacheControlImmutable 内容寻址对象的缓存策略。
+//
+// 对象名是内容哈希（见 FileUploadService.UploadFromReader：sha256 前 12 位 + 扩展名），
+// 同一 URL 的内容永不改变，所以可以放心 immutable + 一年。
+// 不设这个头时浏览器只能走"启发式缓存"（按 Last-Modified 推算），
+// 行为因浏览器而异，也不保证二次访问不再发请求。
+const cacheControlImmutable = "public, max-age=31536000, immutable"
+
 type Storage interface {
 	// PutObject 上传文件
 	PutObject(objectName string, reader io.Reader, objectSize int64, contentType string) error
@@ -46,13 +54,13 @@ type Storage interface {
 
 // parseObjectNameFromURL 公共 URL→objectName 反解函数，供各 Storage 实现复用。
 //
-//   absolutePrefix: 绝对 URL 前缀，如 "http://39.171.58.10:9990/libtv/"；
-//                   传空串则跳过绝对 URL 匹配（适用于 LocalStorage）
+//	absolutePrefix: 绝对 URL 前缀，如 "http://39.171.58.10:9990/libtv/"；
+//	                传空串则跳过绝对 URL 匹配（适用于 LocalStorage）
 //
 // 识别顺序：
-//   1. 绝对 URL 前缀匹配 → 截掉前缀得到 objectName
-//   2. 相对 URL "/media/" 前缀匹配 → 截掉得到 objectName
-//   3. 都不匹配 → 返回 ("", false)
+//  1. 绝对 URL 前缀匹配 → 截掉前缀得到 objectName
+//  2. 相对 URL "/media/" 前缀匹配 → 截掉得到 objectName
+//  3. 都不匹配 → 返回 ("", false)
 func parseObjectNameFromURL(url, absolutePrefix string) (string, bool) {
 	if url == "" {
 		return "", false
