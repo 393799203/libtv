@@ -83,7 +83,11 @@ services:
     # 必须设置密码：Redis 7 的 protected-mode 在「无密码」时只接受 loopback 连接，
     # 后端容器经 Docker 网络访问会被拒（connection reset by peer）。
     # 端口仅绑宿主机 127.0.0.1；密码需与 server/configs/config.yaml 的 redis.password 一致
-    command: redis-server --appendonly yes --requirepass libtv-redis-2026
+    command: redis-server --appendonly yes --requirepass libtv-redis-2026 --maxmemory 256mb --maxmemory-policy noeviction
+    # maxmemory：仅存控制面数据（队列/幂等标记/限流计数/上游任务引用），实测约 1.6MB，
+    #   256mb 是三个数量级以上的余量保险。
+    # 策略用 noeviction（默认）：写满时明确报错，而不是静默淘汰——队列/幂等标记被淘汰
+    #   会导致任务丢失或重复执行；写失败只会让入队降级为进程内协程，限流则 fail-open
     environment:
       # 供 healthcheck 里的 redis-cli 自动鉴权（避免在命令行出现明文密码）
       - REDISCLI_AUTH=libtv-redis-2026

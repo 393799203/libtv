@@ -48,6 +48,7 @@ sync_infra() {
   sync_dir docker-compose.yml /opt/libtv/docker-compose.yml
   sync_dir server/configs/ /opt/libtv/server/configs/
   sync_dir scripts/deploy.sh /opt/libtv/deploy.sh
+  sync_dir redis/ /opt/libtv/redis/
 }
 
 echo "▶ 同步代码到服务器…"
