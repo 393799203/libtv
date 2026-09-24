@@ -14,6 +14,7 @@ function convertToModelOption(model: ModelConfig): ModelOption {
     label: model.Name,
     description: model.Description,
     isDefault: model.Default,  // 从后端配置读取默认标记
+    provider: model.Provider,  // 所属渠道（wasu/dianxin），切换渠道后用于置灰判断
     // 标签逻辑：Z-Image-Turbo 标记"快速"（其他标签可根据需要配置）
     tag: model.ID === 'z-image-turbo' ? '快速' : undefined,
     tagColor: model.ID === 'z-image-turbo' ? '#3b82f6' : undefined,

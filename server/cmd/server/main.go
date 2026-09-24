@@ -166,7 +166,7 @@ func main() {
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager, channelService)
 	channelHandler := handler.NewChannelHandler(channelService, userService)
-	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
+	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService, channelService)
 	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService, channelService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)

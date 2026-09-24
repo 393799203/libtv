@@ -20,6 +20,13 @@ export interface BaseNodeFields {
   stale?: boolean;
   mentions?: MentionMarker[];
   progressMessage?: string; // 进度消息（从SSE node_progress事件的message字段）
+  /**
+   * 节点所选模型所属的 AI 渠道（wasu/dianxin）。
+   * 华数/电信存在同名模型（如 doubao-seedream-5.0-lite），仅凭 model 无法判断当初选的是哪个渠道；
+   * 记录本字段后，渠道切换即可判定该模型需要重新选择（置灰并拦截生成）。
+   * 历史节点无此字段 → 视为华数（历史数据均为华数时代创建）。
+   */
+  modelProvider?: string;
 }
 
 // 文本节点数据

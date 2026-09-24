@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
+import { useModelStore } from '@/stores/modelStore';
 import { nodeRegistry } from '@/plugins/registry';
 import { VIDEO_RESOLUTION_OPTIONS } from '@/configs/promptConfig';
 import type {
@@ -308,12 +309,33 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const mentionsRef = useRef(mentions);
 
   // 模型选择状态（使用动态模型列表）
-  // 初始化时：优先使用节点 data.model 原始值（无论是否在当前渠道列表，
-  // 不在列表时由 ModelSelector 置灰显示"渠道不可用"）；data.model 为空时用配置默认模型
+  // 初始化：data.model 有值（旧节点）→ 用它（不在当前渠道列表时由 ModelSelector 置灰）；
+  // data.model 为空（新节点）→ 留空，待模型列表加载后自动选当前渠道默认模型
   const initialModel = ('model' in data && (data as { model?: string }).model)
     ? (data as { model: string }).model
-    : config.defaultModel;
+    : '';
   const [selectedModel, setSelectedModel] = useState(initialModel);
+
+  // 当前最终渠道（wasu/dianxin）：写回节点时记录，并用于模型可用性判断
+  const currentChannel = useModelStore((s) => s.channel);
+  // 节点记录的模型渠道：仅在节点确实保存过该字段时才参与可用性判定。
+  // 历史节点（渠道记录功能上线前生成）没有该字段，无法追溯其真实来源 →
+  // 此时不做判定（否则"电信渠道下用 cdance 生成的旧节点"会被误判为华数而错误置灰）。
+  // 判定模型是否可用仍以「该模型在当前渠道是否存在」为主（见 ModelSelector）。
+  // 用户在本节点重新生成/选模时，会自动写入当前渠道记录，此后渠道切换即可准确置灰。
+  const storedModelChannel: string | undefined =
+    (data as { modelProvider?: string }).modelProvider;
+
+  // 用户切换模型：立即写回节点（含所选模型的渠道），
+  // 使"渠道切换后必须重新选择"的判定有据可依
+  const handleModelChange = useCallback((v: string) => {
+    setSelectedModel(v);
+    const m = availableModels.find((x) => x.value === v);
+    onUpdate({
+      model: m?.modelId || v,
+      modelProvider: m?.provider || currentChannel,
+    } as Partial<LibTVNodeData>);
+  }, [availableModels, onUpdate, currentChannel]);
 
   // 注意：Canvas.tsx 用 key={selectedNode.id} 重挂载本组件，切换节点时 useState 初始化器
   // 已经生效，因此不再需要「监听 nodeId/data 变化并重置本地状态」的 effect。
@@ -445,6 +467,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       prompt: editorRef.current?.getValue() ?? promptTextRef.current,
       mentions: editorRef.current?.getMentions() ?? mentionsRef.current,  // 从 DOM 提取，保证与实际引用一致
       model: modelIdToSave,
+      // 记录本次所选模型的渠道：渠道切换后据此要求用户重新选择
+      modelProvider: currentModel?.provider || currentChannel,
     };
     if (nodeType === 'image' || nodeType === 'video') {
       (updateData as any).resolution = selectedResolution;
@@ -465,7 +489,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       (updateData as any).tone = selectedTone;    // 语气词
     }
     return updateData;
-  }, [availableModels, selectedModel, nodeType, selectedResolution, selectedAspectRatio, selectedQuality, videoMode, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone]);
+  }, [availableModels, selectedModel, nodeType, selectedResolution, selectedAspectRatio, selectedQuality, videoMode, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone, currentChannel]);
 
   // 暂存：只保存到 zustand store 内存状态，不持久化到后端
   // 下次点击节点能取到最新内容，刷新页面回到之前后端持久化的状态
@@ -618,7 +642,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       <PromptToolbar
         models={availableModels}
         selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
+        onModelChange={handleModelChange}
+        storedModelChannel={storedModelChannel}
         selectedResolution={selectedResolution}
         onResolutionChange={handleResolutionChange}
         selectedAspectRatio={selectedAspectRatio}

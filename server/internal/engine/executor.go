@@ -575,14 +575,15 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	}
 
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
+	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
+
 	chargedAmount, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成", 1)
 	if err != nil {
 		return nil, err
 	}
 
 	// 调用 LLM 生成故事文本（模型 ID 由前端按用户渠道选择，直接使用）
-	// 注入用户渠道供多 token 路由
-	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
@@ -732,14 +733,14 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	}
 
 	log.Printf("[ScriptExecutor] nodeID=%s upstreamChars=%d promptChars=%d fullInputChars=%d model=%s", node.ID, len(material), len(cleanedPrompt), len(fullInput), data.Model)
+	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；剧本使用文本模型按次计费）
 	chargedAmount, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成", 1)
 	if err != nil {
 		return nil, err
 	}
 	// 调用 LLM 生成分镜剧本（模型 ID 由前端按用户渠道选择，直接使用）
-	// 注入用户渠道供多 token 路由
-	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
@@ -1056,6 +1057,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 	log.Printf("[ImageExecutor] 生成数量: data.Count=%d -> 实际count=%d", data.Count, count)
 
+	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景；图片模型按次计费，按生成张数计）
 	chargedAmount, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成", count)
 	if err != nil {
@@ -1063,8 +1066,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
-	// 返回所有生成图片的 URL 列表（N>1 时有多个）；注入用户渠道供多 token 路由
-	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
+	// 返回所有生成图片的 URL 列表（N>1 时有多个）
 	var generatedURLs []string
 
 	if len(upstreamImageURLs) > 0 {
@@ -1390,6 +1392,9 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 时长按模型钳制后再扣费，保证扣费时长与实际生成时长一致（GenerateVideo 内仍有兜底钳制）
 	data.Duration = llm.NormalizeVideoDuration(model, data.Duration)
 
+	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
+
 	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按分辨率+时长计）
 	chargedAmount, err := v.biller.ChargeByDurationWithResolution(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", resolution, data.Duration)
 	if err != nil {
@@ -1397,7 +1402,6 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	// 调用视频生成API；注入用户渠道供多 token 路由
-	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	videoURL, err := v.videoClient.GenerateVideo(
 		ctx,
 		model,
@@ -1597,6 +1601,8 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
 
+	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
+	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：按输入字符数计费（每 100 字为单位），通过后才调用 TTS API
 	charCount := len([]rune(inputText))
 	chargedAmount, err := a.biller.ChargeByChars(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成", charCount)
@@ -1604,8 +1610,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return nil, err
 	}
 
-	// 调用 TTS API；注入用户渠道供多 token 路由
-	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
+	// 调用 TTS API
 	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)

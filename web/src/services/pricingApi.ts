@@ -39,8 +39,8 @@ export const pricingApi = {
     return api.get<PricingListResponse>('/pricing', { params: channel ? { channel } : undefined });
   },
 
-  /** 批量保存价格配置（仅管理员） */
-  save(items: PriceSaveItem[]): Promise<void> {
-    return api.put('/pricing', { items });
+  /** 批量保存价格配置（仅管理员）；价格按渠道独立存储，channel 指定保存到哪个渠道 */
+  save(channel: string, items: PriceSaveItem[]): Promise<void> {
+    return api.put('/pricing', { channel, items });
   },
 };

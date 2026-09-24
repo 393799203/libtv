@@ -94,63 +94,61 @@ func (s *BillingService) Price(action string) int64 {
 	return s.prices[action]
 }
 
-// modelUnitPrice 返回指定节点下模型的单价（按次模型=积分/次，按秒模型=积分/秒）；
+// billingChannel 取计费渠道：从 ctx 解析（executor 已注入用户最终渠道），空值回退 wasu
+func billingChannel(ctx context.Context) string {
+	if ch := llm.ChannelFrom(ctx); ch != "" {
+		return ch
+	}
+	return "wasu"
+}
+
+// lookupPriceModelID 将调用方传入的模型标识（配置 ID 或 API model_id）在**指定渠道内**归一为配置 ID。
+// 按渠道归一可避免同名模型（如 deepseek-v4.1-flash 在华数/电信各有一份）跨渠道误取价格
+func (s *BillingService) lookupPriceModelID(channel, modelID string) string {
+	if s.modelManager == nil || modelID == "" {
+		return modelID
+	}
+	for _, models := range s.modelManager.ListModelsForChannel(channel) {
+		for _, m := range models {
+			if m.ID == modelID || m.ModelID == modelID {
+				return m.ID
+			}
+		}
+	}
+	return modelID
+}
+
+// modelUnitPrice 返回指定渠道下某节点模型的单价（按次模型=积分/次，按秒模型=积分/秒）；
 // 未配置或查询失败时返回 0（暂不扣费）。每次调用实时查库，后台改价即时生效
 func (s *BillingService) modelUnitPrice(ctx context.Context, nodeType, modelID string) float64 {
 	if s.priceRepo == nil || modelID == "" {
 		return 0
 	}
+	channel := billingChannel(ctx)
 	// 归一：调用方可能传配置 ID（id）也可能传 API 模型 ID（model_id），统一映射到配置 ID 查价
-	lookupID := modelID
-	if s.modelManager != nil {
-		if cfg := s.modelManager.FindModelByID(modelID); cfg != nil {
-			lookupID = cfg.ID
-		} else {
-			for _, models := range s.modelManager.ListModels() {
-				for _, m := range models {
-					if m.ModelID == modelID {
-						lookupID = m.ID
-						break
-					}
-				}
-			}
-		}
-	}
-	record, err := s.priceRepo.GetByNodeModel(ctx, nodeType, lookupID)
+	lookupID := s.lookupPriceModelID(channel, modelID)
+	record, err := s.priceRepo.GetByNodeModel(ctx, channel, nodeType, lookupID)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Printf("[Billing] 查询模型价格失败: nodeType=%s modelID=%s err=%v", nodeType, modelID, err)
+			log.Printf("[Billing] 查询模型价格失败: channel=%s nodeType=%s modelID=%s err=%v", channel, nodeType, modelID, err)
 		}
 		return 0
 	}
 	return record.Price
 }
 
-// modelUnitPriceWithResolution 返回指定节点下模型按分辨率的单价（视频节点用）；
+// modelUnitPriceWithResolution 返回指定渠道下模型按分辨率的单价（视频节点用）；
 // 未配置或查询失败时返回 0（暂不扣费）
 func (s *BillingService) modelUnitPriceWithResolution(ctx context.Context, nodeType, modelID, resolution string) float64 {
 	if s.priceRepo == nil || modelID == "" {
 		return 0
 	}
-	lookupID := modelID
-	if s.modelManager != nil {
-		if cfg := s.modelManager.FindModelByID(modelID); cfg != nil {
-			lookupID = cfg.ID
-		} else {
-			for _, models := range s.modelManager.ListModels() {
-				for _, m := range models {
-					if m.ModelID == modelID {
-						lookupID = m.ID
-						break
-					}
-				}
-			}
-		}
-	}
-	record, err := s.priceRepo.GetByNodeModelResolution(ctx, nodeType, lookupID, resolution)
+	channel := billingChannel(ctx)
+	lookupID := s.lookupPriceModelID(channel, modelID)
+	record, err := s.priceRepo.GetByNodeModelResolution(ctx, channel, nodeType, lookupID, resolution)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Printf("[Billing] 查询模型价格失败: nodeType=%s modelID=%s resolution=%s err=%v", nodeType, modelID, resolution, err)
+			log.Printf("[Billing] 查询模型价格失败: channel=%s nodeType=%s modelID=%s resolution=%s err=%v", channel, nodeType, modelID, resolution, err)
 		}
 		return 0
 	}
@@ -219,12 +217,22 @@ func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelNa
 	if err != nil {
 		return cost, err
 	}
+	// 账单模型显示「渠道-模型」：从 ctx 取渠道（executor 已注入），
+	// 无渠道时回退 wasu；历史纯 ID 记录保持原样（无前缀）
+	channel := "wasu"
+	if ch := llm.ChannelFrom(ctx); ch != "" {
+		channel = ch
+	}
+	displayModel := modelName
+	if displayModel != "" {
+		displayModel = channel + "-" + displayModel
+	}
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:       userID,
 		Type:         "deduct",
 		Amount:       cost,
 		Action:       action,
-		Model:        modelName,
+		Model:        displayModel,
 		Scene:        scene,
 		Remark:       s.remarkOf(action, scene),
 		BalanceAfter: balance,
@@ -269,12 +277,21 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 		}
 		remark = fmt.Sprintf("%s失败退还：%s", scene, reason)
 	}
+	// 退费账单模型同样带渠道前缀，与扣费记录显示一致
+	channel := "wasu"
+	if ch := llm.ChannelFrom(ctx); ch != "" {
+		channel = ch
+	}
+	displayModel := modelName
+	if displayModel != "" {
+		displayModel = channel + "-" + displayModel
+	}
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:       userID,
 		Type:         "refund",
 		Amount:       amount,
 		Action:       action,
-		Model:        modelName,
+		Model:        displayModel,
 		Scene:        scene,
 		Remark:       remark,
 		BalanceAfter: balance,

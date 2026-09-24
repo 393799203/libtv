@@ -22,6 +22,8 @@ export interface ModelOption {
   tagColor?: string;       // 标签颜色
   isDefault?: boolean;     // 是否为默认模型（从后端配置读取）
   resolutions?: string[];  // 支持的分辨率列表（视频模型用，来自后端 models.yaml）
+  /** 所属渠道（wasu/dianxin）：切换渠道后用于判断旧模型是否仍可用（渠道不同即置灰） */
+  provider?: string;
 }
 
 // 分辨率选项（图片节点用 1K/2K/4K，视频节点用 480p/720p/1080p/4K）

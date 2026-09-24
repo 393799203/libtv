@@ -357,6 +357,11 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 					URL      string `json:"url"`
 				} `json:"output"`
 			} `json:"data"`
+			// 电信响应：视频 URL 在 content.video_url（外层 content 对象）
+			Content *struct {
+				VideoURL string `json:"video_url"`
+				URL      string `json:"url"`
+			} `json:"content"`
 			Output *struct {
 				VideoURL string `json:"video_url"`
 				URL      string `json:"url"`
@@ -380,9 +385,15 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 			status = task.Data.Status
 		}
 
-		// 成功：取视频URL（兼容多字段）
+		// 成功：取视频URL（兼容多字段；电信实际格式为 content.video_url）
 		var videoURL string
-		if task.Data != nil {
+		if task.Content != nil {
+			videoURL = task.Content.VideoURL
+			if videoURL == "" {
+				videoURL = task.Content.URL
+			}
+		}
+		if videoURL == "" && task.Data != nil {
 			if task.Data.Output != nil {
 				videoURL = task.Data.Output.VideoURL
 				if videoURL == "" {

@@ -42,16 +42,23 @@ func (h *PricingHandler) List(c *gin.Context) {
 	response.OK(c, result)
 }
 
-// Save 批量保存价格配置（仅管理员，路由层由 RequireAdmin 中间件保护）
+// Save 批量保存指定渠道的价格配置（仅管理员，路由层由 RequireAdmin 中间件保护）
+//   - 显式传 channel（后台价格管理页在对应渠道 tab 保存）→ 保存到该渠道
+//   - 未传 channel → 按管理员自己的最终渠道
 func (h *PricingHandler) Save(c *gin.Context) {
 	var req struct {
-		Items []service.PriceSaveItem `json:"items" binding:"required,dive"`
+		Channel string                  `json:"channel"`
+		Items   []service.PriceSaveItem `json:"items" binding:"required,dive"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "价格配置参数非法")
 		return
 	}
-	if err := h.pricingService.SavePrices(c.Request.Context(), req.Items); err != nil {
+	channel := req.Channel
+	if channel == "" && h.channelService != nil {
+		channel = h.channelService.ResolveUserChannel(c.Request.Context(), middleware.GetUserID(c))
+	}
+	if err := h.pricingService.SavePrices(c.Request.Context(), channel, req.Items); err != nil {
 		response.FailWith(c, err)
 		return
 	}

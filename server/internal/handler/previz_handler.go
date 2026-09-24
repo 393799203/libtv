@@ -55,18 +55,19 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		channel = h.channelService.ResolveUserChannel(c.Request.Context(), middleware.GetUserID(c))
 	}
 
-	// 默认视觉模型（快/便宜）；按渠道取不同默认（电信=glm-5.3-flash 多模态，华数=Seed 2.1 Turbo）
+	// 默认视觉模型（快/便宜）；按渠道取不同默认（电信=deepseek-v4.1-flash 多模态，华数=Seed 2.1 Turbo）
 	modelID := req.Model
 	if modelID == "" {
 		if channel == "dianxin" {
-			modelID = "glm-5.3-flash"
+			modelID = "deepseek-v4.1-flash"
 		} else {
 			modelID = "doubao-seed-2.1-turbo"
 		}
 	}
 
-	// 模型 ID 映射：前端传 ID，需要转换为 model_id
-	modelConfig := h.modelManager.FindModelByID(modelID)
+	// 模型 ID 映射：前端传 ID，需在当前渠道内转换为 model_id
+	// （华数/电信存在同名模型，必须按渠道查找，避免取到另一渠道的配置）
+	modelConfig := h.modelManager.FindModelByIDForChannel(channel, modelID)
 	if modelConfig == nil {
 		response.Fail(c, 400, "模型不存在: "+modelID)
 		return

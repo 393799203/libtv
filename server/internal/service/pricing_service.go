@@ -38,7 +38,7 @@ var priceNodeDefs = []priceNodeDef{
 	{NodeType: "image", NodeName: "图片节点", ModelGroup: "image", BillingType: BillingTypePerCall, Usage: "image"},
 	{NodeType: "video", NodeName: "视频节点", ModelGroup: "video", BillingType: BillingTypePerSecond, Usage: "video"},
 	{NodeType: "audio", NodeName: "语音节点", ModelGroup: "audio", BillingType: BillingTypePerChar, Usage: "audio"},
-	{NodeType: "previz", NodeName: "白模解析", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"doubao-seed-2.1-turbo", "doubao-seed-2.1-pro", "glm-5.3-flash"}},
+	{NodeType: "previz", NodeName: "白模解析", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"doubao-seed-2.1-turbo", "doubao-seed-2.1-pro", "glm-5.3-flash", "deepseek-v4.1-flash"}},
 }
 
 // ErrInvalidPriceConfig 价格配置参数非法（HTTP 400）
@@ -100,19 +100,19 @@ func NewPricingService(modelManager *llm.ModelManager, priceRepo repository.Mode
 // channel 为空时按华数（wasu）展示（兼容默认）
 // 视频节点按分辨率拆分展示：同一模型不同分辨率各占一行
 func (s *PricingService) ListPrices(ctx context.Context, channel string) (*PriceListResult, error) {
-	records, err := s.priceRepo.ListAll(ctx)
+	if channel == "" {
+		channel = "wasu"
+	}
+	records, err := s.priceRepo.ListAll(ctx, channel)
 	if err != nil {
 		return nil, err
 	}
-	// 价格按（节点 + 模型 + 分辨率）三维度索引
+	// 价格按（节点 + 模型 + 分辨率）三维度索引（记录已按渠道过滤）
 	priceByKey := make(map[string]float64, len(records))
 	for _, r := range records {
 		priceByKey[r.NodeType+"|"+r.ModelID+"|"+r.Resolution] = r.Price
 	}
 
-	if channel == "" {
-		channel = "wasu"
-	}
 	registry := s.modelManager.ListModelsForChannel(channel)
 	result := &PriceListResult{Nodes: make([]NodePriceGroup, 0, len(priceNodeDefs))}
 	for _, def := range priceNodeDefs {
@@ -154,14 +154,18 @@ func (s *PricingService) ListPrices(ctx context.Context, channel string) (*Price
 	return result, nil
 }
 
-// SavePrices 批量保存价格配置：校验节点与模型真实存在后按 (node_type, model_id, resolution) upsert
-func (s *PricingService) SavePrices(ctx context.Context, items []PriceSaveItem) error {
+// SavePrices 批量保存指定渠道的价格配置：
+// 校验节点合法且模型属于该渠道后，按 (channel, node_type, model_id, resolution) upsert
+func (s *PricingService) SavePrices(ctx context.Context, channel string, items []PriceSaveItem) error {
 	if len(items) == 0 {
 		return ErrInvalidPriceConfig
 	}
+	if channel == "" {
+		channel = "wasu"
+	}
 
-	// 汇总 models.yaml 中的全部模型 ID，拒绝为不存在的模型配置价格
-	registry := s.modelManager.ListModels()
+	// 汇总该渠道 models.yaml 中的模型 ID，拒绝为不存在的模型或跨渠道模型配置价格
+	registry := s.modelManager.ListModelsForChannel(channel)
 	validIDs := make(map[string]struct{})
 	for _, models := range registry {
 		for _, m := range models {
@@ -176,7 +180,7 @@ func (s *PricingService) SavePrices(ctx context.Context, items []PriceSaveItem) 
 			return apperror.New(400, http.StatusBadRequest, fmt.Sprintf("未知节点类型: %s", item.NodeType))
 		}
 		if _, ok := validIDs[item.ModelID]; !ok {
-			return apperror.New(400, http.StatusBadRequest, fmt.Sprintf("模型不存在: %s", item.ModelID))
+			return apperror.New(400, http.StatusBadRequest, fmt.Sprintf("模型不属于渠道 %s: %s", channel, item.ModelID))
 		}
 		if item.Price < 0 || item.Price != math.Trunc(item.Price) {
 			// 单价统一为整数（视频/语音按秒单价同样如此），小数一律拒绝
@@ -187,7 +191,13 @@ func (s *PricingService) SavePrices(ctx context.Context, items []PriceSaveItem) 
 			continue
 		}
 		seen[key] = struct{}{}
-		prices = append(prices, model.ModelPrice{NodeType: item.NodeType, ModelID: item.ModelID, Resolution: item.Resolution, Price: item.Price})
+		prices = append(prices, model.ModelPrice{
+			Channel:    channel,
+			NodeType:   item.NodeType,
+			ModelID:    item.ModelID,
+			Resolution: item.Resolution,
+			Price:      item.Price,
+		})
 	}
 
 	return s.priceRepo.BatchUpsert(ctx, prices)

@@ -76,7 +76,7 @@ export default function PricingManagement() {
   const handleSave = () => {
     if (dirtyItems.length === 0) return;
     setSaving(true);
-    pricingApi.save(dirtyItems)
+    pricingApi.save(channel, dirtyItems)
       .then(() => {
         message.success('价格设置已保存');
         load();

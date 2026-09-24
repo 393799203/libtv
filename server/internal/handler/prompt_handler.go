@@ -50,17 +50,22 @@ func normalizeAssetRefs(text string, refs []llm.AssetReference, refType string) 
 }
 
 type PromptHandler struct {
-	llmClient    *llm.Client
-	modelManager *llm.ModelManager
-	biller       *service.BillingService
+	llmClient      *llm.Client
+	modelManager   *llm.ModelManager
+	biller         *service.BillingService
+	channelService *service.ChannelService
 }
 
-func NewPromptHandler(llmClient *llm.Client, modelManager *llm.ModelManager, biller *service.BillingService) *PromptHandler {
-	return &PromptHandler{
+func NewPromptHandler(llmClient *llm.Client, modelManager *llm.ModelManager, biller *service.BillingService, channelService ...*service.ChannelService) *PromptHandler {
+	h := &PromptHandler{
 		llmClient:    llmClient,
 		modelManager: modelManager,
 		biller:       biller,
 	}
+	if len(channelService) > 0 {
+		h.channelService = channelService[0]
+	}
+	return h
 }
 
 // GeneratePromptRequest 生成提示词请求（画面 + 运动一起生成）
@@ -126,15 +131,24 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		}
 	}
 
-	// 模型 ID 映射：前端传 ID（如 'text-general'），需要转换为 model_id（如 'deepseek-ai/DeepSeek-V4-Flash'）
-	modelConfig := h.modelManager.FindModelByID(req.Model)
+	// 解析用户最终渠道（全局策略 + 用户渠道）：用于按渠道查找模型、计费账单带渠道前缀、调用走对应 token
+	billCtx := c.Request.Context()
+	channel := ""
+	if h.channelService != nil {
+		channel = h.channelService.ResolveUserChannel(billCtx, middleware.GetUserID(c))
+		billCtx = llm.WithChannel(billCtx, channel)
+	}
+
+	// 模型 ID 映射：前端传 ID（如 'text-general'），需在当前渠道内转换为 model_id
+	// （华数/电信存在同名模型，必须按渠道查找，避免取到另一渠道的配置）
+	modelConfig := h.modelManager.FindModelByIDForChannel(channel, req.Model)
 	if modelConfig == nil {
 		response.Fail(c, 400, "模型不存在: "+req.Model)
 		return
 	}
 
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
-	chargedAmount, err := h.biller.ChargeByModel(c.Request.Context(), middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", 1)
+	chargedAmount, err := h.biller.ChargeByModel(billCtx, middleware.GetUserID(c), service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", 1)
 	if err != nil {
 		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
 			"code": apperror.CodeFromError(err),

@@ -19,6 +19,15 @@ models:
         description: "DeepSeek V4 Flash，适合文本生成、剧本分镜和提示词生成"
         default: true  # 默认选中此模型
 
+      - id: deepseek-v4.1-flash
+        name: "DeepSeek V4.1 Flash"
+        provider: wasu
+        model_id: "deepseek-v4.1-flash"
+        usage: [text, script, previz]  # previz=白模场景解析（多模态，支持图片理解）
+        max_tokens: 8192
+        temperature: 0.7
+        description: "DeepSeek V4.1 Flash（多模态），支持图片理解，可用于文本、剧本分镜与白模场景解析"
+
       - id: deepseek-v4-pro
         name: "DeepSeek V4 Pro"
         provider: wasu
@@ -160,7 +169,7 @@ models:
         usage: [video]
         temperature: 0
         description: "字节Seedance 2.0视频生成"
-        resolutions: ["480p", "720p", "1080p", "4k"]
+        resolutions: ["480p", "720p", "1080p"]
 
       - id: doubao-seedance-2.0-fast
         name: "Seedance 2.0 Fast"
@@ -206,10 +215,10 @@ models:
         name: "DeepSeek V4.1 Flash"
         provider: dianxin
         model_id: "deepseek-v4.1-flash"
-        usage: [text, script]
+        usage: [text, script, previz]  # previz=白模场景解析（多模态，支持图片理解）
         max_tokens: 8192
         temperature: 0.7
-        description: "DeepSeek V4.1 Flash，适合文本生成、剧本分镜和提示词生成"
+        description: "DeepSeek V4.1 Flash（多模态），支持图片理解，可用于文本、剧本分镜与白模场景解析"
         default: true  # 默认选中此模型
 
       - id: glm-5.3-flash
@@ -221,7 +230,19 @@ models:
         temperature: 0.7
         description: "GLM-5.3 Flash（多模态），支持图片理解，可用于白模场景解析、文本与分镜生成"
 
+      - id: deepseek-v4-flash-0731
+        name: "DeepSeek V4 Flash"
+        provider: dianxin
+        model_id: "deepseek-v4-flash-0731"
+        usage: [text, script]
+        max_tokens: 8192
+        temperature: 0.7
+        description: "DeepSeek V4 Flash（电信侧 0731 版本），适合文本生成、剧本分镜和提示词生成"
+
     # ---------- image ----------
+    # 电信 image 与华数同名（doubao-seedream-5.0-lite / -pro）：
+    # 价格按渠道独立存储（model_prices.channel），同名模型不冲突；
+    # 调用时按渠道路由 token，计费按渠道取价
     image:
       - id: doubao-seedream-5.0-lite
         name: "Seedream 5.0 Lite"
@@ -233,6 +254,15 @@ models:
         description: "电信渠道 Seedream 5.0 轻量版（image 接口与华数同协议）"
         default: true
 
+      - id: doubao-seedream-5.0-pro
+        name: "Seedream 5.0 Pro"
+        provider: dianxin
+        model_id: "doubao-seedream-5.0-pro"
+        usage: [image, character, scene, prop]
+        max_tokens: 2048
+        temperature: 0.7
+        description: "电信渠道 Seedream 5.0 Pro，画质与细节更强（支持文生图与图生图）"
+
     # ---------- video ----------
     video:
       - id: cdance2.0-0807
@@ -241,6 +271,22 @@ models:
         model_id: "cdance2.0-0807"
         usage: [video]
         description: "电信渠道 Seedance 2.0（cdance2.0-0807，异步任务接口）"
+        resolutions: ["480p", "720p", "1080p"]
+
+      - id: cdance2.0-fast-0807
+        name: "Seedance 2.0 Fast"
+        provider: dianxin
+        model_id: "cdance2.0-fast-0807"
+        usage: [video]
+        description: "电信渠道 Seedance 2.0 Fast（cdance2.0-fast-0807，生成更快）"
+        resolutions: ["480p", "720p"]
+
+      - id: cdance2.5-0807
+        name: "Seedance 2.5"
+        provider: dianxin
+        model_id: "cdance2.5-0807"
+        usage: [video]
+        description: "电信渠道 Seedance 2.5（cdance2.5-0807，异步任务接口，长叙事与多镜头连贯能力更强）"
         resolutions: ["480p", "720p", "1080p"]
 
     # ---------- audio ----------

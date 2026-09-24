@@ -11,13 +11,16 @@ import { usePrevizStore } from './previzStore';
 // 图片来源 tab
 type SourceTab = 'upload' | 'image' | 'video';
 
-// 视觉模型选项（按当前渠道）：华数=Seed 2.1（turbo快/pro准），电信=GLM-5.3 Flash（多模态）
+// 视觉模型选项（按当前渠道）：华数=Seed 2.1（turbo快/pro准）+ DeepSeek V4.1 Flash（多模态），
+// 电信=多模态（DeepSeek V4.1 Flash / GLM-5.3 Flash）
 const MODEL_OPTIONS_WASU = [
   { value: 'doubao-seed-2.1-turbo', label: 'Seed 2.1 Turbo（默认，快/便宜）' },
   { value: 'doubao-seed-2.1-pro', label: 'Seed 2.1 Pro（更准）' },
+  { value: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash（多模态）' },
 ];
 const MODEL_OPTIONS_DIANXIN = [
-  { value: 'glm-5.3-flash', label: 'GLM-5.3 Flash（默认，多模态）' },
+  { value: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash（默认，多模态）' },
+  { value: 'glm-5.3-flash', label: 'GLM-5.3 Flash（多模态）' },
 ];
 
 // AI 建白模弹窗：上传图片 / 画布图片节点 / 视频节点抽帧 → 视觉模型解析 → 自动搭建白模场景
@@ -45,7 +48,7 @@ export function AIBuildModal({
       const ch = res?.channel || 'wasu';
       if (ch === 'dianxin') {
         setModelOptions(MODEL_OPTIONS_DIANXIN);
-        setModel('glm-5.3-flash');
+        setModel('deepseek-v4.1-flash');
       } else {
         setModelOptions(MODEL_OPTIONS_WASU);
         setModel('doubao-seed-2.1-turbo');

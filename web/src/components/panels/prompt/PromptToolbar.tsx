@@ -4,6 +4,7 @@ import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
 import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS } from '@/configs/promptConfig';
 import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
+import { useModelStore } from '@/stores/modelStore';
 
 // 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；
 // 失败时清空缓存，允许下次挂载时重试
@@ -92,6 +93,13 @@ interface PromptToolbarProps {
   audioReferenced?: boolean;
   // 音频节点专属：输入字符数（用于计算费用）
   charCount?: number;
+  /**
+   * 节点记录的模型渠道（wasu/dianxin）：仅当节点确实保存过该字段时才参与判定。
+   * - undefined：节点未记录渠道（新节点，或渠道记录功能上线前的历史节点）
+   *   → 不做渠道判定，仅按"模型在当前渠道是否存在"判断可用性（避免误伤历史节点）
+   * - 已记录且与当前渠道不一致：置灰并要求重新选择，同时拦截生成
+   */
+  storedModelChannel?: string;
 }
 
 // ==================== 统一控件样式（工具栏视觉语言）====================
@@ -115,15 +123,29 @@ const ModelSelector = memo(function ModelSelector({
   models,
   value,
   onChange,
+  channel = 'wasu',
+  storedModelChannel,
 }: {
   models: ModelOption[];
   value: string;
   onChange: (v: string) => void;
+  /** 当前最终渠道（wasu/dianxin）：用于判断旧渠道模型是否仍可用 */
+  channel?: string;
+  /** 节点当初保存模型时的渠道；与当前渠道不一致 → 强制重新选择 */
+  storedModelChannel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const currentModel = models.find((m) => m.value === value);
-  // 当前选中模型不在本渠道可用列表：置灰提示，需重新选择
-  const unavailable = !!value && !currentModel;
+  // 置灰条件（任一命中即不可用）：
+  //   1) 模型 ID 不在当前渠道列表中
+  //   2) 列表中该模型的 provider 与当前渠道不一致（同名模型跨渠道场景）
+  //   3) 节点当初保存模型时的渠道与当前渠道不一致（渠道切换后必须重新选择，
+  //      避免"直接点生成"悄悄用新渠道的同名模型出图）
+  const unavailable = !!value && (
+    !currentModel
+    || (currentModel.provider && currentModel.provider !== channel)
+    || (storedModelChannel !== undefined && storedModelChannel !== channel)
+  );
 
   return (
     <div className="relative">
@@ -595,9 +617,20 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onGenerateAudioChange,
   audioReferenced = false,
   charCount = 0,
+  storedModelChannel,
 }) {
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
+  // 当前最终渠道（wasu/dianxin），传给模型选择器做置灰判断
+  const currentChannel = useModelStore((s) => s.channel);
+  // 当前所选模型是否因渠道变更而不可用（与 ModelSelector 判定一致）：用于拦截生成
+  const modelUnavailable = !!selectedModel && (() => {
+    const m = models.find((x) => x.value === selectedModel);
+    if (!m) return true;
+    if (m.provider && m.provider !== currentChannel) return true;
+    if (storedModelChannel !== undefined && storedModelChannel !== currentChannel) return true;
+    return false;
+  })();
   const [durationOpen, setDurationOpen] = useState(false);
   // 视频时长选项随所选模型变化（wan3.0-video: 2-30s，seedance: 4-15s）
   const durationOptions = getDurationOptions(selectedModel);
@@ -661,6 +694,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         models={models}
         value={selectedModel}
         onChange={onModelChange}
+        channel={currentChannel}
+        storedModelChannel={storedModelChannel}
       />
 
       {/* 分隔 */}
@@ -903,13 +938,14 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           </span>
         )}
 
-        {/* 生成按钮 */}
+        {/* 生成按钮：模型因渠道变更不可用时拦截，必须先重新选择模型 */}
         <button
           className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-gray-800 to-gray-950 text-white flex items-center justify-center hover:from-gray-700 hover:to-gray-900 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm text-[13px] font-medium tracking-wide"
           onClick={() => onGenerate?.(1)}
-          disabled={isGenerating}
+          disabled={isGenerating || modelUnavailable}
+          title={modelUnavailable ? '模型在当前渠道不可用，请先重新选择模型' : undefined}
         >
-          {isGenerating ? '生成中…' : '生成'}
+          {isGenerating ? '生成中…' : modelUnavailable ? '请重选模型' : '生成'}
         </button>
       </div>
     </div>

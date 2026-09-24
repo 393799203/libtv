@@ -158,3 +158,28 @@ func (mm *ModelManager) FindModelByID(modelID string) *ModelConfig {
 	}
 	return nil
 }
+
+// FindModelByIDForChannel 在**指定渠道内**根据 ID 查找模型配置。
+// 华数/电信可能存在同名模型（如 doubao-seedream-5.0-lite、deepseek-v4.1-flash），
+// 此时 FindModelByID 因 map 遍历顺序随机而可能返回另一渠道的配置；
+// 有渠道上下文时（提示词生成、白模解析等）应使用本方法，保证取到当前渠道的配置
+func (mm *ModelManager) FindModelByIDForChannel(channel, modelID string) *ModelConfig {
+	if channel == "" {
+		channel = "wasu"
+	}
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	groups, ok := mm.config.Models[channel]
+	if !ok {
+		return nil
+	}
+	for _, models := range groups {
+		for i := range models {
+			if models[i].ID == modelID || models[i].ModelID == modelID {
+				return &models[i]
+			}
+		}
+	}
+	return nil
+}
