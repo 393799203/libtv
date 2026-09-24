@@ -251,7 +251,7 @@ models:
         usage: [image, character, scene, prop]
         max_tokens: 2048
         temperature: 0.7
-        description: "电信渠道 Seedream 5.0 轻量版（image 接口与华数同协议）"
+        description: "Seedream 5.0 轻量版（image 接口与华数同协议）"
         default: true
 
       - id: doubao-seedream-5.0-pro
@@ -261,7 +261,7 @@ models:
         usage: [image, character, scene, prop]
         max_tokens: 2048
         temperature: 0.7
-        description: "电信渠道 Seedream 5.0 Pro，画质与细节更强（支持文生图与图生图）"
+        description: "Seedream 5.0 Pro，画质与细节更强（支持文生图与图生图）"
 
     # ---------- video ----------
     video:
@@ -270,7 +270,7 @@ models:
         provider: dianxin
         model_id: "cdance2.0-0807"
         usage: [video]
-        description: "电信渠道 Seedance 2.0（cdance2.0-0807，异步任务接口）"
+        description: "Seedance 2.0（cdance2.0-0807，异步任务接口）"
         resolutions: ["480p", "720p", "1080p"]
 
       - id: cdance2.0-fast-0807
@@ -278,7 +278,7 @@ models:
         provider: dianxin
         model_id: "cdance2.0-fast-0807"
         usage: [video]
-        description: "电信渠道 Seedance 2.0 Fast（cdance2.0-fast-0807，生成更快）"
+        description: "Seedance 2.0 Fast（cdance2.0-fast-0807，生成更快）"
         resolutions: ["480p", "720p"]
 
       - id: cdance2.5-0807
@@ -286,7 +286,18 @@ models:
         provider: dianxin
         model_id: "cdance2.5-0807"
         usage: [video]
-        description: "电信渠道 Seedance 2.5（cdance2.5-0807，异步任务接口，长叙事与多镜头连贯能力更强）"
+        description: "Seedance 2.5（cdance2.5-0807，异步任务接口，长叙事与多镜头连贯能力更强）"
+        resolutions: ["480p", "720p", "1080p"]
+
+      # 与华数同名（wan3.0-video），靠渠道区分 token 与价格；
+      # 电信侧走 DashScope 异步协议，与上面 cdance 系列（火山协议）实现不同
+      - id: wan3.0-video
+        name: "Wan 3.0 Video"
+        provider: dianxin
+        model_id: "wan3.0-video"
+        usage: [video]
+        temperature: 0
+        description: "通义万相 3.0 视频（DashScope 异步协议，支持 2-30 秒长视频）"
         resolutions: ["480p", "720p", "1080p"]
 
     # ---------- audio ----------

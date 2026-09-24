@@ -176,8 +176,13 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 		ratio = "16:9"
 	}
 
-	// 电信渠道：独立协议（contents/generations/tasks 异步任务）
+	// 电信渠道：两组彼此独立的协议
+	//   wan3.0-video → DashScope 异步任务（services/aigc/video-generation/video-synthesis + tasks/{id}）
+	//   cdance 系列  → 火山异步任务（contents/generations/tasks）
 	if ChannelFrom(ctx) == ChannelDianxin {
+		if strings.Contains(model, "wan3.0") {
+			return c.generateDianxinWanVideo(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
+		}
 		return c.generateDianxinVideo(ctx, model, prompt, duration, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 	}
 
@@ -432,6 +437,238 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 	}
 
 	return "", fmt.Errorf("电信视频任务超时（10分钟）: taskID=%s", taskID)
+}
+
+// ==================== 电信 wan3.0-video（DashScope 异步协议）====================
+//
+// 与 cdance 系列（火山 contents/generations/tasks 协议）完全不同：
+//   创建：POST /services/aigc/video-generation/video-synthesis + Header X-DashScope-Async: enable
+//         body = { model, input:{prompt, media[]}, parameters:{resolution, ratio, duration, prompt_extend} }
+//   查询：GET  /tasks/{task_id}  → output.task_status (PENDING/RUNNING/SUCCEEDED/FAILED) + output.video_url
+
+// DianxinWanRequest 电信 wan3.0-video 请求体
+type DianxinWanRequest struct {
+	Model      string               `json:"model"`
+	Input      DianxinWanInput      `json:"input"`
+	Parameters DianxinWanParameters `json:"parameters"`
+}
+
+// DianxinWanInput 输入：prompt + 参考素材（media 为空时整字段省略）
+type DianxinWanInput struct {
+	Prompt string                `json:"prompt,omitempty"`
+	Media  []DianxinWanMediaItem `json:"media,omitempty"`
+}
+
+// DianxinWanMediaItem 参考素材（type 复用 role 词汇：reference_image / first_frame / last_frame / reference_video）
+type DianxinWanMediaItem struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+// DianxinWanParameters 万相参数：分辨率用大写档位（480P/720P/1080P）
+type DianxinWanParameters struct {
+	Resolution   string `json:"resolution"`
+	Ratio        string `json:"ratio"`
+	Duration     int    `json:"duration"`
+	PromptExtend bool   `json:"prompt_extend"`
+	Audio        bool   `json:"audio,omitempty"`
+	Watermark    bool   `json:"watermark"`
+}
+
+// generateDianxinWanVideo 电信 wan3.0-video 生成（创建 DashScope 任务 → 轮询）
+func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
+	origDuration := duration
+	duration, err := normalizeWanParams(ctx, duration, videoURLs)
+	if err != nil {
+		return "", err
+	}
+	logDurationNormalized(origDuration, duration)
+
+	// 参考素材：role 规则与万相一致（单图无 mode 归 reference_image）
+	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	media := make([]DianxinWanMediaItem, 0, len(items))
+	for _, it := range items {
+		media = append(media, DianxinWanMediaItem{Type: it.role, URL: it.url})
+	}
+
+	payload, err := json.Marshal(DianxinWanRequest{
+		Model: model,
+		Input: DianxinWanInput{Prompt: prompt, Media: media},
+		Parameters: DianxinWanParameters{
+			Resolution:   wanResolution(resolution),
+			Ratio:        wanRatio(ratio),
+			Duration:     duration,
+			PromptExtend: true,
+			Audio:        generateAudio,
+			Watermark:    false,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal dianxin wan request: %w", err)
+	}
+
+	log.Printf("[VideoGen] 电信 wan3.0 任务创建: model=%s duration=%ds resolution=%s ratio=%s mediaCount=%d promptLen=%d",
+		model, duration, wanResolution(resolution), wanRatio(ratio), len(media), len(prompt))
+
+	apiKey, baseURL := c.creds(ctx)
+	createURL := fmt.Sprintf("%s/services/aigc/video-generation/video-synthesis", baseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("create dianxin wan task: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("X-DashScope-Async", "enable")
+
+	start := time.Now()
+	resp, err := c.httpCli.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("dianxin wan http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[VideoGen] 电信 wan3.0 创建失败: status=%d body=%s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("电信 wan3.0 API错误 (status=%d): %s", resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+	}
+	log.Printf("[VideoGen] 电信 wan3.0 任务创建成功: 耗时=%s", time.Since(start).Round(time.Millisecond))
+
+	// 解析任务ID（DashScope：output.task_id；兼容 task_id / id）
+	var createResp struct {
+		Output struct {
+			TaskID     string `json:"task_id"`
+			TaskStatus string `json:"task_status"`
+			Code       string `json:"code"`
+			Message    string `json:"message"`
+		} `json:"output"`
+		TaskID  string `json:"task_id"`
+		ID      string `json:"id"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &createResp); err != nil {
+		return "", fmt.Errorf("解析电信 wan3.0 响应失败: %w", err)
+	}
+	if createResp.Error != nil && createResp.Error.Message != "" {
+		return "", fmt.Errorf("电信 wan3.0 API错误: %s", createResp.Error.Message)
+	}
+	if createResp.Output.Code != "" || createResp.Output.Message != "" {
+		return "", fmt.Errorf("电信 wan3.0 API错误: %s %s", createResp.Output.Code, createResp.Output.Message)
+	}
+	taskID := createResp.Output.TaskID
+	if taskID == "" {
+		taskID = createResp.TaskID
+	}
+	if taskID == "" {
+		taskID = createResp.ID
+	}
+	if taskID == "" {
+		return "", fmt.Errorf("电信 wan3.0 响应无任务ID: %s", string(respBody))
+	}
+
+	return c.pollDianxinWanTask(ctx, taskID)
+}
+
+// pollDianxinWanTask 轮询 DashScope 任务（GET /tasks/{task_id}）
+// 状态为大写 PENDING/RUNNING/SUCCEEDED/FAILED/UNKNOWN；成功时取 output.video_url
+func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (string, error) {
+	apiKey, baseURL := c.creds(ctx)
+	pollURL := fmt.Sprintf("%s/tasks/%s", baseURL, taskID)
+	maxAttempts := 120 // 每5秒一次，共10分钟
+
+	for i := 0; i < maxAttempts; i++ {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("create dianxin wan poll request: %w", err)
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+		resp, err := c.httpCli.Do(httpReq)
+		if err != nil {
+			log.Printf("[VideoGen] 电信 wan3.0 轮询错误 (attempt %d): %v", i+1, err)
+			continue
+		}
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("[VideoGen] 电信 wan3.0 轮询HTTP错误 (attempt %d): status=%d body=%s", i+1, resp.StatusCode, string(respBody))
+			continue
+		}
+
+		var task struct {
+			Output *struct {
+				TaskStatus string `json:"task_status"`
+				VideoURL   string `json:"video_url"`
+				URL        string `json:"url"`
+				Code       string `json:"code"`
+				Message    string `json:"message"`
+			} `json:"output"`
+			TaskStatus string `json:"task_status"`
+			VideoURL   string `json:"video_url"`
+			Code       string `json:"code"`
+			Message    string `json:"message"`
+			Error      *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(respBody, &task); err != nil {
+			log.Printf("[VideoGen] 电信 wan3.0 轮询解析失败 (attempt %d): %v", i+1, err)
+			continue
+		}
+
+		if task.Error != nil && task.Error.Message != "" {
+			return "", fmt.Errorf("电信 wan3.0 视频任务失败: %s", task.Error.Message)
+		}
+
+		var status, videoURL string
+		if task.Output != nil {
+			status = task.Output.TaskStatus
+			videoURL = task.Output.VideoURL
+			if videoURL == "" {
+				videoURL = task.Output.URL
+			}
+		}
+		if status == "" {
+			status = task.TaskStatus
+		}
+		if videoURL == "" {
+			videoURL = task.VideoURL
+		}
+
+		switch strings.ToLower(status) {
+		case "succeeded", "success", "done":
+			if videoURL != "" {
+				return videoURL, nil
+			}
+			log.Printf("[VideoGen] 电信 wan3.0 任务成功但无URL (attempt %d): %s", i+1, string(respBody))
+			continue
+		case "failed", "unknown", "canceled", "cancelled":
+			code, msg := task.Code, task.Message
+			if task.Output != nil {
+				if code == "" {
+					code = task.Output.Code
+				}
+				if msg == "" {
+					msg = task.Output.Message
+				}
+			}
+			return "", fmt.Errorf("电信 wan3.0 视频任务失败: %s %s", code, msg)
+		default:
+			log.Printf("[VideoGen] 电信 wan3.0 任务轮询 (attempt %d): status=%s", i+1, status)
+		}
+	}
+
+	return "", fmt.Errorf("电信 wan3.0 视频任务超时（10分钟）: taskID=%s", taskID)
 }
 
 // ==================== 豆包 Seedance 系列（火山引擎）====================
