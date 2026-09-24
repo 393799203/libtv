@@ -9,14 +9,36 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	Storage  StorageConfig  `yaml:"storage"`
-	AI       AIConfig       `yaml:"ai"`
-	Payment  PaymentConfig  `yaml:"payment"`
-	CORS     CORSConfig     `yaml:"cors"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Redis     RedisConfig     `yaml:"redis"`
+	Queue     QueueConfig     `yaml:"queue"`
+	RateLimit RateLimitConfig `yaml:"ratelimit"`
+	JWT       JWTConfig       `yaml:"jwt"`
+	Storage   StorageConfig   `yaml:"storage"`
+	AI        AIConfig        `yaml:"ai"`
+	Payment   PaymentConfig   `yaml:"payment"`
+	CORS      CORSConfig      `yaml:"cors"`
+}
+
+// QueueConfig 生成任务队列（Redis Stream）。
+// 队列化后任务具备：跨重启续跑（原裸 goroutine 会被重启杀掉，执行永久卡 running）、
+// 失败重试、死信留存、消费端并发可控。Enabled=false 时回退为直接 goroutine。
+type QueueConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	Workers             int    `yaml:"workers"`               // worker 数 = 同时消费的任务数
+	MaxRetry            int    `yaml:"max_retry"`             // 失败重试次数，超出进死信
+	Stream              string `yaml:"stream"`                // 任务流
+	DeadStream          string `yaml:"dead_stream"`           // 死信流
+	ConsumerGroup       string `yaml:"consumer_group"`        // 消费者组
+	VisibilityTimeoutSec int   `yaml:"visibility_timeout_sec"` // 超时未确认视为 worker 崩溃，重新认领
+}
+
+// RateLimitConfig 生成接口限流。
+// 限制单用户发起频率，防狂点；全局并发上界由 queue.workers 承担（worker 数即闸门）。
+type RateLimitConfig struct {
+	Enabled   bool `yaml:"enabled"`
+	PerMinute int  `yaml:"per_minute"` // 0 表示不限制
 }
 
 type ServerConfig struct {

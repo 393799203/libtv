@@ -20,6 +20,8 @@ function convertToModelOption(model: ModelConfig): ModelOption {
     tagColor: model.ID === 'z-image-turbo' ? '#3b82f6' : undefined,
     // 视频模型支持的分辨率（后端 models.yaml 配置），归一化 4k→4K 以便前端统一比较/展示
     resolutions: model.Resolutions?.map((r) => (r.toLowerCase() === '4k' ? '4K' : r)),
+    // 视频时长范围（后端 models.yaml duration_range）：前端时长选项以此为准
+    durationRange: model.DurationRange,
   };
 }
 

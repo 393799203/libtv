@@ -22,11 +22,35 @@ database:
   dbname: libtv
   sslmode: disable
 
+# Redis：限流 / 生成并发闸门 / 任务队列。
+# 属增强能力而非硬依赖 —— 连不上时自动降级（限流关闭、生成任务回到进程内执行），不阻断生成。
+# Docker 内使用服务名 redis；本地开发改为 localhost
 redis:
-  host: localhost
+  host: redis
   port: 6379
-  password: ""
+  password: "libtv-redis-2026"   # 需与 docker-compose.yml 中 redis 的 --requirepass 一致
   db: 0
+
+# 生成任务队列（Redis Stream）
+#   • 进程重启不丢任务：未确认的消息在下次启动时由 XAUTOCLAIM 认领续跑
+#     （原实现是裸 goroutine，重启即丢，执行会永久卡在 running 但积分已扣）
+#   • 失败按指数退避重试（30s→1m→2m→4m），超出次数进死信流便于排查/重放
+#   • workers 即全局并发闸门：同时最多这么多个任务在跑，保护上游网关
+# 注意：被中断的任务重跑时会重新执行计划内节点。失败节点本身已退费，
+#       但同一计划中先前已成功的节点会被重新扣费，故 max_retry 保守设为 1。
+queue:
+  enabled: true
+  workers: 10                    # 同时消费的任务数 = 全局生成并发上限
+  max_retry: 1                  # 失败重试次数（超出转死信流）
+  stream: "libtv:gen:tasks"
+  dead_stream: "libtv:gen:dead"
+  consumer_group: "libtv:gen"
+  visibility_timeout_sec: 900   # 超过此时长未确认即视为 worker 中断，重新认领续跑
+
+# 生成接口限流（防狂点）
+ratelimit:
+  enabled: true
+  per_minute: 10                # 每用户每分钟最多发起 10 次生成（0 = 不限制）
 
 jwt:
   secret: "libtv-mvp-secret-change-in-production"

@@ -5,7 +5,7 @@ import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
 import { useModelStore } from '@/stores/modelStore';
 import { nodeRegistry } from '@/plugins/registry';
-import { VIDEO_RESOLUTION_OPTIONS } from '@/configs/promptConfig';
+import { VIDEO_RESOLUTION_OPTIONS, videoDurationRange } from '@/configs/promptConfig';
 import type {
   UpstreamInput,
   MentionMarker,
@@ -387,9 +387,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const selectedDuration: number = nodeType === 'video'
     ? (() => {
         const d = (data as { duration?: number }).duration;
-        const isWan = selectedModel.includes('wan3.0');
-        const minD = isWan ? 2 : 4;
-        const maxD = isWan ? 30 : 15;
+        // 时长范围以模型配置的 duration_range 为准（models.yaml，如 cdance2.5-0807 为 4-30s），
+        // 超出范围时回退到边界值
+        const [minD, maxD] = videoDurationRange(availableModels.find((m) => m.value === selectedModel));
         if (!d || d <= 0) return 5;
         if (d < minD) return minD;
         if (d > maxD) return maxD;

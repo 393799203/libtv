@@ -133,8 +133,8 @@ func (c *Client) ChatWithModel(ctx context.Context, model, systemPrompt, userMes
 
 // VisionContentPart OpenAI vision 格式的消息内容分片
 type VisionContentPart struct {
-	Type     string `json:"type"`            // "text" | "image_url"
-	Text     string `json:"text,omitempty"`  // type=text 时的文本
+	Type     string `json:"type"`           // "text" | "image_url"
+	Text     string `json:"text,omitempty"` // type=text 时的文本
 	ImageURL *struct {
 		URL string `json:"url"` // 图片 URL 或 data:image/...;base64,...
 	} `json:"image_url,omitempty"` // type=image_url 时的图片
@@ -169,7 +169,7 @@ func (c *Client) ChatWithImages(ctx context.Context, model, systemPrompt, userTe
 	parts := []VisionContentPart{{Type: "text", Text: userText}}
 	for _, u := range imageURLs {
 		parts = append(parts, VisionContentPart{
-			Type:     "image_url",
+			Type: "image_url",
 			ImageURL: &struct {
 				URL string `json:"url"`
 			}{URL: u},

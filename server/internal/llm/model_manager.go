@@ -23,6 +23,9 @@ type ModelConfig struct {
 	Parameters  map[string]interface{} `yaml:"parameters"`
 	Default     bool                   `yaml:"default"`     // 是否为默认模型
 	Resolutions []string               `yaml:"resolutions"` // 支持的分辨率（视频模型用）
+	// DurationRange 视频时长范围 [min, max]（秒）。未配置时回退默认 4-15；
+	// 例：wan3.0-video [2,30]、cdance2.5-0807 [4,30]
+	DurationRange []int `yaml:"duration_range"`
 }
 
 // ModelsConfig models.yaml 的完整结构
@@ -182,4 +185,19 @@ func (mm *ModelManager) FindModelByIDForChannel(channel, modelID string) *ModelC
 		}
 	}
 	return nil
+}
+
+// VideoDurationRange 返回模型支持的视频时长范围（秒，闭区间）。
+// 优先取 models.yaml 的 duration_range 配置；未配置或配置非法时回退 4-15。
+// 让新增视频模型只需改配置，无需改代码
+func (mm *ModelManager) VideoDurationRange(channel, modelID string) (int, int) {
+	minDur, maxDur := DefaultVideoDurationRange()
+	if mm == nil {
+		return minDur, maxDur
+	}
+	m := mm.FindModelByIDForChannel(channel, modelID)
+	if m == nil || len(m.DurationRange) < 2 || m.DurationRange[1] <= m.DurationRange[0] {
+		return minDur, maxDur
+	}
+	return m.DurationRange[0], m.DurationRange[1]
 }

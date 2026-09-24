@@ -13,6 +13,7 @@ export interface ModelConfig {
   Parameters?: Record<string, unknown>;
   Default?: boolean;   // 是否为默认模型（从配置文件读取）
   Resolutions?: string[];  // 支持的分辨率（视频模型用，后端 models.yaml 配置）
+  DurationRange?: number[]; // 视频时长范围 [min,max]（秒，后端 models.yaml duration_range）
 }
 
 // 模型列表响应（按类型分组）

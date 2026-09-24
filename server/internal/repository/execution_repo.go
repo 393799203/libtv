@@ -15,6 +15,9 @@ type ExecutionRepo interface {
 	UpdateStatus(ctx context.Context, id int64, status string, errMsg string) error
 	DeleteByProjectID(ctx context.Context, projectID string) error
 	ListByProjectID(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error)
+	// ListActiveByProject 查询项目下仍在进行中（pending/running）的执行，
+	// 供前端重进项目时恢复「生成中」状态
+	ListActiveByProject(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error)
 }
 
 type executionRepo struct {
@@ -52,6 +55,17 @@ func (r *executionRepo) DeleteByProjectID(ctx context.Context, projectID string)
 func (r *executionRepo) ListByProjectID(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error) {
 	var executions []*model.WorkflowExecution
 	if err := r.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&executions).Error; err != nil {
+		return nil, err
+	}
+	return executions, nil
+}
+
+// ListActiveByProject 查询项目下 pending/running 的执行
+func (r *executionRepo) ListActiveByProject(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error) {
+	var executions []*model.WorkflowExecution
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ? AND status IN ?", projectID, []string{"pending", "running"}).
+		Order("id DESC").Find(&executions).Error; err != nil {
 		return nil, err
 	}
 	return executions, nil

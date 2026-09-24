@@ -98,6 +98,7 @@ models:
         provider: wasu
         model_id: "qwen-image-3.0"
         usage: [image, character, scene, prop]
+        resolutions: ["1K", "2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "通义千问图像3.0，适合角色/场景/道具图生成"
@@ -110,6 +111,7 @@ models:
         provider: wasu
         model_id: "qwen-image-3.0-pro"
         usage: [image, character, scene, prop]
+        resolutions: ["1K", "2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "通义千问图像3.0专业版，画质更高"
@@ -119,6 +121,7 @@ models:
         provider: wasu
         model_id: "wan2.7-image"
         usage: [image, character, scene, prop]
+        resolutions: ["1K", "2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "万象2.7图像生成，适合创意图像生成"
@@ -128,6 +131,7 @@ models:
         provider: wasu
         model_id: "wan2.7-image-pro"
         usage: [image, character, scene, prop]
+        resolutions: ["1K", "2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "万象2.7图像专业版，画质更高"
@@ -137,6 +141,7 @@ models:
         provider: wasu
         model_id: "doubao-seedream-4.5"
         usage: [image, character, scene, prop]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "字节Seedream 4.5，画质提升"
@@ -146,6 +151,7 @@ models:
         provider: wasu
         model_id: "doubao-seedream-5.0-lite"
         usage: [image, character, scene, prop]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "字节Seedream 5.0轻量版，生成速度快"
@@ -156,6 +162,7 @@ models:
         provider: wasu
         model_id: "doubao-seedream-5.0-pro"
         usage: [image, character, scene, prop]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "字节Seedream 5.0专业版，画质最高"
@@ -170,6 +177,7 @@ models:
         temperature: 0
         description: "字节Seedance 2.0视频生成"
         resolutions: ["480p", "720p", "1080p"]
+        duration_range: [4, 15]
 
       - id: doubao-seedance-2.0-fast
         name: "Seedance 2.0 Fast"
@@ -179,6 +187,7 @@ models:
         temperature: 0
         description: "字节Seedance 2.0快速版，生成速度更快"
         resolutions: ["480p", "720p"]
+        duration_range: [4, 15]
 
       - id: doubao-seedance-2.5
         name: "Seedance 2.5"
@@ -188,6 +197,7 @@ models:
         temperature: 0
         description: "字节Seedance 2.5视频生成，长叙事能力强，擅长多镜头连贯剧情与复杂运镜"
         resolutions: ["480p", "720p", "1080p"]
+        duration_range: [4, 30]
 
       - id: wan3.0-video
         name: "Wan 3.0"
@@ -197,6 +207,7 @@ models:
         temperature: 0
         description: "阿里Wan 3.0全能参考视频生成，最长30秒"
         resolutions: ["480p", "720p", "1080p"]
+        duration_range: [2, 30]
 
     # ---------- audio ----------
     audio:
@@ -249,6 +260,7 @@ models:
         provider: dianxin
         model_id: "doubao-seedream-5.0-lite"
         usage: [image, character, scene, prop]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "Seedream 5.0 轻量版（image 接口与华数同协议）"
@@ -259,6 +271,7 @@ models:
         provider: dianxin
         model_id: "doubao-seedream-5.0-pro"
         usage: [image, character, scene, prop]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "Seedream 5.0 Pro，画质与细节更强（支持文生图与图生图）"
@@ -272,6 +285,7 @@ models:
         usage: [video]
         description: "Seedance 2.0（cdance2.0-0807，异步任务接口）"
         resolutions: ["480p", "720p", "1080p"]
+        duration_range: [4, 15]
 
       - id: cdance2.0-fast-0807
         name: "Seedance 2.0 Fast"
@@ -280,6 +294,7 @@ models:
         usage: [video]
         description: "Seedance 2.0 Fast（cdance2.0-fast-0807，生成更快）"
         resolutions: ["480p", "720p"]
+        duration_range: [4, 15]
 
       - id: cdance2.5-0807
         name: "Seedance 2.5"
@@ -288,6 +303,7 @@ models:
         usage: [video]
         description: "Seedance 2.5（cdance2.5-0807，异步任务接口，长叙事与多镜头连贯能力更强）"
         resolutions: ["480p", "720p", "1080p"]
+        duration_range: [4, 30]
 
       # 与华数同名（wan3.0-video），靠渠道区分 token 与价格；
       # 电信侧走 DashScope 异步协议，与上面 cdance 系列（火山协议）实现不同
@@ -299,6 +315,7 @@ models:
         temperature: 0
         description: "通义万相 3.0 视频（DashScope 异步协议，支持 2-30 秒长视频）"
         resolutions: ["480p", "720p", "1080p"]
+        duration_range: [2, 30]
 
     # ---------- audio ----------
     audio:

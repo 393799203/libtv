@@ -19,7 +19,8 @@ var defaultOrigins = []string{
 }
 
 // CORS 根据 config.C.CORS.Origins 构造跨域中间件
-//   优先使用配置文件/环境变量；为空则回退到 defaultOrigins
+//
+//	优先使用配置文件/环境变量；为空则回退到 defaultOrigins
 func CORS() gin.HandlerFunc {
 	origins := config.C.CORS.Origins
 	if len(origins) == 0 {

@@ -46,10 +46,10 @@ type CreateStyleRequest struct {
 }
 
 type UpdateStyleRequest struct {
-	Name        *string  `json:"name"`
-	Author      *string  `json:"author"`
-	CategoryID  *string  `json:"category_id"`
-	Tags        []string `json:"tags"`
+	Name       *string  `json:"name"`
+	Author     *string  `json:"author"`
+	CategoryID *string  `json:"category_id"`
+	Tags       []string `json:"tags"`
 }
 
 type CreateCategoryRequest struct {

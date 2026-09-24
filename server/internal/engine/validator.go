@@ -16,8 +16,8 @@ func Validate(schema *WorkflowSchema) error {
 		nodeSet[node.ID] = true
 	}
 
-	adj := make(map[string][]string)   // source → targets
-	inDegree := make(map[string]int)    // nodeID → 入度
+	adj := make(map[string][]string) // source → targets
+	inDegree := make(map[string]int) // nodeID → 入度
 
 	for _, node := range schema.Nodes {
 		inDegree[node.ID] = 0

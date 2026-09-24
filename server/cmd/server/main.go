@@ -6,15 +6,19 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
+	"libtv/internal/cache"
 	"libtv/internal/config"
 	"libtv/internal/engine"
 	"libtv/internal/handler"
 	"libtv/internal/llm"
 	"libtv/internal/middleware"
 	"libtv/internal/model"
+	"libtv/internal/queue"
 	"libtv/internal/repository"
 	"libtv/internal/service"
 	"libtv/internal/storage"
@@ -180,6 +184,34 @@ func main() {
 	}
 	paymentHandler := handler.NewPaymentHandler(paymentService, frontendBase)
 
+	// ==================== Redis 增强能力：限流 / 并发闸门 / 生成任务队列 ====================
+	// Redis 是增强而非硬依赖：连接失败时自动降级（限流关闭、生成任务回到进程内执行），
+	// 不影响生成主流程。
+	if err := cache.Init(config.C.Redis); err != nil {
+		log.Printf("⚠️  Redis 不可用，限流/任务队列将降级为原逻辑: %v", err)
+	} else {
+		log.Printf("✅ Redis 已连接: %s (db=%d)", config.C.Redis.Addr(), config.C.Redis.DB)
+		defer func() { _ = cache.Close() }()
+	}
+
+	// 生成任务队列：任务入 Redis Stream，由 worker 池消费。
+	// worker 数即全局并发闸门；未确认的消息在进程重启后由 XAUTOCLAIM 认领续跑。
+	var genQueue *queue.Queue
+	if config.C.Queue.Enabled && cache.Available() {
+		genQueue = queue.New(config.C.Queue, cache.Client(), workflowHandler.HandleQueuedTask)
+		workflowHandler.SetQueue(genQueue)
+		if err := genQueue.Start(context.Background()); err != nil {
+			log.Printf("⚠️  队列启动失败，降级为进程内执行: %v", err)
+			genQueue = nil
+			workflowHandler.SetQueue(nil)
+		}
+	} else if config.C.Queue.Enabled {
+		log.Printf("⚠️  队列已配置开启但 Redis 不可用，生成任务走进程内执行")
+	}
+	if genQueue == nil {
+		log.Printf("ℹ️  生成任务队列未启用：任务在进程内直接执行（重启会中断）")
+	}
+
 	// 初始化 Gin
 	if config.C.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -212,7 +244,7 @@ func main() {
 		publicShows.GET("/categories", showHandler.ListCategories)
 		publicShows.GET("", showHandler.ListShows)
 		publicShows.GET("/:id", showHandler.GetShow)
-		publicShows.GET("/:id/comments", commentHandler.List)                // 顶级评论列表（公开）
+		publicShows.GET("/:id/comments", commentHandler.List)                       // 顶级评论列表（公开）
 		publicShows.GET("/comments/:commentId/replies", commentHandler.ListReplies) // 评论的回复列表（公开）
 	}
 
@@ -260,19 +292,19 @@ func main() {
 		api.GET("/users", userHandler.List)                    // 管理员：获取所有用户
 		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
 		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
-		api.POST("/users/:id/recharge", userHandler.Recharge)   // 管理员：为用户充值积分
-		api.GET("/models", modelHandler.ListModels)             // 模型清单（按登录用户渠道返回各自渠道模型）
+		api.POST("/users/:id/recharge", userHandler.Recharge)  // 管理员：为用户充值积分
+		api.GET("/models", modelHandler.ListModels)            // 模型清单（按登录用户渠道返回各自渠道模型）
 
 		// AI 渠道管理（多渠道 token 路由：华数/电信）
-		api.GET("/channel/my", channelHandler.GetMyChannel)     // 当前用户自己的渠道
-		api.GET("/channel/policy", channelHandler.GetPolicy)    // 管理员：查询全局渠道策略
-		api.PUT("/channel/policy", middleware.RequireAdmin(userService), channelHandler.SetPolicy) // 管理员：切换全局策略（全A/全B/按用户）
+		api.GET("/channel/my", channelHandler.GetMyChannel)                                                   // 当前用户自己的渠道
+		api.GET("/channel/policy", channelHandler.GetPolicy)                                                  // 管理员：查询全局渠道策略
+		api.PUT("/channel/policy", middleware.RequireAdmin(userService), channelHandler.SetPolicy)            // 管理员：切换全局策略（全A/全B/按用户）
 		api.PUT("/users/:id/channel", middleware.RequireAdmin(userService), channelHandler.UpdateUserChannel) // 管理员：修改用户渠道
 
 		// 支付订单（积分超市充值，需登录）
 		payment := api.Group("/payment")
 		{
-			payment.POST("/orders", paymentHandler.CreateOrder) // 下单，返回支付宝收银台支付 URL
+			payment.POST("/orders", paymentHandler.CreateOrder)      // 下单，返回支付宝收银台支付 URL
 			payment.GET("/orders/:orderNo", paymentHandler.GetOrder) // 查单（前端轮询支付结果）
 		}
 
@@ -287,8 +319,10 @@ func main() {
 			projects.GET("/:id/canvas", canvasHandler.Get)
 			projects.PUT("/:id/canvas", canvasHandler.Save)
 			// 工作流（路径对齐前端 api/services/workflowApi.ts）；AI 调用入口，先过扣费中间件
-			projects.POST("/:id/workflows/execute", middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
+			projects.POST("/:id/workflows/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
 			projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)
+			// 项目进行中的执行（前端重进项目时恢复"生成中"状态用；路径挂在 workflows 之外避免与 :execId 冲突）
+			projects.GET("/:id/active-executions", workflowHandler.GetActiveExecutions)
 			// SSE 流式订阅工作流执行进度（必须单独注册在 r 上，不能走 Auth 中间件：
 			//   原生 EventSource 不支持自定义 header，token 只能放 query ，
 			//   所以鉴权由 StreamExecution 内部处理，见 workflow_handler.go）
@@ -300,7 +334,7 @@ func main() {
 		// 工作流（兼容旧路由 /api/workflow/*）；AI 调用入口，先过扣费中间件
 		workflow := api.Group("/workflow")
 		{
-			workflow.POST("/execute", middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
+			workflow.POST("/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
 			workflow.GET("/executions/:id", workflowHandler.GetExecution)
 		}
 
@@ -417,7 +451,26 @@ func main() {
 		IdleTimeout:    0, // 不设空闲超时
 		MaxHeaderBytes: 1 << 20,
 	}
-	if err := srv.ListenAndServe(); err != nil {
+	// 优雅退出：先停止接收新请求，再停止队列 worker。
+	// 未确认的队列消息留给下次启动的 XAUTOCLAIM 认领续跑（这正是队列化的核心收益）
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-quit
+		log.Printf("收到退出信号，开始优雅停止…")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP 关闭异常: %v", err)
+		}
+		if genQueue != nil {
+			genQueue.Stop(8 * time.Second)
+		}
+		_ = cache.Close()
+		log.Printf("已停止")
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("start server: %v", err)
 	}
 }

@@ -52,6 +52,8 @@ type ExecutionContext struct {
 	userID string
 	// channel 项目属主用户的 AI 渠道（wasu/dianxin，经全局策略解析后的最终渠道）
 	channel string
+	// executionID 本次执行ID（异步任务登记 / 重启续跑复用已提交任务时用于定位）
+	executionID int64
 }
 
 func NewExecutionContext() *ExecutionContext {
@@ -144,6 +146,22 @@ func (ec *ExecutionContext) SetChannel(channel string) {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 	ec.channel = channel
+}
+
+// SetExecutionID 设置本次执行ID。
+// 异步生成任务（视频）按「执行ID + 节点ID」登记已提交的上游 taskID，
+// 进程重启续跑时据此接着取结果，而不是重新下发一次。
+func (ec *ExecutionContext) SetExecutionID(executionID int64) {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.executionID = executionID
+}
+
+// GetExecutionID 获取本次执行ID
+func (ec *ExecutionContext) GetExecutionID() int64 {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	return ec.executionID
 }
 
 // GetChannel 获取用户 AI 渠道；未设置时回退 wasu
@@ -268,6 +286,8 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 	// 设置项目ID与属主用户ID，供节点执行器使用（确定存储路径）
 	execCtx.SetProjectID(projectID)
 	execCtx.SetUserID(userID)
+	// 本次执行ID：异步生成任务按「执行ID+节点ID」登记上游 taskID，供重启续跑复用
+	execCtx.SetExecutionID(executionID)
 
 	// 解析用户最终 AI 渠道（全局策略 + 用户渠道），供执行器调用 LLM 时选择 token 渠道
 	if e.channelResolver != nil {
@@ -810,20 +830,20 @@ func getAssetTypeFromNodeID(nodeID string) string {
 
 // ImageExecutor 图像节点执行器（调用图像生成API）
 type ImageExecutor struct {
-	imageClient             *llm.ImageClient
-	modelManager            *llm.ModelManager
-	fileUploadService       *service.FileUploadService
-	biller                  *service.BillingService
+	imageClient              *llm.ImageClient
+	modelManager             *llm.ModelManager
+	fileUploadService        *service.FileUploadService
+	biller                   *service.BillingService
 	generationHistoryService *service.GenerationHistoryService
 }
 
 // NewImageExecutor 创建图像执行器
 func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ImageExecutor {
 	return &ImageExecutor{
-		imageClient:             client,
-		modelManager:            modelManager,
-		fileUploadService:       fileUploadService,
-		biller:                  biller,
+		imageClient:              client,
+		modelManager:             modelManager,
+		fileUploadService:        fileUploadService,
+		biller:                   biller,
 		generationHistoryService: generationHistoryService,
 	}
 }
@@ -1389,17 +1409,41 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		resolution = "4k"
 	}
 
-	// 时长按模型钳制后再扣费，保证扣费时长与实际生成时长一致（GenerateVideo 内仍有兜底钳制）
-	data.Duration = llm.NormalizeVideoDuration(model, data.Duration)
+	// 时长按模型钳制后再扣费，保证扣费时长与实际生成时长一致。
+	// 范围来自 models.yaml 的 duration_range（与渠道无关），未配置的模型回退默认 4-15
+	minDur, maxDur := llm.DefaultVideoDurationRange()
+	if v.modelManager != nil {
+		minDur, maxDur = v.modelManager.VideoDurationRange(execCtx.GetChannel(), model)
+	}
+	data.Duration = llm.ClampVideoDuration(data.Duration, minDur, maxDur)
 
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 
-	// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按分辨率+时长计）
-	chargedAmount, err := v.biller.ChargeByDurationWithResolution(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", resolution, data.Duration)
-	if err != nil {
-		return nil, err
+	// ── 异步任务续跑：优先接着上次已提交的上游任务取结果 ──
+	// 进程重启/发版中断后队列会重投该任务，此时上游那次视频其实还在跑甚至已跑完。
+	// 若重新下发一次：上游重复生成、用户重复扣费，而第一次的结果被白白丢掉。
+	// 因此先查有没有「已提交但未取回结果」的 taskID，命中就直接续查，且**不再扣费**。
+	execID := execCtx.GetExecutionID()
+	resumeRef := llm.LoadAsyncTaskRef(ctx, execID, node.ID)
+	taskRef := llm.NewAsyncTaskRef(execID, node.ID)
+	var chargedAmount int64
+
+	if resumeRef != nil {
+		taskRef.Provider, taskRef.Model = resumeRef.Provider, resumeRef.Model
+		taskRef.TaskID, taskRef.ChargedAmount = resumeRef.TaskID, resumeRef.ChargedAmount
+		log.Printf("[VideoExecutor] ♻ 命中已提交的上游任务: taskID=%s model=%s（%s）→ 续取结果，跳过重复下发与扣费",
+			resumeRef.TaskID, resumeRef.Model, resumeRef.CreateAt)
+	} else {
+		// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按分辨率+时长计）
+		var chargeErr error
+		chargedAmount, chargeErr = v.biller.ChargeByDurationWithResolution(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", resolution, data.Duration)
+		if chargeErr != nil {
+			return nil, chargeErr
+		}
+		taskRef.ChargedAmount = chargedAmount
 	}
+	ctx = llm.WithAsyncTaskHolder(ctx, taskRef)
 
 	// 调用视频生成API；注入用户渠道供多 token 路由
 	videoURL, err := v.videoClient.GenerateVideo(
@@ -1417,9 +1461,24 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	)
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
-		// API调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(v.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成", err.Error()); refundErr != nil {
-			log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
+		if resumeRef != nil {
+			// 复用失败：该上游任务已不可用（过期/已失败），清掉登记；
+			// 同时退还当初下发它的那笔扣费 —— 重试会重新下发并重新扣费，
+			// 不退的话用户等于为一个拿不到结果的任务白付一次
+			llm.ClearAsyncTaskRef(execID, node.ID)
+			if resumeRef.ChargedAmount > 0 {
+				reason := "上游任务已失效，退还该次扣费并稍后重新生成: " + err.Error()
+				if refundErr := refundWithFreshCtx(v.biller, execCtx.GetUserID(), resumeRef.ChargedAmount, service.BillingActionVideo, model, "视频生成", reason); refundErr != nil {
+					log.Printf("[VideoExecutor] 复用失败退费失败: %v", refundErr)
+				} else {
+					log.Printf("[VideoExecutor] 复用失败，已退还上次扣费 %d 积分（重试时重新下发并扣费）", resumeRef.ChargedAmount)
+				}
+			}
+		} else if chargedAmount > 0 {
+			// API调用失败，退还已扣费用
+			if refundErr := refundWithFreshCtx(v.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成", err.Error()); refundErr != nil {
+				log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
+			}
 		}
 		return &NodeOutput{
 			NodeID: node.ID,
@@ -1431,6 +1490,9 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 
 	log.Printf("[VideoExecutor] ✅ 视频生成成功: nodeId=%s videoUrl=%s", node.ID, videoURL)
+
+	// 结果已取回，任务登记不再需要（避免后续误复用已消费的任务）
+	llm.ClearAsyncTaskRef(execID, node.ID)
 
 	// 下载视频并使用 FileUploadService 上传到 users/<userID>/canvas/<projectID>/（与图片保存机制一致）
 	ownVideoURL, dlErr := v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID())

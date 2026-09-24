@@ -64,9 +64,9 @@ func (h *ProjectHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"items": projects,
-			"total": total,
-			"page":  page,
+			"items":     projects,
+			"total":     total,
+			"page":      page,
 			"page_size": pageSize,
 		},
 	})

@@ -14,6 +14,7 @@ import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore, type ActiveStream } from '@/stores/executionStore';
 import { useExecutionStream } from '@/hooks/useExecutionStream';
+import { useResumeActiveExecution } from '@/hooks/useResumeActiveExecution';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 import AddShowDialog from '@/components/AddShowDialog';
@@ -50,6 +51,9 @@ function CanvasWithDrop({ urlProjectId }: { urlProjectId: string }) {
       loadCanvasFromServer(urlProjectId);
     }
   }, [urlProjectId, loadCanvasFromServer]);
+
+  // 后端队列里的生成与页面无关；刷新/重进后恢复"仍在进行中"的节点状态与进度订阅
+  useResumeActiveExecution(urlProjectId);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();

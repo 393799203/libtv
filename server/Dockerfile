@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# 构建工具链与 go.mod 的 go 指令保持一致（go-redis v9.7.3 兼容 go 1.18+）
 FROM golang:1.22-alpine AS builder
 
 WORKDIR /app

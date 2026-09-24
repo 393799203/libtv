@@ -6,6 +6,15 @@ export interface ExecuteResponse {
   executionId: number;
 }
 
+/** 项目进行中的执行（重进项目时恢复"生成中"状态用） */
+export interface ActiveExecutionItem {
+  executionId: number;
+  status: string;
+  startedAt?: string;
+  /** 本次执行涉及的节点 ID（后端 plan 裁剪后的真实执行集合） */
+  nodeIds: string[];
+}
+
 /** 执行粒度（与后端 handler 的 mode 字段对齐） */
 export type ExecuteMode = '' | 'single' | 'downstream';
 
@@ -25,6 +34,14 @@ export const workflowApi = {
   // 停止执行
   stop: (projectId: string, executionId: string) =>
     api.post<ApiResponse<void>>(`/projects/${projectId}/workflows/${executionId}/stop`),
+
+  // 查询项目进行中的执行（pending/running）。
+  // 页面刷新/关闭会丢掉内存里的 executionId，导致无法重连 SSE；
+  // 进项目时调这个接口即可恢复"生成中"显示，避免用户误以为没在生成而重复点击。
+  getActive: (projectId: string) =>
+    api.get<ApiResponse<{ executions: ActiveExecutionItem[] }>>(
+      `/projects/${projectId}/active-executions`,
+    ),
 
   // 获取执行状态（可传入 nodeId 获取该节点最新数据）
   getStatus: (projectId: string, executionId: string, nodeId?: string) => {

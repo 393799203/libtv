@@ -38,16 +38,16 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 
 // Project 项目模型
 type Project struct {
-	ID          string    `gorm:"primaryKey;size:36" json:"id"`
-	UserID      string    `gorm:"index;size:36;not null" json:"user_id"`
-	Name        string    `gorm:"size:255;not null" json:"name"`
-	Description string    `gorm:"size:1000" json:"description"`
-	CoverURL    string    `gorm:"size:500" json:"cover_url"`
+	ID          string `gorm:"primaryKey;size:36" json:"id"`
+	UserID      string `gorm:"index;size:36;not null" json:"user_id"`
+	Name        string `gorm:"size:255;not null" json:"name"`
+	Description string `gorm:"size:1000" json:"description"`
+	CoverURL    string `gorm:"size:500" json:"cover_url"`
 	// ShowStatus 关联发布视频的状态（pending/published/rejected），无关联为空；不存库，列表查询时补充
 	ShowStatus string    `gorm:"-" json:"show_status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	User        User      `gorm:"foreignKey:UserID" json:"-"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	User       User      `gorm:"foreignKey:UserID" json:"-"`
 }
 
 func (Project) TableName() string { return "projects" }
@@ -83,7 +83,11 @@ type WorkflowExecution struct {
 	FinishedAt     *time.Time     `json:"finished_at"`
 	ErrorMsg       string         `gorm:"size:1000" json:"error_msg"`
 	CreatedAt      time.Time      `json:"created_at"`
-	Project        Project        `gorm:"foreignKey:ProjectID" json:"-"`
+	// NodeIDs 本次执行实际涉及的节点 ID 列表（JSON 数组）。
+	// 用途：用户发起生成后关掉页面再回来时，前端据此把仍在跑的节点恢复为「生成中」
+	// 并重建进度订阅，避免误以为没在生成而重复点击（重复生成、重复扣费）。
+	NodeIDs datatypes.JSON `gorm:"type:jsonb" json:"node_ids"`
+	Project Project        `gorm:"foreignKey:ProjectID" json:"-"`
 }
 
 func (WorkflowExecution) TableName() string { return "workflow_executions" }
@@ -207,10 +211,10 @@ type Show struct {
 	Views        int            `gorm:"default:0" json:"views"`
 	Likes        int            `gorm:"default:0" json:"likes"`
 	// CommentCount 评论数（含回复）；不存库，详情/列表查询时补充
-	CommentCount int64          `gorm:"-" json:"comment_count"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	Category     ShowCategory   `gorm:"foreignKey:CategoryID" json:"category"`
+	CommentCount int64        `gorm:"-" json:"comment_count"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
+	Category     ShowCategory `gorm:"foreignKey:CategoryID" json:"category"`
 }
 
 func (Show) TableName() string { return "shows" }
@@ -244,10 +248,10 @@ func (s *ShowLike) BeforeCreate(tx *gorm.DB) error {
 
 // ShowComment 视频评论（一层楼中楼：回复挂顶级评论，不再嵌套）
 type ShowComment struct {
-	ID        string    `gorm:"primaryKey;size:36" json:"id"`
-	ShowID    string    `gorm:"size:36;not null;index" json:"show_id"`
-	UserID    string    `gorm:"size:36;not null;index" json:"user_id"`
-	Content   string    `gorm:"size:1000;not null" json:"content"`
+	ID      string `gorm:"primaryKey;size:36" json:"id"`
+	ShowID  string `gorm:"size:36;not null;index" json:"show_id"`
+	UserID  string `gorm:"size:36;not null;index" json:"user_id"`
+	Content string `gorm:"size:1000;not null" json:"content"`
 	// ParentID 为空=顶级评论；非空=回复，指向顶级评论 ID（回复的回复也归到顶级下）
 	ParentID string `gorm:"size:36;index" json:"parent_id"`
 	// ReplyToNickname 冗余展示用：回复某条回复时为被回复人昵称（回复顶级评论时为空）
@@ -343,7 +347,7 @@ type ModelPrice struct {
 	NodeType   string  `gorm:"size:20;not null;uniqueIndex:idx_price_channel_node_model_res,priority:2" json:"node_type"`    // 节点类型：text/script/image/video/audio
 	ModelID    string  `gorm:"size:100;not null;uniqueIndex:idx_price_channel_node_model_res,priority:3" json:"model_id"`    // 模型 ID（对应 models.yaml 的 id）
 	Resolution string  `gorm:"size:10;default:'';uniqueIndex:idx_price_channel_node_model_res,priority:4" json:"resolution"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
-	Price      float64 `gorm:"not null;default:0" json:"price"`                                                             // 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
+	Price      float64 `gorm:"not null;default:0" json:"price"`                                                              // 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -355,15 +359,15 @@ func (ModelPrice) TableName() string { return "model_prices" }
 
 // PointsPackage 积分套餐（积分超市卡片，运营后台「套餐管理」维护）
 type PointsPackage struct {
-	ID          int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	Name        string    `gorm:"size:50;not null" json:"name"`              // 套餐名称，如「尝鲜包」
-	Price       float64   `gorm:"not null;default:0" json:"price"`           // 售价（元）
-	Points      int64     `gorm:"not null;default:0" json:"points"`          // 积分数量
-	Badge       string    `gorm:"size:20;default:''" json:"badge"`           // 角标文案（空表示无角标）
-	Recommended bool      `gorm:"not null;default:false" json:"recommended"` // 是否推荐（卡片高亮展示）
-	Features    string    `gorm:"type:text;default:''" json:"features"`      // 套餐特点，每行一条
-	SortOrder   int       `gorm:"not null;default:0" json:"sort_order"`      // 排序，越小越靠前
-	Enabled     bool      `gorm:"not null;default:true" json:"enabled"`      // 是否在积分超市展示
+	ID          int64   `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name        string  `gorm:"size:50;not null" json:"name"`              // 套餐名称，如「尝鲜包」
+	Price       float64 `gorm:"not null;default:0" json:"price"`           // 售价（元）
+	Points      int64   `gorm:"not null;default:0" json:"points"`          // 积分数量
+	Badge       string  `gorm:"size:20;default:''" json:"badge"`           // 角标文案（空表示无角标）
+	Recommended bool    `gorm:"not null;default:false" json:"recommended"` // 是否推荐（卡片高亮展示）
+	Features    string  `gorm:"type:text;default:''" json:"features"`      // 套餐特点，每行一条
+	SortOrder   int     `gorm:"not null;default:0" json:"sort_order"`      // 排序，越小越靠前
+	Enabled     bool    `gorm:"not null;default:true" json:"enabled"`      // 是否在积分超市展示
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

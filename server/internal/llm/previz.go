@@ -113,7 +113,7 @@ func sanitizePrevizObject(raw previzSceneObjectRaw) (PrevizSceneObject, bool) {
 		Type:     objType,
 		Name:     name,
 		Position: normalizeVec3(raw.Position, [3]float64{0, 0.5, 0}, -50, 50),
-		Rotation: normalizeVec3(raw.Rotation, [3]float64{0, 0, 0}, -math.Pi * 2, math.Pi * 2),
+		Rotation: normalizeVec3(raw.Rotation, [3]float64{0, 0, 0}, -math.Pi*2, math.Pi*2),
 		Scale:    normalizeVec3(raw.Scale, [3]float64{1, 1, 1}, 0.05, 50),
 	}, true
 }

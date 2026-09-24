@@ -15,6 +15,28 @@ export type VideoResolutionOption = typeof VIDEO_RESOLUTION_OPTIONS[number];
 // wan3.0（阿里万相）支持的画幅比例（其余视频模型不限制；free=自适应，后端映射为 adaptive）
 export const WAN3_VIDEO_ASPECT_RATIOS = ['free', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
 
+// ==================== 视频时长范围 ====================
+
+/**
+ * 视频时长默认范围（秒，闭区间）：模型未在 models.yaml 配置 duration_range 时使用。
+ * 每个视频模型都应在后端 models.yaml 显式声明自己的 duration_range，
+ * 前端一律以配置为准（与渠道无关，同名模型同范围），不再按模型名硬编码
+ */
+export const DEFAULT_VIDEO_DURATION_RANGE: [number, number] = [4, 15];
+
+/** 取模型的视频时长范围（秒），配置缺失/非法时回退默认值 */
+export function videoDurationRange(model?: Pick<ModelOption, 'durationRange'>): [number, number] {
+  const r = model?.durationRange;
+  if (r && r.length >= 2 && r[1] > r[0]) return [r[0], r[1]];
+  return DEFAULT_VIDEO_DURATION_RANGE;
+}
+
+/** 按模型配置生成可选时长列表（秒），如 [2,30] → [2,3,…,30] */
+export function buildDurationOptions(model?: Pick<ModelOption, 'durationRange'>): number[] {
+  const [min, max] = videoDurationRange(model);
+  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
+}
+
 // ==================== 画质选项 ====================
 
 export const QUALITY_OPTIONS = ['低画质', '标准画质', '高画质'] as const;

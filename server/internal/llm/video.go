@@ -165,6 +165,7 @@ type mediaItem struct {
 // GenerateVideo 调用视频生成API，按渠道+模型分派到对应的请求构建器：
 //   - 电信渠道（dianxin）：buildDianxinRequest → /contents/generations/tasks 异步任务
 //   - 华数 wan3.0（阿里万相）→ buildWanRequest；其他（doubao-seedance 系列）→ buildSeedanceRequest
+//
 // imageURLs: 参考图列表。videoURLs: 参考视频列表。
 // videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=参考
 // generateAudio: 是否生成音频（true=生成声音，false=静音）
@@ -184,6 +185,17 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 			return c.generateDianxinWanVideo(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 		}
 		return c.generateDianxinVideo(ctx, model, prompt, duration, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
+	}
+
+	// 华数渠道：复用已提交任务（重启续跑直接接着查结果，不重新下发）
+	if h := AsyncTaskHolder(ctx); h != nil {
+		if h.Model == "" {
+			h.Model = model
+		}
+		if h.TaskID != "" {
+			log.Printf("[VideoGen] ♻ 复用已提交的华数任务: taskID=%s（跳过重复下发）", h.TaskID)
+			return c.pollVideoTask(ctx, h.TaskID)
+		}
 	}
 
 	var payload []byte
@@ -210,12 +222,12 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 
 // DianxinVideoItem 电信视频 content 条目（text 独立成项，参考素材带 role）
 type DianxinVideoItem struct {
-	Type     string             `json:"type"`                 // text / image_url / video_url / audio_url
-	Text     string             `json:"text,omitempty"`       // type=text
-	ImageURL *VideoContentImage `json:"image_url,omitempty"`  // type=image_url
-	VideoURL *VideoContentImage `json:"video_url,omitempty"`  // type=video_url
-	AudioURL *VideoContentImage `json:"audio_url,omitempty"`  // type=audio_url
-	Role     string             `json:"role,omitempty"`       // reference_image / reference_video / reference_audio
+	Type     string             `json:"type"`                // text / image_url / video_url / audio_url
+	Text     string             `json:"text,omitempty"`      // type=text
+	ImageURL *VideoContentImage `json:"image_url,omitempty"` // type=image_url
+	VideoURL *VideoContentImage `json:"video_url,omitempty"` // type=video_url
+	AudioURL *VideoContentImage `json:"audio_url,omitempty"` // type=audio_url
+	Role     string             `json:"role,omitempty"`      // reference_image / reference_video / reference_audio
 }
 
 // DianxinVideoRequest 电信视频创建任务请求体
@@ -230,6 +242,12 @@ type DianxinVideoRequest struct {
 
 // generateDianxinVideo 电信视频生成（POST /contents/generations/tasks → 轮询）
 func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, prompt string, duration int, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
+	// 复用已提交任务：重启续跑时直接接着查结果，不重新下发（避免重复生成与重复扣费）
+	if h := AsyncTaskHolder(ctx); h != nil && h.TaskID != "" {
+		log.Printf("[VideoGen] ♻ 复用已提交的电信 cdance 任务: taskID=%s（跳过重复下发）", h.TaskID)
+		return c.pollDianxinVideoTask(ctx, h.TaskID)
+	}
+
 	// 参考素材 role 复用 collectMedia（role 词汇与华数一致）
 	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
 
@@ -312,6 +330,9 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 	if taskID == "" {
 		return "", fmt.Errorf("电信视频响应无任务ID: %s", string(respBody))
 	}
+
+	// 拿到 taskID 立刻落盘，再进入轮询（中断后可接着查，不必重新下发）
+	RecordSubmittedTask(ctx, "dianxin", model, taskID)
 
 	// 轮询任务
 	return c.pollDianxinVideoTask(ctx, taskID)
@@ -477,6 +498,13 @@ type DianxinWanParameters struct {
 
 // generateDianxinWanVideo 电信 wan3.0-video 生成（创建 DashScope 任务 → 轮询）
 func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
+	// 复用已提交任务：进程重启后续跑时，不再重新下发（否则上游重复生成、
+	// 用户被重复扣费，而第一次那次的结果反而被丢掉），直接接着查那个任务
+	if h := AsyncTaskHolder(ctx); h != nil && h.TaskID != "" {
+		log.Printf("[VideoGen] ♻ 复用已提交的电信 wan3.0 任务: taskID=%s（跳过重复下发）", h.TaskID)
+		return c.pollDianxinWanTask(ctx, h.TaskID)
+	}
+
 	origDuration := duration
 	duration, err := normalizeWanParams(ctx, duration, videoURLs)
 	if err != nil {
@@ -568,6 +596,10 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 	if taskID == "" {
 		return "", fmt.Errorf("电信 wan3.0 响应无任务ID: %s", string(respBody))
 	}
+
+	// 拿到 taskID 立刻登记落盘（先落盘、后轮询）：轮询期间进程若被杀，
+	// 重启续跑即可直接接着查这个任务，而不是重新下发一次
+	RecordSubmittedTask(ctx, "dianxin", model, taskID)
 
 	return c.pollDianxinWanTask(ctx, taskID)
 }
@@ -922,14 +954,36 @@ func logDurationNormalized(expected, actual int) {
 	}
 }
 
-// NormalizeVideoDuration 按模型钳制视频时长（秒）：
-// wan3.0-video（阿里万相）：2-30 秒；doubao-seedance 系列（火山引擎）：4-15 秒
-// 供 executor 在扣费前调用，保证扣费时长与实际生成时长一致
+// DefaultVideoDurationRange 视频时长默认范围（秒，闭区间）。
+// 每个视频模型都应在 models.yaml 的 duration_range 显式声明（与渠道无关，同名模型同范围）；
+// 未声明时用它兜底
+func DefaultVideoDurationRange() (int, int) { return 4, 15 }
+
+// ClampVideoDuration 将时长钳制到 [min, max]。
+// executor 读取 models.yaml 的 duration_range 后调用本函数，保证扣费时长与实际生成时长一致
+func ClampVideoDuration(duration, min, max int) int { return clampDuration(duration, min, max) }
+
+// NormalizeVideoDuration 按模型钳制视频时长（秒）—— 仅供 GenerateVideo 内部兜底。
+// 正常路径：executor 读 models.yaml 的 duration_range → ClampVideoDuration；
+// 此处按模型名推断，保证绕过 executor 直接调用时不越界
 func NormalizeVideoDuration(model string, duration int) int {
-	if strings.Contains(model, "wan3.0") {
-		return clampDuration(duration, 2, 30)
+	minDur, maxDur := videoDurationRangeByModel(model)
+	return clampDuration(duration, minDur, maxDur)
+}
+
+// videoDurationRangeByModel 按模型名推断时长范围（兜底用，以 models.yaml 配置为准）：
+//   - wan3.0-video（阿里万相）：2-30 秒
+//   - Seedance 2.5 系列（cdance2.5-0807 / doubao-seedance-2.5）：4-30 秒
+//   - 其余 seedance 系列：4-15 秒
+func videoDurationRangeByModel(model string) (int, int) {
+	switch {
+	case strings.Contains(model, "wan3.0"):
+		return 2, 30
+	case strings.Contains(model, "2.5"):
+		return 4, 30
+	default:
+		return DefaultVideoDurationRange()
 	}
-	return clampDuration(duration, 4, 15)
 }
 
 // clampDuration 将时长钳制到 [min, max]
@@ -1036,6 +1090,8 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 	// 情况2：返回任务ID，需要轮询
 	if videoResp.ID != "" {
 		log.Printf("[VideoGen] 异步任务: id=%s, 开始轮询...", videoResp.ID)
+		// 拿到 taskID 立刻落盘，再进入轮询（中断后可接着查，不必重新下发）
+		RecordSubmittedTask(ctx, "wasu", "", videoResp.ID)
 		return c.pollVideoTask(ctx, videoResp.ID)
 	}
 
@@ -1112,6 +1168,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 // 兼容华数TokenHub网关两种格式：
 //   - 格式1: {"code":"...","message":"纯文本"} 或 {"code":"...","error":{"message":"..."}}
 //   - 格式2: {"code":"...","message":"{\"error\":{\"code\":\"...\",\"message\":\"可读信息\",...}}"}（message 内再嵌一层 JSON）
+//
 // 提取失败时原样返回 body，保证错误信息不丢失
 func extractVideoAPIErrorMessage(body string) string {
 	var outer struct {

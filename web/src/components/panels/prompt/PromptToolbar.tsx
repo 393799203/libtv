@@ -2,7 +2,7 @@ import { memo, useMemo, useState, useEffect } from 'react';
 import { SoundOutlined } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
-import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS } from '@/configs/promptConfig';
+import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS, buildDurationOptions } from '@/configs/promptConfig';
 import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
 import { useModelStore } from '@/stores/modelStore';
 
@@ -248,38 +248,79 @@ const ModelSelector = memo(function ModelSelector({
 
 // ==================== 分辨率+比例选择器（截图3 样式）====================
 
-// 比例图标：根据宽高比绘制精确的矩形示意
-function RatioIcon({ value, active }: { value: string; active: boolean }) {
+// 比例图标：按真实宽高比绘制矩形示意。
+// 采用「填充块 + 细描边」，形状一眼可辨（纯描边在极小尺寸下会显得单薄）；
+// 极端比例（1:2 / 2:1）保底最小厚度，避免退化成一条线。
+// active：选中态（深色实心）；size：卡片内更大、触发按钮上更小
+function RatioIcon({ value, active, size = 22 }: { value: string; active: boolean; size?: number }) {
+  // 自适应：虚线框 + 淡填充
   if (value === 'free') {
     return (
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-        <rect x="3" y="3" width="14" height="14" rx="1.5"
-          stroke={active ? '#111827' : '#D1D5DB'} strokeWidth="1.5" strokeDasharray="3 2" fill="none" />
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none">
+        <rect x="3.4" y="3.4" width={size - 6.8} height={size - 6.8} rx="2.6"
+          stroke={active ? '#111827' : '#CBD5E1'} strokeWidth={active ? 1.7 : 1.3}
+          strokeDasharray="4 2.6"
+          fill={active ? 'rgba(17,24,39,0.07)' : 'none'} />
       </svg>
     );
   }
 
   const [w, h] = value.split(':').map(Number);
+  if (!w || !h) return null;
+
   const ratio = w / h;
-  const size = 18;
-  let iw, ih;
+  const box = size - 7; // 比例框最长边（四周留白）
+  let iw: number, ih: number;
   if (ratio >= 1) {
-    iw = size;
-    ih = size / ratio;
+    iw = box;
+    ih = box / ratio;
   } else {
-    ih = size;
-    iw = size * ratio;
+    ih = box;
+    iw = box * ratio;
   }
+  iw = Math.max(iw, 6);
+  ih = Math.max(ih, 6);
   const ox = (size - iw) / 2;
   const oy = (size - ih) / 2;
 
   return (
-    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-      <rect x={ox + 1} y={oy + 1} width={iw - 2} height={ih - 2}
-        rx={Math.min(iw, ih) * 0.15}
-        stroke={active ? '#111827' : '#9CA3AF'} strokeWidth={active ? 1.8 : 1.3}
-        fill={active ? 'rgba(17,24,39,0.06)' : 'white'} />
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none">
+      <rect x={ox} y={oy} width={iw} height={ih} rx={Math.min(iw, ih) * 0.18}
+        fill={active ? '#111827' : '#F1F5F9'}
+        stroke={active ? '#111827' : '#CBD5E1'}
+        strokeWidth={active ? 1.5 : 1}
+      />
     </svg>
+  );
+}
+
+// 卡片内的区块标题图标（小、灰、跟随文字基线）
+const ResSectionIcon = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" className="text-gray-400">
+    <rect x="1.3" y="2.3" width="11.4" height="9.4" rx="1.7" stroke="currentColor" strokeWidth="1.2" />
+    <path d="M4.3 5.5h5.4M4.3 7.5h3.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+const RatioSectionIcon = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" className="text-gray-400">
+    <rect x="1.3" y="3.7" width="11.4" height="6.6" rx="1.7" stroke="currentColor" strokeWidth="1.2" />
+  </svg>
+);
+
+// 区块标题：小图标 + 标题 + 右侧当前值 chip
+function SectionHeader({ icon, title, chip }: { icon: React.ReactNode; title: string; chip?: string }) {
+  return (
+    <div className="mb-2.5 flex items-center justify-between">
+      <span className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-800">
+        {icon}
+        {title}
+      </span>
+      {chip && (
+        <span className="rounded-md bg-gray-100/90 px-1.5 py-[3px] text-[10px] font-medium leading-none text-gray-500 tabular-nums">
+          {chip}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -307,18 +348,14 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   const [open, setOpen] = useState(false);
   const isVideo = nodeType === 'video';
 
-  // 分辨率选项：
-  // - 视频节点：根据选中模型的 resolutions 动态过滤；模型未配置则用默认全集
-  // - 图片节点：固定 1K/2K/4K
-  const modelResolutions = isVideo && selectedModelId
+  // 分辨率选项：统一由模型配置驱动（后端 models.yaml 的 resolutions）——
+  // 图片与视频同一套规则；模型未配置时回退各自默认全集
+  const modelResolutions = selectedModelId
     ? models.find((m) => m.value === selectedModelId)?.resolutions
     : undefined;
-  const resolutionOptions: readonly string[] = isVideo
-    ? (modelResolutions && modelResolutions.length > 0 ? modelResolutions : VIDEO_RESOLUTION_OPTIONS)
-    : RESOLUTION_OPTIONS;
-
-  // 图片节点：doubao-seedream 系列不支持 1K
-  const is1KDisabled = !isVideo && !!selectedModelId && selectedModelId.startsWith('doubao-seedream');
+  const resolutionOptions: readonly string[] = modelResolutions && modelResolutions.length > 0
+    ? modelResolutions
+    : (isVideo ? VIDEO_RESOLUTION_OPTIONS : RESOLUTION_OPTIONS);
 
   // 视频节点：wan3.0（阿里万相）仅支持部分比例，其余模型不限制
   const allowedAspectRatios: readonly string[] | null =
@@ -340,17 +377,11 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
     ? ASPECT_RATIO_ROWS.map((row) => row.filter((item) => !item.value || allowedAspectRatios.includes(item.value)))
     : ASPECT_RATIO_ROWS;
 
-  // 当前分辨率不可用时自动回退：
-  // - 图片：1K 被禁用时回退到 2K
-  // - 视频：当前值不在模型支持列表时回退到第一个可用项
-  let effectiveResolution: string = resolution;
-  if (isVideo) {
-    if (!resolutionOptions.includes(resolution)) {
-      effectiveResolution = resolutionOptions[0] ?? resolution;
-    }
-  } else if (is1KDisabled && resolution === '1K') {
-    effectiveResolution = '2K';
-  }
+  // 当前分辨率不在模型支持列表时自动回退到第一个可用项（图片/视频同一套逻辑）
+  const resolutionFallback = !resolutionOptions.includes(resolution)
+    ? (resolutionOptions[0] ?? resolution)
+    : null;
+  const effectiveResolution: string = resolutionFallback ?? resolution;
 
   // 回退值与父组件状态不一致时回写，保证生成时提交的分辨率与 UI 显示一致
   useEffect(() => {
@@ -378,16 +409,16 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-2 w-[352px] bg-white rounded-2xl shadow-2xl border border-gray-100 ring-1 ring-black/5 p-4 z-30">
+          <div className="absolute bottom-full left-0 z-30 mb-2 w-[358px] rounded-2xl border border-gray-100/90 bg-white p-4 shadow-[0_16px_44px_-14px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.03]">
             {/* 清晰度 */}
             <div>
-              <div className="flex items-baseline justify-between mb-2.5">
-                <span className="text-[12px] font-semibold text-gray-800">清晰度</span>
-                {isVideo && <span className="text-[10px] text-gray-400">按当前时长预估</span>}
-              </div>
+              <SectionHeader
+                icon={ResSectionIcon}
+                title="清晰度"
+                chip={isVideo ? `按 ${selectedDuration && selectedDuration > 0 ? selectedDuration : 4}s 预估` : undefined}
+              />
               <div className="flex gap-2">
                 {resolutionOptions.map((res) => {
-                  const disabled = !isVideo && is1KDisabled && res === '1K';
                   const isActive = effectiveResolution === res;
                   // 视频节点：查找该分辨率对应的单价和预估费用
                   let resPriceLabel: string | null = null;
@@ -396,44 +427,49 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                     const priceItem = findVideoPricing(pricingNodes, realModelId, res);
                     if (priceItem && priceItem.price > 0) {
                       const dur = selectedDuration && selectedDuration > 0 ? selectedDuration : 4;
-                      resPriceLabel = `${Math.ceil(priceItem.price * dur)}积分`;
+                      resPriceLabel = `${Math.ceil(priceItem.price * dur)} 积分`;
                     }
                   }
+                  const isPrice = !!resPriceLabel;
+                  const subText = isPrice ? (resPriceLabel as string) : (RESOLUTION_META[res] || '');
                   return (
                     <button
                       key={res}
-                      title={disabled ? '当前模型不支持该清晰度' : undefined}
-                      className={`flex-1 rounded-xl border py-2 text-center transition-all ${
+                      className={`relative flex-1 rounded-xl border px-1 py-2.5 text-center transition-all duration-150 ${
                         isActive
-                          ? 'border-gray-900 bg-gray-900 text-white shadow-sm'
-                          : disabled
-                            ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
-                            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-400 hover:shadow-sm'
+                          ? 'border-gray-900 bg-gradient-to-b from-gray-800 to-gray-950 text-white shadow-md'
+                          : 'border-gray-200/90 bg-white text-gray-700 hover:-translate-y-px hover:border-gray-300 hover:bg-gray-50/70 hover:shadow-sm'
                       }`}
-                      onClick={() => { if (!disabled) { onResolutionChange(res as ResolutionOption); setOpen(false); } }}
-                      disabled={disabled}
+                      onClick={() => { onResolutionChange(res as ResolutionOption); setOpen(false); }}
                     >
-                      <div className="text-[13px] font-semibold leading-none">{res}</div>
-                      <div className={`text-[10px] leading-none mt-1.5 ${isActive ? 'text-gray-300' : disabled ? 'text-gray-300' : 'text-gray-400'}`}>
-                        {resPriceLabel && !disabled ? resPriceLabel : (RESOLUTION_META[res] || '')}
+                      <div className="text-[13px] font-semibold leading-none tracking-tight">{res}</div>
+                      <div className={`mt-1.5 text-[10px] leading-none tabular-nums ${
+                        isActive
+                          ? (isPrice ? 'text-amber-300' : 'text-gray-400')
+                          : (isPrice ? 'font-medium text-amber-600' : 'text-gray-400')
+                      }`}>
+                        {subText}
                       </div>
                     </button>
                   );
                 })}
               </div>
-              {is1KDisabled && (
-                <div className="text-[11px] text-amber-600 mt-2">当前模型不支持 1K 清晰度，已自动切换至 2K</div>
+              {resolutionFallback && (
+                <div className="mt-2 text-[11px] text-amber-600">
+                  当前模型不支持 {resolution} 清晰度，已自动切换至 {resolutionFallback}
+                </div>
               )}
             </div>
 
-            <div className="my-3.5 h-px bg-gray-100" />
+            <div className="my-3.5 h-px bg-gradient-to-r from-gray-100 via-gray-100 to-transparent" />
 
             {/* 比例网格 */}
             <div>
-              <div className="flex items-baseline justify-between mb-2.5">
-                <span className="text-[12px] font-semibold text-gray-800">比例</span>
-                <span className="text-[10px] text-gray-400">当前 {effectiveAspectRatio === 'free' ? '自适应' : effectiveAspectRatio}</span>
-              </div>
+              <SectionHeader
+                icon={RatioSectionIcon}
+                title="比例"
+                chip={effectiveAspectRatio === 'free' ? '自适应' : effectiveAspectRatio}
+              />
               <div className="grid grid-cols-5 gap-2">
                 {aspectRatioRows.flat().map((item, index) => {
                   // 占位：空值渲染为透明占位元素
@@ -444,17 +480,18 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                   return (
                     <button
                       key={item.value}
-                      className={`rounded-xl transition-all flex flex-col items-center justify-center gap-1.5 py-2 ${
+                      title={item.label}
+                      className={`group relative flex flex-col items-center justify-center gap-1.5 rounded-xl border py-2.5 transition-all duration-150 ${
                         isActive
-                          ? 'border-[1.5px] border-gray-900 bg-gray-900/[0.05] shadow-sm'
-                          : 'border border-gray-200 bg-white hover:border-gray-400 hover:shadow-sm'
+                          ? 'border-gray-900/85 bg-gray-900/[0.06] shadow-[inset_0_0_0_1px_rgba(17,24,39,0.04)]'
+                          : 'border-gray-200/90 bg-white hover:-translate-y-px hover:border-gray-300 hover:bg-gray-50/70 hover:shadow-sm'
                       }`}
                       onClick={() => { onAspectRatioChange(item.value); setOpen(false); }}
                     >
-                      <RatioIcon value={item.value} active={isActive} />
+                      <RatioIcon value={item.value} active={isActive} size={24} />
                       <span
-                        className={`text-[11px] leading-none ${
-                          isActive ? 'font-semibold text-gray-900' : 'text-gray-500'
+                        className={`text-[11px] leading-none tracking-tight transition-colors ${
+                          isActive ? 'font-semibold text-gray-900' : 'text-gray-500 group-hover:text-gray-700'
                         }`}
                       >
                         {item.label}
@@ -464,7 +501,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                 })}
               </div>
               {allowedAspectRatios && (
-                <div className="text-[11px] text-amber-600 mt-2">万相 Wan 3.0 仅支持以上比例</div>
+                <div className="mt-2 text-[11px] text-amber-600">万相 Wan 3.0 仅支持以上比例</div>
               )}
             </div>
           </div>
@@ -476,14 +513,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
 
 // ==================== 主工具栏（截图1 底部）====================
 
-// 视频时长选项：按模型分流
-// doubao-seedance-2.0：4-15 秒（火山引擎官方限制）；wan3.0-video：2-30 秒（阿里云官方限制）
-function getDurationOptions(model: string): number[] {
-  const isWan = model.includes('wan3.0');
-  const min = isWan ? 2 : 4;
-  const max = isWan ? 30 : 15;
-  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
-}
+// 视频时长选项由模型配置驱动：后端 models.yaml 的 duration_range（每个视频模型显式声明），
+// 前端统一用 buildDurationOptions 生成，未配置的模型回退默认 4-15 秒
 
 // 音色选项（仅列出 qwen3-tts-instruct-flash 支持的音色，来自阿里云百炼官方非实时音色列表）
 // 不支持的音色（Katerina/Ryan/Aiden/Andre 及全部方言）已移除，
@@ -632,8 +663,9 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     return false;
   })();
   const [durationOpen, setDurationOpen] = useState(false);
-  // 视频时长选项随所选模型变化（wan3.0-video: 2-30s，seedance: 4-15s）
-  const durationOptions = getDurationOptions(selectedModel);
+  // 视频时长选项：以所选模型的 duration_range 配置为准
+  // （如 wan3.0-video 2-30s、cdance2.5-0807 4-30s、seedance 2.0 系列 4-15s）
+  const durationOptions = buildDurationOptions(models.find((m) => m.value === selectedModel));
 
   // 音色选择器状态
   const [voiceOpen, setVoiceOpen] = useState(false);
