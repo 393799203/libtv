@@ -99,12 +99,29 @@ func (q *Queue) Enqueue(ctx context.Context, t Task) error {
 	}).Err()
 }
 
-// Start 建消费组、拉起 worker 池与回收协程
-func (q *Queue) Start(parent context.Context) error {
-	// 起始 ID 用 "0"：组首次创建时，已入队但未消费的消息也会被投递给消费者
-	err := q.rdb.XGroupCreateMkStream(parent, q.cfg.Stream, q.cfg.ConsumerGroup, "0").Err()
+// ensureGroup 创建消费者组，幂等（已存在时忽略 BUSYGROUP）。
+// 起始 ID 用 "0"：组首次创建或重建时，已入队但未投递的消息也会被投递给消费者。
+//
+// 之所以要反复调用而不只在启动时建一次：Redis 侧数据被清空或容器重建后，
+// 消费者组会随之消失，而此时 XADD 仍会自动创建 stream（入队看起来是成功的），
+// 但 worker 的 XREADGROUP 会一直报 NOGROUP —— 任务静默卡在 pending 永不执行。
+func (q *Queue) ensureGroup(ctx context.Context) error {
+	err := q.rdb.XGroupCreateMkStream(ctx, q.cfg.Stream, q.cfg.ConsumerGroup, "0").Err()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
 		return fmt.Errorf("创建消费者组失败: %w", err)
+	}
+	return nil
+}
+
+// isNoGroupErr Redis 在 stream / 消费者组不存在时返回 NOGROUP 错误
+func isNoGroupErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "NOGROUP")
+}
+
+// Start 建消费组、拉起 worker 池与回收协程
+func (q *Queue) Start(parent context.Context) error {
+	if err := q.ensureGroup(parent); err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(parent)
@@ -222,6 +239,15 @@ func (q *Queue) worker(ctx context.Context, id int) {
 				return
 			}
 			log.Printf("[Queue] worker-%d 读取任务失败: %v", id, err)
+			// 消费者组丢失（Redis 数据被清空/容器重建）→ 自愈重建后继续消费
+			if isNoGroupErr(err) {
+				if gerr := q.ensureGroup(ctx); gerr == nil {
+					log.Printf("[Queue] worker-%d 检测到消费者组缺失，已重建并继续消费", id)
+					continue
+				} else {
+					log.Printf("[Queue] worker-%d 重建消费者组失败: %v", id, gerr)
+				}
+			}
 			time.Sleep(time.Second)
 			continue
 		}
@@ -421,6 +447,9 @@ func (q *Queue) reclaimOnce(ctx context.Context, consumer string, minIdle time.D
 	if err != nil {
 		if ctx.Err() == nil && err != redis.Nil {
 			log.Printf("[Queue] 认领超时任务失败: %v", err)
+			if isNoGroupErr(err) {
+				_ = q.ensureGroup(ctx)
+			}
 		}
 		return
 	}
