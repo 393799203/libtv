@@ -7,15 +7,14 @@ import { paymentApi } from '@/services/paymentApi';
 import api from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 
-/** 容量估算参考模型：视频取 Seedance 2.0 480p，图片取默认的 Seedream 5.0 Lite */
-const REF_VIDEO_MODEL_ID = 'doubao-seedance-2.0';
+/** 参考单价估算：视频取当前渠道第一个 480p 已配价模型，图片取第一个已配价模型 */
 const REF_VIDEO_RESOLUTION = '480p';
-const REF_IMAGE_MODEL_ID = 'doubao-seedream-5.0-lite';
 
 /** 参考单价（积分/秒、积分/张），来自运营后台「价格管理」，未配置时为 0 */
 interface RefPrices {
   videoPricePerSec: number;
   imagePricePerPiece: number;
+  videoModelName: string;
   imageModelName: string;
 }
 
@@ -24,11 +23,11 @@ function capacityFeatures(points: number, prices: RefPrices): string[] {
   const features: string[] = [];
   if (prices.videoPricePerSec > 0) {
     const videoSeconds = Math.floor(points / prices.videoPricePerSec);
-    features.push(`可生成约 ${videoSeconds.toLocaleString()} 秒 Seedance 2.0 480p 视频`);
+    features.push(`可生成约 ${videoSeconds.toLocaleString()} 秒${prices.videoModelName || '视频'}`);
   }
   if (prices.imagePricePerPiece > 0) {
     const imageCount = Math.floor(points / prices.imagePricePerPiece);
-    features.push(`或可生成约 ${imageCount.toLocaleString()} 张图片`);
+    features.push(`或可生成约 ${imageCount.toLocaleString()} 张${prices.imageModelName || '图片'}`);
   }
   return features;
 }
@@ -37,7 +36,7 @@ function capacityFeatures(points: number, prices: RefPrices): string[] {
 export function PointsMallModal({ onClose }: { onClose: () => void }) {
   const { message } = App.useApp();
   const [packages, setPackages] = useState<PointsPackage[]>([]);
-  const [prices, setPrices] = useState<RefPrices>({ videoPricePerSec: 0, imagePricePerPiece: 0, imageModelName: '图片' });
+  const [prices, setPrices] = useState<RefPrices>({ videoPricePerSec: 0, imagePricePerPiece: 0, videoModelName: '视频', imageModelName: '图片' });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,20 +54,26 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
       });
 
     // 参考单价（价格管理实时配置）
+    // 按当前登录用户渠道返回（后端 /api/pricing 未传 channel 时按用户最终渠道解析），
+    // 参考模型动态取当前渠道第一个有价格的视频/图片模型（电信用户看电信模型估算）
     pricingApi
       .list()
       .then((res) => {
         if (cancelled) return;
         const videoNode = res.nodes?.find((n) => n.node_type === 'video');
-        const videoModel = videoNode?.models.find(
-          (m) => m.model_id === REF_VIDEO_MODEL_ID && m.resolution === REF_VIDEO_RESOLUTION,
-        );
+        // 视频：取第一个 480p 且已配价的模型作为参考
+        const videoModel =
+          videoNode?.models.find(
+            (m) => (m.resolution || '').toLowerCase() === REF_VIDEO_RESOLUTION && m.price > 0,
+          ) ?? videoNode?.models.find((m) => m.price > 0);
         const imageNode = res.nodes?.find((n) => n.node_type === 'image');
+        // 图片：取第一个已配价的模型作为参考
         const imageModel =
-          imageNode?.models.find((m) => m.model_id === REF_IMAGE_MODEL_ID) ?? imageNode?.models[0];
+          imageNode?.models.find((m) => m.price > 0) ?? imageNode?.models[0];
         setPrices({
           videoPricePerSec: videoModel?.price ?? 0,
           imagePricePerPiece: imageModel?.price ?? 0,
+          videoModelName: videoModel?.model_name || '视频',
           imageModelName: imageModel?.model_name || '图片',
         });
       })
@@ -142,10 +147,10 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // 底部参考单价说明（按已配置的单价动态拼接）
+  // 底部参考单价说明（按已配置的单价动态拼接，模型名来自当前渠道）
   const priceNotes: string[] = [];
   if (prices.videoPricePerSec > 0) {
-    priceNotes.push(`Seedance 2.0 480p 视频 ${prices.videoPricePerSec} 积分/秒`);
+    priceNotes.push(`${prices.videoModelName || '视频'} ${prices.videoPricePerSec} 积分/秒`);
   }
   if (prices.imagePricePerPiece > 0) {
     priceNotes.push(`${prices.imageModelName} ${prices.imagePricePerPiece} 积分/张`);

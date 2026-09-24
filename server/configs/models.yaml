@@ -209,13 +209,40 @@ models:
         usage: [text, script]
         max_tokens: 8192
         temperature: 0.7
-        description: "DeepSeek V4.1 Flash（电信天翼云渠道），适合文本生成、剧本分镜和提示词生成"
+        description: "DeepSeek V4.1 Flash，适合文本生成、剧本分镜和提示词生成"
         default: true  # 默认选中此模型
+
+      - id: glm-5.3-flash
+        name: "GLM-5.3 Flash"
+        provider: dianxin
+        model_id: "glm-5.3-flash"
+        usage: [text, script, previz]  # previz=白模场景解析（多模态，支持图片输入）
+        max_tokens: 8192
+        temperature: 0.7
+        description: "GLM-5.3 Flash（多模态），支持图片理解，可用于白模场景解析、文本与分镜生成"
 
     # ---------- image ----------
     image:
+      - id: doubao-seedream-5.0-lite
+        name: "Seedream 5.0 Lite"
+        provider: dianxin
+        model_id: "doubao-seedream-5.0-lite"
+        usage: [image, character, scene, prop]
+        max_tokens: 2048
+        temperature: 0.7
+        description: "电信渠道 Seedream 5.0 轻量版（image 接口与华数同协议）"
+        default: true
+
     # ---------- video ----------
     video:
+      - id: cdance2.0-0807
+        name: "Seedance 2.0"
+        provider: dianxin
+        model_id: "cdance2.0-0807"
+        usage: [video]
+        description: "电信渠道 Seedance 2.0（cdance2.0-0807，异步任务接口）"
+        resolutions: ["480p", "720p", "1080p"]
+
     # ---------- audio ----------
     audio:
 

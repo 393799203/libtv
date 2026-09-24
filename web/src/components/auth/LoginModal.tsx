@@ -41,7 +41,10 @@ export function LoginModal() {
   const handleRegister = async (values: LoginRequest & RegisterRequest) => {
     setLoading(true);
     try {
-      const response = await authApi.register(values);
+      // 注册来源渠道：默认电信；仅当 URL 显式 ?source=wasu 时走华数
+      const source = new URLSearchParams(window.location.search).get('source');
+      const channel = source === 'wasu' ? 'wasu' : 'dianxin';
+      const response = await authApi.register({ ...values, channel });
       setAuth(response as unknown as import('@/types/api').AuthResponse);
       message.success('注册成功');
       closeLoginModal();

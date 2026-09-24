@@ -53,7 +53,7 @@ func (s *UserService) Register(ctx context.Context, email, password, nickname st
 	return s.RegisterWithChannel(ctx, email, password, nickname, "")
 }
 
-// RegisterWithChannel 注册（可指定来源渠道：wasu/dianxin；空值默认 wasu）
+// RegisterWithChannel 注册（可指定来源渠道：wasu=华数 / dianxin=电信；缺省/非法回退 dianxin）
 func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, nickname, channel string) (*model.User, error) {
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -68,8 +68,8 @@ func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, 
 		return nil, err
 	}
 
-	if channel != "dianxin" {
-		channel = "wasu" // 默认华数
+	if channel != "wasu" {
+		channel = "dianxin" // 默认电信（无 source 走电信）
 	}
 
 	user := &model.User{

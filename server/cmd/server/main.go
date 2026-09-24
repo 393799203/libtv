@@ -167,7 +167,7 @@ func main() {
 	modelHandler := handler.NewModelHandler(modelManager, channelService)
 	channelHandler := handler.NewChannelHandler(channelService, userService)
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService)
-	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService)
+	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService, channelService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService, channelService)

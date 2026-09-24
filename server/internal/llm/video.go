@@ -162,8 +162,9 @@ type mediaItem struct {
 	isAudio bool
 }
 
-// GenerateVideo 调用视频生成API，按模型分派到对应的请求构建器：
-// wan3.0（阿里万相）→ buildWanRequest；其他（doubao-seedance 系列）→ buildSeedanceRequest
+// GenerateVideo 调用视频生成API，按渠道+模型分派到对应的请求构建器：
+//   - 电信渠道（dianxin）：buildDianxinRequest → /contents/generations/tasks 异步任务
+//   - 华数 wan3.0（阿里万相）→ buildWanRequest；其他（doubao-seedance 系列）→ buildSeedanceRequest
 // imageURLs: 参考图列表。videoURLs: 参考视频列表。
 // videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=参考
 // generateAudio: 是否生成音频（true=生成声音，false=静音）
@@ -173,6 +174,11 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 	}
 	if ratio == "" {
 		ratio = "16:9"
+	}
+
+	// 电信渠道：独立协议（contents/generations/tasks 异步任务）
+	if ChannelFrom(ctx) == ChannelDianxin {
+		return c.generateDianxinVideo(ctx, model, prompt, duration, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 	}
 
 	var payload []byte
@@ -193,6 +199,228 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 
 	log.Printf("[VideoGen] ✅ 视频生成成功: url=%s", videoURL)
 	return videoURL, nil
+}
+
+// ==================== 电信（天翼云）视频协议 ====================
+
+// DianxinVideoItem 电信视频 content 条目（text 独立成项，参考素材带 role）
+type DianxinVideoItem struct {
+	Type     string             `json:"type"`                 // text / image_url / video_url / audio_url
+	Text     string             `json:"text,omitempty"`       // type=text
+	ImageURL *VideoContentImage `json:"image_url,omitempty"`  // type=image_url
+	VideoURL *VideoContentImage `json:"video_url,omitempty"`  // type=video_url
+	AudioURL *VideoContentImage `json:"audio_url,omitempty"`  // type=audio_url
+	Role     string             `json:"role,omitempty"`       // reference_image / reference_video / reference_audio
+}
+
+// DianxinVideoRequest 电信视频创建任务请求体
+type DianxinVideoRequest struct {
+	Model         string             `json:"model"`
+	Content       []DianxinVideoItem `json:"content"`
+	GenerateAudio bool               `json:"generate_audio"`
+	Ratio         string             `json:"ratio"`
+	Duration      int                `json:"duration"`
+	Watermark     bool               `json:"watermark"`
+}
+
+// generateDianxinVideo 电信视频生成（POST /contents/generations/tasks → 轮询）
+func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, prompt string, duration int, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
+	// 参考素材 role 复用 collectMedia（role 词汇与华数一致）
+	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+
+	content := make([]DianxinVideoItem, 0, len(items)+1)
+	// 提示词作为 text 条目（电信协议：文本独立成 content 项）
+	content = append(content, DianxinVideoItem{Type: "text", Text: prompt})
+	for _, it := range items {
+		entry := DianxinVideoItem{Role: it.role}
+		if it.isVideo {
+			entry.Type = "video_url"
+			entry.VideoURL = &VideoContentImage{URL: it.url}
+		} else if it.isAudio {
+			entry.Type = "audio_url"
+			entry.AudioURL = &VideoContentImage{URL: it.url}
+		} else {
+			entry.Type = "image_url"
+			entry.ImageURL = &VideoContentImage{URL: it.url}
+		}
+		content = append(content, entry)
+	}
+
+	payload, err := json.Marshal(DianxinVideoRequest{
+		Model:         model,
+		Content:       content,
+		GenerateAudio: generateAudio,
+		Ratio:         ratio,
+		Duration:      duration,
+		Watermark:     false,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal dianxin video request: %w", err)
+	}
+
+	log.Printf("[VideoGen] 电信视频任务创建: model=%s duration=%ds ratio=%s contentCount=%d",
+		model, duration, ratio, len(content))
+
+	// 创建任务
+	apiKey, baseURL := c.creds(ctx)
+	createURL := fmt.Sprintf("%s/contents/generations/tasks", baseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("create dianxin video task: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	start := time.Now()
+	resp, err := c.httpCli.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("dianxin video http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[VideoGen] 电信视频创建失败: status=%d body=%s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("电信视频API错误 (status=%d): %s", resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+	}
+	log.Printf("[VideoGen] 电信视频任务创建成功: 耗时=%s", time.Since(start).Round(time.Millisecond))
+
+	// 解析任务ID（兼容 id / data.id 字段）
+	var createResp struct {
+		ID   string `json:"id"`
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &createResp); err != nil {
+		return "", fmt.Errorf("解析电信视频响应失败: %w", err)
+	}
+	if createResp.Error != nil {
+		return "", fmt.Errorf("电信视频API错误: %s", createResp.Error.Message)
+	}
+	taskID := createResp.ID
+	if taskID == "" {
+		taskID = createResp.Data.ID
+	}
+	if taskID == "" {
+		return "", fmt.Errorf("电信视频响应无任务ID: %s", string(respBody))
+	}
+
+	// 轮询任务
+	return c.pollDianxinVideoTask(ctx, taskID)
+}
+
+// pollDianxinVideoTask 轮询电信视频任务状态（GET /contents/generations/tasks/{id}）
+func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (string, error) {
+	apiKey, baseURL := c.creds(ctx)
+	pollURL := fmt.Sprintf("%s/contents/generations/tasks/%s", baseURL, taskID)
+	maxAttempts := 120 // 每5秒一次，共10分钟
+
+	for i := 0; i < maxAttempts; i++ {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("create dianxin poll request: %w", err)
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+		resp, err := c.httpCli.Do(httpReq)
+		if err != nil {
+			log.Printf("[VideoGen] 电信轮询错误 (attempt %d): %v", i+1, err)
+			continue
+		}
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("[VideoGen] 电信轮询HTTP错误 (attempt %d): status=%d body=%s", i+1, resp.StatusCode, string(respBody))
+			continue
+		}
+
+		// 解析任务状态（兼容两种包裹格式）
+		var task struct {
+			Status string `json:"status"` // processing/succeeded/failed
+			Data   *struct {
+				Status     string `json:"status"`
+				VideoURL   string `json:"video_url"`
+				ResultURL  string `json:"result_url"`
+				FailReason string `json:"fail_reason"`
+				Output     *struct {
+					VideoURL string `json:"video_url"`
+					URL      string `json:"url"`
+				} `json:"output"`
+			} `json:"data"`
+			Output *struct {
+				VideoURL string `json:"video_url"`
+				URL      string `json:"url"`
+			} `json:"output"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(respBody, &task); err != nil {
+			log.Printf("[VideoGen] 电信轮询解析失败 (attempt %d): %v", i+1, err)
+			continue
+		}
+
+		if task.Error != nil && task.Error.Message != "" {
+			return "", fmt.Errorf("电信视频任务失败: %s", task.Error.Message)
+		}
+
+		// 状态字段可能在 data 内
+		status := task.Status
+		if task.Data != nil && task.Data.Status != "" {
+			status = task.Data.Status
+		}
+
+		// 成功：取视频URL（兼容多字段）
+		var videoURL string
+		if task.Data != nil {
+			if task.Data.Output != nil {
+				videoURL = task.Data.Output.VideoURL
+				if videoURL == "" {
+					videoURL = task.Data.Output.URL
+				}
+			}
+			if videoURL == "" {
+				videoURL = task.Data.VideoURL
+			}
+			if videoURL == "" {
+				videoURL = task.Data.ResultURL
+			}
+			if task.Data.FailReason != "" {
+				return "", fmt.Errorf("电信视频任务失败: %s", task.Data.FailReason)
+			}
+		}
+		if videoURL == "" && task.Output != nil {
+			videoURL = task.Output.VideoURL
+			if videoURL == "" {
+				videoURL = task.Output.URL
+			}
+		}
+
+		switch status {
+		case "succeeded", "success", "done":
+			if videoURL != "" {
+				return videoURL, nil
+			}
+			log.Printf("[VideoGen] 电信任务成功但无URL (attempt %d): %s", i+1, string(respBody))
+			continue
+		case "failed", "error":
+			return "", fmt.Errorf("电信视频任务失败: %s", string(respBody))
+		default:
+			log.Printf("[VideoGen] 电信任务轮询 (attempt %d): status=%s", i+1, status)
+		}
+	}
+
+	return "", fmt.Errorf("电信视频任务超时（10分钟）: taskID=%s", taskID)
 }
 
 // ==================== 豆包 Seedance 系列（火山引擎）====================

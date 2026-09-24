@@ -14,19 +14,24 @@ import (
 )
 
 type PrevizHandler struct {
-	llmClient    *llm.Client
-	imageClient  *llm.ImageClient // 本地图片转 base64 用
-	modelManager *llm.ModelManager
-	biller       *service.BillingService
+	llmClient      *llm.Client
+	imageClient    *llm.ImageClient // 本地图片转 base64 用
+	modelManager   *llm.ModelManager
+	biller         *service.BillingService
+	channelService *service.ChannelService
 }
 
-func NewPrevizHandler(llmClient *llm.Client, imageClient *llm.ImageClient, modelManager *llm.ModelManager, biller *service.BillingService) *PrevizHandler {
-	return &PrevizHandler{
+func NewPrevizHandler(llmClient *llm.Client, imageClient *llm.ImageClient, modelManager *llm.ModelManager, biller *service.BillingService, channelService ...*service.ChannelService) *PrevizHandler {
+	h := &PrevizHandler{
 		llmClient:    llmClient,
 		imageClient:  imageClient,
 		modelManager: modelManager,
 		biller:       biller,
 	}
+	if len(channelService) > 0 {
+		h.channelService = channelService[0]
+	}
+	return h
 }
 
 // AnalyzeSceneRequest 白模场景解析请求
@@ -44,10 +49,20 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		return
 	}
 
-	// 默认视觉模型（快/便宜）；必须存在于 models.yaml（FindModelByID 查不到会 400）
+	// 解析用户最终渠道（全局策略 + 用户渠道），供视觉模型走对应 token
+	channel := "wasu"
+	if h.channelService != nil {
+		channel = h.channelService.ResolveUserChannel(c.Request.Context(), middleware.GetUserID(c))
+	}
+
+	// 默认视觉模型（快/便宜）；按渠道取不同默认（电信=glm-5.3-flash 多模态，华数=Seed 2.1 Turbo）
 	modelID := req.Model
 	if modelID == "" {
-		modelID = "doubao-seed-2.1-turbo"
+		if channel == "dianxin" {
+			modelID = "glm-5.3-flash"
+		} else {
+			modelID = "doubao-seed-2.1-turbo"
+		}
 	}
 
 	// 模型 ID 映射：前端传 ID，需要转换为 model_id
@@ -91,8 +106,9 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		imageURL = base64Data
 	}
 
-	// 调用视觉模型解析场景
-	objects, description, err := h.llmClient.AnalyzeSceneImage(c.Request.Context(), modelConfig.ModelID, imageURL)
+	// 调用视觉模型解析场景（注入用户渠道供多 token 路由）
+	ctx := llm.WithChannel(c.Request.Context(), channel)
+	objects, description, err := h.llmClient.AnalyzeSceneImage(ctx, modelConfig.ModelID, imageURL)
 	if err != nil {
 		log.Printf("[PrevizHandler] 场景解析失败: %v", err)
 		refund("解析失败")

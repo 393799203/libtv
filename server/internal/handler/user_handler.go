@@ -27,6 +27,9 @@ type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
 	Nickname string `json:"nickname"`
+	// Channel 注册来源渠道（wasu=华数 / dianxin=电信）；缺省 wasu。
+	// 由前端从注册链接的 ?source= 参数或其他投放渠道标记带入。
+	Channel string `json:"channel"`
 }
 
 type LoginRequest struct {
@@ -46,7 +49,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.Register(c.Request.Context(), req.Email, req.Password, req.Nickname)
+	user, err := h.userService.RegisterWithChannel(c.Request.Context(), req.Email, req.Password, req.Nickname, req.Channel)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return

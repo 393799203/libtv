@@ -38,7 +38,7 @@ var priceNodeDefs = []priceNodeDef{
 	{NodeType: "image", NodeName: "图片节点", ModelGroup: "image", BillingType: BillingTypePerCall, Usage: "image"},
 	{NodeType: "video", NodeName: "视频节点", ModelGroup: "video", BillingType: BillingTypePerSecond, Usage: "video"},
 	{NodeType: "audio", NodeName: "语音节点", ModelGroup: "audio", BillingType: BillingTypePerChar, Usage: "audio"},
-	{NodeType: "previz", NodeName: "白模解析", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"doubao-seed-2.1-turbo", "doubao-seed-2.1-pro"}},
+	{NodeType: "previz", NodeName: "白模解析", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"doubao-seed-2.1-turbo", "doubao-seed-2.1-pro", "glm-5.3-flash"}},
 }
 
 // ErrInvalidPriceConfig 价格配置参数非法（HTTP 400）
