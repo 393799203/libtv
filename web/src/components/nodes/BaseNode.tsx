@@ -2,6 +2,7 @@ import { memo, useState, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { Tooltip } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
 import type { LibTVNodeData } from '@/types/canvas';
 import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -39,6 +40,30 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   const effectiveColor = headerColor || config.color;
   const status = data.status;
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+
+  // 是否已有上一次的产出。用来区分两种情况：
+  // - 首次生成（无旧结果）：显示统一加载态
+  // - 重新生成（有旧结果）：保留旧结果半透明做对照 + 叠加"重新生成中"遮罩
+  const hasExistingOutput = (() => {
+    const d = data as Record<string, unknown>;
+    switch (nodeType) {
+      case 'image':
+        return Boolean(d.imageUrl);
+      case 'video':
+      case 'previz':
+        return Boolean(d.videoUrl);
+      case 'audio':
+        return Boolean(d.audioUrl);
+      case 'text':
+        return Boolean(d.content);
+      case 'script':
+        // 剧本节点有两种产出：正文 scriptContent + 分镜列表 shots。
+        // 任一存在都算"有旧结果"，只生成了分镜的情况不能漏判。
+        return Boolean(d.scriptContent) || (Array.isArray(d.shots) && d.shots.length > 0);
+      default:
+        return false;
+    }
+  })();
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [label, setLabel] = useState(data.label || config.label);
@@ -119,14 +144,33 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
 
       {/* 节点内容 */}
       <div className={`${noContentPadding ? '' : 'px-3 py-2'} text-xs text-gray-600 flex-1 relative`}>
-        {/* ✅ 统一loading状态显示：所有节点在pending/running时都显示统一的loading组件 */}
         {(status === 'running' || status === 'pending') ? (
-          <NodeLoadingState
-            status={status}
-            statusText={(data.progressMessage as string | undefined) || (status === 'pending' ? '等待生成中...' : `正在生成${config.label}...`)}
-            iconBgColor={nodeType === 'text' ? 'bg-purple-100' : nodeType === 'image' ? 'bg-green-100' : nodeType === 'video' ? 'bg-red-100' : nodeType === 'audio' ? 'bg-emerald-100' : 'bg-blue-100'}
-            iconColor={nodeType === 'text' ? 'text-purple-500' : nodeType === 'image' ? 'text-green-500' : nodeType === 'video' ? 'text-red-500' : nodeType === 'audio' ? 'text-emerald-500' : 'text-blue-500'}
-          />
+          hasExistingOutput ? (
+            /* 重新生成：保留上一次的产出做对照（半透明、不可交互），叠加遮罩说明正在重跑。
+               直接清空换成加载态会让用户以为结果丢了；跑完后由 SSE 回填替换。 */
+            <div className="relative">
+              <div className="opacity-40 pointer-events-none select-none" aria-hidden="true">
+                {children}
+              </div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-md bg-white/45 backdrop-blur-[1px]">
+                <LoadingOutlined className="text-xl text-blue-500 animate-spin" />
+                <span className="text-[11px] font-medium text-blue-600">
+                  {status === 'pending' ? '等待生成中...' : '重新生成中...'}
+                </span>
+                {data.progressMessage ? (
+                  <span className="text-[10px] text-gray-500">{data.progressMessage}</span>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            /* 首次生成：没有旧结果可留，显示统一加载态 */
+            <NodeLoadingState
+              status={status}
+              statusText={(data.progressMessage as string | undefined) || (status === 'pending' ? '等待生成中...' : `正在生成${config.label}...`)}
+              iconBgColor={nodeType === 'text' ? 'bg-purple-100' : nodeType === 'image' ? 'bg-green-100' : nodeType === 'video' ? 'bg-red-100' : nodeType === 'audio' ? 'bg-emerald-100' : 'bg-blue-100'}
+              iconColor={nodeType === 'text' ? 'text-purple-500' : nodeType === 'image' ? 'text-green-500' : nodeType === 'video' ? 'text-red-500' : nodeType === 'audio' ? 'text-emerald-500' : 'text-blue-500'}
+            />
+          )
         ) : (
           children
         )}
