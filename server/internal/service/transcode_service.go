@@ -23,10 +23,10 @@ const (
 
 type VideoTask struct {
 	Status     VideoTaskStatus `json:"status"`
-	URL        string           `json:"url,omitempty"`
-	Compressed bool             `json:"compressed"`
-	Error      string           `json:"error,omitempty"`
-	CreatedAt  time.Time        `json:"created_at"`
+	URL        string          `json:"url,omitempty"`
+	Compressed bool            `json:"compressed"`
+	Error      string          `json:"error,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
 }
 
 // videoTaskRegistry 进程内任务状态注册表（仅用于异步转码场景）

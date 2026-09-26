@@ -12,6 +12,7 @@ import type { UserAsset } from '@/services/assetApi';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { BaseNode } from './BaseNode';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
+import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import { uploadImage } from '@/services/uploadApi';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
@@ -33,14 +34,18 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   const projectId = useCanvasStore((s) => s.projectId);
   // 从资产库导入图片弹窗
   const [showAssetPicker, setShowAssetPicker] = useState(false);
+  // 双击查看大图弹窗（展示原图，不是画布上的缩略图）
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // 是否为风格图片节点
   const isStyleNode = id.startsWith('style-');
   // 风格节点使用粉色主题
   const styleColor = isStyleNode ? '#ec4899' : undefined;
 
-  // 图片尺寸：优先使用data中的值（后端返回），否则通过加载图片获取（fallback）
-  const [loadedSize, setLoadedSize] = useState<{ width: number; height: number } | null>(null);
+  // 原图尺寸：右上角尺寸标签与容器高度都用它。
+  // 必须只由**原图**测得 —— 画布上渲染的是缩略图（640px webp），
+  // 若拿渲染图的 naturalWidth 覆盖，标签就会显示缩略图尺寸（2560×1440 显示成 640×360）。
+  const [originalSize, setOriginalSize] = useState<{ width: number; height: number } | null>(null);
 
   // 图片懒加载状态：loading（灰底+转圈）→ loaded / error
   const [imgStatus, setImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
@@ -58,26 +63,23 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
       ? data.imageUrl
       : data.thumbUrl || deriveThumbUrl(data.imageUrl) || data.imageUrl;
 
-  // 最终尺寸：data中有值就用data的，否则用加载获取的
-  const imageWidth = data.width || loadedSize?.width;
-  const imageHeight = data.height || loadedSize?.height;
+  // 最终尺寸：后端回写的 data.width/height 优先，缺失时才回落到原图实测
+  const imageWidth = data.width || originalSize?.width;
+  const imageHeight = data.height || originalSize?.height;
 
-  // Fallback：如果data中没有width/height，通过加载图片获取尺寸
+  // Fallback：data 中没有 width/height 时，加载**原图**测尺寸（不能用缩略图测）
   useEffect(() => {
     if (data.imageUrl && !data.width && !data.height) {
       const img = new window.Image();
       img.onload = () => {
-        setLoadedSize({
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-        });
+        setOriginalSize({ width: img.naturalWidth, height: img.naturalHeight });
       };
       img.onerror = () => {
-        setLoadedSize(null);
+        setOriginalSize(null);
       };
       img.src = data.imageUrl;
     } else {
-      setLoadedSize(null);
+      setOriginalSize(null);
     }
   }, [data.imageUrl, data.width, data.height]);
 
@@ -121,6 +123,9 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     },
     [id]
   );
+
+  // 双击打开大图：稳定引用，避免 headerRight 的 useMemo 每次重建
+  const onPreview = useCallback(() => setPreviewOpen(true), []);
 
   // 标题栏右侧内容 — useMemo 避免每次渲染重建 JSX 导致 BaseNode 无效重渲染
   const headerRight = useMemo(() => {
@@ -192,6 +197,11 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
           <div
             className="relative rounded-lg overflow-hidden bg-gray-100 w-[320px]"
             style={{ minHeight: `${imageContainerHeight}px` }}
+            title="双击查看大图"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              onPreview();
+            }}
           >
             {/* 懒加载中：灰底 + 转圈标识 */}
             {imgStatus === 'loading' && (
@@ -207,10 +217,8 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
               decoding="async"
               onLoad={async (e) => {
                 const el = e.currentTarget;
-                // 以实际渲染的图片尺寸更新容器高度（避免探测 Image 与显示 img 不同步导致的高度错误/裁切）
-                if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-                  setLoadedSize({ width: el.naturalWidth, height: el.naturalHeight });
-                }
+                // 注意：这里渲染的是缩略图，**不能**用它的 naturalWidth/Height 去写尺寸，
+                // 否则右上角标签会显示缩略图尺寸（640×360）。尺寸一律以原图为准。
                 // 大图场景：onLoad 只表示下载完成，解码/上屏可能仍在进行——
                 // 等 decode() 真正可绘制后再收起 loading，避免"转圈没了图还没出来"
                 try {
@@ -257,6 +265,18 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
           onChange={handleUpload}
         />
       </BaseNode>
+
+      {/* 双击查看大图：展示 imageUrl 原图（画布上渲染的是缩略图） */}
+      <MediaPreviewModal
+        open={previewOpen}
+        kind="image"
+        url={data.imageUrl}
+        title={data.label}
+        meta={imageWidth && imageHeight ? `${imageWidth} × ${imageHeight}` : undefined}
+        width={imageWidth}
+        height={imageHeight}
+        onClose={() => setPreviewOpen(false)}
+      />
 
       {/* 从资产库导入图片（Modal 默认 portal 到 body，不受画布 transform 影响） */}
       {showAssetPicker && (

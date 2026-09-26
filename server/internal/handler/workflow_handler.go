@@ -474,6 +474,23 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	}
 }
 
+// toInt 把引擎输出里的数值字段转成 int（Go 侧是 int，经 JSON 往返可能是 float64/json.Number）
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i), true
+		}
+	}
+	return 0, false
+}
+
 // persistNodeOutputs 把执行结果回写到画布节点 data 中
 // - 把用户输入的 prompt 写回 data.prompt（持久化提示词）
 // - 把生成的 content 写回 data.content（持久化生成结果）
@@ -527,10 +544,21 @@ func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.
 				existing["status"] = statusBytes
 			}
 			if out.Status == "success" {
-				for _, field := range []string{"content", "imageUrl", "videoUrl"} {
+				// 成功时清掉历史错误：否则"失败过一次、之后重试成功"的节点
+				// 会一直挂着旧 error，前端红框与错误文案不会消失。
+				delete(existing, "error")
+				for _, field := range []string{"content", "imageUrl", "videoUrl", "thumbUrl"} {
 					if v, ok := out.Data[field].(string); ok && v != "" {
 						fieldBytes, _ := json.Marshal(v)
 						existing[field] = fieldBytes
+					}
+				}
+				// 尺寸必须回写：前端右上角显示的是原图尺寸，缺了它前端只能加载图片来测，
+				// 而画布渲染的是缩略图 —— 测出来就是缩略图尺寸（2560×1440 的图显示成 640×360）。
+				for _, field := range []string{"width", "height"} {
+					if n, ok := toInt(out.Data[field]); ok && n > 0 {
+						nBytes, _ := json.Marshal(n)
+						existing[field] = nBytes
 					}
 				}
 				// 多图场景（imageUrls 为数组）
@@ -538,6 +566,11 @@ func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.
 					urlsBytes, _ := json.Marshal(urls)
 					existing["imageUrls"] = urlsBytes
 				}
+			} else if out.Error != "" {
+				// 失败原因必须回写画布：前端 BaseNode 读 data.error 才显示红框和具体原因
+				// （只写 status 会变成"失败了但不知道为什么"，重进项目更是什么都没有）。
+				errBytes, _ := json.Marshal(out.Error)
+				existing["error"] = errBytes
 			}
 		}
 

@@ -181,18 +181,20 @@ func (s *FileUploadService) Upload(file multipart.File, header *multipart.FileHe
 
 // VideoUploadResult 视频上传结果（可能同步完成，也可能异步转码中）
 type VideoUploadResult struct {
-	URL            string `json:"url,omitempty"`    // 同步完成时有值
+	URL            string `json:"url,omitempty"`     // 同步完成时有值
 	TaskID         string `json:"task_id,omitempty"` // 异步转码时有值
-	ObjectName     string `json:"filename"`         // 最终对象名（含 .mp4）
+	ObjectName     string `json:"filename"`          // 最终对象名（含 .mp4）
 	Cached         bool   `json:"cached"`            // 是否命中去重
 	Compressed     bool   `json:"compressed"`        // 是否经过转码压缩
 	StorageType    string `json:"storage_type"`
-	AsyncTranscode bool   `json:"async_transcode"`  // 是否进入异步转码
+	AsyncTranscode bool   `json:"async_transcode"` // 是否进入异步转码
 }
 
 // UploadVideoWithTranscode 视频上传 Template Method：
-//   不需转码 → 走标准 Upload 流程
-//   需转码   → 哈希去重 → 落盘临时文件 → 注册任务 → goroutine 异步转码并上传
+//
+//	不需转码 → 走标准 Upload 流程
+//	需转码   → 哈希去重 → 落盘临时文件 → 注册任务 → goroutine 异步转码并上传
+//
 // 调用方传入 transcodeSvc 用于异步转码分支，nil 时遇到需转码文件直接返回错误。
 func (s *FileUploadService) UploadVideoWithTranscode(
 	header *multipart.FileHeader,
@@ -267,9 +269,9 @@ func (s *FileUploadService) UploadVideoWithTranscode(
 	go transcodeSvc.ConvertAndUpload(taskID, tmpPath, mp4ObjectName)
 
 	return &VideoUploadResult{
-		TaskID:        taskID,
-		ObjectName:    mp4ObjectName,
-		StorageType:   s.storage.GetType(),
+		TaskID:         taskID,
+		ObjectName:     mp4ObjectName,
+		StorageType:    s.storage.GetType(),
 		AsyncTranscode: true,
 	}, nil
 }
@@ -318,6 +320,27 @@ func (s *FileUploadService) ObjectURL(objectName string) string {
 }
 
 // ========== Content-Type 辅助函数（调用方可直接传入 ContentTypeFor） ==========
+
+// DetectImageExt 按**真实字节**判断图片格式，返回小写扩展名（含点）与对应 Content-Type。
+//
+// 上游网关经常把 JPEG/WebP 声明成 image/png；若照声明落盘，就会出现
+// 「.png 后缀 + Content-Type: image/png + JPEG 字节」三方不一致 ——
+// 浏览器靠内容嗅探照样能显示，所以很难被发现，但下载下来的文件名和类型是错的
+// （Windows 上部分看图软件按后缀判断会打不开）。
+// 识别不出时返回空串，由调用方回退到原有逻辑。
+func DetectImageExt(data []byte) (ext string, contentType string) {
+	switch {
+	case len(data) >= 8 && bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}):
+		return ".png", "image/png"
+	case len(data) >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
+		return ".jpg", "image/jpeg"
+	case len(data) >= 12 && bytes.Equal(data[:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")):
+		return ".webp", "image/webp"
+	case len(data) >= 6 && (bytes.Equal(data[:6], []byte("GIF87a")) || bytes.Equal(data[:6], []byte("GIF89a"))):
+		return ".gif", "image/gif"
+	}
+	return "", ""
+}
 
 // ContentTypeForImage 图片扩展名 → Content-Type
 func ContentTypeForImage(ext string) string {

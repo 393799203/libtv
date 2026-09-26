@@ -17,13 +17,13 @@ import (
 
 // 计费动作（扣费维度）：细分到每次真实 AI 调用，账单可精确到模型与场景
 const (
-	BillingActionWorkflowExecute = "workflow.execute" // 工作流入口（中间件仅校验余额，不扣费）
-	BillingActionPromptGenerate  = "prompt.generate"  // 提示词生成
-	BillingActionStory           = "ai.story"         // 故事生成（文本节点）
-	BillingActionScript          = "ai.script"        // 分镜剧本生成（脚本节点）
-	BillingActionImage           = "ai.image"         // 图片生成（图片节点）
-	BillingActionVideo           = "ai.video"         // 视频生成（视频节点）
-	BillingActionAudio           = "ai.audio"         // 音频生成（音频节点）
+	BillingActionWorkflowExecute = "workflow.execute"  // 工作流入口（中间件仅校验余额，不扣费）
+	BillingActionPromptGenerate  = "prompt.generate"   // 提示词生成
+	BillingActionStory           = "ai.story"          // 故事生成（文本节点）
+	BillingActionScript          = "ai.script"         // 分镜剧本生成（脚本节点）
+	BillingActionImage           = "ai.image"          // 图片生成（图片节点）
+	BillingActionVideo           = "ai.video"          // 视频生成（视频节点）
+	BillingActionAudio           = "ai.audio"          // 音频生成（音频节点）
 	BillingActionPrevizAnalyze   = "ai.previz_analyze" // 白模场景解析（previz 节点）
 )
 

@@ -46,11 +46,11 @@ var ErrInvalidPriceConfig = apperror.New(400, http.StatusBadRequest, "价格配�
 
 // PriceModelItem 单个模型的价格条目（价格管理页签展示用）
 type PriceModelItem struct {
-	ModelID    string  `json:"model_id"`
-	ModelName  string  `json:"model_name"`
-	Description string `json:"description"`
-	Resolution string  `json:"resolution,omitempty"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
-	Price      float64 `json:"price"`                // 未配置时为 0
+	ModelID     string  `json:"model_id"`
+	ModelName   string  `json:"model_name"`
+	Description string  `json:"description"`
+	Resolution  string  `json:"resolution,omitempty"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
+	Price       float64 `json:"price"`                // 未配置时为 0
 }
 
 // NodePriceGroup 节点维度的价格分组

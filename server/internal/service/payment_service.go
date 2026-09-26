@@ -30,8 +30,8 @@ import (
 
 // 支付相关业务错误
 var (
-	ErrPaymentDisabled    = apperror.New(400, http.StatusBadRequest, "支付功能未开启")
-	ErrPaymentOrderFails  = apperror.New(400, http.StatusBadRequest, "订单创建失败")
+	ErrPaymentDisabled      = apperror.New(400, http.StatusBadRequest, "支付功能未开启")
+	ErrPaymentOrderFails    = apperror.New(400, http.StatusBadRequest, "订单创建失败")
 	ErrPaymentOrderNotFound = apperror.New(404, http.StatusNotFound, "支付订单不存在")
 )
 

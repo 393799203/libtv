@@ -6,6 +6,7 @@ import type { VideoNodeData } from '@/types/canvas';
 import type { UserAsset } from '@/services/assetApi';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
+import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import { uploadVideo } from '@/services/uploadApi';
 
 type VideoNodeType = Node<VideoNodeData, 'video'>;
@@ -22,6 +23,8 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
   const [errorMsg, setErrorMsg] = useState<string>('');
   // 从资产库导入视频弹窗
   const [showAssetPicker, setShowAssetPicker] = useState(false);
+  // 双击弹窗播放
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // 视频上传
   const handleUpload = useCallback(
@@ -77,9 +80,36 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     [id, projectId]
   );
 
+  // 单击进入内联播放。但双击会先派发两次 click —— 延迟 250ms 再播，
+  // 期间若发生双击就把定时器取消，避免"内联播放闪一下又弹窗"。
+  const clickTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+    },
+    []
+  );
   const handlePlayClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setShowPlayer(true);
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+      return;
+    }
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = null;
+      setShowPlayer(true);
+    }, 250);
+  }, []);
+
+  // 双击弹窗播放：把内联播放器收起，避免同一个地址两路解码
+  const handleOpenPreview = useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    setShowPlayer(false);
+    setPreviewOpen(true);
   }, []);
 
   // 视频时长标签：< 60s 显示 "Ns"，否则 "M:SS"
@@ -91,6 +121,13 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     const s = d % 60;
     return `${m}:${String(s).padStart(2, '0')}`;
   }, [data.duration]);
+
+  // 弹窗标题右侧：分辨率 · 时长
+  const previewMeta = useMemo(() => {
+    const vw = (data as { videoWidth?: number }).videoWidth;
+    const vh = (data as { videoHeight?: number }).videoHeight;
+    return [vw && vh ? `${vw} × ${vh}` : '', durationLabel].filter(Boolean).join(' · ');
+  }, [durationLabel, (data as { videoWidth?: number }).videoWidth, (data as { videoHeight?: number }).videoHeight]);
 
   // 从资产库选中视频：替换节点视频（清掉旧尺寸/时长，由元数据加载重新计算）
   const handlePickAsset = useCallback(
@@ -174,6 +211,10 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     return Math.round(480 * h / w);
   }, [data.videoUrl, (data as { videoWidth?: number }).videoWidth, (data as { videoHeight?: number }).videoHeight, (data as { aspectRatio?: string }).aspectRatio]);
 
+  // 弹窗占位尺寸：视频原始分辨率（放在 videoHeight 之后声明，避免 TDZ）
+  const intrinsicVideoWidth = (data as { videoWidth?: number }).videoWidth;
+  const intrinsicVideoHeight = (data as { videoHeight?: number }).videoHeight;
+
   // AI 生成视频后，加载视频元数据获取实际尺寸和时长
   // videoUrl 变化时必须重新加载，否则会沿用上一段视频的尺寸导致比例错误
   useEffect(() => {
@@ -206,7 +247,16 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         noContentPadding
         className="!w-[480px]"
       >
-        <div className="w-[480px]" style={{ height: `${videoHeight}px` }}>
+        <div
+          className="w-[480px]"
+          style={{ height: `${videoHeight}px` }}
+          title={data.videoUrl ? '双击弹窗播放' : undefined}
+          onDoubleClick={(e) => {
+            if (!data.videoUrl) return;
+            e.stopPropagation();
+            handleOpenPreview();
+          }}
+        >
           {data.videoUrl && showPlayer ? (
             <video
               src={data.videoUrl}
@@ -276,6 +326,18 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         accept="video/*"
         className="hidden"
         onChange={handleUpload}
+      />
+
+      {/* 双击弹窗播放：展示 videoUrl 原视频 */}
+      <MediaPreviewModal
+        open={previewOpen}
+        kind="video"
+        url={data.videoUrl}
+        title={data.label}
+        meta={previewMeta || undefined}
+        width={intrinsicVideoWidth}
+        height={intrinsicVideoHeight}
+        onClose={() => setPreviewOpen(false)}
       />
 
       {/* 从资产库导入视频（Modal 默认 portal 到 body，不受画布 transform 影响） */}

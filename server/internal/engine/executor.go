@@ -407,15 +407,22 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 				output, err := executor.Execute(ctx, n, execCtx)
 				if err != nil {
 					log.Printf("[Engine] executor error nodeID=%s type=%s err=%v", n.ID, n.Type, err)
-					mu.Lock()
-					levelErrors = append(levelErrors, err)
-					mu.Unlock()
-
-					execCtx.SetOutput(n.ID, &NodeOutput{
+					// 失败节点同样要进 outputs：它才是 saveOutputs → LastOutputs →
+					// persistNodeOutputs 的数据源。原来只写 execCtx（+发 node_failed 事件），
+					// 回写画布时 `if out, ok := outputs[n.ID]; ok` 判定为 false，
+					// 该节点被整条跳过 —— 失败态与错误信息永远落不到画布：
+					// 页面一关/一刷新就只剩 idle，重进项目像没执行过。
+					failedOutput := &NodeOutput{
 						NodeID: n.ID,
 						Status: "failed",
 						Error:  err.Error(),
-					})
+					}
+					mu.Lock()
+					levelErrors = append(levelErrors, err)
+					outputs[n.ID] = failedOutput
+					mu.Unlock()
+
+					execCtx.SetOutput(n.ID, failedOutput)
 
 					e.emit(WorkflowEvent{
 						ExecutionID: executionID,
@@ -1212,10 +1219,18 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 
 	log.Printf("[ImageExecutor] 图片下载成功: size=%d bytes, 使用生成尺寸: %dx%d", len(imageData), width, height)
 
-	result, err := i.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), "image.png", service.UploadOptions{
+	// 扩展名按真实字节判定：上游网关返回的 Content-Type 不可信
+	// （常见把 JPEG 声明成 image/png），照声明落盘会得到与内容不符的后缀与 Content-Type
+	imgExt, _ := service.DetectImageExt(imageData)
+	if imgExt == "" {
+		imgExt = ".png" // 识别不出时保持原行为
+	}
+	log.Printf("[ImageExecutor] 实际图片格式: %s（按字节判定）", imgExt)
+
+	result, err := i.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), "image"+imgExt, service.UploadOptions{
 		Dir:            canvasDir,
 		ProjectID:      projectID,
-		DefaultExt:     ".png",
+		DefaultExt:     imgExt,
 		ContentTypeFor: service.ContentTypeForImage,
 	})
 	if err != nil {

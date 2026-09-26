@@ -175,8 +175,16 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		dir = h.canvasDirForProject(projectID)
 	}
 
+	// 扩展名以真实字节为准：客户端文件名后缀可能与内容不符（如 JPEG 命名为 .png）。
+	// 存储名是内容哈希（hash+ext），原文件名只在取扩展名时用到，替换掉没有副作用；
+	// 识别不出时仍用原文件名，白名单校验行为不变。
+	uploadName := header.Filename
+	if sniffedExt, _ := service.DetectImageExt(imageData); sniffedExt != "" {
+		uploadName = "image" + sniffedExt
+	}
+
 	// ✅ 使用 bytes.NewReader 重新创建 reader（因为前面的 ReadAll 已经读完了）
-	result, err := h.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), header.Filename, service.UploadOptions{
+	result, err := h.fileUploadService.UploadFromReader(bytes.NewReader(imageData), int64(len(imageData)), uploadName, service.UploadOptions{
 		Dir:            dir,
 		ProjectID:      projectID,
 		AllowedExts:    service.ImageExts(),
