@@ -1,19 +1,19 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
-  Card,
   Typography,
   Tag,
   App,
   Spin,
 } from 'antd';
 import {
+  HeartOutlined,
   PlusOutlined,
   PlayCircleOutlined,
   SearchOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
-  HeartOutlined,
 } from '@ant-design/icons';
 import { projectApi } from '@/services/projectApi';
 import { showApi } from '@/services/showApi';
@@ -47,79 +47,136 @@ const VideoCard = memo(function VideoCard({
   onNavigate: (id: string) => void;
   isVisible: boolean; // 是否在可视区域
 }) {
-  // 只在可见时渲染完整内容，否则只渲染占位符（占位符与卡片同为固定高度，避免布局偏移）
+  // 描述 tooltip 跟随鼠标：
+  // - 用 portal 挂到 body，否则会被外层滚动容器（overflow: auto）裁掉
+  // - 位置直接写 DOM 的 transform，不走 state：鼠标一移动就 setState 会让整卡高频重渲染
+  const [tipOn, setTipOn] = useState(false);
+  const tipRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const posRef = useRef({ x: 0, y: 0 });
+
+  const placeTip = (x: number, y: number) => {
+    const el = tipRef.current;
+    if (!el) return;
+    // 用实测尺寸，不要用 max-w 常量：文字短时实际宽度远小于 280
+    const W = el.offsetWidth || 280;
+    const H = el.offsetHeight || 60;
+    const M = 8; // 视口内安全边距
+    const clamp = (v: number, max: number) => Math.min(Math.max(M, v), Math.max(M, max));
+
+    // 水平：tooltip 中点对准鼠标（不左右翻转——翻到另一侧会“瞬间跳过去”）
+    // 垂直：在光标下方 18px（不上下翻转，同理）
+    // 两边都只做贴边夹取，越界时停在边缘而不是换边，移动过程中位置是连续变化的
+    const left = clamp(x - W / 2, window.innerWidth - W - M);
+    const top = clamp(y + 18, window.innerHeight - H - M);
+    el.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+  };
+
+  useEffect(() => {
+    if (tipOn) placeTip(posRef.current.x, posRef.current.y);
+  }, [tipOn]);
+  useEffect(() => () => { if (timerRef.current) window.clearTimeout(timerRef.current); }, []);
+
+  const handleEnter = (e: React.MouseEvent) => {
+    posRef.current = { x: e.clientX, y: e.clientY };
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    // 轻微延迟：鼠标扫过一排卡片时不会闪出一串框
+    timerRef.current = window.setTimeout(() => setTipOn(true), 120);
+  };
+  const handleMove = (e: React.MouseEvent) => {
+    posRef.current = { x: e.clientX, y: e.clientY };
+    if (tipOn) placeTip(e.clientX, e.clientY);
+  };
+  const handleLeave = () => {
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    setTipOn(false);
+  };
+
+  // 只在可见时渲染完整内容，否则只渲染占位符（占位符与卡片同为 16:9，避免布局偏移）
   if (!isVisible) {
     return (
       <div className="w-full h-full bg-gray-100 rounded-lg animate-pulse" />
     );
   }
 
+  // 无外框：整张卡片就是缩略图本身，不再有底部那条「标题 + 点赞」栏
   return (
-    <Card
-      hoverable
-      className="!rounded-lg overflow-hidden cursor-pointer h-full"
-      styles={{ body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' } }}
+    <div
+      className="group w-full h-full bg-gray-100 relative rounded-lg cursor-pointer"
+      style={{
+        contain: 'layout style',
+      }}
       onClick={() => onNavigate(item.id)}
+      onMouseEnter={handleEnter}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
     >
-      <div
-        className="h-40 bg-gray-100 relative overflow-hidden"
-        style={{
-          contain: 'layout style paint', // CSS containment优化
-        }}
-      >
-        <img
-          src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`}
-          alt={item.title}
-          className="w-full h-full object-cover"
-          loading="lazy"
-          decoding="async" // 异步解码，避免阻塞主线程
-        />
-        {/* 标签：分类名称 + 视频自身标签 */}
-        {(item.category || (item.tags?.length || 0) > 0) && (
-          <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
-            {item.category && (
-              <span className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{item.category}</span>
-            )}
-            {(item.tags || []).slice(0, 2).map(tag => (
-              <span key={tag} className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{tag}</span>
-            ))}
-          </div>
-        )}
-        {/* 播放按钮 - 简化hover效果 */}
-        <div className="absolute inset-0 bg-black/0 hover:bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 z-10 transition-none">
-          <PlayCircleOutlined style={{ fontSize: '48px', color: 'white' }} />
+      <img
+        src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`}
+        alt={item.title}
+        className="w-full h-full rounded-lg object-cover"
+        loading="lazy"
+        decoding="async" // 异步解码，避免阻塞主线程
+      />
+      {/* 分类与标签：左上角 */}
+      {(item.category || (item.tags?.length || 0) > 0) && (
+        <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
+          {item.category && (
+            <span className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{item.category}</span>
+          )}
+          {(item.tags || []).slice(0, 2).map(tag => (
+            <span key={tag} className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{tag}</span>
+          ))}
         </div>
-        {/* 时长和作者信息 - 合并到一个叠加层，减少absolute元素 */}
-        <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between z-20">
+      )}
+      {/* 点赞数：原来占底部一整栏，现挪到右上角，与左上角分类标签分居两侧 */}
+      <div className="absolute top-2 right-2 z-20 flex items-center gap-0.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+        <HeartOutlined className="text-[10px]" />
+        {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
+      </div>
+      {/* 播放按钮 - 简化hover效果 */}
+      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 z-10 transition-none">
+        <PlayCircleOutlined style={{ fontSize: '48px', color: 'white' }} />
+      </div>
+      {/* 标题/作者/时长压在缩略图上：不再单独占一栏高度，卡片仍是纯 16:9 缩略图。
+          底部加一层由下往上的渐变遮罩，否则浅色缩略图上白字读不出来。 */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 rounded-b-lg bg-gradient-to-t from-black/75 via-black/45 to-transparent px-2 pb-2 pt-8">
+        <p className="truncate text-[13px] font-medium text-white">
+          {item.title}
+        </p>
+        <div className="mt-1 flex items-center justify-between gap-2">
           {/* 作者信息：优先用作者真实头像，缺失时用作者首字占位 */}
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
             {item.authorAvatar ? (
-              <img src={item.authorAvatar} alt="" className="w-4 h-4 rounded-full border border-white/50 object-cover" loading="lazy" decoding="async" />
+              <img src={item.authorAvatar} alt="" className="w-4 h-4 shrink-0 rounded-full border border-white/50 object-cover" loading="lazy" decoding="async" />
             ) : (
-              <div className="w-4 h-4 rounded-full border border-white/50 bg-gray-500 text-white text-[8px] flex items-center justify-center">{item.author.slice(0, 1)}</div>
+              <div className="w-4 h-4 shrink-0 rounded-full border border-white/50 bg-gray-500 text-white text-[8px] flex items-center justify-center">{item.author.slice(0, 1)}</div>
             )}
-            <span className="text-white text-[11px] drop-shadow-sm truncate max-w-[100px]">{item.author}</span>
+            <span className="truncate text-[11px] text-white/90">{item.author}</span>
           </div>
           {/* 时长 */}
           {item.duration > 0 && (
-            <div className="bg-black/70 text-white text-xs px-1.5 py-0.5 rounded">
+            <div className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-white">
               {formatDuration(item.duration)}
             </div>
           )}
         </div>
       </div>
-      <div className="p-3 flex-1">
-        <div className="flex items-start justify-between">
-          <p className="!text-sm font-medium truncate flex-1">
-            {item.title}
-          </p>
-          <span className="flex items-center gap-0.5 text-gray-500 text-xs flex-shrink-0 ml-2">
-            <HeartOutlined className="text-[12px]" />
-            {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
-          </span>
-        </div>
-      </div>
-    </Card>
+
+      {/* 描述 tooltip：挂在 body 上（不受卡片与外层滚动容器裁剪），跟随鼠标；
+          pointer-events-none 保证它不抢下面卡片的 hover。只有填了描述的视频才提示。 */}
+      {tipOn && item.description && createPortal(
+        <div
+          ref={tipRef}
+          className="pointer-events-none fixed left-0 top-0 z-[9999] will-change-transform"
+        >
+          <div className="line-clamp-4 max-w-[280px] rounded-lg bg-gray-900/95 px-2.5 py-1.5 text-[12px] leading-5 text-white shadow-lg">
+            {item.description}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 });
 
@@ -335,6 +392,7 @@ export default function VideoListPage() {
         tags: item.tags || undefined,
         category: item.category?.name,
         likes: item.likes || 0,
+        description: item.description || undefined,
       }));
       setTvShowVideos(list);
       // 判断是否还有更多数据
@@ -375,6 +433,7 @@ export default function VideoListPage() {
         tags: item.tags || undefined,
         category: item.category?.name,
         likes: item.likes || 0,
+        description: item.description || undefined,
       }));
       setTvShowVideos(prev => [...prev, ...newList]);
       setCurrentPage(nextPage);
@@ -784,15 +843,14 @@ export default function VideoListPage() {
         {/* TV Show 网格 - 切换时遮罩 loading，数据返回后整体替换；固定最小高度放在总容器上，切换时内容区不塌陷 */}
         <Spin spinning={videosLoading}>
           <div style={{ minHeight: '440px' }}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {/* 缩略图间距收紧到 8px（原 16px）：无边框后 16px 会显得空 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
             {videoListData.map((item, index) => (
               <div
                 key={item.id}
                 ref={(el) => setItemRef(index, el)}
                 data-index={index}
-                style={{
-                  height: '212px', // 固定高度，与占位符完全一致，避免布局偏移
-                }}
+                className="aspect-video" // 16:9：与占位符同比例，去掉底栏后不再需要固定像素高
               >
                 <VideoCard
                   item={item}
