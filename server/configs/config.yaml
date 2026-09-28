@@ -12,7 +12,14 @@ cors:
     - http://39.171.58.10:38880
     - http://yunqueai.cloud:38880
     - http://60.188.49.208:8880
-    # 备案后正式域名上线时在此追加（http/https、www/无www 均需分别添加）
+    # 正式域名上线（备案已完成）：http/https × 各子域都要分别列出
+    - https://yunqueai.cloud
+    - https://www.yunqueai.cloud
+    - https://manwa.yunqueai.cloud
+    - http://yunqueai.cloud
+    - http://www.yunqueai.cloud
+    - http://manwa.yunqueai.cloud
+    - http://60.188.49.208        # 直连 IP 的 80 端口（域名走 301 跳转，这里兜住 IP 直连）
 
 database:
   host: localhost

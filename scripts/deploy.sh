@@ -27,7 +27,10 @@ cd /opt/libtv || { echo "❌ 未找到 /opt/libtv"; exit 1; }
 TARGET="${1:-all}"
 FORCE="${FORCE:-0}"
 FRESH_WINDOW="${FRESH_WINDOW:-30}"
-PUBLIC=http://localhost:8880
+# 线上入口健康检查走 HTTPS 正式域名；--resolve 把它指到本机，
+# 既不依赖云主机的 NAT 回环（原 8880 明文入口已移除），也顺带验证证书链。
+PUBLIC=https://manwa.yunqueai.cloud
+CURL_PUBLIC="curl -s --resolve manwa.yunqueai.cloud:443:127.0.0.1"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
@@ -115,9 +118,21 @@ restart_backend() {
 }
 
 up_frontend() {
+  # 起容器前先用新镜像校验 nginx 配置：配置/镜像有问题时容器会陷入重启循环，
+  # 而 compose 已经停掉了旧容器 → 线上直接不可用（曾因漏同步 Dockerfile 挂了约 52 秒）。
+  # 校验不通过就不切换，旧容器继续服务。
+  # 注意：不能用 `if ! cmd | tail`——管道退出码取 tail（恒为 0），判断会永远通过。
+  # 本脚本也没开 pipefail，所以这里显式取 cmd 自己的退出码。
+  local cfg_out cfg_rc
+  cfg_out=$(docker compose run --rm --no-deps -T frontend nginx -t 2>&1); cfg_rc=$?
+  printf '%s\n' "$cfg_out" | tail -3
+  if [ "$cfg_rc" != "0" ]; then
+    log "❌ nginx 配置校验失败，已取消切换（线上仍是旧容器）"
+    return 1
+  fi
   docker compose up -d frontend 2>&1 | tail -1
   sleep 3
-  log "线上资源：$(curl -s $PUBLIC/ | grep -oE 'assets/index-[a-zA-Z0-9_-]+\.js' | head -1)"
+  log "线上资源：$($CURL_PUBLIC $PUBLIC/ | grep -oE 'assets/index-[a-zA-Z0-9_-]+\.js' | head -1)"
 }
 
 clean_zombies() {
@@ -144,7 +159,7 @@ case "$TARGET" in
     ;;
   frontend)
     build_frontend || exit 1
-    up_frontend
+    up_frontend || exit 1
     ;;
   config)
     log "仅重载配置（configs 为挂载卷，无需重建镜像）…"
@@ -156,7 +171,7 @@ case "$TARGET" in
   all | "")
     build_backend; bb=$?
     build_frontend || exit 1
-    up_frontend
+    up_frontend || exit 1
     [ "$bb" = "0" ] && up_backend
     ;;
   *)

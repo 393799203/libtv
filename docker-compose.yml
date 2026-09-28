@@ -4,7 +4,13 @@ services:
       context: ./web
       dockerfile: Dockerfile
     ports:
-      - "8880:80"
+      - "80:80"      # HTTP：仅 ACME 校验 + 301 跳 HTTPS（不再提供明文页面）
+      - "443:443"    # HTTPS 唯一正式入口（manwa/www/yunqueai.cloud，Let's Encrypt 证书）
+    volumes:
+      # 证书由宿主机 certbot 管理，容器内只读引用；webroot 目录供 --webroot 续期写入
+      # （不用 standalone 续期：80 常驻被本容器占用，standalone 抢不到端口会续期失败）
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       - backend
     networks:
@@ -16,7 +22,10 @@ services:
       context: ./server
       dockerfile: Dockerfile
     ports:
-      - "38080:8080"   # 备案期用非 Web 端口规避 80/443/8080 拦截；ICP 备案后建议改回 80
+      # 只绑本机：正式流量一律走 frontend 的 443 → nginx 反代 backend:8080。
+      # 暴露到公网等于多一个明文入口、绕过 HTTPS，故收敛到 loopback
+      # （服务器上用 curl http://127.0.0.1:38080/... 直连调试仍可用）。
+      - "127.0.0.1:38080:8080"
     environment:
       - TZ=Asia/Shanghai
       - DB_HOST=db

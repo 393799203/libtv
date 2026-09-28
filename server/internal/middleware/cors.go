@@ -9,13 +9,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// defaultOrigins 本地开发默认白名单
+// defaultOrigins 本地开发默认白名单（正式域名在 config.yaml 的 cors.origins 里）
 var defaultOrigins = []string{
 	"http://localhost:5173",
 	"http://localhost:3000",
 	"http://192.168.110.115:8880",
 	"http://39.171.58.10:38880",
 	"http://yunqueai.cloud:38880",
+	// 正式入口（80/443 + HTTPS 域名）
+	"https://yunqueai.cloud",
+	"https://www.yunqueai.cloud",
+	"http://yunqueai.cloud",
+	"http://www.yunqueai.cloud",
 }
 
 // CORS 根据 config.C.CORS.Origins 构造跨域中间件

@@ -55,6 +55,16 @@ echo "▶ 同步代码到服务器…"
 case "$TARGET" in
   frontend)
     sync_dir web/dist/ /opt/libtv/web/dist/
+    # nginx 配置随前端镜像一起重建：不在这里同步的话，线上会用旧配置重建镜像
+    # （TLS/端口/代理改动会静默丢失）
+    sync_dir web/nginx.conf /opt/libtv/web/nginx.conf
+    sync_dir web/libtv-app.conf /opt/libtv/web/libtv-app.conf
+    sync_dir web/libtv-acme.conf /opt/libtv/web/libtv-acme.conf
+    # Dockerfile 也是构建上下文的一部分：漏同步会导致镜像缺文件、容器起不来
+    # （曾漏同步 COPY libtv-app.conf 那一行，前端直接重启循环约 52 秒不可用）
+    sync_dir web/Dockerfile /opt/libtv/web/Dockerfile
+    # 端口映射、证书挂载都在 compose 里，必须一起同步
+    sync_infra
     ;;
   config)
     sync_infra
