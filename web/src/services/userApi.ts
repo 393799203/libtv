@@ -8,6 +8,8 @@ export interface UserItem {
   /** AI 渠道：wasu=华数 / dianxin=电信 */
   channel?: string;
   created_at: string;
+  /** 最后一次登录成功时间；为空=从未登录过（改版前的历史用户不回填） */
+  last_login_at?: string | null;
   /** 剩余积分（AI 调用扣费用） */
   credits?: number;
   /** 项目数（管理员列表接口返回） */

@@ -24,6 +24,10 @@ type User struct {
 	Credits   int64     `gorm:"not null;default:0" json:"credits"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// LastLoginAt 最后一次登录成功的时间（后台用户列表展示）。
+	// 指针类型：为空表示改版前注册、或注册后从未登录过，前端显示「—」；
+	// 该列由 AutoMigrate 自动添加，历史用户不回填（无历史登录记录可查）。
+	LastLoginAt *time.Time `json:"last_login_at"`
 }
 
 func (User) TableName() string { return "users" }

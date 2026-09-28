@@ -1035,6 +1035,7 @@ export default function AdminPage() {
                         <th className="px-4 py-3 text-left font-medium text-gray-600">AI渠道</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">剩余积分</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">最后登录</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
                       </tr>
                     </thead>
@@ -1103,6 +1104,14 @@ export default function AdminPage() {
                             </td>
                             <td className="px-4 py-3 text-gray-500">
                               {new Date(user.created_at).toLocaleDateString('zh-CN')}
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                              {user.last_login_at
+                                ? new Date(user.last_login_at).toLocaleString('zh-CN', {
+                                    year: 'numeric', month: '2-digit', day: '2-digit',
+                                    hour: '2-digit', minute: '2-digit', hour12: false,
+                                  })
+                                : '—'}
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">

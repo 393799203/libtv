@@ -97,6 +97,15 @@ func (s *UserService) Login(ctx context.Context, email, password string) (string
 		return "", nil, errors.New("invalid email or password")
 	}
 
+	// 记录最后登录时间（后台用户列表展示用）。写失败不影响这次登录本身，
+	// 只记 warn —— 免得因为一个统计字段让用户登不进来。
+	now := time.Now()
+	if err := s.userRepo.UpdateProfile(ctx, user.ID, map[string]interface{}{"last_login_at": now}); err != nil {
+		log.Printf("warning: update last_login_at failed userID=%s: %v", user.ID, err)
+	} else {
+		user.LastLoginAt = &now
+	}
+
 	token, err := s.generateToken(user)
 	if err != nil {
 		return "", nil, err
