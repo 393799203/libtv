@@ -25,11 +25,13 @@ interface GeneratePromptRequest {
   characters: AssetReference[];    // 角色列表
   scenes: AssetReference[];        // 场景列表
   props: AssetReference[];         // 道具列表
+  imageCount?: number;             // 需要几份画面提示词（1=单张参考图；2=起始画面+结束画面）
 }
 
 interface GeneratePromptData {
-  storyboardPrompt: string; // 生成的画面提示词（含 @ 引用）
-  motionPrompt: string;     // 生成的运动提示词
+  storyboardPrompt: string;      // 生成的画面提示词（含 @ 引用）；多份时等于第 1 份
+  storyboardPrompts?: string[];  // 多份画面提示词（与参考图一一对应）
+  motionPrompt: string;          // 生成的运动提示词
 }
 
 /**
@@ -40,5 +42,8 @@ interface GeneratePromptData {
 export async function generatePrompt(
   request: GeneratePromptRequest
 ): Promise<GeneratePromptData> {
-  return api.post<GeneratePromptData>('/prompt/generate', request);
+  // 区别于统一的 60 秒：提示词生成是同步 LLM 调用，大剧本 + 多份提示词时
+  // 上游首字节常在 30~60 秒、偶发超过 60 秒，放宽到 5 分钟与后端 LLM 客户端对齐
+  // （此前 60 秒会先掐断请求，后端只能记到 context canceled）
+  return api.post<GeneratePromptData>('/prompt/generate', request, { timeout: 300000 });
 }

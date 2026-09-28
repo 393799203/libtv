@@ -44,7 +44,7 @@ const filmLookBlock = `胶片电影质感：35mm胶片摄影质感，细腻胶�
 // 注入角色/场景/道具文生图模板：资产必须是 3D 立体质感，避免纸片式平面感
 const asset3DBlock = `【3D立体风格】3D立体渲染质感，造型有体积感与纵深，材质表现真实（皮肤/布料/金属/石材等质感分明），光影塑造立体感，避免平面化、纸片式、2D插画风格`
 
-const PromptGenerationSystemPrompt = `你是一个专业的影视镜头描述专家。你的任务是根据提供的镜头信息和资产信息，同时生成画面提示词和运动提示词。
+const promptGenSystemPromptHead = `你是一个专业的影视镜头描述专家。你的任务是根据提供的镜头信息和资产信息，同时生成画面提示词和运动提示词。
 
 要求：
 1. **画面提示词**：
@@ -85,6 +85,58 @@ const PromptGenerationSystemPrompt = `你是一个专业的影视镜头描述专
 画面提示词：[景别与机位。场景描述。人物描述。环境细节。光影描述。镜头光学。构图描述。氛围描述。色彩基调。[视觉风格：...]]
 运动提示词：[起始状态：... 中间过程-阶段1（第X-X秒）：... 中间过程-阶段2（第X-X秒）：... 中间过程-阶段3（第X-X秒）：... 结束状态：... 音效与对白：... 配乐：... 负面提示：... 视觉风格：...]`
 
+// promptGenStoryboardSpec 单份画面提示词的字段要求（多份时每一份都要满足）
+const promptGenStoryboardSpec = "景别与机位。场景描述。人物描述。环境细节。光影描述。镜头光学。构图描述。氛围描述。色彩基调。[视觉风格：...]"
+
+// promptGenMotionSpec 运动提示词的字段要求
+const promptGenMotionSpec = "起始状态：... 中间过程-阶段1（第X-X秒）：... 中间过程-阶段2（第X-X秒）：... 中间过程-阶段3（第X-X秒）：... 结束状态：... 音效与对白：... 配乐：... 负面提示：... 视觉风格：..."
+
+// motionSpecForFrames 运动提示词的字段要求。
+// 2 张（首尾帧）时额外要求起始/结束状态分别与两份画面提示词对齐 ——
+// 否则视频的首帧/尾帧和用户提供的两张参考图对不上，首尾帧模式就白用了。
+// imageCount<=1 时与改造前逐字一致。
+func motionSpecForFrames(imageCount int) string {
+	if imageCount <= 1 {
+		return promptGenMotionSpec
+	}
+	return "起始状态（必须与画面提示词1「起始画面」完全一致，同一瞬间）：... " +
+		"中间过程-阶段1（第X-X秒）：... 中间过程-阶段2（第X-X秒）：... 中间过程-阶段3（第X-X秒）：... " +
+		"结束状态（必须与最后一份画面提示词「结束画面」完全一致，同一瞬间）：... " +
+		"音效与对白：... 配乐：... 负面提示：... 视觉风格：..."
+}
+
+// buildMultiFrameOutputFormat 多张参考图时的输出格式：N 份画面提示词，分别对应同一镜头的不同瞬间。
+// 首份=起始画面，末份=结束画面（正好对应首尾帧），中间份为过程瞬间。
+func buildMultiFrameOutputFormat(imageCount int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "输出格式（严格遵守，本次需要 %d 份画面提示词，分别对应同一镜头的不同瞬间）：\n", imageCount)
+	for i := 1; i <= imageCount; i++ {
+		label := fmt.Sprintf("（第 %d 个瞬间）", i)
+		if i == 1 {
+			label = "（起始画面）"
+		} else if i == imageCount {
+			label = "（结束画面）"
+		}
+		fmt.Fprintf(&b, "画面提示词%d%s：[%s]\n", i, label, promptGenStoryboardSpec)
+		if i > 1 {
+			fmt.Fprintf(&b, "（第 %d 份必须是同一镜头运动到该瞬间的画面：人物姿态、位置、朝向、表情与上一份明显不同，环境与光影随之变化；但角色外观、服装、场景、道具与整体视觉风格必须与第 1 份保持一致）\n", i)
+		}
+	}
+	fmt.Fprintf(&b, "运动提示词：[%s]", motionSpecForFrames(imageCount))
+	return b.String()
+}
+
+// BuildPromptGenerationSystemPrompt 按需要的画面提示词份数构建系统提示词。
+// imageCount<=1 时与改造前逐字一致，保证单张提示词的既有行为不变。
+func BuildPromptGenerationSystemPrompt(imageCount int) string {
+	if imageCount <= 1 {
+		return promptGenSystemPromptHead + "\n\n" + `输出格式（严格遵守）：
+画面提示词：[` + promptGenStoryboardSpec + `]
+运动提示词：[` + promptGenMotionSpec + `]`
+	}
+	return promptGenSystemPromptHead + "\n\n" + buildMultiFrameOutputFormat(imageCount)
+}
+
 // ---- 提示词生成相关函数 ----
 
 // BuildPromptGenerationUserMessage 构建提示词生成的用户消息
@@ -93,7 +145,13 @@ func BuildPromptGenerationUserMessage(
 	characters []AssetReference,
 	scenes []AssetReference,
 	props []AssetReference,
+	imageCount int,
 ) string {
+	// 需要多张参考图时，明确要求几份画面提示词、分别表达哪一瞬间
+	frameAsk := "请同时生成画面提示词和运动提示词，画面提示词中使用括号形式引用相关资产。"
+	if imageCount > 1 {
+		frameAsk = fmt.Sprintf("请按输出格式生成 %d 份画面提示词（第 1 份=镜头起始画面，第 %d 份=镜头结束画面，同一镜头的不同瞬间，人物姿态/位置/表情与环境光影要逐份推进变化），以及 1 份运动提示词；运动提示词的起始状态必须写第 1 份画面（起始画面）的状态、结束状态必须写第 %d 份画面（结束画面）的状态，让视频首尾帧正好接上这两张参考图；画面提示词中使用括号形式引用相关资产。", imageCount, imageCount, imageCount)
+	}
 	return fmt.Sprintf(`镜头信息：
 - 画面描述：%s
 - 镜别：%s
@@ -108,7 +166,8 @@ func BuildPromptGenerationUserMessage(
 场景：%s
 道具：%s
 
-请同时生成画面提示词和运动提示词，画面提示词中使用括号形式引用相关资产。格式示例：南方（@角色-南方）、水下洞穴主通道（@场景-水下洞穴主通道）。`,
+%s格式示例：南方（@角色-南方）、水下洞穴主通道（@场景-水下洞穴主通道）。`,
+		frameAsk,
 		shotData.Visual,
 		shotData.ShotSize,
 		shotData.CameraMovement,
@@ -122,8 +181,51 @@ func BuildPromptGenerationUserMessage(
 	)
 }
 
-// parsePromptResponse 解析 LLM 响应，提取画面提示词和运动提示词
-func parsePromptResponse(content string) (string, string) {
+// extractNumberedStoryboardSection 提取「画面提示词N（小标题）：」的内容段：
+// 先按标记取段，再去掉紧跟在标记后的小标题（如「（起始画面）」）
+func extractNumberedStoryboardSection(content, marker string, endMarkers []string) string {
+	section := extractSection(content, marker, endMarkers)
+	// 去掉紧跟的小标题括号（全角/半角）
+	for _, open := range []string{"（", "("} {
+		if strings.HasPrefix(section, open) {
+			closeCh := "）"
+			if open == "(" {
+				closeCh = ")"
+			}
+			if i := strings.Index(section, closeCh); i >= 0 {
+				section = section[i+len(closeCh):]
+			}
+			break
+		}
+	}
+	// 小标题后面往往还跟着冒号（「（起始画面）：中景…」），统一去掉；
+	// 末尾可能残留下一节标记带的 markdown 星号（「…蹲着\n**画面提示词2…」），也一并去掉
+	return strings.TrimSpace(strings.Trim(strings.TrimLeft(section, "：:** \t\r\n"), "*：: \t\r\n"))
+}
+
+// parsePromptResponse 解析 LLM 响应，提取画面提示词（imageCount 份）和运动提示词。
+// imageCount<=1 时走原有单份逻辑，行为不变。
+func parsePromptResponse(content string, imageCount int) ([]string, string) {
+	if imageCount <= 1 {
+		// 单份走原有逻辑（含标记都找不到时的兜底分割），保证既有行为完全不变
+		storyboardPrompt, motionPrompt := parseSinglePromptResponse(content)
+		return []string{storyboardPrompt}, motionPrompt
+	}
+
+	storyboardPrompts := make([]string, 0, imageCount)
+	for i := 1; i <= imageCount; i++ {
+		endMarkers := []string{"运动提示词"}
+		if i < imageCount {
+			endMarkers = []string{fmt.Sprintf("画面提示词%d", i+1), "运动提示词"}
+		}
+		storyboardPrompts = append(storyboardPrompts, extractNumberedStoryboardSection(content, fmt.Sprintf("画面提示词%d", i), endMarkers))
+	}
+	motionPrompt := extractSection(content, "运动提示词", nil)
+	return storyboardPrompts, motionPrompt
+}
+
+// parseSinglePromptResponse 单份提示词解析（原逻辑，含兜底分割）
+func parseSinglePromptResponse(content string) (string, string) {
 	storyboardPrompt := extractSection(content, "画面提示词", []string{"运动提示词"})
 	motionPrompt := extractSection(content, "运动提示词", nil)
 

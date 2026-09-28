@@ -50,7 +50,7 @@ export function useNodeGeneration(
   const generatingNodeId = useExecutionStore((s) => s.generatingNodeId);
   const setGeneratingNodeId = useExecutionStore((s) => s.setGeneratingNodeId);
   const setCurrentExecution = useExecutionStore((s) => s.setCurrentExecution);
-  const lastError = useExecutionStore((s) => s.lastError);
+
   const activeStreams = useExecutionStore((s) => s.activeStreams);
   const addActiveStream = useExecutionStore((s) => s.addActiveStream);
 
@@ -61,7 +61,7 @@ export function useNodeGeneration(
   // 简化逻辑：只要当前节点是 generatingNodeId，就显示生成中
   const isGenerating = generatingNodeId === nodeId || (!!executionId && (nodeExec?.status === 'running' || nodeExec?.status === 'pending'));
   const progress = nodeExec?.progress ?? 0;
-  const error = lastError || nodeExec?.error || null;
+  // 注：这里不再对外暴露 error —— 节点自己的红点 + Tooltip 就是错误提示的唯一出口
 
   // 监听节点状态：完成后清除 generatingNodeId
   useEffect(() => {
@@ -134,17 +134,11 @@ export function useNodeGeneration(
     [projectId, nodeId, generatingNodeId, updateNodeData, updateNodeStatus, setGeneratingNodeId, setCurrentExecution, persistCanvas, addActiveStream],
   );
 
-  const clearError = useCallback(() => {
-    useExecutionStore.getState().setLastError(null);
-  }, []);
-
   return {
     executionId,
     isGenerating,
     progress,
-    error,
     generate,
     saveCanvas: persistCanvas,
-    clearError,
   };
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"log"
 	"strings"
 	"unicode/utf8"
@@ -76,12 +77,14 @@ type GeneratePromptRequest struct {
 	Characters []llm.AssetReference      `json:"characters"`                  // 角色列表
 	Scenes     []llm.AssetReference      `json:"scenes"`                      // 场景列表
 	Props      []llm.AssetReference      `json:"props"`                       // 道具列表
+	ImageCount int                       `json:"imageCount"`                  // 需要几份画面提示词（1=单张参考图；2=起始画面+结束画面），默认 1
 }
 
 // GeneratePromptResponse 生成提示词响应（画面 + 运动）
 type GeneratePromptResponse struct {
-	StoryboardPrompt string `json:"storyboardPrompt"` // 生成的画面提示词（含 @ 引用）
-	MotionPrompt     string `json:"motionPrompt"`     // 生成的运动提示词
+	StoryboardPrompt  string   `json:"storyboardPrompt"`  // 生成的画面提示词（含 @ 引用）—— 多份时等于第 1 份，兼容旧前端
+	StoryboardPrompts []string `json:"storyboardPrompts"` // 多份画面提示词（与参考图一一对应）
+	MotionPrompt      string   `json:"motionPrompt"`      // 生成的运动提示词
 }
 
 // GeneratePrompt 生成提示词（画面 + 运动一起生成）
@@ -157,22 +160,47 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		return
 	}
 
+	// 参考图张数：1=单张，2=起始画面+结束画面（多份提示词一次生成，只扣一次费）
+	imageCount := req.ImageCount
+	if imageCount <= 0 {
+		imageCount = 1
+	}
+	if imageCount > 9 {
+		imageCount = 9
+	}
+
 	// 调用 LLM 生成提示词（画面 + 运动）
-	storyboardPrompt, motionPrompt, err := h.llmClient.GeneratePrompt(
+	storyboardPrompts, motionPrompt, err := h.llmClient.GeneratePrompt(
 		c.Request.Context(),
 		modelConfig.ModelID, // 使用完整的 model_id
 		shotData,
 		characters,
 		scenes,
 		props,
+		imageCount,
 	)
 	if err != nil {
-		response.Fail(c, 500, "生成提示词失败: "+err.Error())
+		// 调用失败也一样不能让用户买单（超时被掐断、上游 5xx 都算）。
+		// 必须用脱离取消的 context：请求已取消时原 ctx 已失效，退费会直接失败。
+		refundCtx := context.WithoutCancel(c.Request.Context())
+		if refundErr := h.biller.Refund(refundCtx, middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成失败（模型调用超时或报错）"); refundErr != nil {
+			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
+		}
+		response.Fail(c, 500, "生成提示词失败，已退费，请重试: "+err.Error())
 		return
 	}
 
-	// 模型输出格式异常导致画面/运动任一为空：不能让用户为半残结果买单，退费并提示重试
-	if storyboardPrompt == "" || motionPrompt == "" {
+	// 模型输出格式异常导致画面/运动缺失（要求几份就得有几份）：不能让用户为半残结果买单，退费并提示重试
+	incomplete := motionPrompt == "" || len(storyboardPrompts) < imageCount
+	if !incomplete {
+		for _, sp := range storyboardPrompts {
+			if sp == "" {
+				incomplete = true
+				break
+			}
+		}
+	}
+	if incomplete {
 		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成结果不完整（画面或运动提示词缺失）"); refundErr != nil {
 			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
 		}
@@ -180,8 +208,15 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		return
 	}
 
+	// 逐份做资产引用归一化
+	normalized := make([]string, len(storyboardPrompts))
+	for i, sp := range storyboardPrompts {
+		normalized[i] = normalizeAssetRefs(normalizeAssetRefs(sp, characters, "角色"), scenes, "场景")
+	}
+
 	response.OK(c, GeneratePromptResponse{
-		StoryboardPrompt: normalizeAssetRefs(normalizeAssetRefs(storyboardPrompt, characters, "角色"), scenes, "场景"),
-		MotionPrompt:     normalizeAssetRefs(normalizeAssetRefs(normalizeAssetRefs(motionPrompt, characters, "角色"), scenes, "场景"), props, "道具"),
+		StoryboardPrompt:  normalized[0],
+		StoryboardPrompts: normalized,
+		MotionPrompt:      normalizeAssetRefs(normalizeAssetRefs(normalizeAssetRefs(motionPrompt, characters, "角色"), scenes, "场景"), props, "道具"),
 	})
 }

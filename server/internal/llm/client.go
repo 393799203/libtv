@@ -273,7 +273,8 @@ func WithMaxTokens(n int) Option {
 // ---- 提示词生成方法 ----
 
 // GeneratePrompt 生成提示词（画面 + 运动一起生成）
-// 返回：画面提示词、运动提示词、错误
+// imageCount：需要几份画面提示词（>1 时一次返回多份，分别对应同一镜头的不同瞬间）
+// 返回：画面提示词列表、运动提示词、错误
 func (c *Client) GeneratePrompt(
 	ctx context.Context,
 	model string,
@@ -281,19 +282,20 @@ func (c *Client) GeneratePrompt(
 	characters []AssetReference,
 	scenes []AssetReference,
 	props []AssetReference,
-) (string, string, error) {
+	imageCount int,
+) ([]string, string, error) {
 	// 构建系统提示词和用户消息（从 prompt.go 获取）
-	systemPrompt := PromptGenerationSystemPrompt
-	userMessage := BuildPromptGenerationUserMessage(shotData, characters, scenes, props)
+	systemPrompt := BuildPromptGenerationSystemPrompt(imageCount)
+	userMessage := BuildPromptGenerationUserMessage(shotData, characters, scenes, props, imageCount)
 
 	// 调用 LLM（max_tokens 显式传大值，见 maxGenerationTokens）
 	resp, err := c.ChatWithModel(ctx, model, systemPrompt, userMessage, WithTemperature(0.7), WithMaxTokens(maxGenerationTokens))
 	if err != nil {
-		return "", "", err
+		return nil, "", err
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", "", fmt.Errorf("LLM 返回空响应")
+		return nil, "", fmt.Errorf("LLM 返回空响应")
 	}
 
 	// 解析响应，提取画面提示词和运动提示词（从 prompt.go 获取）
@@ -302,16 +304,25 @@ func (c *Client) GeneratePrompt(
 	if content == "" && resp.Choices[0].Message.ReasoningContent != "" {
 		content = resp.Choices[0].Message.ReasoningContent
 	}
-	storyboardPrompt, motionPrompt := parsePromptResponse(content)
+	storyboardPrompts, motionPrompt := parsePromptResponse(content, imageCount)
 
 	// 解析结果不完整时输出原始响应（截断），便于排查模型输出格式问题
-	if storyboardPrompt == "" || motionPrompt == "" {
+	incomplete := motionPrompt == "" || len(storyboardPrompts) < imageCount
+	if !incomplete {
+		for _, sp := range storyboardPrompts {
+			if sp == "" {
+				incomplete = true
+				break
+			}
+		}
+	}
+	if incomplete {
 		preview := content
 		if len(preview) > 800 {
 			preview = preview[:800]
 		}
-		log.Printf("[LLM] ⚠️ 提示词解析不完整: model=%s storyboardLen=%d motionLen=%d raw=%s", model, len(storyboardPrompt), len(motionPrompt), preview)
+		log.Printf("[LLM] ⚠️ 提示词解析不完整: model=%s 需要画面份数=%d 实际=%d motionLen=%d raw=%s", model, imageCount, len(storyboardPrompts), len(motionPrompt), preview)
 	}
 
-	return storyboardPrompt, motionPrompt, nil
+	return storyboardPrompts, motionPrompt, nil
 }

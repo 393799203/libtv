@@ -1,6 +1,6 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Modal, Button, message, Select } from 'antd';
-import { ReloadOutlined, CopyOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-design/icons';
+import { Modal, Button, message, Select, Segmented } from 'antd';
+import { ReloadOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import type { ScriptShot, ScriptNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useModels } from '@/hooks/useModels';
@@ -11,7 +11,7 @@ import {
   createShotImageNode,
   createShotVideoNode,
   persistShotCanvas,
-  findShotImageNode,
+  findShotImageNodes,
   findShotVideoNode,
   generateShotImageNodeId,
 } from '@/utils/shotNodeSync';
@@ -29,7 +29,7 @@ interface PromptMergeModalProps {
  * 提示词生成弹窗（单镜头）
  * - 一次调用同时生成画面提示词和运动提示词
  * - 使用 @ 符号引用准备好的资产（角色、场景、道具）
- * - 实时显示最终提示词（画面 + 运动）
+ * - 左右两栏：左=画面提示词，右=运动提示词
  */
 export const PromptMergeModal = memo<PromptMergeModalProps>(
   function PromptMergeModal({
@@ -41,8 +41,15 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
     onUpdate,
   }) {
     const [generating, setGenerating] = useState(false);
-    const [storyboardPrompt, setStoryboardPrompt] = useState(''); // 生成的画面提示词
-    const [motionPrompt, setMotionPrompt] = useState(''); // 生成的运动提示词
+    // 两种模式各自独立的提示词，互不覆盖：1 张模式只读 singlePrompt，2 张模式只读 dual*Prompt
+    const [singlePrompt, setSinglePrompt] = useState(''); // 参考模式（单张参考图）的画面提示词
+    const [dualStartPrompt, setDualStartPrompt] = useState(''); // 首尾帧模式：起始画面
+    const [dualEndPrompt, setDualEndPrompt] = useState(''); // 首尾帧模式：结束画面
+    const [refImageCount, setRefImageCount] = useState<1 | 2>(2); // 模式：1=参考模式，2=首尾帧模式（默认首尾帧）
+    const [activeRef, setActiveRef] = useState<1 | 2>(1); // 首尾帧模式下当前在编辑哪一张（1=起始 2=结束）
+    // 运动提示词同样按模式各存各的：两次生成的结果不可能一样，不能互相覆盖
+    const [singleMotion, setSingleMotion] = useState(''); // 参考模式的运动提示词
+    const [dualMotion, setDualMotion] = useState(''); // 首尾帧模式的运动提示词
     const [selectedModel, setSelectedModel] = useState(''); // 选择的文本模型
     const [contentReady, setContentReady] = useState(false); // ✅ 动画性能优化：延迟渲染重型组件
     const [imageGenerating, setImageGenerating] = useState(false); // 分镜图片节点生成中
@@ -69,9 +76,14 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
 
     // 获取画布状态和模型列表（只在需要时获取，避免不必要的订阅）
     const projectId = useCanvasStore((s) => s.projectId);
-    // ✅ 响应式判断：画布上是否已存在该镜头的图片节点（已存在则隐藏"生成提示词图片"按钮）
-    const shotImageNodeId = shot ? generateShotImageNodeId(shot.id, scriptNodeId) : '';
-    const imageNodeExists = useCanvasStore((s) => s.nodes.some((n) => n.id === shotImageNodeId));
+    // ✅ 响应式判断：该镜头的参考图节点是否已全部创建（全建好才隐藏"创建参考图节点"按钮）
+    const shotImageNodeIds = useMemo(
+      () => (shot ? Array.from({ length: refImageCount }, (_, i) => generateShotImageNodeId(shot.id, scriptNodeId, i + 1)) : []),
+      [shot, scriptNodeId, refImageCount],
+    );
+    const imageNodeExists = useCanvasStore(
+      (s) => shotImageNodeIds.length > 0 && shotImageNodeIds.every((id) => s.nodes.some((n) => n.id === id)),
+    );
     const textModels = useModels('text');
     const imageModels = useModels('image');
     const videoModels = useModels('video');
@@ -86,13 +98,34 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
       return m?.modelId || '';
     }, [videoModels]);
 
-    // 实时计算最终提示词（画面 + 运动提示词拼接）
-    const finalPrompt = useMemo(() => {
-      if (!storyboardPrompt.trim()) return '';
-      return motionPrompt.trim()
-        ? `画面提示词：${storyboardPrompt.trim()}\n视频运动提示词：${motionPrompt.trim()}`
-        : `画面提示词：${storyboardPrompt.trim()}`;
-    }, [storyboardPrompt, motionPrompt]);
+    // 当前编辑框里显示哪份提示词：1 张模式永远读自己的那份 —— 切到 1 张时不会残留 2 张模式的第 2 份
+    const activePrompt = refImageCount === 2
+      ? (activeRef === 2 ? dualEndPrompt : dualStartPrompt)
+      : singlePrompt;
+    // 当前模式是否已有提示词（决定按钮显示/「重新生成」文案）；1=参考模式 2=首尾帧模式
+    const modeHasPrompt = refImageCount === 2
+      ? !!(dualStartPrompt.trim() || dualEndPrompt.trim())
+      : !!singlePrompt.trim();
+    // 当前模式的主提示词；首尾帧模式下起始为空时退回结束画面
+    const modeFirstPrompt = refImageCount === 2
+      ? (dualStartPrompt.trim() || dualEndPrompt.trim())
+      : singlePrompt.trim();
+    // 第 index 张参考图用哪份画面提示词（仅首尾帧模式需要区分；缺一份时沿用另一份，避免建出空提示词节点）
+    const promptForRef = useCallback((index: number) => {
+      if (refImageCount === 2) {
+        return index === 2
+          ? (dualEndPrompt.trim() || dualStartPrompt.trim())
+          : (dualStartPrompt.trim() || dualEndPrompt.trim());
+      }
+      return singlePrompt.trim();
+    }, [refImageCount, singlePrompt, dualStartPrompt, dualEndPrompt]);
+    // 当前模式生效的运动提示词
+    const activeMotion = refImageCount === 2 ? dualMotion : singleMotion;
+    // 切换模式：各自独立；切到参考模式时视角也回到第 1 张
+    const handleRefCountChange = useCallback((next: 1 | 2) => {
+      setRefImageCount(next);
+      if (next === 1) setActiveRef(1);
+    }, []);
 
     // 缓存资产引用数据（避免每次生成时重新 map）
     // ✅ 通过 nodeId 从画布节点获取最新图片
@@ -142,8 +175,15 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
     // 使用 shot?.id 而不是整个 shot 对象作为依赖
     useEffect(() => {
       if (shot) {
-        setStoryboardPrompt(shot.storyboardPrompt || '');
-        setMotionPrompt(shot.motionPrompt || '');
+        setSinglePrompt(shot.storyboardPrompt || '');
+        setDualStartPrompt(shot.storyboardPrompts?.[0] || '');
+        setDualEndPrompt(shot.storyboardPrompts?.[1] || '');
+        setRefImageCount(2); // 默认首尾帧模式：开箱即可用首尾帧
+        setActiveRef(1);
+        setSingleMotion(shot.motionPrompt || '');
+        setDualMotion(shot.dualMotionPrompt || '');
+        // 恢复该镜头上次选用的模式（1 张 / 2 张），默认 2 张
+        setRefImageCount(shot.refImageCount === 1 ? 1 : 2); // 1=参考模式 2=首尾帧模式
       }
     }, [shot?.id]); // 只依赖 shot.id，避免对象引用变化触发
 
@@ -221,30 +261,46 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
           characters: assetReferences.characters,
           scenes: assetReferences.scenes,
           props: assetReferences.props,
+          imageCount: refImageCount, // 首尾帧模式一次生成「起始画面 + 结束画面」两份提示词
         };
 
         // 调用后端 API 生成提示词（api 实例会自动注入 token）
         const result = await generatePrompt(request);
 
-        // 更新状态
-        setStoryboardPrompt(result.storyboardPrompt);
-        setMotionPrompt(result.motionPrompt);
+        // 更新状态（多份时逐份落位）
+        const generated = result.storyboardPrompts?.length ? result.storyboardPrompts : [result.storyboardPrompt];
+        const prompt1 = generated[0] || '';
+        const prompt2 = generated[1] || '';
+        // 只写当前模式的提示词，另一模式的存量原样保留
+        let promptPatch: Partial<ScriptShot>;
+        if (refImageCount === 2) {
+          setDualStartPrompt(prompt1);
+          setDualEndPrompt(prompt2);
+          setActiveRef(1);
+          promptPatch = { storyboardPrompts: [prompt1, prompt2] };
+        } else {
+          setSinglePrompt(prompt1);
+          promptPatch = { storyboardPrompt: prompt1 };
+        }
+        if (refImageCount === 2) setDualMotion(result.motionPrompt);
+        else setSingleMotion(result.motionPrompt);
 
         // 自动保存（更新镜头数据）
         const updatedShot = {
           ...shot,
-          storyboardPrompt: result.storyboardPrompt,
-          motionPrompt: result.motionPrompt,
+          ...promptPatch,
+          ...(refImageCount === 2 ? { dualMotionPrompt: result.motionPrompt } : { motionPrompt: result.motionPrompt }),
+          refImageCount,
           finalPrompt: result.motionPrompt.trim()
-            ? `画面提示词：${result.storyboardPrompt.trim()}\n视频运动提示词：${result.motionPrompt.trim()}`
-            : `画面提示词：${result.storyboardPrompt.trim()}`,
+            ? `画面提示词：${prompt1.trim()}\n视频运动提示词：${result.motionPrompt.trim()}`
+            : `画面提示词：${prompt1.trim()}`,
         };
 
         onUpdate(updatedShot);
 
         // ✅ 性能优化：延迟保存，避免阻塞 UI，给用户响应时间
         // 用户可以立即看到生成的提示词，保存操作在后台执行
-        message.success('提示词生成成功');
+        message.success(refImageCount > 1 && prompt2 ? '已生成 2 份画面提示词（起始画面 + 结束画面）' : '提示词生成成功'); // 参考模式只生成 1 份
 
         // ✅ 修复内存泄漏：清理之前的timer，避免堆积
         if (saveTimerRef.current) {
@@ -279,90 +335,23 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
       } finally {
         setGenerating(false);
       }
-    }, [shot?.id, selectedModel, assetReferences, onUpdate, projectId]); // ✅ 使用 shot?.id 而不是 shot 对象，移除 generating 依赖
+    }, [shot?.id, selectedModel, assetReferences, onUpdate, projectId, refImageCount]); // ✅ 使用 shot?.id 而不是 shot 对象，移除 generating 依赖
 
     // Input onChange 处理器优化（避免每次输入创建新函数）
     const handleStoryboardChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setStoryboardPrompt(e.target.value);
-    }, []);
-
-    // 复制最终提示词（增强错误处理）
-    const handleCopyFinalPrompt = useCallback(async () => {
-      if (!finalPrompt.trim()) {
-        message.warning('最终提示词为空，无法复制');
+      const v = e.target.value;
+      if (refImageCount === 2) {
+        if (activeRef === 2) setDualEndPrompt(v);
+        else setDualStartPrompt(v);
         return;
       }
-
-      // Step 1: 安全上下文校验
-      const isSecureContext = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-
-      // Step 2: 尝试 Clipboard API（现代浏览器）
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        try {
-          await navigator.clipboard.writeText(finalPrompt);
-          message.success('已复制到剪贴板');
-          console.log('[复制成功] Clipboard API');
-          return; // 成功则直接返回
-        } catch (err) {
-          console.error('[Clipboard API 失败]', {
-            error: err,
-            name: err instanceof Error ? err.name : 'Unknown',
-            message: err instanceof Error ? err.message : 'Unknown error',
-            isSecureContext,
-            hasFocus: document.hasFocus(),
-            clipboardAvailable: !!navigator.clipboard,
-          });
-
-          // SecurityError 或其他错误，继续尝试 fallback
-          if (err instanceof Error && err.name === 'SecurityError') {
-            console.warn('[安全限制] Clipboard API 被阻止，尝试备用方案');
-          }
-        }
-      } else {
-        console.warn('[Clipboard API 不可用]', {
-          clipboardExists: !!navigator.clipboard,
-          writeTextExists: !!navigator.clipboard?.writeText,
-          isSecureContext,
-        });
-      }
-
-      // Step 3: execCommand 降级方案（兼容性兜底）
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = finalPrompt;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        textarea.style.top = '0';
-        textarea.style.opacity = '0';
-        textarea.setAttribute('readonly', ''); // 防止iOS键盘弹出
-        document.body.appendChild(textarea);
-
-        // iOS兼容性：需要先focus再select
-        textarea.focus();
-        textarea.select();
-
-        // 设置selection范围（兼容所有浏览器）
-        textarea.setSelectionRange(0, finalPrompt.length);
-
-        const success = document.execCommand('copy');
-        document.body.removeChild(textarea);
-
-        if (success) {
-          message.success('已复制到剪贴板');
-          console.log('[复制成功] execCommand fallback');
-        } else {
-          message.error('复制失败，请手动复制');
-          console.error('[execCommand 失败] 返回 false');
-        }
-      } catch (fallbackErr) {
-        console.error('[Fallback 失败]', fallbackErr);
-        message.error('复制失败，请手动复制');
-      }
-    }, [finalPrompt, message]);
+      setSinglePrompt(v);
+    }, [refImageCount, activeRef]);
 
     const handleMotionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setMotionPrompt(e.target.value);
-    }, []);
+      if (refImageCount === 2) setDualMotion(e.target.value);
+      else setSingleMotion(e.target.value);
+    }, [refImageCount]);
 
     // 自动保存提示词（失去焦点时保存）
     const handleAutoSave = useCallback(async () => {
@@ -370,13 +359,18 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
 
       try {
         // 更新镜头数据
+        // 只落当前模式自己的字段，另一模式的数据不动
+        const promptPatch: Partial<ScriptShot> = refImageCount === 2
+          ? { storyboardPrompts: [dualStartPrompt.trim(), dualEndPrompt.trim()] }
+          : { storyboardPrompt: singlePrompt.trim() };
         const updatedShot = {
           ...shot,
-          storyboardPrompt: storyboardPrompt.trim(),
-          motionPrompt: motionPrompt.trim(),
-          finalPrompt: motionPrompt.trim()
-            ? `画面提示词：${storyboardPrompt.trim()}\n视频运动提示词：${motionPrompt.trim()}`
-            : `画面提示词：${storyboardPrompt.trim()}`,
+          ...promptPatch,
+          ...(refImageCount === 2 ? { dualMotionPrompt: dualMotion.trim() } : { motionPrompt: singleMotion.trim() }),
+          refImageCount,
+          finalPrompt: activeMotion.trim()
+            ? `画面提示词：${modeFirstPrompt}\n视频运动提示词：${activeMotion.trim()}`
+            : `画面提示词：${modeFirstPrompt}`,
         };
 
         onUpdate(updatedShot);
@@ -395,37 +389,51 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
         console.error('自动保存失败:', error);
         // HTTP 错误已由 api.ts 拦截器统一 message.error()
       }
-    }, [shot, storyboardPrompt, motionPrompt, projectId, onUpdate]);
+    }, [shot, singlePrompt, dualStartPrompt, dualEndPrompt, refImageCount, modeFirstPrompt, singleMotion, dualMotion, activeMotion, projectId, onUpdate]);
 
     // 创建分镜图片节点并触发生成（前提：已有画面提示词）
     const handleGenerateImage = useCallback(async () => {
       if (!shot) return;
-      if (!storyboardPrompt.trim()) {
+      if (!modeHasPrompt) {
         message.warning('请先生成画面提示词');
         return;
       }
       if (!projectId) return;
 
-      // 已在生成中则阻止重复点击
-      const existing = findShotImageNode(scriptNodeId, shot.id);
-      if (existing && (existing.data.status === 'running' || existing.data.status === 'pending')) {
+      // 已在生成中则阻止重复点击（该镜头任意一张参考图在跑都拦）
+      const existingNodes = findShotImageNodes(scriptNodeId, shot.id);
+      if (existingNodes.some((n) => n.data.status === 'running' || n.data.status === 'pending')) {
         message.warning('该镜头的图片正在生成中，请稍候');
         return;
       }
 
       setImageGenerating(true);
       try {
-        const node = createShotImageNode(scriptNodeId, shot, storyboardPrompt.trim(), defaultImageModelId);
-        if (!node) {
+        // 按张数创建参考图节点：第 1 张可作首帧、第 2 张可作尾帧，也可两张一起做全能参考
+        let created = 0;
+        for (let i = 1; i <= refImageCount; i++) {
+          const node = createShotImageNode(scriptNodeId, shot, promptForRef(i), defaultImageModelId, i, refImageCount);
+          if (node) created += 1;
+        }
+        if (created === 0) {
           message.error('创建图片节点失败');
           return;
         }
         await persistShotCanvas(projectId);
-        message.success('已创建图片节点，请在画布上点击生成');
+        if (refImageCount === 2 && !dualStartPrompt.trim()) {
+          message.warning('起始画面还没有自己的提示词，暂时沿用了结束画面');
+        } else if (refImageCount === 2 && !dualEndPrompt.trim()) {
+          message.warning('结束画面还没有自己的提示词，暂时沿用了起始画面');
+        }
+        message.success(
+          refImageCount === 2
+            ? '已创建起始画面 + 结束画面两个节点，请在画布上点击生成'
+            : `已创建 ${created} 个参考图节点，请在画布上点击生成`,
+        );
       } finally {
         setImageGenerating(false);
       }
-    }, [shot, storyboardPrompt, scriptNodeId, projectId, defaultImageModelId]);
+    }, [shot, modeHasPrompt, dualStartPrompt, dualEndPrompt, refImageCount, promptForRef, scriptNodeId, projectId, defaultImageModelId]);
 
     // 创建分镜视频节点并触发生成
     // 有图片节点时只需运动提示词；无图片节点时需画面+运动提示词
@@ -433,18 +441,18 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
       if (!shot) return;
       if (!projectId) return;
 
-      // 检查是否已有分镜图片节点（作为参考图）
-      const hasImageNode = !!findShotImageNode(scriptNodeId, shot.id);
+      // 检查是否已有分镜参考图节点（作为参考图）
+      const hasImageNode = findShotImageNodes(scriptNodeId, shot.id).length > 0;
 
       if (hasImageNode) {
         // 有图片节点：只需要运动提示词
-        if (!motionPrompt.trim()) {
+        if (!activeMotion.trim()) {
           message.warning('请先生成运动提示词');
           return;
         }
       } else {
         // 无图片节点：画面+运动提示词都需要
-        if (!storyboardPrompt.trim() || !motionPrompt.trim()) {
+        if (!modeFirstPrompt || !activeMotion.trim()) {
           message.warning('请先生成画面提示词和运动提示词');
           return;
         }
@@ -458,8 +466,8 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
 
       // 合成最终提示词：有图片节点时只用运动提示词
       const combined = hasImageNode
-        ? `视频运动提示词：${motionPrompt.trim()}`
-        : `画面提示词：${storyboardPrompt.trim()}\n视频运动提示词：${motionPrompt.trim()}`;
+        ? `视频运动提示词：${activeMotion.trim()}`
+        : `画面提示词：${modeFirstPrompt}\n视频运动提示词：${activeMotion.trim()}`;
       setVideoGenerating(true);
       try {
         const node = createShotVideoNode(scriptNodeId, shot, combined, defaultVideoModelId);
@@ -472,7 +480,7 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
       } finally {
         setVideoGenerating(false);
       }
-    }, [shot, storyboardPrompt, motionPrompt, scriptNodeId, projectId, defaultVideoModelId]);
+    }, [shot, modeFirstPrompt, activeMotion, scriptNodeId, projectId, defaultVideoModelId]);
 
     return (
       <Modal
@@ -492,8 +500,18 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
           </div>
         ) : (
           <div className="flex flex-col h-full gap-3">
-            {/* 顶部：模型选择 + 生成按钮 */}
+            {/* 顶部：模式（首尾帧/参考）+ 模型选择 + 生成按钮 */}
             <div className="flex items-center gap-3 shrink-0">
+              <span className="text-sm font-medium text-gray-700 shrink-0">模式</span>
+              <Segmented
+                size="small"
+                value={refImageCount}
+                onChange={(v) => handleRefCountChange(Number(v) as 1 | 2)}
+                options={[
+                  { label: '首尾帧模式', value: 2 },
+                  { label: '参考模式', value: 1 },
+                ]}
+              />
               <span className="text-sm font-medium text-gray-700 shrink-0">文本模型</span>
               <Select
                 value={selectedModel}
@@ -509,22 +527,38 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
                 loading={generating}
                 icon={<ReloadOutlined />}
               >
-                {generating ? '生成中...' : storyboardPrompt ? '重新生成' : '生成提示词'}
+                {generating ? '生成中...' : modeHasPrompt ? '重新生成' : '生成提示词'}
               </Button>
             </div>
 
-            {/* 中部：左侧提示词编辑区 + 右侧最终提示词 */}
+            {/* 中部：左=画面提示词，右=运动提示词 */}
             <div className="flex gap-4 flex-1 min-h-0">
-              {/* 左列：画面提示词 + 运动提示词 */}
-              <div className="flex-1 min-w-0 flex flex-col gap-3">
-                {/* 画面提示词 */}
-                <div className="flex-[6] min-h-0 flex flex-col">
-                  <div className="text-sm font-medium text-gray-700 mb-1 shrink-0">画面提示词</div>
+              {/* 左栏：画面提示词 */}
+              <div className="flex-1 min-w-0 flex flex-col">
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <div className="text-sm font-medium text-gray-700 mb-1 shrink-0">
+                    画面提示词
+                    {refImageCount === 2 && <span className="ml-1 text-xs font-normal text-gray-400">（首尾帧：起始 + 结束两份）</span>}
+                  </div>
+                  {/* 首尾帧模式：切换编辑起始还是结束画面 */}
+                  {refImageCount === 2 && (
+                    <Segmented
+                      size="small"
+                      block
+                      className="mb-1 shrink-0"
+                      value={activeRef}
+                      onChange={(v) => setActiveRef(Number(v) as 1 | 2)}
+                      options={[
+                        { label: '起始画面', value: 1 },
+                        { label: '结束画面', value: 2 },
+                      ]}
+                    />
+                  )}
                   {/* 识别到的 @ 引用标签 */}
-                  {storyboardPrompt.trim() && (
+                  {activePrompt.trim() && (
                     <div className="mb-1 shrink-0">
                       <PromptReferenceTags
-                        prompt={storyboardPrompt}
+                        prompt={activePrompt}
                         characters={charactersRef.current}
                         scenes={scenesRef.current}
                         props={propsRef.current}
@@ -534,52 +568,31 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
                   )}
                   <div className="flex-1 min-h-0 flex">
                     <textarea
-                      value={storyboardPrompt}
+                      value={activePrompt}
                       onChange={handleStoryboardChange}
                       onBlur={handleAutoSave}
-                      placeholder="点击AI生成按钮或手动输入画面提示词，可使用括号形式引用资产（如：南方（@角色-南方））"
-                      className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-gray-700 leading-relaxed resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* 运动提示词 */}
-                <div className="flex-[4] min-h-0 flex flex-col">
-                  <div className="text-sm font-medium text-gray-700 mb-1 shrink-0">运动提示词</div>
-                  <div className="flex-1 min-h-0 flex">
-                    <textarea
-                      value={motionPrompt}
-                      onChange={handleMotionChange}
-                      onBlur={handleAutoSave}
-                      placeholder="点击AI生成按钮或手动输入运动提示词"
+                      placeholder={refImageCount === 2
+                        ? `${activeRef === 1 ? '起始画面' : '结束画面'}的画面提示词，可点击AI生成或手动输入`
+                        : '点击AI生成按钮或手动输入画面提示词，可使用括号形式引用资产（如：南方（@角色-南方））'}
                       className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-gray-700 leading-relaxed resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* 右列：最终提示词 */}
-              <div className="w-[360px] shrink-0 flex flex-col">
-                <div className="text-sm font-medium text-gray-700 mb-1 shrink-0 flex items-center justify-between">
-                  <span>最终提示词</span>
-                  {finalPrompt.trim() && (
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<CopyOutlined />}
-                      onClick={handleCopyFinalPrompt}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      复制
-                    </Button>
-                  )}
+              {/* 右栏：运动提示词 */}
+              <div className="flex-1 min-w-0 flex flex-col">
+                <div className="text-sm font-medium text-gray-700 mb-1 shrink-0">
+                  运动提示词
+                  {refImageCount === 2 && <span className="ml-1 text-xs font-normal text-gray-400">（首尾帧：起止状态对齐两张参考图）</span>}
                 </div>
                 <div className="flex-1 min-h-0 flex">
                   <textarea
-                    value={finalPrompt}
-                    placeholder="画面提示词 + 运动提示词自动合成"
-                    className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-700 leading-relaxed resize-none focus:outline-none"
-                    readOnly
+                    value={activeMotion}
+                    onChange={handleMotionChange}
+                    onBlur={handleAutoSave}
+                    placeholder="点击AI生成按钮或手动输入运动提示词"
+                    className="flex-1 w-full px-3 py-2 rounded-md border border-gray-200 bg-white text-sm text-gray-700 leading-relaxed resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 transition-colors"
                   />
                 </div>
               </div>
@@ -588,17 +601,17 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
             {/* 底部：创建分镜资产节点（仅在有提示词时显示） */}
             <div className="shrink-0 pt-3 border-t border-gray-200">
               <div className="flex items-center justify-center gap-2">
-                {storyboardPrompt.trim() && !imageNodeExists && (
+                {modeHasPrompt && !imageNodeExists && (
                   <Button
                     onClick={handleGenerateImage}
                     loading={imageGenerating}
                     disabled={!shot}
                     icon={<PictureOutlined />}
                   >
-                    创建分镜图片节点
+                    {refImageCount === 2 ? '创建首尾帧节点（起始 + 结束）' : '创建参考图节点'}
                   </Button>
                 )}
-                {storyboardPrompt.trim() && motionPrompt.trim() && (
+                {modeHasPrompt && activeMotion.trim() && (
                   <Button
                     onClick={handleGenerateVideo}
                     loading={videoGenerating}

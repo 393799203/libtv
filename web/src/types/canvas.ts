@@ -153,8 +153,14 @@ export interface ScriptShot {
   imageUrl?: string;
   /** 画面提示词（第三阶段生成，基于表格数据重新生成，含 @ 引用） */
   storyboardPrompt?: string;
+  /** 首尾帧模式的画面提示词（第 1 项=起始画面，第 2 项=结束画面；与参考模式各存各的） */
+  storyboardPrompts?: string[];
   /** 运动提示词（第三阶段生成，基于表格数据重新生成） */
   motionPrompt?: string;
+  /** 首尾帧模式的运动提示词（与参考模式各存各的；要求与起始/结束画面锚定） */
+  dualMotionPrompt?: string;
+  /** 该镜头选用的模式（1=参考模式，2=首尾帧模式），决定上面哪一组提示词生效 */
+  refImageCount?: number;
   /** 最终合成提示词（画面提示词 + 运动提示词） */
   finalPrompt?: string;
 }

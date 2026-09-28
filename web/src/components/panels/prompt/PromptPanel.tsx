@@ -111,8 +111,8 @@ function computeImportablePrompts(
   const result: { label: string; prompt: string; duration?: number }[] = [];
   for (const input of upstreamInputs) {
     if (input.nodeType !== 'image') continue;
-    // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}
-    const match = input.nodeId.match(/^shot-image-(.+)-(script-.+)$/);
+    // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}（第 2 张起带 -refN 后缀）
+    const match = input.nodeId.match(/^shot-image-(.+)-(script-.+?)(?:-ref\d+)?$/);
     if (!match) continue;
     const [, shotId, scriptNodeId] = match;
     const scriptNode = nodes.find((n) => n.id === scriptNodeId);
@@ -120,9 +120,13 @@ function computeImportablePrompts(
     const scriptData = scriptNode.data as ScriptNodeData;
     const shot = (scriptData.shots || []).find((s: ScriptShot) => s.id === shotId);
     if (shot?.finalPrompt) {
-      // 有上游图片参考时，只需要运动提示词（画面由参考图提供）
-      const prompt = shot.motionPrompt?.trim()
-        ? `视频运动提示词：${shot.motionPrompt.trim()}`
+      // 有上游图片参考时，只需要运动提示词（画面由参考图提供）。
+      // 运动提示词按该镜头选用的模式取：参考模式用 motionPrompt，首尾帧模式用 dualMotionPrompt，
+      // 两者独立生成、内容不同，不能混用（缺失时回退到另一份，兼容旧数据）。
+      const motion = (shot.refImageCount === 1 ? shot.motionPrompt : shot.dualMotionPrompt)?.trim()
+        || shot.motionPrompt?.trim();
+      const prompt = motion
+        ? `视频运动提示词：${motion}`
         : shot.finalPrompt;
       result.push({ label: `分镜${shot.shotNumber}提示词`, prompt, duration: shot.duration });
     }
@@ -153,13 +157,13 @@ function computeUpstreamSignature(nodeId: string, nodes: LibTVNode[], edges: Lib
     addNode(src);
     // 分镜图片节点关联的 script 节点：shots 里被读到的字段也纳入签名
     if (src && src.id.startsWith('shot-image-')) {
-      const m = src.id.match(/^shot-image-(.+)-(script-.+)$/);
+      const m = src.id.match(/^shot-image-(.+)-(script-.+?)(?:-ref\d+)?$/);
       const scriptNode = m ? nodes.find((n) => n.id === m[2]) : undefined;
       if (scriptNode) {
         addNode(scriptNode);
         const shots = (scriptNode.data as ScriptNodeData).shots || [];
         for (const s of shots) {
-          parts.push(`shot:${s.id}|${s.shotNumber}|${s.finalPrompt}|${s.motionPrompt}|${s.duration}`);
+          parts.push(`shot:${s.id}|${s.shotNumber}|${s.finalPrompt}|${s.motionPrompt}|${s.dualMotionPrompt}|${s.refImageCount}|${s.duration}`);
         }
       }
     }
@@ -249,12 +253,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   }, [dragInfo]);
 
   // 节点生成 hook — 统一入口（处理单点生成 + SSE 订阅）
-  const {
-    isGenerating: hookIsGenerating,
-    error: hookError,
-    generate,
-    clearError,
-  } = useNodeGeneration({ nodeId });
+  // 错误不在这里提示：失败状态与错误信息由节点本身展示（红点 + 悬浮看详情）
+  const { isGenerating: hookIsGenerating, generate } = useNodeGeneration({ nodeId });
 
   // 从 plugin registry 读配置（统一来源，后续加节点类型无需改 PromptPanel）
   const config = nodeRegistry.get(nodeType).promptConfig;
@@ -561,21 +561,6 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   return (
     <div className={panelClass}>
-
-      {/* 错误提示条（hookError 有值时显示） */}
-      {hookError && (
-        <div className="mb-2 px-3 py-2 rounded-md bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
-          <span className="flex-1 break-all">{hookError}</span>
-          <button
-            onClick={clearError}
-            className="text-red-500 hover:text-red-700 flex-shrink-0"
-            title="关闭"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* 视频节点：模式选择器 + 快捷导入按钮 */}
       {nodeType === 'video' && (
