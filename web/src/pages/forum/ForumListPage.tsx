@@ -163,12 +163,12 @@ export default function ForumListPage() {
           <Empty description={keyword ? `没有找到包含「${keyword}」的帖子` : '还没有帖子，来发第一篇吧'} />
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div>
           {posts.map((post, index) => (
             <div
               key={post.id}
               onClick={() => navigate(`/forum/${post.id}`)}
-              className={`flex cursor-pointer items-start gap-4 px-5 py-4 transition-colors hover:bg-gray-50 ${
+              className={`flex cursor-pointer items-start gap-4 py-4 transition-colors hover:bg-gray-50 ${
                 index > 0 ? 'border-t border-gray-100' : ''
               }`}
             >
