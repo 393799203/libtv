@@ -247,10 +247,14 @@ export default function PointsPackageManagement() {
             </div>
             <div className="flex items-center gap-3">
               <span className="w-20 shrink-0 text-[13px] text-gray-600">售价（元）</span>
+              {/* 支持两位小数（如 ¥49.90）：下单会按 math.Round(price*100) 转成分，
+                  支付宝按 %.2f 传 total_amount，整条链路本来就支持小数，
+                  原先被 precision={0} 挡成了只能填整数。积分数量保持整数（余额是 bigint）。 */}
               <InputNumber
                 className="flex-1"
-                min={1}
-                precision={0}
+                min={0.01}
+                step={0.1}
+                precision={2}
                 value={editState.price}
                 onChange={(v) => setEditState({ ...editState, price: v ?? 0 })}
               />

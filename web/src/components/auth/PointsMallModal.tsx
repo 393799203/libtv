@@ -167,7 +167,9 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
       open
       onCancel={onClose}
       footer={null}
-      width={880}
+      // 4 个及以上套餐一行摆 4 个，模态框相应加宽，卡片才不会被挤窄；
+      // 1~3 个仍沿用原来的宽度与列数
+      width={packages.length >= 4 ? 1040 : 880}
       destroyOnClose
       styles={{
         mask: { backdropFilter: 'blur(4px)' },
@@ -181,7 +183,19 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
           <Empty description="暂无在售套餐" />
         </div>
       ) : (
-        <div className={`grid gap-4 ${packages.length >= 3 ? 'grid-cols-3' : packages.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        // 列数按套餐数量自适应：4 个及以上一行 4 个（窄屏退化为 2 列，避免卡片被压扁）。
+        // Tailwind 静态提取类名，所以只能写完整字面量，不能用 `grid-cols-${n}` 拼。
+        <div
+          className={`grid gap-4 ${
+            packages.length >= 4
+              ? 'grid-cols-2 lg:grid-cols-4'
+              : packages.length === 3
+                ? 'grid-cols-3'
+                : packages.length === 2
+                  ? 'grid-cols-2'
+                  : 'grid-cols-1'
+          }`}
+        >
           {packages.map((pkg) => {
             const features = [
               ...capacityFeatures(pkg.points, prices),
