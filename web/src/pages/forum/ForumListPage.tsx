@@ -168,19 +168,11 @@ export default function ForumListPage() {
             <div
               key={post.id}
               onClick={() => navigate(`/forum/${post.id}`)}
-              className={`flex cursor-pointer items-start gap-4 py-4 transition-colors hover:bg-gray-50 ${
+              className={`cursor-pointer p-4 transition-colors hover:bg-gray-50 ${
                 index > 0 ? 'border-t border-gray-100' : ''
               }`}
             >
-              <img
-                src={post.avatar_url || '/default-avatar.svg'}
-                alt=""
-                className="mt-0.5 h-9 w-9 shrink-0 rounded-full border border-gray-200 object-cover"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
-                }}
-              />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   {post.is_pinned && (
                     <Tag color="red" className="shrink-0 !mr-0" icon={<PushpinFilled />}>
@@ -198,7 +190,17 @@ export default function ForumListPage() {
                   />
                 </p>
                 <div className="mt-2 flex items-center gap-4 text-[12px] text-gray-400">
-                  <span className="text-gray-500">{post.nickname || '匿名用户'}</span>
+                  <span className="flex items-center gap-1.5 text-gray-500">
+                    <img
+                      src={post.avatar_url || '/default-avatar.svg'}
+                      alt=""
+                      className="h-5 w-5 shrink-0 rounded-full bg-gray-100 object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+                      }}
+                    />
+                    {post.nickname || '匿名用户'}
+                  </span>
                   <span>{formatTime(post.created_at)}</span>
                   <span className="flex items-center gap-1">
                     <EyeOutlined /> {post.view_count}
