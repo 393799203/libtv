@@ -18,6 +18,8 @@ const MyProjectsPage = lazy(() => import('@/pages/projects/MyProjectsPage'));
 const AIModelsPage = lazy(() => import('@/pages/ai-models/AIModelsPage'));
 const AdminPage = lazy(() => import('@/pages/admin/AdminPage'));
 const PrevizEditor = lazy(() => import('@/pages/previz/PrevizEditor'));
+const ForumListPage = lazy(() => import('@/pages/forum/ForumListPage'));
+const ForumPostPage = lazy(() => import('@/pages/forum/ForumPostPage'));
 
 const Loading = () => (
   <div className="w-full h-screen flex items-center justify-center">
@@ -56,6 +58,23 @@ export const routes: RouteObject[] = [
             element: (
               <LazyLoad>
                 <VideoListPage />
+              </LazyLoad>
+            ),
+          },
+          // 论坛：公开可读（要能当首页 banner 的活动落地页），发帖/回复在页面内自行要求登录
+          {
+            path: 'forum',
+            element: (
+              <LazyLoad>
+                <ForumListPage />
+              </LazyLoad>
+            ),
+          },
+          {
+            path: 'forum/:postId',
+            element: (
+              <LazyLoad>
+                <ForumPostPage />
               </LazyLoad>
             ),
           },

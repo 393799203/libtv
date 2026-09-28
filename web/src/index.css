@@ -210,3 +210,126 @@
 :root {
   --ant-color-primary: #3b82f6;
 }
+
+/* ---------------------------------------------------------------------------
+ * 论坛富文本正文样式
+ * 帖子正文是服务端清洗过的 HTML，用 dangerouslySetInnerHTML 渲染；
+ * Tailwind 的 preflight 会把 h1~h5/ul/blockquote 等默认样式清掉，
+ * 所以这里把排版补回来，否则正文会是一坨没有层次的文字。
+ * 作用域限定在 .forum-content 内，不影响站内其它地方。
+ * ------------------------------------------------------------------------- */
+.forum-content {
+  font-size: 15px;
+  line-height: 1.85;
+  color: #374151;
+  word-break: break-word;
+}
+
+.forum-content p {
+  margin: 0 0 0.85em;
+}
+
+.forum-content h1,
+.forum-content h2,
+.forum-content h3,
+.forum-content h4,
+.forum-content h5 {
+  margin: 1.3em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #111827;
+}
+
+.forum-content h1 { font-size: 24px; }
+.forum-content h2 { font-size: 21px; }
+.forum-content h3 { font-size: 18px; }
+.forum-content h4 { font-size: 16px; }
+.forum-content h5 { font-size: 15px; }
+
+.forum-content ul,
+.forum-content ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.6em;
+}
+
+.forum-content ul { list-style: disc; }
+.forum-content ol { list-style: decimal; }
+.forum-content li { margin: 0.25em 0; }
+
+.forum-content blockquote {
+  margin: 0.85em 0;
+  padding: 0.6em 1em;
+  border-left: 3px solid #d1d5db;
+  background: #f9fafb;
+  color: #4b5563;
+}
+
+.forum-content pre {
+  margin: 0.85em 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: #1f2937;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.forum-content pre code {
+  color: #e5e7eb;
+  background: transparent;
+  padding: 0;
+}
+
+.forum-content code {
+  padding: 1px 5px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #db2777;
+}
+
+.forum-content a {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.forum-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 0.6em 0;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.forum-content hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid #e5e7eb;
+}
+
+.forum-content table {
+  width: 100%;
+  margin: 0.85em 0;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.forum-content th,
+.forum-content td {
+  padding: 6px 10px;
+  border: 1px solid #e5e7eb;
+}
+
+.forum-content th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+/* 回复框里的富文本更紧凑一点 */
+.forum-content--compact {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.forum-content--compact p { margin-bottom: 0.5em; }

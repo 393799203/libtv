@@ -608,7 +608,14 @@ export default function VideoListPage() {
                         return;
                       }
                       if (banner.link_url) {
-                        window.open(banner.link_url, '_blank');
+                        const bannerLink = banner.link_url.trim();
+                        // 站内链接（以 / 开头，例如论坛活动落地页 /forum 或某篇帖子
+                        // /forum/<id>）走前端路由跳转，不要新开标签页；外链仍新开窗口
+                        if (bannerLink.startsWith('/')) {
+                          navigate(bannerLink);
+                        } else {
+                          window.open(bannerLink, '_blank', 'noopener,noreferrer');
+                        }
                       }
                     }}
                   >

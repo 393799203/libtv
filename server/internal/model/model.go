@@ -298,6 +298,55 @@ func (b *Banner) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// ========== 论坛 ==========
+
+// ForumPost 论坛帖子
+type ForumPost struct {
+	ID     string `gorm:"primaryKey;size:36" json:"id"`
+	UserID string `gorm:"size:36;not null;index" json:"user_id"`
+	Title  string `gorm:"size:200;not null" json:"title"`
+	// Content 富文本正文（HTML）。写入前已由 service 用 bluemonday 白名单清洗，
+	// 前端用 dangerouslySetInnerHTML 渲染，切勿跳过清洗直接展示。
+	Content    string `gorm:"type:text;not null" json:"content"`
+	ViewCount  int64  `gorm:"not null;default:0" json:"view_count"`
+	ReplyCount int64  `gorm:"not null;default:0" json:"reply_count"`
+	// IsPinned 置顶：仅管理员可设，列表里排在最前
+	IsPinned  bool      `gorm:"not null;default:false;index" json:"is_pinned"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (ForumPost) TableName() string { return "forum_posts" }
+
+func (p *ForumPost) BeforeCreate(tx *gorm.DB) error {
+	if p.ID == "" {
+		p.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// ForumReply 论坛回复（平铺一层；回复某条回复时用 ReplyToNickname 展示「回复 @某人」，
+// 不建父子树——与 show_comments 的展示口径一致，读起来更接近普通论坛）
+type ForumReply struct {
+	ID     string `gorm:"primaryKey;size:36" json:"id"`
+	PostID string `gorm:"size:36;not null;index" json:"post_id"`
+	UserID string `gorm:"size:36;not null;index" json:"user_id"`
+	// Content 富文本回复（HTML，同样经过 bluemonday 清洗）
+	Content string `gorm:"type:text;not null" json:"content"`
+	// ReplyToNickname 冗余展示用：被回复人昵称（直接回复帖子时为空）
+	ReplyToNickname string    `gorm:"size:100" json:"reply_to_nickname"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (ForumReply) TableName() string { return "forum_replies" }
+
+func (r *ForumReply) BeforeCreate(tx *gorm.DB) error {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // ========== 用户个人资产库 ==========
 
 // UserAsset 用户个人资产（从画布节点收藏进来的图片/视频，

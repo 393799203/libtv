@@ -140,13 +140,36 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 // 如果传递 project_id 参数，存储到 users/<userID>/canvas/项目ID/ 目录
 // 如果不传递 project_id，存储到 images/ 目录
 func (h *UploadHandler) UploadImage(c *gin.Context) {
+	projectID := c.PostForm("project_id")
+	dir := "images"
+	if projectID != "" {
+		dir = h.canvasDirForProject(projectID)
+	}
+	h.uploadImageToDir(c, dir, projectID)
+}
+
+// UploadForumImage 论坛图片上传（需登录）：存到 forum/<userID>/。
+//
+// 为什么不复用公开的 UploadImage 再让前端传目录：目录一旦由客户端指定就能被伪造成
+// 别人的目录，所以这里从 JWT 取当前用户，由服务端拼路径。
+// 放在独立目录是为了能按作者/按论坛单独清理，也不再和全站 images/ 混在一起。
+func (h *UploadHandler) UploadForumImage(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Fail(c, http.StatusUnauthorized, "请先登录")
+		return
+	}
+	h.uploadImageToDir(c, "forum/"+userID, "")
+}
+
+// uploadImageToDir 图片上传的公共实现：解码取尺寸 → 内容哈希去重落盘 → 生成缩略图。
+// dir 由调用方按业务决定（images/、canvas/...、forum/<userID>/）。
+func (h *UploadHandler) uploadImageToDir(c *gin.Context, dir, projectID string) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "获取文件失败")
 		return
 	}
-
-	projectID := c.PostForm("project_id")
 
 	// ✅ 读取图片数据到 buffer，用于解码获取尺寸
 	imageData, err := io.ReadAll(file)
@@ -167,12 +190,6 @@ func (h *UploadHandler) UploadImage(c *gin.Context) {
 		width = imgConfig.Width
 		height = imgConfig.Height
 		log.Printf("[UploadImage] 图片解码成功: filename=%s format=%s size=%d bytes dimensions=%d×%d", header.Filename, format, len(imageData), width, height)
-	}
-
-	// 没有项目ID时存到 images/，有项目ID时存到 users/<userID>/canvas/项目ID/
-	dir := "images"
-	if projectID != "" {
-		dir = h.canvasDirForProject(projectID)
 	}
 
 	// 扩展名以真实字节为准：客户端文件名后缀可能与内容不符（如 JPEG 命名为 .png）。

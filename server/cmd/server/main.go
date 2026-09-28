@@ -67,7 +67,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -95,6 +95,7 @@ func main() {
 	modelPriceRepo := repository.NewModelPriceRepo(db)
 	generationHistoryRepo := repository.NewGenerationHistoryRepo(db)
 	pointsPackageRepo := repository.NewPointsPackageRepo(db)
+	forumRepo := repository.NewForumRepo(db)
 
 	// 初始化存储（提前到 service 之前，便于 service 注入 storage）
 	appStorage := initStorage()
@@ -105,6 +106,7 @@ func main() {
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, commentRepo, appStorage)
 	commentService := service.NewCommentService(commentRepo, showRepo, userRepo)
+	forumService := service.NewForumService(forumRepo, userRepo)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
 	// 模型价格配置服务（运营后台价格管理；模型清单来自 models.yaml，价格存 model_prices 表）
@@ -167,6 +169,7 @@ func main() {
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
 	commentHandler := handler.NewCommentHandler(commentService)
+	forumHandler := handler.NewForumHandler(forumService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager, channelService)
 	channelHandler := handler.NewChannelHandler(channelService, userService)
@@ -255,6 +258,15 @@ func main() {
 		publicBanners.GET("/:id", bannerHandler.GetBanner)
 	}
 
+	// 公开论坛路由（无需登录：未登录也能浏览帖子与回复，
+	// 论坛要能当首页 banner 的活动落地页，必须让没登录的访客也能看）
+	publicForum := r.Group("/api/forum")
+	{
+		publicForum.GET("/posts", forumHandler.ListPosts)
+		publicForum.GET("/posts/:id", forumHandler.GetPost)
+		publicForum.GET("/posts/:id/replies", forumHandler.ListReplies)
+	}
+
 	// 积分超市套餐列表（无需登录，仅启用中的套餐）
 	r.GET("/api/points-packages", pointsPackageHandler.ListPublic)
 
@@ -289,7 +301,16 @@ func main() {
 		api.PUT("/auth/profile", userHandler.UpdateProfile)    // 更新当前用户个人资料（昵称/头像）
 		api.PUT("/auth/password", userHandler.ChangePassword)  // 修改当前用户密码
 		api.POST("/upload/avatar", uploadHandler.UploadAvatar) // 上传头像（存 users/<userID>/avatar/）
+		api.POST("/upload/forum-image", uploadHandler.UploadForumImage) // 论坛图片（存 forum/<userID>/）
 		api.GET("/users", userHandler.List)                    // 管理员：获取所有用户
+
+		// 论坛：发帖/回复/删除（需登录；删帖删回复本人或管理员皆可）
+		api.POST("/forum/posts", forumHandler.CreatePost)
+		api.POST("/forum/posts/:id/replies", forumHandler.CreateReply)
+		api.DELETE("/forum/posts/:id", forumHandler.DeletePost)
+		api.DELETE("/forum/replies/:replyId", forumHandler.DeleteReply)
+		// 论坛置顶（仅管理员）
+		api.PUT("/forum/posts/:id/pin", middleware.RequireAdmin(userService), forumHandler.SetPinned)
 		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
 		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
 		api.POST("/users/:id/recharge", userHandler.Recharge)  // 管理员：为用户充值积分

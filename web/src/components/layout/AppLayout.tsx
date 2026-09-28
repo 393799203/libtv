@@ -10,6 +10,7 @@ import {
   AccountBookOutlined,
   FolderOutlined,
   ShopOutlined,
+  CommentOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
@@ -80,6 +81,20 @@ export function AppLayout() {
           </button>
           <span className="text-gray-300">|</span>
           <span className="text-sm text-gray-400">AI 视频创作工作台</span>
+          {/* 论坛入口：放在登录态判断之外——论坛是公开可读的，
+              未登录访客（含从 banner 活动落地进来的）也要能看到这个入口 */}
+          <span className="hidden text-gray-300 sm:inline">|</span>
+          <button
+            onClick={() => navigate('/forum')}
+            className={`hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors sm:flex ${
+              location.pathname.startsWith('/forum')
+                ? 'bg-blue-50 text-blue-600'
+                : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
+            }`}
+          >
+            <CommentOutlined />
+            漫蛙社区
+          </button>
         </div>
 
         {isAuthenticated ? (
