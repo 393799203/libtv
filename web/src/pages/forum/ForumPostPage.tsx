@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { App, Button, Empty, Input, Modal, Spin, Tag } from 'antd';
 import {
@@ -12,11 +12,11 @@ import {
 import { forumApi, type ForumPostItem, type ForumReplyItem } from '@/services/forumApi';
 import { RichTextEditor } from '@/components/forum/RichTextEditor';
 import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
+import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import { isRichTextEmpty } from '@/components/forum/richText';
 import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
-import { deriveThumbUrl, isOwnStorageUrl } from '@/utils/thumbUrl';
-import { toSameOriginMediaUrl } from '@/utils/download';
+import { decorateForumContent } from '@/utils/thumbUrl';
 
 function formatTime(iso: string): string {
   const time = new Date(iso).getTime();
@@ -164,45 +164,49 @@ export default function ForumPostPage() {
     }
   };
 
-  // 正文/回复里的图片：优先加载 640px 缩略图（原图可能好几 MB），点击看原图。
-  // 缩略图缺失（存量文件没生成过）时自动回退原图，所以替换是安全的；
-  // 只替换本站存储在管的地址，外链不动，避免为外链多打一次 404。
+  // 正文/回复里的图片：显示用 640px 缩略图（原图可能好几 MB），点击用弹窗看原图。
+  //
+  // 改写发生在「交给 React 的 HTML 字符串」上，不是渲染后改 DOM —— 组件任何一次
+  // state 变化（比如打开预览弹窗）都会让 React 用原始 HTML 重灌 innerHTML，手工加的
+  // 属性、包裹的节点全会被冲掉（实测底图退回原图，布局从 642px 蹦到 992px 且回不去）。
+  const postHtml = useMemo(() => (post ? decorateForumContent(post.content) : ''), [post]);
+  const decoratedReplies = useMemo(
+    () => replies.map((reply) => ({ ...reply, decoratedContent: decorateForumContent(reply.content) })),
+    [replies],
+  );
+
   const contentRootRef = useRef<HTMLDivElement>(null);
+  // 点正文图片时用站内弹窗看原图（不新开页面）
+  const [previewUrl, setPreviewUrl] = useState('');
+  const boundThumbImgsRef = useRef<WeakSet<HTMLImageElement>>(new WeakSet());
+
+  // 缩略图可能不存在（存量文件上传那次没生成过），加载失败要自动回退原图。
+  // error 事件不冒泡，只能逐个挂监听；而 React 重渲染会换掉这些节点，
+  // 所以这个 effect 每次渲染都跑一遍，用 WeakSet 记住已经绑过的节点（不泄漏）。
   useEffect(() => {
     const root = contentRootRef.current;
     if (!root) return;
-    root.querySelectorAll('.forum-content img[src]').forEach((node) => {
-      const img = node as HTMLImageElement;
-      if (img.dataset.thumbDone === '1') return;
-      const original = img.getAttribute('src') || '';
-      if (!original) return;
-      img.dataset.thumbDone = '1';
-      img.loading = 'lazy';
-      const thumb = isOwnStorageUrl(original) ? deriveThumbUrl(original) : undefined;
-      if (!thumb) return;
-      img.dataset.original = original;
+    root.querySelectorAll<HTMLImageElement>('img[data-original]').forEach((img) => {
+      if (boundThumbImgsRef.current.has(img)) return;
+      boundThumbImgsRef.current.add(img);
       img.addEventListener('error', function onThumbError() {
         img.removeEventListener('error', onThumbError);
         const fallback = img.dataset.original;
         if (fallback && img.getAttribute('src') !== fallback) img.setAttribute('src', fallback);
       });
-      img.setAttribute('src', thumb);
-      // 点开看原图：正文只显示 640px 缩略图，看细节要有出口。
-      // 不能直接链 ZOS 地址：天翼云 ZOS 在响应层强制 Content-Disposition: attachment
-      // （上传时声明 inline 也没用，实测会被覆盖），点开只会下载。
-      // 同源 /media/<对象名> 由后端直读存储，响应头我们说了算，浏览器会直接显示。
-      img.style.cursor = 'zoom-in';
-      img.title = '查看原图';
-      if (!img.closest('a')) {
-        const link = document.createElement('a');
-        link.href = toSameOriginMediaUrl(original);
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        img.parentNode?.insertBefore(link, img);
-        link.appendChild(img);
-      }
     });
-  }, [post?.content, replies]);
+  });
+
+  // 图片点击统一在容器上代理：我们只拦「正文里带 data-original 的图」的普通左键，
+  // 带 Ctrl/Cmd/Shift/Alt 的点击交回浏览器（原生新标签页打开仍然可用）。
+  const handleContentClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const img = target?.closest?.('img[data-original]') as HTMLImageElement | null;
+    if (!img) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    setPreviewUrl(img.dataset.original || '');
+  };
 
   if (loading) {
     return (
@@ -259,7 +263,11 @@ export default function ForumPostPage() {
   };
 
   return (
-    <div ref={contentRootRef} className="mx-auto w-full max-w-5xl px-4 py-8">
+    <div
+      ref={contentRootRef}
+      onClick={handleContentClick}
+      className="mx-auto w-full max-w-5xl px-4 py-8"
+    >
       {/* 帖子主体 */}
       <article className="pb-6">
         <div className="flex items-start justify-between gap-4">
@@ -314,7 +322,7 @@ export default function ForumPostPage() {
         </div>
 
         {/* 正文：服务端已清洗的 HTML */}
-        <div className="forum-content mt-5" dangerouslySetInnerHTML={{ __html: post.content }} />
+        <div className="forum-content mt-5" dangerouslySetInnerHTML={{ __html: postHtml }} />
       </article>
 
       {/* 回复区 */}
@@ -350,7 +358,7 @@ export default function ForumPostPage() {
                     </div>
                     <div
                       className="forum-content forum-content--compact mt-1.5"
-                      dangerouslySetInnerHTML={{ __html: reply.content }}
+                      dangerouslySetInnerHTML={{ __html: reply.decoratedContent }}
                     />
                     <div className="mt-1 flex items-center gap-3 text-[12px]">
                       <button
@@ -428,6 +436,15 @@ export default function ForumPostPage() {
           </div>
         )}
       </section>
+
+      {/* 正文图片的原图预览（点图打开弹窗，不新开页面） */}
+      <MediaPreviewModal
+        open={!!previewUrl}
+        kind="image"
+        url={previewUrl}
+        title="查看原图"
+        onClose={() => setPreviewUrl('')}
+      />
 
       {/* 编辑帖子（作者本人或管理员）：标题 + 富文本，编辑器挂载时带上本帖 id，
           所以编辑过程中新上传的图片/视频会进本帖目录，保存时再清掉已被移除的那些 */}

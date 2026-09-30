@@ -304,6 +304,20 @@
   background: #000;
 }
 
+/* 正文图片链接：行内 <a> 套块级 <img> 会被撑成整行宽（实测 992px vs 图片 642px），
+   点图片右边一大片白区也算点击。撑成 block + fit-content，盒子紧贴图片本身。 */
+.forum-content a.forum-img-link {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  line-height: 0;
+  text-decoration: none;
+}
+
+.forum-content a.forum-img-link img {
+  cursor: zoom-in;
+}
+
 .forum-content img {
   max-width: 100%;
   height: auto;
@@ -400,3 +414,35 @@
 .post-fullscreen-modal .w-e-full-screen-container {
   position: absolute;
 }
+
+/* 沉浸式全屏预览：干掉 antd 默认白色卡片（不同版本类名分别是 -container / -content，都兜住）。
+   用 !important 是因为 antd 用 CSS-in-JS 生成的容器样式优先级较高。 */
+.media-preview-immersive .ant-modal-container,
+.media-preview-immersive .ant-modal-content {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  /* 高度必须定死：媒体用的是 max-height: 100%，父级高度为 auto 时百分比失效，
+     媒体会按自然尺寸撑开（实测容器被撑到 1431px，超出 900px 视口） */
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
+.media-preview-immersive .ant-modal-body {
+  padding: 0 !important;
+  background: transparent !important;
+  height: 100vh !important;
+}
+
+/* 内容正好铺满视口，避免 wrap 的 overflow:auto 产生额外滚动条 */
+.media-preview-immersive {
+  overflow: hidden !important;
+}
+
+.media-preview-immersive .ant-modal {
+  max-width: 100vw !important;
+  padding-bottom: 0 !important;
+  top: 0 !important;
+}
+
