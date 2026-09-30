@@ -16,6 +16,7 @@ import { isRichTextEmpty } from '@/components/forum/richText';
 import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { deriveThumbUrl, isOwnStorageUrl } from '@/utils/thumbUrl';
+import { toSameOriginMediaUrl } from '@/utils/download';
 
 function formatTime(iso: string): string {
   const time = new Date(iso).getTime();
@@ -186,13 +187,17 @@ export default function ForumPostPage() {
         if (fallback && img.getAttribute('src') !== fallback) img.setAttribute('src', fallback);
       });
       img.setAttribute('src', thumb);
-      // 点开看原图：缩略图只有 640px，想看细节要有出口
+      // 点开看原图：正文只显示 640px 缩略图，看细节要有出口。
+      // 不能直接链 ZOS 地址：天翼云 ZOS 在响应层强制 Content-Disposition: attachment
+      // （上传时声明 inline 也没用，实测会被覆盖），点开只会下载。
+      // 同源 /media/<对象名> 由后端直读存储，响应头我们说了算，浏览器会直接显示。
+      img.style.cursor = 'zoom-in';
+      img.title = '查看原图';
       if (!img.closest('a')) {
         const link = document.createElement('a');
-        link.href = original;
+        link.href = toSameOriginMediaUrl(original);
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
-        link.title = '查看原图';
         img.parentNode?.insertBefore(link, img);
         link.appendChild(img);
       }
@@ -469,6 +474,7 @@ export default function ForumPostPage() {
           </p>
         </div>
       </Modal>
+
     </div>
   );
 }

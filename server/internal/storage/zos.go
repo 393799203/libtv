@@ -3,15 +3,14 @@ package storage
 import (
 	"context"
 	"fmt"
-	"io"
-	"log"
-	"sync/atomic"
-	"time"
-
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-
+	"io"
 	"libtv/internal/config"
+	"log"
+	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // ZOSStorage 天翼云对象存储（ZOS）实现
@@ -180,9 +179,17 @@ func (z *ZOSStorage) PutObject(objectName string, reader io.Reader, objectSize i
 		contentType = "application/octet-stream"
 	}
 
+	// 图片/视频/音频声明 inline：ZOS 对未声明的对象默认给 Content-Disposition: attachment，
+	// 结果是点开链接直接变成下载而不是在浏览器里显示（论坛"查看原图"就踩过这个坑）。
+	disposition := ""
+	if strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") || strings.HasPrefix(contentType, "audio/") {
+		disposition = "inline"
+	}
+
 	_, err := z.client.PutObject(ctx, z.bucket, objectName, reader, objectSize, minio.PutObjectOptions{
-		ContentType:  contentType,
-		CacheControl: cacheControlImmutable,
+		ContentType:        contentType,
+		ContentDisposition: disposition,
+		CacheControl:       cacheControlImmutable,
 		// 大文件分片并发上传：单连接吞吐很低，多路并发能明显缩短等待
 		NumThreads: 8,
 		PartSize:   64 << 20,
