@@ -163,23 +163,6 @@ export default function ForumPostPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-32">
-        <Spin />
-      </div>
-    );
-  }
-
-  if (notFound || !post) {
-    return (
-      <div className="mx-auto w-full max-w-5xl px-4 py-24 text-center">
-        <Empty description="帖子不存在或已被删除" />
-      </div>
-    );
-  }
-
-  const canDeletePost = isAuthenticated && (isAdmin || post.user_id === currentUser?.id);
   // 正文/回复里的图片：优先加载 640px 缩略图（原图可能好几 MB），点击看原图。
   // 缩略图缺失（存量文件没生成过）时自动回退原图，所以替换是安全的；
   // 只替换本站存储在管的地址，外链不动，避免为外链多打一次 404。
@@ -215,6 +198,24 @@ export default function ForumPostPage() {
       }
     });
   }, [post?.content, replies]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-32">
+        <Spin />
+      </div>
+    );
+  }
+
+  if (notFound || !post) {
+    return (
+      <div className="mx-auto w-full max-w-5xl px-4 py-24 text-center">
+        <Empty description="帖子不存在或已被删除" />
+      </div>
+    );
+  }
+
+  const canDeletePost = isAuthenticated && (isAdmin || post.user_id === currentUser?.id);
 
   const canEditPost = canDeletePost; // 修改权限与删除一致：作者本人或管理员
 
