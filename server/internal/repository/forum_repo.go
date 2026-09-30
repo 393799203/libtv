@@ -30,6 +30,13 @@ type ForumRepo interface {
 	DeleteReply(ctx context.Context, id string) error
 	// DeleteRepliesByPostID 删除帖子下的全部回复（删帖时连带清理）
 	DeleteRepliesByPostID(ctx context.Context, postID string) error
+
+	// UpdatePost 只更新标题与正文（不动浏览数/回复数/置顶等字段，避免和并发自增互相覆盖）
+	UpdatePost(ctx context.Context, id, title, content string) error
+
+	// ListRepliesForCleanup 取某帖全部回复（删帖时要在删行之前取出：
+	// 要用每条的 id + userID 去删各自的媒体目录，用 content 做旧格式兜底清理）
+	ListRepliesForCleanup(ctx context.Context, postID string) ([]model.ForumReply, error)
 }
 
 type forumRepo struct {
@@ -125,6 +132,20 @@ func (r *forumRepo) DeleteReply(ctx context.Context, id string) error {
 
 func (r *forumRepo) DeleteRepliesByPostID(ctx context.Context, postID string) error {
 	return r.db.WithContext(ctx).Where("post_id = ?", postID).Delete(&model.ForumReply{}).Error
+}
+
+// UpdatePost 更新帖子标题与正文
+func (r *forumRepo) UpdatePost(ctx context.Context, id, title, content string) error {
+	return r.db.WithContext(ctx).Model(&model.ForumPost{}).Where("id = ?", id).
+		Updates(map[string]any{"title": title, "content": content}).Error
+}
+
+// ListRepliesForCleanup 取某帖全部回复（不限条数，删帖清理媒体用）
+func (r *forumRepo) ListRepliesForCleanup(ctx context.Context, postID string) ([]model.ForumReply, error) {
+	var replies []model.ForumReply
+	err := r.db.WithContext(ctx).Model(&model.ForumReply{}).
+		Where("post_id = ?", postID).Find(&replies).Error
+	return replies, err
 }
 
 // escapeLike 转义 LIKE/ILIKE 的通配符，使用户输入按字面量匹配

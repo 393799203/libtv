@@ -106,7 +106,7 @@ func main() {
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, commentRepo, appStorage)
 	commentService := service.NewCommentService(commentRepo, showRepo, userRepo)
-	forumService := service.NewForumService(forumRepo, userRepo)
+	forumService := service.NewForumService(forumRepo, userRepo, appStorage)
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
 	// 模型价格配置服务（运营后台价格管理；模型清单来自 models.yaml，价格存 model_prices 表）
@@ -165,7 +165,7 @@ func main() {
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, projectRepo, eng, registry)
-	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService, projectRepo)
+	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService, projectRepo, userRepo)
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
 	commentHandler := handler.NewCommentHandler(commentService)
@@ -301,12 +301,14 @@ func main() {
 		api.PUT("/auth/profile", userHandler.UpdateProfile)    // 更新当前用户个人资料（昵称/头像）
 		api.PUT("/auth/password", userHandler.ChangePassword)  // 修改当前用户密码
 		api.POST("/upload/avatar", uploadHandler.UploadAvatar) // 上传头像（存 users/<userID>/avatar/）
-		api.POST("/upload/forum-image", uploadHandler.UploadForumImage) // 论坛图片（存 forum/<userID>/）
+		api.POST("/upload/forum-image", uploadHandler.UploadForumImage) // 论坛图片（存 forum/<帖子id>/）
+		api.POST("/upload/forum-video", uploadHandler.UploadForumVideo) // 论坛视频（存 forum/<帖子id>/）
 		api.GET("/users", userHandler.List)                    // 管理员：获取所有用户
 
 		// 论坛：发帖/回复/删除（需登录；删帖删回复本人或管理员皆可）
 		api.POST("/forum/posts", forumHandler.CreatePost)
 		api.POST("/forum/posts/:id/replies", forumHandler.CreateReply)
+		api.PUT("/forum/posts/:id", forumHandler.UpdatePost)
 		api.DELETE("/forum/posts/:id", forumHandler.DeletePost)
 		api.DELETE("/forum/replies/:replyId", forumHandler.DeleteReply)
 		// 论坛置顶（仅管理员）
@@ -448,6 +450,10 @@ func main() {
 		// 模型价格配置（查询需登录；保存仅管理员）
 		api.GET("/pricing", pricingHandler.List)
 		api.PUT("/pricing", middleware.RequireAdmin(userService), pricingHandler.Save)
+
+		// 媒体维护：给缺失缩略图的图片补图（仅管理员）
+		// 缩略图只在图片上传成功那一刻生成，漏了就没人补，这个接口用来扫一遍补齐
+		api.POST("/admin/media/backfill-thumbnails", middleware.RequireAdmin(userService), uploadHandler.BackfillThumbnails)
 
 		// 积分套餐管理（仅管理员；积分超市公开列表见上方公共路由）
 		pointsPackages := api.Group("/admin/points-packages", middleware.RequireAdmin(userService))

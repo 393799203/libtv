@@ -14,16 +14,10 @@ import { BaseNode } from './BaseNode';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import { uploadImage } from '@/services/uploadApi';
+import { deriveThumbUrl } from '@/utils/thumbUrl';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
 
-/** 按后端约定推导缩略图 URL：images/hash.png → images/hash.thumb.webp（存量图已批量回填） */
-function deriveThumbUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  const m = url.match(/^(.+)\.(png|jpe?g|webp|gif)(\?.*)?$/i);
-  if (!m) return undefined;
-  return `${m[1]}.thumb.webp${m[3] || ''}`;
-}
 
 export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   id,

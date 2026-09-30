@@ -13,6 +13,8 @@ import { RichTextEditor } from '@/components/forum/RichTextEditor';
 import { excerptAround, hasRichMedia, isRichTextEmpty } from '@/components/forum/richText';
 import { Highlight } from '@/components/forum/Highlight';
 import { useAuthStore } from '@/stores/authStore';
+import { newContentId } from '@/utils/contentId';
+import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
 
 const PAGE_SIZE = 10;
 
@@ -46,6 +48,9 @@ export default function ForumListPage() {
   const [loading, setLoading] = useState(true);
 
   const [composeOpen, setComposeOpen] = useState(false);
+  // 这篇帖子的 id：打开编辑器时就生成，上传的图片/视频按它分目录，发布时作为帖子 id 提交，
+  // 这样删帖 = 删 forum/<帖子id>/ 整个目录，媒体不会残留（详见 utils/contentId.ts）
+  const [composeId, setComposeId] = useState(() => newContentId());
   const [composeTitle, setComposeTitle] = useState('');
   // 正文放 ref 而不是 state：编辑器每次输入都 setState 会让父组件重渲染，
   // 实测会导致「点了粗体图标再打字，字不会变粗」（重新渲染打断了待生效的格式标记）。
@@ -53,6 +58,8 @@ export default function ForumListPage() {
   const composeHtmlRef = useRef('');
   // 每次打开发帖弹窗都换 key，让富文本编辑器以空内容重新挂载
   const [composeKey, setComposeKey] = useState(0);
+  // 编辑器点全屏时，发帖弹窗要跟着铺满视口（详见 useFullscreenModal）
+  const { modalProps, onFullscreenChange, resetFullscreen } = useFullscreenModal();
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(
@@ -87,9 +94,15 @@ export default function ForumListPage() {
     }
     setComposeTitle('');
     composeHtmlRef.current = '';
+    setComposeId(newContentId()); // 每次打开都换新 id：复用会导致删这篇时牵连上一篇的媒体
     setComposeKey((k) => k + 1);
     setComposeOpen(true);
   };
+
+  const closeCompose = useCallback(() => {
+    setComposeOpen(false);
+    resetFullscreen();
+  }, [resetFullscreen]);
 
   const handleSubmitPost = async () => {
     if (!composeTitle.trim()) {
@@ -102,9 +115,14 @@ export default function ForumListPage() {
     }
     setSubmitting(true);
     try {
-      const created = await forumApi.createPost({ title: composeTitle.trim(), content: composeHtmlRef.current });
+      const created = await forumApi.createPost({
+        id: composeId,
+        title: composeTitle.trim(),
+        content: composeHtmlRef.current,
+      });
       message.success('发布成功');
       setComposeOpen(false);
+      resetFullscreen();
       navigate(`/forum/${created.id}`);
     } catch {
       // 错误提示由 api 拦截器统一弹出
@@ -235,8 +253,8 @@ export default function ForumListPage() {
       <Modal
         title="发布新帖"
         open={composeOpen}
-        onCancel={() => setComposeOpen(false)}
-        width={860}
+        onCancel={closeCompose}
+        {...modalProps}
         destroyOnClose
         maskClosable={false}
         okText="发布"
@@ -260,10 +278,14 @@ export default function ForumListPage() {
               composeHtmlRef.current = html;
             }}
             height={380}
-            placeholder="正文支持标题、加粗、列表、引用、代码块、图片……"
+            placeholder="正文支持标题、加粗、列表、引用、代码块、图片、视频……"
+            onFullscreenChange={onFullscreenChange}
+            draftId={composeId}
           />
           <p className="text-[12px] text-gray-400">
-            图片可直接粘贴或点工具栏的图片按钮上传；发布后本人和管理员可以删除。
+            图片可直接粘贴或点工具栏按钮上传（最大 10MB）；视频点工具栏的视频按钮上传
+            （支持 mp4 / webm，普通用户最大 200MB，管理员 1GB）。
+            发布后本人和管理员可以删除，帖子里的图片和视频会随帖子一起删掉。
           </p>
         </div>
       </Modal>

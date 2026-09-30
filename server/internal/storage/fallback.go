@@ -2,11 +2,17 @@ package storage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/minio/minio-go/v7"
 
 	"libtv/internal/config"
 )
@@ -164,16 +170,47 @@ func (f *FallbackStorage) GetObjectRange(objectName string, start, end int64) (i
 
 // DeleteObject 删除文件（两个存储都删除）
 // 注意：云存储删除不受健康检查开关限制——否则探测瞬时不可用会导致文件静默泄漏
+// isNotFoundErr 判断错误是否表示「这个对象本来就不存在」，而不是「删除动作失败」。
+//
+// 这个区分很关键：文件平时只存在云存储里，本地那份可能压根没有（或反过来），
+// 删一个不存在的对象是「目标已达成」，不该算失败。
+func isNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	var resp minio.ErrorResponse
+	if errors.As(err, &resp) {
+		switch resp.Code {
+		case "NoSuchKey", "NoSuchBucket", "NotFound":
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	for _, frag := range []string{
+		"no such key", "nosuchkey", "does not exist", "not exist",
+		"no such file", "no such directory", "文件不存在", "指定key不存在",
+	} {
+		if strings.Contains(msg, frag) {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *FallbackStorage) DeleteObject(objectName string) error {
 	var errors []error
 
 	// 删除云存储中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
-	if err := f.Primary.DeleteObject(objectName); err != nil {
+	// 对象不存在时忽略：说明它已经不在了
+	if err := f.Primary.DeleteObject(objectName); err != nil && !isNotFoundErr(err) {
 		errors = append(errors, fmt.Errorf("云存储删除失败: %w", err))
 	}
 
-	// 删除本地存储中的文件
-	if err := f.Fallback.DeleteObject(objectName); err != nil {
+	// 删除本地存储中的文件（同理，本地可能本来就没有这份）
+	if err := f.Fallback.DeleteObject(objectName); err != nil && !isNotFoundErr(err) {
 		errors = append(errors, fmt.Errorf("本地删除失败: %w", err))
 	}
 
@@ -244,7 +281,7 @@ func (f *FallbackStorage) DeleteObjectsByPrefix(prefix string) error {
 	log.Printf("[FallbackStorage] 开始删除目录: prefix=%s", prefix)
 
 	// 删除云存储中的文件（无论健康检查状态都尝试，真不可用时会返回错误并记录）
-	if err := f.Primary.DeleteObjectsByPrefix(prefix); err != nil {
+	if err := f.Primary.DeleteObjectsByPrefix(prefix); err != nil && !isNotFoundErr(err) {
 		errors = append(errors, fmt.Errorf("云存储删除目录失败: %w", err))
 		log.Printf("[FallbackStorage] 云存储删除失败: prefix=%s err=%v", prefix, err)
 	} else {
@@ -252,7 +289,7 @@ func (f *FallbackStorage) DeleteObjectsByPrefix(prefix string) error {
 	}
 
 	// 删除本地存储中的文件
-	if err := f.Fallback.DeleteObjectsByPrefix(prefix); err != nil {
+	if err := f.Fallback.DeleteObjectsByPrefix(prefix); err != nil && !isNotFoundErr(err) {
 		errors = append(errors, fmt.Errorf("本地删除目录失败: %w", err))
 		log.Printf("[FallbackStorage] 本地删除失败: prefix=%s err=%v", prefix, err)
 	} else {

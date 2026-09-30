@@ -79,6 +79,9 @@ func (h *ForumHandler) ListReplies(c *gin.Context) {
 // CreatePost 发帖（需登录）：POST /api/forum/posts
 func (h *ForumHandler) CreatePost(c *gin.Context) {
 	var req struct {
+		// ID 客户端生成（编辑器打开时就生成，上传的图片/视频按它分目录），
+		// 用同一个 id 建帖子，删帖时才能按目录把该帖的媒体一次删干净
+		ID      string `json:"id"`
 		Title   string `json:"title" binding:"required"`
 		Content string `json:"content" binding:"required"`
 	}
@@ -86,7 +89,7 @@ func (h *ForumHandler) CreatePost(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "标题和正文都不能为空")
 		return
 	}
-	post, err := h.forumService.CreatePost(c.Request.Context(), middleware.GetUserID(c), req.Title, req.Content)
+	post, err := h.forumService.CreatePost(c.Request.Context(), middleware.GetUserID(c), req.ID, req.Title, req.Content)
 	if err != nil {
 		response.FailWith(c, err)
 		return
@@ -97,6 +100,8 @@ func (h *ForumHandler) CreatePost(c *gin.Context) {
 // CreateReply 回复帖子（需登录）：POST /api/forum/posts/:id/replies
 func (h *ForumHandler) CreateReply(c *gin.Context) {
 	var req struct {
+		// ID 客户端生成，含义同发帖：定位本条回复自己的媒体目录
+		ID      string `json:"id"`
 		Content string `json:"content" binding:"required"`
 		// ReplyToNickname 可选：回复某条回复时传被回复人昵称，用于展示「回复 @某人」
 		ReplyToNickname string `json:"reply_to_nickname"`
@@ -105,12 +110,30 @@ func (h *ForumHandler) CreateReply(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "回复内容不能为空")
 		return
 	}
-	reply, err := h.forumService.CreateReply(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), req.Content, req.ReplyToNickname)
+	reply, err := h.forumService.CreateReply(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), req.ID, req.Content, req.ReplyToNickname)
 	if err != nil {
 		response.FailWith(c, err)
 		return
 	}
 	response.Created(c, reply)
+}
+
+// UpdatePost 修改帖子（需登录，本人或管理员）：PUT /api/forum/posts/:id
+func (h *ForumHandler) UpdatePost(c *gin.Context) {
+	var req struct {
+		Title   string `json:"title" binding:"required"`
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "标题和正文都不能为空")
+		return
+	}
+	post, err := h.forumService.UpdatePost(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), req.Title, req.Content)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OKWithMsg(c, "修改成功", post)
 }
 
 // DeletePost 删帖（需登录，本人或管理员）：DELETE /api/forum/posts/:id

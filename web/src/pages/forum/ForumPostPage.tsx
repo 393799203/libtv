@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { App, Button, Empty, Modal, Spin, Tag } from 'antd';
+import { App, Button, Empty, Input, Modal, Spin, Tag } from 'antd';
 import {
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
   MessageOutlined,
   PushpinFilled,
@@ -10,8 +11,11 @@ import {
 } from '@ant-design/icons';
 import { forumApi, type ForumPostItem, type ForumReplyItem } from '@/services/forumApi';
 import { RichTextEditor } from '@/components/forum/RichTextEditor';
+import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
 import { isRichTextEmpty } from '@/components/forum/richText';
 import { useAuthStore } from '@/stores/authStore';
+import { newContentId } from '@/utils/contentId';
+import { deriveThumbUrl, isOwnStorageUrl } from '@/utils/thumbUrl';
 
 function formatTime(iso: string): string {
   const time = new Date(iso).getTime();
@@ -54,6 +58,15 @@ export default function ForumPostPage() {
   const replyHtmlRef = useRef('');
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [editorKey, setEditorKey] = useState(0);
+  // 编辑帖子：作者本人或管理员可以改标题和正文
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const editHtmlRef = useRef('');
+  const { modalProps, onFullscreenChange, resetFullscreen } = useFullscreenModal();
+  // 本条回复的 id：上传的图片按它分目录，提交时作为回复 id 交上去，
+  // 这样删回复 = 删它自己的媒体目录（发完一条就换新 id，见 handleReply）
+  const [replyId, setReplyId] = useState(() => newContentId());
   const [submitting, setSubmitting] = useState(false);
 
   const isAdmin = currentUser?.role === 'admin';
@@ -93,12 +106,14 @@ export default function ForumPostPage() {
     setSubmitting(true);
     try {
       await forumApi.createReply(postId, {
+        id: replyId,
         content: html,
         reply_to_nickname: replyTo || undefined,
       });
       message.success('回复成功');
       replyHtmlRef.current = '';
       setReplyTo(null);
+      setReplyId(newContentId()); // 下一条回复换新目录，避免两条回复共用一份媒体
       setEditorKey((k) => k + 1); // 重新挂载编辑器以清空内容
       await load();
     } catch {
@@ -165,9 +180,80 @@ export default function ForumPostPage() {
   }
 
   const canDeletePost = isAuthenticated && (isAdmin || post.user_id === currentUser?.id);
+  // 正文/回复里的图片：优先加载 640px 缩略图（原图可能好几 MB），点击看原图。
+  // 缩略图缺失（存量文件没生成过）时自动回退原图，所以替换是安全的；
+  // 只替换本站存储在管的地址，外链不动，避免为外链多打一次 404。
+  const contentRootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = contentRootRef.current;
+    if (!root) return;
+    root.querySelectorAll('.forum-content img[src]').forEach((node) => {
+      const img = node as HTMLImageElement;
+      if (img.dataset.thumbDone === '1') return;
+      const original = img.getAttribute('src') || '';
+      if (!original) return;
+      img.dataset.thumbDone = '1';
+      img.loading = 'lazy';
+      const thumb = isOwnStorageUrl(original) ? deriveThumbUrl(original) : undefined;
+      if (!thumb) return;
+      img.dataset.original = original;
+      img.addEventListener('error', function onThumbError() {
+        img.removeEventListener('error', onThumbError);
+        const fallback = img.dataset.original;
+        if (fallback && img.getAttribute('src') !== fallback) img.setAttribute('src', fallback);
+      });
+      img.setAttribute('src', thumb);
+      // 点开看原图：缩略图只有 640px，想看细节要有出口
+      if (!img.closest('a')) {
+        const link = document.createElement('a');
+        link.href = original;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.title = '查看原图';
+        img.parentNode?.insertBefore(link, img);
+        link.appendChild(img);
+      }
+    });
+  }, [post?.content, replies]);
+
+  const canEditPost = canDeletePost; // 修改权限与删除一致：作者本人或管理员
+
+  const openEdit = () => {
+    if (!post) return;
+    setEditTitle(post.title);
+    editHtmlRef.current = post.content;
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!post) return;
+    if (!editTitle.trim()) {
+      message.warning('请填写标题');
+      return;
+    }
+    if (isRichTextEmpty(editHtmlRef.current)) {
+      message.warning('正文不能为空');
+      return;
+    }
+    setSaving(true);
+    try {
+      await forumApi.updatePost(post.id, {
+        title: editTitle.trim(),
+        content: editHtmlRef.current,
+      });
+      message.success('修改成功');
+      setEditOpen(false);
+      resetFullscreen();
+      await load();
+    } catch {
+      // 错误提示由 api 拦截器统一弹出
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8">
+    <div ref={contentRootRef} className="mx-auto w-full max-w-5xl px-4 py-8">
       {/* 帖子主体 */}
       <article className="pb-6">
         <div className="flex items-start justify-between gap-4">
@@ -188,6 +274,11 @@ export default function ForumPostPage() {
                 onClick={handleTogglePin}
               >
                 {post.is_pinned ? '取消置顶' : '置顶'}
+              </Button>
+            )}
+            {canEditPost && (
+              <Button size="small" type="text" icon={<EditOutlined />} onClick={openEdit}>
+                编辑
               </Button>
             )}
             {canDeletePost && (
@@ -308,6 +399,7 @@ export default function ForumPostPage() {
           <>
             <RichTextEditor
               key={editorKey}
+              draftId={replyId}
               compact
               height={180}
               onChange={(html) => {
@@ -330,6 +422,52 @@ export default function ForumPostPage() {
           </div>
         )}
       </section>
+
+      {/* 编辑帖子（作者本人或管理员）：标题 + 富文本，编辑器挂载时带上本帖 id，
+          所以编辑过程中新上传的图片/视频会进本帖目录，保存时再清掉已被移除的那些 */}
+      <Modal
+        title="编辑帖子"
+        open={editOpen}
+        onCancel={() => {
+          setEditOpen(false);
+          resetFullscreen();
+        }}
+        width={860}
+        {...modalProps}
+        destroyOnClose
+        maskClosable={false}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={saving}
+        onOk={handleSaveEdit}
+      >
+        <div className="space-y-3 py-2">
+          <Input
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            maxLength={100}
+            showCount
+            placeholder="标题（不超过 100 字）"
+          />
+          <RichTextEditor
+            defaultValue={post?.content || ''}
+            draftId={post?.id}
+            // 必须自动聚焦：wangEditor 的上传类菜单在编辑器没有选区时是 disabled 的
+            // （源码：if (editor.selection == null || editor.isDisabled()) disabled = true），
+            // 不聚焦的话图片/视频按钮点上去毫无反应，看着像坏了
+            autoFocus
+            height={360}
+            placeholder="支持标题、加粗、列表、引用、代码块、图片、视频……"
+            onFullscreenChange={onFullscreenChange}
+            onChange={(html) => {
+              editHtmlRef.current = html;
+            }}
+          />
+          <p className="text-[12px] text-gray-400">
+            保存后立即生效；正文里被移除的图片、视频会一并从存储中删除。
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }

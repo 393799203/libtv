@@ -11,6 +11,7 @@ import {
   FolderOutlined,
   ShopOutlined,
   CommentOutlined,
+  ReadOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
@@ -21,6 +22,11 @@ import { PointsMallModal } from '@/components/auth/PointsMallModal';
 import { getUserAvatarSrc } from '@/utils/avatar';
 
 const { Header: AntHeader, Content } = Layout;
+
+// 论坛里那篇《漫蛙AI 使用指南》帖子的 id，导航中间的「漫蛙AI使用指南」入口指向它。
+// 这里写死 id 而不是"动态找一篇教程"：导航入口需要稳定；帖子若被删掉，
+// 这个入口会进 404，届时改这一行或换一篇帖子即可。
+const GUIDE_POST_ID = 'ff69a939-9e29-427c-bc86-4478869bf36a';
 
 export function AppLayout() {
   const { message } = App.useApp();
@@ -96,6 +102,19 @@ export function AppLayout() {
             漫蛙社区
           </button>
         </div>
+
+        {/* 使用指南入口：放在导航正中间（左组与右组之间） */}
+        <button
+          onClick={() => navigate(`/forum/${GUIDE_POST_ID}`)}
+          className={`hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors md:flex ${
+            location.pathname === `/forum/${GUIDE_POST_ID}`
+              ? 'bg-blue-50 text-blue-600'
+              : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
+          }`}
+        >
+          <ReadOutlined />
+          漫蛙AI使用指南
+        </button>
 
         {isAuthenticated ? (
           <div className="flex items-center gap-2">

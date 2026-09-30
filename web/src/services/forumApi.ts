@@ -51,12 +51,16 @@ export const forumApi = {
     api.get<ForumPaged<ForumReplyItem>>(`/forum/posts/${id}/replies`, { params }),
 
   /** 发帖（需登录） */
-  createPost: (data: { title: string; content: string }) =>
+  createPost: (data: { id?: string; title: string; content: string }) =>
     api.post<ForumPostItem>('/forum/posts', data),
 
   /** 回复帖子（需登录） */
-  createReply: (id: string, data: { content: string; reply_to_nickname?: string }) =>
+  createReply: (id: string, data: { id?: string; content: string; reply_to_nickname?: string }) =>
     api.post<ForumReplyItem>(`/forum/posts/${id}/replies`, data),
+
+  /** 修改帖子（本人或管理员） */
+  updatePost: (id: string, data: { title: string; content: string }) =>
+    api.put<ForumPostItem>(`/forum/posts/${id}`, data),
 
   /** 删帖（本人或管理员） */
   deletePost: (id: string) => api.delete(`/forum/posts/${id}`),

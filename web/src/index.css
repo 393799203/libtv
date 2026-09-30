@@ -295,6 +295,15 @@
   text-underline-offset: 2px;
 }
 
+.forum-content video {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;   /* 竖屏视频别把整页撑得找不到评论区 */
+  margin: 0.6em 0;
+  border-radius: 8px;
+  background: #000;
+}
+
 .forum-content img {
   max-width: 100%;
   height: auto;
@@ -333,3 +342,61 @@
   line-height: 1.7;
 }
 .forum-content--compact p { margin-bottom: 0.5em; }
+
+/* -------------------------------------------------------------------------
+ * 发帖弹窗「编辑器全屏」布局
+ *
+ * wangEditor 的全屏做法是给编辑器容器加 .w-e-full-screen-container，
+ * 用 position:fixed + inset:0 铺满整个视口；但 AntD 弹窗自身还是原来那个
+ * 居中偏上的小盒子，于是弹窗标题栏的关闭 X 和底部的取消/发布按钮，
+ * 就留在原地「浮」在全屏编辑区的中上部 —— 看着像没跟着一起进全屏。
+ *
+ * 处理办法：编辑器进全屏时给弹窗加 rootClassName，让弹窗本身也铺满视口
+ * （标题栏钉在顶部、按钮组钉在底部），再把编辑器全屏容器改成相对弹窗正文
+ * 定位，三块各就各位，也不用写死任何高度数值。
+ * ------------------------------------------------------------------------- */
+.post-fullscreen-modal .ant-modal {
+  top: 0;
+  margin: 0 auto;
+  max-width: 100vw;
+  padding-bottom: 0;
+}
+
+/* 注意：不同 AntD 小版本里这个内层容器的类名不一样
+   （当前线上版本是 .ant-modal-container，老版本是 .ant-modal-content），两个都写上 */
+.post-fullscreen-modal .ant-modal-container,
+.post-fullscreen-modal .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 0;
+  border-radius: 0;
+}
+
+.post-fullscreen-modal .ant-modal-header,
+.post-fullscreen-modal .ant-modal-footer {
+  flex: none;
+  margin: 0;
+  padding: 14px 24px;
+}
+
+.post-fullscreen-modal .ant-modal-header {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.post-fullscreen-modal .ant-modal-footer {
+  border-top: 1px solid #f0f0f0;
+}
+
+.post-fullscreen-modal .ant-modal-body {
+  position: relative;    /* 作为编辑器全屏容器的定位参照 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 16px 24px;
+}
+
+/* 覆盖库里的 position:fixed（inset 仍是 0，只是改成相对弹窗正文定位） */
+.post-fullscreen-modal .w-e-full-screen-container {
+  position: absolute;
+}

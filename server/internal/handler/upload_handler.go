@@ -29,12 +29,40 @@ type UploadHandler struct {
 	fileUploadService *service.FileUploadService
 	transcodeService  *service.TranscodeService
 	projectRepo       repository.ProjectRepo
+	userRepo          repository.UserRepo
 }
 
 // NewUploadHandler 创建上传处理器
-func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService, transcodeService *service.TranscodeService, projectRepo repository.ProjectRepo) *UploadHandler {
-	return &UploadHandler{storage: s, fileUploadService: fileUploadService, transcodeService: transcodeService, projectRepo: projectRepo}
+func NewUploadHandler(s storage.Storage, fileUploadService *service.FileUploadService, transcodeService *service.TranscodeService, projectRepo repository.ProjectRepo, userRepo repository.UserRepo) *UploadHandler {
+	return &UploadHandler{storage: s, fileUploadService: fileUploadService, transcodeService: transcodeService, projectRepo: projectRepo, userRepo: userRepo}
 }
+
+// isAdminUser 当前登录用户是否管理员（查库判断，不信任 token 里的角色，改了权限立刻生效）
+func (h *UploadHandler) isAdminUser(c *gin.Context) bool {
+	if h.userRepo == nil {
+		return false
+	}
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		return false
+	}
+	user, err := h.userRepo.FindByID(c.Request.Context(), userID)
+	return err == nil && user != nil && user.Role == "admin"
+}
+
+// forumVideoMaxSize 论坛视频大小上限：管理员 1GB，其他用户 200MB。
+//
+// 管理员常要传整段片子或素材，200MB 明显不够；普通用户 200MB 足够发一段演示视频，
+// 也避免单个账号长时间占满出口带宽。
+func forumVideoMaxSize(isAdmin bool) int64 {
+	if isAdmin {
+		return 1 << 30 // 1GB
+	}
+	return 200 << 20 // 200MB
+}
+
+// forumImageMaxSize 论坛图片上限：10MB（图片基本不会更大）
+const forumImageMaxSize = 10 << 20
 
 // canvasDirForProject 返回画布文件的存储目录前缀：
 // 按项目属主存 users/<userID>/canvas（删用户时级联清理）；项目不存在时降级公共 canvas 目录
@@ -159,7 +187,106 @@ func (h *UploadHandler) UploadForumImage(c *gin.Context) {
 		response.Fail(c, http.StatusUnauthorized, "请先登录")
 		return
 	}
-	h.uploadImageToDir(c, "forum/"+userID, "")
+	dir, ok := forumContentDir(c)
+	if !ok {
+		response.Fail(c, http.StatusBadRequest, "缺少内容 id，请刷新页面后重试")
+		return
+	}
+	// 先在接口层挡掉超大文件：uploadImageToDir 会把整张图读进内存再解码尺寸，
+	// 不限大小的话一个 2G 的「图片」就能把后端打爆（与前端 guardUpload 的 10MB 对齐）
+	if f, header, err := c.Request.FormFile("file"); err == nil {
+		_ = f.Close()
+		if header.Size > forumImageMaxSize {
+			response.Fail(c, http.StatusBadRequest, fmt.Sprintf("图片不能超过 %dMB", forumImageMaxSize>>20))
+			return
+		}
+	}
+	// 目录用客户端带来的「内容 id」（帖子/回复 id）：删帖删回复时按目录前缀一次删干净
+	h.uploadImageToDir(c, "forum/"+dir, "")
+}
+
+// forumContentDir 取客户端带来的「内容 id」（帖子/回复 id），它就是上传物在 forum/ 下的目录名。
+//
+// 为什么按内容 id 而不是用户 id 分层：帖子 id、回复 id 本身就是全局唯一 UUID，
+// 一条内容的媒体全在 forum/<内容id>/ 里，删帖删回复直接按这个前缀删，不会牵连别人、
+// 也不用去解析正文反查对象。这里不校验内容是否存在——发帖时文件是先于帖子上传的。
+//
+// 只接受标准 UUID：目录名一旦能被客户端任意指定，就能用 "../" 写到别的目录去。
+// 拿不到合法 id 就报错，绝不退回别的目录——否则文件会落在没人负责清理的地方。
+func forumContentDir(c *gin.Context) (string, bool) {
+	id := strings.TrimSpace(c.PostForm("draftId"))
+	if id == "" {
+		id = strings.TrimSpace(c.Query("draftId"))
+	}
+	if id == "" || !service.ValidForumContentID(id) {
+		return "", false
+	}
+	return id, true
+}
+
+// forumPlayableVideoExts 论坛视频白名单：只放行浏览器能直接播放的容器。
+//
+// 为什么不用 service.VideoExts()（含 mkv/avi）：那套是给「转码队列」用的，
+// 走 UploadVideo 会返回空 url + task_id（异步转码），而发帖要的是传完立刻能播。
+// mkv/avi 基本都播不了，与其传上去显示一个黑框，不如当场退回让用户转成 mp4。
+func forumPlayableVideoExts() map[string]bool {
+	return map[string]bool{
+		".mp4": true, ".m4v": true, ".webm": true, ".ogv": true, ".ogg": true, ".mov": true,
+	}
+}
+
+// UploadForumVideo 论坛视频上传（需登录）：存到 forum/<userID>/，同步落盘、不做转码。
+//
+// 目录形如 forum/<帖子id>/（详见 forumContentDir）：一个内容的媒体集中在一个目录，
+// 删帖删回复按前缀一次删净。成功后前端会往正文插入 <video src controls>，
+// 所以这里必须给一个立刻可播的 URL（这也是不走 UploadVideo 异步转码的原因）。
+// 安全说明：只按扩展名白名单放行，存储时的 Content-Type 由 ContentTypeForVideo
+// 按扩展名给定（video/*），即使有人把别的文件改名成 .mp4，也只会以 video 类型被下载。
+func (h *UploadHandler) UploadForumVideo(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		response.Fail(c, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	dir, ok := forumContentDir(c)
+	if !ok {
+		response.Fail(c, http.StatusBadRequest, "缺少内容 id，请刷新页面后重试")
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "获取文件失败")
+		return
+	}
+
+	// 上限按角色区分：管理员 1GB（要传整段片子），其他用户 200MB
+	maxSize := forumVideoMaxSize(h.isAdminUser(c))
+	if header.Size > maxSize {
+		response.Fail(c, http.StatusBadRequest,
+			fmt.Sprintf("视频不能超过 %dMB，请压缩后再上传", maxSize>>20))
+		return
+	}
+
+	result, err := h.fileUploadService.Upload(file, header, service.UploadOptions{
+		Dir:            "forum/" + dir,
+		DefaultExt:     ".mp4",
+		AllowedExts:    forumPlayableVideoExts(),
+		MaxSize:        maxSize,
+		ContentTypeFor: service.ContentTypeForVideo,
+	})
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	log.Printf("[UploadForumVideo] 论坛视频上传成功: user=%s file=%s size=%d url=%s", userID, header.Filename, header.Size, result.URL)
+	response.OKWithMsg(c, "上传成功", gin.H{
+		"url":      result.URL,
+		"filename": result.ObjectName,
+		"size":     header.Size,
+	})
 }
 
 // uploadImageToDir 图片上传的公共实现：解码取尺寸 → 内容哈希去重落盘 → 生成缩略图。
@@ -235,6 +362,116 @@ func (h *UploadHandler) uploadImageToDir(c *gin.Context, dir, projectID string) 
 		"cached":       result.Cached,
 		"width":        width,  // ✅ 图片宽度
 		"height":       height, // ✅ 图片高度
+	})
+}
+
+// backfillThumbSuffixes 支持回填缩略图的图片后缀（与 ImageExts 一致）
+var backfillThumbSuffixes = []string{".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+// BackfillThumbnails 给缺失缩略图的图片补一张（管理员维护接口）。
+//
+// 为什么需要它：缩略图是在图片上传「成功返回前」生成的，那一次请求没走完
+// （浏览器断开、容器重启等），这张图的缩略图就永远缺失 —— 事后没有任何补偿，
+// 属于静默缺口。缺了也不报错：画布能按约定推导再回退原图，论坛正文更是完全不用缩略图，
+// 所以没人会发现，只有翻存储目录才看得出来。
+//
+// 参数：prefix（可选，默认 forum/）；limit（可选，默认 200，单次最多 2000）。
+// 返回扫描/已存在/本次生成/失败/剩余待补的数量，remaining > 0 时再调一次即可。
+func (h *UploadHandler) BackfillThumbnails(c *gin.Context) {
+	prefix := strings.TrimSpace(c.Query("prefix"))
+	if prefix == "" {
+		prefix = "forum/"
+	}
+	limit := 200
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		if v > 2000 {
+			v = 2000
+		}
+		limit = v
+	}
+
+	objects, err := h.storage.ListObjects(prefix)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, "列出对象失败: "+err.Error())
+		return
+	}
+
+	existing := make(map[string]bool, len(objects))
+	for _, obj := range objects {
+		existing[obj] = true
+	}
+
+	type pendingThumb struct{ object, thumb string }
+	todo := make([]pendingThumb, 0, 16)
+	already, images := 0, 0
+	for _, obj := range objects {
+		lower := strings.ToLower(obj)
+		if strings.HasSuffix(lower, ".thumb.webp") {
+			continue
+		}
+		isImage := false
+		for _, suffix := range backfillThumbSuffixes {
+			if strings.HasSuffix(lower, suffix) {
+				isImage = true
+				break
+			}
+		}
+		if !isImage {
+			continue
+		}
+		images++
+		thumb := service.ThumbnailObjectName(obj)
+		if existing[thumb] {
+			already++
+			continue
+		}
+		todo = append(todo, pendingThumb{obj, thumb})
+	}
+
+	remaining := 0
+	if len(todo) > limit {
+		remaining = len(todo) - limit
+		todo = todo[:limit]
+	}
+
+	generated, failed := 0, 0
+	for _, item := range todo {
+		rc, err := h.storage.GetObject(item.object)
+		if err != nil {
+			failed++
+			log.Printf("[BackfillThumb] 读取失败 object=%s err=%v", item.object, err)
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			failed++
+			log.Printf("[BackfillThumb] 读取出错 object=%s err=%v", item.object, err)
+			continue
+		}
+		thumbBytes, err := service.GenerateImageThumbnail(data)
+		if err != nil {
+			failed++
+			log.Printf("[BackfillThumb] 生成失败 object=%s err=%v", item.object, err)
+			continue
+		}
+		if err := h.fileUploadService.PutBytes(item.thumb, thumbBytes, "image/webp"); err != nil {
+			failed++
+			log.Printf("[BackfillThumb] 写入失败 object=%s err=%v", item.thumb, err)
+			continue
+		}
+		generated++
+		log.Printf("[BackfillThumb] 已补缩略图: %s", item.thumb)
+	}
+
+	response.OKWithMsg(c, "回填完成", gin.H{
+		"prefix":    prefix,
+		"scanned":   len(objects),
+		"images":    images,
+		"already":   already,
+		"generated": generated,
+		"failed":    failed,
+		"remaining": remaining,
 	})
 }
 
