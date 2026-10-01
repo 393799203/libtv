@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
@@ -47,13 +48,21 @@ export function AppLayout() {
     message.success('已退出登录');
   };
 
-  const userMenuItems: MenuProps['items'] = [
-    { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
-    { key: 'assets', icon: <FolderOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
-    { key: 'billing', icon: <AccountBookOutlined />, label: '费用明细', onClick: () => setShowBillingRecords(true) },
-    { type: 'divider' },
-    { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
-  ];
+  // 移动端 <768px：用于菜单项这类无法用 CSS 表达的差异
+  const isMobile = useIsMobile();
+
+  const userMenuItems: MenuProps['items'] = isMobile
+    ? [
+        // 移动端只留退出登录：个人设置/资产管理/费用明细本身是桌面布局，手机上进不去也没法用
+        { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
+      ]
+    : [
+        { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
+        { key: 'assets', icon: <FolderOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
+        { key: 'billing', icon: <AccountBookOutlined />, label: '费用明细', onClick: () => setShowBillingRecords(true) },
+        { type: 'divider' },
+        { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
+      ];
 
   // 工作台页面使用全屏布局
   const isWorkspace = location.pathname.startsWith('/project/');
@@ -79,26 +88,28 @@ export function AppLayout() {
 
   return (
     <Layout className="h-screen">
-      <AntHeader className="!bg-white !px-4 !h-12 flex items-center justify-between border-b border-gray-200 shadow-sm !leading-none">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/')} className="flex items-center gap-3 hover:opacity-80 transition-opacity cursor-pointer">
+      <AntHeader className="!bg-white !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-gray-200 shadow-sm !leading-none">
+        <div className="flex items-center gap-1.5 md:gap-3">
+          <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity cursor-pointer">
             <VideoCameraOutlined className="text-lg text-blue-500" />
             <span className="font-semibold text-base text-gray-800">漫蛙AI</span>
           </button>
-          <span className="text-gray-300">|</span>
-          <span className="text-sm text-gray-400">AI 视频创作工作台</span>
+          {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
+          <span className="hidden md:inline text-gray-300">|</span>
+          <span className="hidden md:inline text-sm text-gray-400">AI 视频创作工作台</span>
           {/* 论坛入口：放在登录态判断之外——论坛是公开可读的，
-              未登录访客（含从 banner 活动落地进来的）也要能看到这个入口 */}
+              未登录访客（含从 banner 活动落地进来的）也要能看到这个入口
+              移动端同样要显示（原本是 hidden sm:flex，手机上看不到） */}
           <span className="hidden text-gray-300 sm:inline">|</span>
           <button
             onClick={() => navigate('/forum')}
-            className={`hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors sm:flex ${
+            className={`flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${
               location.pathname.startsWith('/forum')
                 ? 'bg-blue-50 text-blue-600'
                 : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
             }`}
           >
-            <CommentOutlined />
+            <CommentOutlined className="text-[18px] md:text-[14px]" />
             漫蛙社区
           </button>
         </div>
@@ -118,11 +129,11 @@ export function AppLayout() {
 
         {isAuthenticated ? (
           <div className="flex items-center gap-2">
-            {/* 系统管理入口（仅管理员） */}
+            {/* 系统管理入口（仅管理员）。移动端隐藏：390px 头部装不下，且运营管理本身是为 PC 设计的 */}
             {user?.role === 'admin' && (
               <button
                 onClick={() => navigate('/admin')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
+                className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
                   location.pathname.startsWith('/admin')
                     ? 'text-blue-600 bg-blue-50'
                     : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
@@ -133,29 +144,32 @@ export function AppLayout() {
               </button>
             )}
 
-            {/* 积分超市入口 */}
+            {/* 积分超市入口（移动端也要显示，内边距收窄以便和社区入口并排） */}
             <button
               onClick={() => setShowPointsMall(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg text-gray-600 transition-colors cursor-pointer hover:text-amber-600 hover:bg-amber-50"
+              className="flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none text-gray-600 transition-colors cursor-pointer hover:text-amber-600 hover:bg-amber-50"
             >
-              <ShopOutlined />
+              <ShopOutlined className="text-[18px] md:text-[14px]" />
               积分超市
             </button>
 
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-              <Button type="text" size="small">
-                <Space>
+              {/* 移动端只剩头像，把点击区补到 44px；左右内边距收紧，避免头像右边留白比左边宽 */}
+              <Button type="text" size="small" className="!min-h-[44px] md:!min-h-0 !px-1 md:!px-2">
+                {/* 用普通 flex 取代 AntD Space：Space 会给每个子元素套 .ant-space-item，
+                    被 hidden 的昵称/积分仍在那里占位，头像右边就多出 ~17px 留白 */}
+                <span className="flex items-center gap-2">
                   <img 
                     src={getUserAvatarSrc(user)} 
                     alt="" 
-                    className="w-6 h-6 rounded-full border border-gray-200" 
+                    className="w-7 h-7 md:w-6 md:h-6 rounded-full ring-2 ring-gray-100 border border-gray-200" 
                   />
-                  <span className="text-sm">{user?.nickname ?? '用户'}</span>
-                  <span className="text-[12px] text-amber-500 font-medium">
+                  <span className="hidden sm:inline text-sm">{user?.nickname ?? '用户'}</span>
+                  <span className="hidden sm:inline text-[12px] text-amber-500 font-medium">
                     <GoldOutlined className="mr-0.5" />
                     {user?.credits ?? 0} 积分
                   </span>
-                </Space>
+                </span>
               </Button>
             </Dropdown>
 

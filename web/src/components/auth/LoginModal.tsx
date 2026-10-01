@@ -72,7 +72,8 @@ export function LoginModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center"
+      /* 移动端：加纵向滚动兜底（小屏/键盘弹起时卡片不会顶部被裁掉） */
+      className="fixed inset-0 z-[1000] flex items-center justify-center overflow-y-auto py-4"
       style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) closeLoginModal(); }}
     >
@@ -84,15 +85,15 @@ export function LoginModal() {
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}
       >
-        {/* 关闭按钮 - z-index 确保在最上层 */}
+        {/* 关闭按钮 - z-index 确保在最上层（移动端放大到 44px 便于点按） */}
         <button
           onClick={(e) => { e.stopPropagation(); closeLoginModal(); }}
-          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          className="absolute top-2 right-2 md:top-4 md:right-4 z-10 w-11 h-11 md:w-8 md:h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
         >
           <CloseOutlined style={{ fontSize: 14 }} />
         </button>
 
-        <div className="px-8 pt-10 pb-8">
+        <div className="px-5 pt-9 pb-7 md:px-8 md:pt-10 md:pb-8">
           {/* Logo + 标题 */}
           <div className="text-center mb-8">
             <div

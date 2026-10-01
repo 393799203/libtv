@@ -838,7 +838,13 @@ export const Canvas = memo(function Canvas() {
       {/* 选中节点时的提示词编辑组件 */}
       {hasPromptPanel && promptPosition && !selectedNode!.data.isEditing && (
         <div
-          className="absolute pointer-events-none"
+          /* 桌面：跟随节点锚定（内联 left/top + 水平居中）。
+             移动端（<768px）改为吸底整宽面板：视口只有 390px 时 750px 的卡片实测左溢 270px、
+             右溢 90px，屏幕上只露 ~120px，等于没法用。用 max-md: + ! 覆盖内联定位，
+             桌面那套锚定逻辑一行不改。 */
+          className="absolute pointer-events-none
+            max-md:!fixed max-md:!inset-x-2 max-md:!top-auto max-md:!bottom-2 max-md:!transform-none
+            max-md:!max-h-[60vh] max-md:!overflow-y-auto max-md:!pointer-events-auto"
           style={{
             left: promptPosition.x,
             top: promptPosition.y,
@@ -846,9 +852,9 @@ export const Canvas = memo(function Canvas() {
             zIndex: 1000,
           }}
         >
-          {/* 箭头 */}
+          {/* 箭头（移动端是吸底面板，箭头指向节点已无意义） */}
           <div
-            className="absolute left-1/2 -translate-x-1/2"
+            className="absolute left-1/2 -translate-x-1/2 max-md:hidden"
             style={{
               top: -5,
               width: 0,

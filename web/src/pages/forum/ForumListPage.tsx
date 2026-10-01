@@ -141,7 +141,7 @@ export default function ForumListPage() {
       {/* 搜索与发帖同一行：搜索占满剩余宽度，发帖固定在右侧 */}
       <div className="mb-5 flex items-center gap-3">
         <Input
-          className="flex-1"
+          className="flex-1 max-md:!h-11"
           size="large"
           allowClear
           prefix={<SearchOutlined className="text-gray-400" />}
@@ -155,13 +155,13 @@ export default function ForumListPage() {
             setKeyword('');
           }}
           suffix={
-            <Button type="link" size="small" onClick={handleSearch}>
+            <Button type="link" size="small" className="max-md:!h-11" onClick={handleSearch}>
               搜索
             </Button>
           }
         />
         <Button
-          className="shrink-0"
+          className="shrink-0 max-md:!h-11"
           type="primary"
           size="large"
           icon={<PlusOutlined />}
@@ -197,7 +197,7 @@ export default function ForumListPage() {
                       置顶
                     </Tag>
                   )}
-                  <h3 className="truncate text-[15px] font-medium text-gray-900">
+                  <h3 className="truncate text-[16px] md:text-[15px] font-medium text-gray-900">
                     <Highlight text={post.title} keyword={keyword} />
                   </h3>
                 </div>

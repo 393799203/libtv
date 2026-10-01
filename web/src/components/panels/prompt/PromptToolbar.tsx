@@ -720,7 +720,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, selectedResolution, charCount]);
 
   return (
-    <div className="flex items-center gap-1 pt-2 mt-0.5 border-t border-gray-100">
+    <div className="flex items-center gap-1 pt-2 mt-0.5 border-t border-gray-100 max-md:flex-wrap">
       {/* 模型选择器 */}
       <ModelSelector
         models={models}

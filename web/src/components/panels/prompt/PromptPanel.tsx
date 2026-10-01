@@ -557,7 +557,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
-    : 'bg-white rounded-2xl shadow-xl border border-gray-100 ring-1 ring-black/5 w-[750px] flex flex-col px-2 py-2';
+    // 移动端（<768px）跟随外层吸底容器整宽显示：750px 在 390px 视口下会溢出屏幕
+    : 'bg-white rounded-2xl shadow-xl border border-gray-100 ring-1 ring-black/5 w-[750px] max-md:w-full flex flex-col px-2 py-2';
 
   return (
     <div className={panelClass}>

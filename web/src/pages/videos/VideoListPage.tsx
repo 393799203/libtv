@@ -14,6 +14,7 @@ import {
   SearchOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons';
 import { projectApi } from '@/services/projectApi';
 import { showApi } from '@/services/showApi';
@@ -253,7 +254,17 @@ export default function VideoListPage() {
   const [showCategories, setShowCategories] = useState<{ key: string; label: string }[]>([ALL_CATEGORY]);
   const [banners, setBanners] = useState<BannerItem[]>([]);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
+  // 轮播容器宽度：卡片尺寸/位移本来写死 520×292 + translateX(450)，在 390px 手机视口下
+  // 相邻卡片会整块跑到屏幕外。这里按容器宽度换算，桌面端取原值不变。
+  const [bannerBoxW, setBannerBoxW] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth));
   const loadingBannersRef = useRef<Set<string>>(new Set()); // 用ref跟踪loading状态，不触发重渲染
+  // 跟随窗口宽度更新轮播容器宽度（轮播是整宽容器，直接用 innerWidth）
+  useEffect(() => {
+    const onResize = () => setBannerBoxW(window.innerWidth);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [, forceUpdate] = useState(0); // 用于强制更新loading状态
   const [isDragging, setIsDragging] = useState(false); // 是否正在拖拽
   const [dragStartX, setDragStartX] = useState(0); // 拖拽起始X坐标
@@ -596,7 +607,7 @@ export default function VideoListPage() {
     >
       {/* Banner 3D轮播图 */}
       <div
-        className="relative w-full h-96 overflow-hidden mb-8 bg-gradient-to-b from-gray-900 to-gray-800 select-none"
+        className="relative w-full h-60 md:h-96 overflow-hidden mb-6 md:mb-8 bg-gradient-to-b from-gray-900 to-gray-800 select-none"
         onMouseEnter={handleBannerMouseEnter}
         onMouseLeave={handleBannerMouseLeave}
         onMouseDown={handleDragStart}
@@ -636,8 +647,13 @@ export default function VideoListPage() {
               if (offset < -1 || offset > 1) return null;
               
               // 3D变换参数
+              // 移动端：卡片按容器宽度收缩（最多 84vw），位移同步收缩，保证前后两张卡片露在屏幕内；
+              // 桌面端（≥768px）保持原来的 520×292 / 位移 450 不变。
+              const bannerCardW = Math.round(Math.min(520, bannerBoxW * 0.84));
+              const bannerCardH = Math.round((bannerCardW * 292) / 520);
+              const bannerOffsetX = bannerBoxW < 768 ? Math.round(bannerCardW * 0.88) : 450;
               const rotateY = -offset * 20; // 左右旋转角度（减小到30度）
-              const translateX = offset * 450; // 左右平移距离（减小到320px）
+              const translateX = offset * bannerOffsetX; // 左右平移距离
               const translateZ = offset === 0 ? 0 : -150; // 深度偏移
               const scale = offset === 0 ? 1 : 0.9; // 缩放比例
               const opacity = offset === 0 ? 1 : 0.75; // 透明度
@@ -647,8 +663,8 @@ export default function VideoListPage() {
                   key={banner.id}
                   className="absolute"
                   style={{
-                    width: '520px',
-                    height: '292px',
+                    width: `${bannerCardW}px`,
+                    height: `${bannerCardH}px`,
                     transform: `translateX(${translateX}px) rotateY(${rotateY}deg) translateZ(${translateZ}px) scale(${scale})`,
                     opacity: opacity,
                     zIndex: offset === 0 ? 10 : 5,
@@ -725,7 +741,7 @@ export default function VideoListPage() {
             {banners.length > 1 && (
               <>
                 <button
-                  className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
+                  className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
                   onClick={() => {
                     setCurrentBannerIndex((prev) =>
                       prev === 0 ? banners.length - 1 : prev - 1
@@ -737,7 +753,7 @@ export default function VideoListPage() {
                   </svg>
                 </button>
                 <button
-                  className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
+                  className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
                   onClick={() => {
                     setCurrentBannerIndex((prev) =>
                       prev === banners.length - 1 ? 0 : prev + 1
@@ -776,8 +792,9 @@ export default function VideoListPage() {
         )}
       </div>
 
-      {/* 最近项目（最多展示两行，超出走「我的项目」页） */}
-      <section className="max-w-7xl mx-auto px-6 mb-10">
+      {/* 最近项目（最多展示两行，超出走「我的项目」页）
+          移动端（<768px）不提供这一板块：hidden 即不渲染占位，想看完整列表走「我的项目」页 */}
+      <section className="hidden md:block max-w-7xl mx-auto px-6 mb-10">
         <div className="flex items-center justify-between mb-4">
           <Text className="text-gray-600 font-medium">最近项目</Text>
           {isAuthenticated && projectTotal > 4 && (
@@ -806,9 +823,19 @@ export default function VideoListPage() {
       </section>
 
       {/* TV Show 分类 */}
-      <section ref={tvSectionRef} className="max-w-7xl mx-auto px-6 scroll-mt-4">
-        <Text className="text-gray-600 font-medium text-lg mb-3 block">TV Show</Text>
-        <div className="flex items-center gap-4 mb-4">
+      {/* 移动端提醒（<768px 才显示）：移动端没有进入画布的入口，这里说明创作请用 PC */}
+      <div className="md:hidden max-w-7xl mx-auto px-3 mb-3">
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
+          <DesktopOutlined className="mt-0.5 shrink-0" />
+          <span>
+            移动端仅支持浏览作品，<b>创作（画布生成剧本 / 图片 / 视频）请用 PC 端浏览器打开</b>。
+          </span>
+        </div>
+      </div>
+
+      <section ref={tvSectionRef} className="max-w-7xl mx-auto px-3 md:px-6 scroll-mt-4">
+        <Text className="text-gray-600 font-medium text-base md:text-lg mb-3 block">TV Show</Text>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4">
           <div className="flex items-center gap-2 flex-wrap flex-1">
             {showCategories.map((cat) => (
               <Tag
@@ -827,7 +854,7 @@ export default function VideoListPage() {
               value={searchKeyword}
               onChange={e => handleSearchChange(e.target.value)}
               placeholder="搜索视频标题、作者、标签..."
-              className="w-[280px] pl-9 pr-8 py-2 text-[14px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none bg-white"
+              className="w-full sm:w-[280px] pl-9 pr-8 py-2 text-[14px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none bg-white"
             />
             {searchKeyword && (
               <button
@@ -844,7 +871,7 @@ export default function VideoListPage() {
         <Spin spinning={videosLoading}>
           <div style={{ minHeight: '440px' }}>
             {/* 缩略图间距收紧到 8px（原 16px）：无边框后 16px 会显得空 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3">
             {videoListData.map((item, index) => (
               <div
                 key={item.id}

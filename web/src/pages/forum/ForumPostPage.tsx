@@ -270,7 +270,8 @@ export default function ForumPostPage() {
     >
       {/* 帖子主体 */}
       <article className="pb-6">
-        <div className="flex items-start justify-between gap-4">
+        {/* flex-wrap 必须加：否则下面 max-md:w-full 的按钮行换不了行，只能去挤标题 */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <h1 className="text-[24px] font-bold leading-8 text-gray-900">
             {post.is_pinned && (
               <Tag color="red" className="mr-2 align-middle" icon={<PushpinFilled />}>
@@ -279,24 +280,41 @@ export default function ForumPostPage() {
             )}
             {post.title}
           </h1>
-          <div className="flex shrink-0 items-center gap-1">
+          {/* 编辑入口：移动端隐藏、PC 端保留（见上方按钮上的 max-md:!hidden）；
+                桌面端仍改为标题独占一行 + 按钮下一行，避免按钮把标题挤窄 */}
+          <div className="flex shrink-0 items-center gap-1 max-md:w-full max-md:justify-end max-md:pt-1 md:ml-auto">
             {isAdmin && (
               <Button
                 size="small"
                 type="text"
+                className="max-md:!h-11 max-md:!px-3"
                 icon={post.is_pinned ? <PushpinFilled /> : <PushpinOutlined />}
                 onClick={handleTogglePin}
               >
                 {post.is_pinned ? '取消置顶' : '置顶'}
               </Button>
             )}
+            {/* 编辑：仅移动端隐藏（手机上调这排按钮容易误触），PC 端保留 */}
             {canEditPost && (
-              <Button size="small" type="text" icon={<EditOutlined />} onClick={openEdit}>
+              <Button
+                size="small"
+                type="text"
+                className="max-md:!hidden"
+                icon={<EditOutlined />}
+                onClick={openEdit}
+              >
                 编辑
               </Button>
             )}
             {canDeletePost && (
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={handleDeletePost}>
+              <Button
+                size="small"
+                type="text"
+                danger
+                className="max-md:!h-11 max-md:!px-3"
+                icon={<DeleteOutlined />}
+                onClick={handleDeletePost}
+              >
                 删除
               </Button>
             )}

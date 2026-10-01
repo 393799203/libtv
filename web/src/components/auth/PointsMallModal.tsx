@@ -171,6 +171,8 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
       // 1~3 个仍沿用原来的宽度与列数
       width={packages.length >= 4 ? 1040 : 880}
       destroyOnClose
+      // 移动端（<768px）由 index.css 的 .points-mall-modal 规则改为全屏抽屉，卡片才有足够宽度
+      wrapClassName="points-mall-modal"
       styles={{
         mask: { backdropFilter: 'blur(4px)' },
         body: { padding: '20px 24px 24px' },
@@ -185,14 +187,15 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
       ) : (
         // 列数按套餐数量自适应：4 个及以上一行 4 个（窄屏退化为 2 列，避免卡片被压扁）。
         // Tailwind 静态提取类名，所以只能写完整字面量，不能用 `grid-cols-${n}` 拼。
+        // 移动端（<640px）统一 1 列：弹窗被压到 374px 后 3 列每张卡只有 82px，实测还横向溢出 13px。
         <div
           className={`grid gap-4 ${
             packages.length >= 4
-              ? 'grid-cols-2 lg:grid-cols-4'
+              ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
               : packages.length === 3
-                ? 'grid-cols-3'
+                ? 'grid-cols-1 sm:grid-cols-3'
                 : packages.length === 2
-                  ? 'grid-cols-2'
+                  ? 'grid-cols-1 sm:grid-cols-2'
                   : 'grid-cols-1'
           }`}
         >
@@ -204,7 +207,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
             return (
               <div
                 key={pkg.id}
-                className={`relative flex flex-col rounded-2xl p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
+                className={`relative flex flex-col rounded-2xl p-4 md:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
                   pkg.recommended
                     ? 'bg-gradient-to-b from-amber-50 to-orange-50 shadow-lg ring-2 ring-amber-400'
                     : 'bg-gray-50 ring-1 ring-gray-200 hover:ring-gray-300'
@@ -231,7 +234,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
 
                 {/* 积分数量 */}
                 <div className="mt-3 text-center">
-                  <span className={`text-[28px] font-bold leading-none ${pkg.recommended ? 'text-amber-600' : 'text-gray-800'}`}>
+                  <span className={`text-[32px] md:text-[28px] font-bold leading-none ${pkg.recommended ? 'text-amber-600' : 'text-gray-800'}`}>
                     {pkg.points.toLocaleString()}
                   </span>
                   <span className="ml-1 text-[13px] text-gray-500">积分</span>
@@ -245,7 +248,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                 {/* 特点列表 */}
                 <ul className="mt-4 flex-1 space-y-2 border-t border-gray-200/70 pt-4">
                   {features.map((f) => (
-                    <li key={f} className="flex items-start gap-1.5 text-[12px] leading-5 text-gray-600">
+                    <li key={f} className="flex items-start gap-1.5 text-[13px] md:text-[12px] leading-5 text-gray-600">
                       <CheckCircleFilled className={`mt-0.5 shrink-0 text-[12px] ${pkg.recommended ? 'text-amber-500' : 'text-green-500'}`} />
                       {f}
                     </li>
@@ -256,7 +259,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                 <button
                   onClick={() => handleBuy(pkg)}
                   disabled={payingPkgId !== null}
-                  className={`mt-4 w-full rounded-lg py-2 text-[14px] font-medium text-white transition-all duration-200 hover:shadow-lg active:scale-95 ${
+                  className={`mt-4 w-full rounded-xl md:rounded-lg py-3 md:py-2 text-[15px] md:text-[14px] font-medium text-white transition-all duration-200 hover:shadow-lg active:scale-95 ${
                     payingPkgId !== null
                       ? 'cursor-not-allowed opacity-50'
                       : 'cursor-pointer'
