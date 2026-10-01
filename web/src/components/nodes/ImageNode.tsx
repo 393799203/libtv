@@ -189,8 +189,9 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
       >
         {/* 图片区域 */}
         {data.imageUrl ? (
+          /* 有图片时：上方与节点头部齐平（圆角 0），下方 0.5rem（与视频节点统一） */
           <div
-            className="relative rounded-lg overflow-hidden bg-gray-100 w-[320px]"
+            className="relative rounded-t-none rounded-b-[0.5rem] overflow-hidden bg-gray-100 w-[320px]"
             style={{ minHeight: `${imageContainerHeight}px` }}
             title="双击查看大图"
             onDoubleClick={(e) => {

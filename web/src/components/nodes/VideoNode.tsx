@@ -248,8 +248,10 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         loadingMinHeight={videoHeight}
         className="!w-[480px]"
       >
+        {/* 有视频时：上方与节点头部齐平（圆角 0），下方 0.5rem；
+            圆角放在容器上并 overflow-hidden，内层视频不再单独设圆角（否则出现双层圆角缺口） */}
         <div
-          className="w-[480px]"
+          className={`w-[480px] overflow-hidden ${data.videoUrl ? 'rounded-t-none rounded-b-[0.5rem]' : ''}`}
           style={{ height: `${videoHeight}px` }}
           title={data.videoUrl ? '双击弹窗播放' : undefined}
           onDoubleClick={(e) => {
@@ -261,19 +263,19 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
           {data.videoUrl && showPlayer ? (
             <video
               src={data.videoUrl}
-              className="w-full h-full rounded object-cover"
+              className="w-full h-full object-cover"
               muted
               controls
               autoPlay
             />
           ) : data.videoUrl ? (
             <div
-              className="relative w-full h-full flex items-center justify-center bg-gray-900 rounded cursor-pointer group"
+              className="relative w-full h-full flex items-center justify-center bg-gray-900 cursor-pointer group"
               onClick={handlePlayClick}
             >
               <video
                 src={data.videoUrl}
-                className="absolute inset-0 w-full h-full rounded object-cover opacity-50"
+                className="absolute inset-0 w-full h-full object-cover opacity-50"
                 muted
                 preload="metadata"
               />
