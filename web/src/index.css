@@ -297,8 +297,19 @@
 
 .forum-content video {
   display: block;
+  /* 正文 <video> 没有 width/height，浏览器在拿到元数据前只能用规范硬编码的默认对象尺寸
+     300×150 排版，元数据一到（实测本例 3272×1974）就被 max-width 撑满容器 —— 于是出现
+     「先小、加载后铺满」的跳动（实测 300×150 → 992×598，宽跳 692px / 高跳 448px）。
+     width:100% + aspect-ratio 让「加载前」就按容器宽排版，抖动从 448px 降到 40px；
+     对 16:9 视频（本站 AI 生成的主流比例）则是 0 抖动。
+     aspect-ratio 必须写成 "auto 16 / 9"：带 auto 才会在元数据到达后改用视频真实比例，
+     否则会被强制成 16:9，4:3 或竖屏视频会永远带黑边。 */
+  width: 100%;
+  height: auto;
+  aspect-ratio: auto 16 / 9;
   max-width: 100%;
   max-height: 70vh;   /* 竖屏视频别把整页撑得找不到评论区 */
+  object-fit: contain;
   margin: 0.6em 0;
   border-radius: 8px;
   background: #000;
