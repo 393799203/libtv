@@ -245,6 +245,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         selected={selected}
         headerRight={headerRight}
         noContentPadding
+        loadingMinHeight={videoHeight}
         className="!w-[480px]"
       >
         <div

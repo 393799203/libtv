@@ -74,6 +74,9 @@ const miniMapNodeColor = (node: LibTVNode) => {
 
 const VIEWPORT_CHANGE_THROTTLE = 100;
 
+/** 提示词面板顶端与节点底边的固定间距（屏幕像素，各缩放档位一致） */
+const PROMPT_PANEL_GAP_PX = 10;
+
 export const Canvas = memo(function Canvas() {
   const viewportRef = useRef<Viewport | null>(null);
   const lastViewportUpdate = useRef(0);
@@ -101,8 +104,20 @@ export const Canvas = memo(function Canvas() {
     sourceNodeId: string;
     sourceHandle: string | null;
   } | null>(null);
-  // 拖动/框选操作期间抑制提示框显示，纯点击时重置
-  const suppressPromptRef = useRef(false);
+  // 拖动/框选操作期间抑制提示词面板，纯点击时重置。
+  //
+  // 必须是 state 不能是 ref：ref 改了不会触发重渲染，hasPromptPanel 在渲染时读到的
+  // 还是旧值（原来的 ref 写法正是栽在这里）。
+  //
+  // 关于「双击看大图」：**故意不在这里抑制面板**。浏览器的一次双击 = 两个完整 click +
+  // 一个 dblclick（dblclick 只比第二个 click 晚 5~10ms），而面板是绑在「选中」上的、
+  // 选中发生在第一个 click，所以任何"双击就收起面板"的做法都会先弹出再收回 = 闪动；
+  // 想用延迟躲开又得赌用户的双击间隔（系统阈值 300~500ms、浏览器读不到）。
+  // 看大图用的是全屏弹窗，本来就完整盖住面板，因此双击全程不动面板 ⇒ 零闪动。
+  const [promptSuppressed, setPromptSuppressed] = useState(false);
+  // 拖动起点：用来判断这次到底是"真拖动"还是"手抖的单击"。React Flow 的拖动阈值很小，
+  // 单击时手指抖一下也会走 dragStart/dragStop，那种情况不该清掉选中态。
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   // 防止 onPaneClick 在连线释放时误关弹窗
   const connectingRef = useRef(false);
   // 拖拽连线中：源节点 ID + 当前悬停的目标节点 ID（目标节点放大 + 高亮 outline）
@@ -503,6 +518,7 @@ export const Canvas = memo(function Canvas() {
   // PromptPanel 的稳定 onUpdate 引用（内联箭头会击穿 memo）：
   // 仅依赖选中节点 id，节点 data 变化不会导致回调引用变化
   const selectedNodeId = selectedNode?.id;
+
   const handlePromptUpdate = useCallback(
     (partial: Partial<LibTVNode['data']>) => {
       if (selectedNodeId) updateNodeData(selectedNodeId, partial);
@@ -512,7 +528,7 @@ export const Canvas = memo(function Canvas() {
 
   // 支持提示词面板的节点类型（排除风格图片节点、拖动/框选操作）
   const hasPromptPanel = selectedNode
-    && !suppressPromptRef.current
+    && !promptSuppressed
     && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type)
     && !selectedNode.id.startsWith('style-');
   const isEditingNode = nodes.some((n) => n.data.isEditing);
@@ -545,16 +561,46 @@ export const Canvas = memo(function Canvas() {
     }
   }, [isLoading, nodes.length]);
 
+  // 画布容器在页面中的原点。
+  // flowToScreenPosition() 返回的是「页面坐标」，而面板是用 left/top 定位在容器**内部**的，
+  // 两者差一个容器原点（本页容器 top=40px，来自顶部栏），不减掉面板就整块偏低 40px：
+  // 于是"面板顶边到节点底边的缝" = 40 − 20×zoom，48% 缩放下有 30px 的缝（看着没贴合），
+  // 150% 时只剩 10px（看着最贴合）—— 就是"不同缩放档位贴合程度不一样"的真正原因。
+  const [containerOffset, setContainerOffset] = useState({ x: 0, y: 0 });
+  useEffect(() => {
+    const update = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setContainerOffset((prev) =>
+        prev.x === rect.left && prev.y === rect.top ? prev : { x: rect.left, y: rect.top },
+      );
+    };
+    update();
+    window.addEventListener('resize', update);
+    const observer = new ResizeObserver(update);
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => {
+      window.removeEventListener('resize', update);
+      observer.disconnect();
+    };
+  }, []);
+
   // 计算提示词框的位置 — 拖动期间不更新
   const promptPosition = useMemo(() => {
-    if (!selectedNode || suppressPromptRef.current) return null;
+    if (!selectedNode || promptSuppressed) return null;
     // 从 store 取最新节点数据（measured 可能异步更新，selectedNode 可能是旧的）
     const latestNode = getNodes().find((n) => n.id === selectedNode.id);
     const node = latestNode || selectedNode;
     // nodeOrigin [0.5, 0.5] → position 是中心点，底部 = position.y + height/2
     const nodeBottomY = node.position.y + (node.measured?.height || 200) / 2;
-    return flowToScreenPosition({ x: node.position.x, y: nodeBottomY - 20 });
-  }, [selectedNode?.id, flowToScreenPosition, viewport, getNodes]);
+    // ① 先换成页面坐标 ② 再减掉容器原点，才是容器内 left/top 该用的值
+    // ③ 间距用固定屏幕像素，避免"面板与节点的缝随缩放变化"
+    const screen = flowToScreenPosition({ x: node.position.x, y: nodeBottomY });
+    return {
+      x: screen.x - containerOffset.x,
+      y: screen.y - containerOffset.y + PROMPT_PANEL_GAP_PX,
+    };
+  }, [selectedNode?.id, promptSuppressed, flowToScreenPosition, viewport, getNodes, containerOffset]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative" onContextMenu={handleContextMenu}>
@@ -581,12 +627,29 @@ export const Canvas = memo(function Canvas() {
         onConnectEnd={handleConnectEnd}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
-        onNodeDragStart={() => { suppressPromptRef.current = true; }}
-        onNodeClick={() => { suppressPromptRef.current = false; }}
+        onNodeDragStart={(_event, node) => {
+          dragStartPosRef.current = { x: node.position.x, y: node.position.y };
+          setPromptSuppressed(true);
+        }}
+        onNodeDragStop={(_event, node, draggedNodes) => {
+          const start = dragStartPosRef.current;
+          dragStartPosRef.current = null;
+          const moved = !!start && Math.hypot(node.position.x - start.x, node.position.y - start.y) > 2;
+          // 拖动开始时抑制了面板，这里必须无条件复位：手抖的单击同样会走 dragStart/dragStop，
+          // 而 React Flow 会把"拖动之后"的 click 吞掉（onNodeClick 不触发），若不复位就会留下
+          // 「节点选中着、面板却不出现」的坏状态。真拖动时选中态会被清掉，复位也无副作用。
+          setPromptSuppressed(false);
+          // 只是手抖的单击：选中态保持原样，面板照常打开
+          if (!moved) return;
+          // 真拖动：拖动开始时面板已经收起，拖动结束后把选中态也一并清掉，
+          // 否则会留下「有蓝色选中框、却没有提示词面板」的不一致状态。
+          onNodesChange(draggedNodes.map((n) => ({ type: 'select' as const, id: n.id, selected: false })));
+        }}
+        onNodeClick={() => { setPromptSuppressed(false); }}
         onMouseDown={(e) => {
           // 画布空白区域按下鼠标（框选/平移）→ 抑制提示框
           if ((e.target as HTMLElement).classList.contains('react-flow__pane')) {
-            suppressPromptRef.current = true;
+            setPromptSuppressed(true);
           }
         }}
         onNodeContextMenu={handleNodeContextMenu}

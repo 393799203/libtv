@@ -913,8 +913,10 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         onKeyDown={handleKeyDown}
         onBeforeInput={handleBeforeInput}
         onPaste={handlePaste}
-        className="w-full text-[14px] text-gray-800 border-0 outline-none resize-none bg-transparent leading-[1.7] min-h-[72px]"
-        style={{ minHeight: 72 }}
+        // 高度上限：提示词可以很长，没有上限时会把这块浮动面板一路撑出视口。
+        // 超过后输入框内部滚动（min 72px，最多约 12 行）。
+        className="w-full text-[14px] text-gray-800 border-0 outline-none resize-none bg-transparent leading-[1.7] min-h-[72px] max-h-[300px] overflow-y-auto"
+        style={{ minHeight: 72, maxHeight: 300 }}
       />
 
       {/* @ 引用下拉菜单 */}

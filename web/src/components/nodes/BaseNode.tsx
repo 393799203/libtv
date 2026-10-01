@@ -19,6 +19,9 @@ interface BaseNodeProps {
   className?: string; // 允许子节点追加容器样式（如编辑模式 nodrag）
   /** 去掉内容区域 padding */
   noContentPadding?: boolean;
+  /** 加载态最小高度（画布流坐标像素）：媒体节点传入按长宽比算出的高度，
+   *  避免"首次生成"时节点比产出后矮/高（详见 NodeLoadingState.minHeight） */
+  loadingMinHeight?: number;
   /** 隐藏输入 Handle（如白模预演节点不连上游） */
   hideInputHandle?: boolean;
 }
@@ -32,6 +35,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   headerColor,
   className,
   noContentPadding,
+  loadingMinHeight,
   hideInputHandle,
 }) {
   const nodeType = data.type as NodeType;
@@ -166,6 +170,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
             /* 首次生成：没有旧结果可留，显示统一加载态 */
             <NodeLoadingState
               status={status}
+              minHeight={loadingMinHeight}
               statusText={(data.progressMessage as string | undefined) || (status === 'pending' ? '等待生成中...' : `正在生成${config.label}...`)}
               iconBgColor={nodeType === 'text' ? 'bg-purple-100' : nodeType === 'image' ? 'bg-green-100' : nodeType === 'video' ? 'bg-red-100' : nodeType === 'audio' ? 'bg-emerald-100' : 'bg-blue-100'}
               iconColor={nodeType === 'text' ? 'text-purple-500' : nodeType === 'image' ? 'text-green-500' : nodeType === 'video' ? 'text-red-500' : nodeType === 'audio' ? 'text-emerald-500' : 'text-blue-500'}

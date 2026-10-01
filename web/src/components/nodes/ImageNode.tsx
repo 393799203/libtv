@@ -184,6 +184,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         headerRight={headerRight}
         headerColor={styleColor}
         noContentPadding
+        loadingMinHeight={imageContainerHeight}
         className="!w-[320px]"
       >
         {/* 图片区域 */}
