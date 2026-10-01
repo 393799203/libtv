@@ -255,6 +255,9 @@ export default function ForumListPage() {
         open={composeOpen}
         onCancel={closeCompose}
         {...modalProps}
+        // 与「编辑帖子」弹窗保持一致：原来这里没写 width，落回 AntD 默认 520，
+        // 富文本工具栏被迫折成 3 行、编辑区只有 470 宽（编辑弹窗是 860）
+        width={860}
         destroyOnClose
         maskClosable={false}
         okText="发布"

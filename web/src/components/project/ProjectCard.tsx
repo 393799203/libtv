@@ -39,19 +39,20 @@ export const ProjectCard = memo(function ProjectCard({
           </div>
         </div>
       )}
-      {/* 删除按钮：hover 显示，避免与已发布角标叠在一起 */}
+      {/* 删除按钮：桌面 hover 显示；移动端恒显示并放大到 36px
+          —— 触摸屏没有 hover，原来 opacity-0 group-hover:opacity-100 等于手机上根本点不到 */}
       <button
-        className="absolute top-1 right-1 z-20 w-6 h-6 flex items-center justify-center rounded bg-black/50 text-white hover:bg-red-500 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-1 right-1 z-20 w-6 h-6 max-md:w-9 max-md:h-9 flex items-center justify-center rounded bg-black/50 text-white hover:bg-red-500 cursor-pointer opacity-0 max-md:opacity-100 group-hover:opacity-100 transition-opacity"
         onClick={(e) => {
           e.stopPropagation();
           onDelete(project);
         }}
         title="删除项目"
       >
-        <DeleteOutlined style={{ fontSize: 12 }} />
+        <DeleteOutlined className="text-[12px] max-md:text-[16px]" />
       </button>
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
-        <p className="!text-white !text-xs truncate">{project.name}</p>
+        <p className="!text-white !text-[13px] md:!text-xs truncate">{project.name}</p>
       </div>
     </div>
   );

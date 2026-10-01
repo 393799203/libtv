@@ -26,3 +26,28 @@ export function useIsMobile(breakpoint = 768): boolean {
 }
 
 export default useIsMobile;
+
+/**
+ * 是否为「纯触摸设备」（无 hover 且粗指针），即真正的手机/平板。
+ *
+ * 与 useIsMobile 的区别（实测）：把桌面浏览器窗口拉窄到 700px 时
+ * max-width:767px 会命中、而 (hover:none) and (pointer:coarse) 不会。
+ * 所以「要不要换成移动端专用交互」这类**能力性**判断用这个 hook，
+ * 只有「版面怎么排」才用宽度断点 —— 否则窄窗 PC 会被误判成手机。
+ */
+export function useIsTouchDevice(): boolean {
+  const query = '(hover: none) and (pointer: coarse)';
+  const [isTouch, setIsTouch] = useState<boolean>(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(query).matches
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const handleChange = (e: MediaQueryListEvent) => setIsTouch(e.matches);
+    setIsTouch(mql.matches);
+    mql.addEventListener('change', handleChange);
+    return () => mql.removeEventListener('change', handleChange);
+  }, [query]);
+
+  return isTouch;
+}

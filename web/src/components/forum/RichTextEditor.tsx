@@ -2,8 +2,9 @@ import '@wangeditor/editor/dist/css/style.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Editor, Toolbar } from '@wangeditor/editor-for-react';
 import type { IDomEditor, IEditorConfig, IToolbarConfig } from '@wangeditor/editor';
-import { message } from 'antd';
+import { Input, message } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
+import { useIsTouchDevice } from '@/hooks/useIsMobile';
 
 const IMAGE_MAX_MB = 10;
 // 视频上限按角色区分（与后端 forumVideoMaxSize 对齐）：管理员 1GB，其他用户 200MB
@@ -56,6 +57,44 @@ function guardUpload(kind: '图片' | '视频', maxMBOverride?: number) {
       message.error(`${kind}上传失败：${res?.data?.msg || res?.msg || '服务端返回错误'}`);
     },
   };
+}
+
+/**
+ * 移动端纯文本 ↔ HTML 的互转。
+ *
+ * 移动端不用 wangEditor：wangEditor 5 官方不支持移动端，工具栏是鼠标事件驱动、
+ * 触摸下选区会丢，「按钮点不出来」是引擎本身的限制而不是样式问题。
+ * 所以窄屏退回 textarea，只在这里把纯文本包装成 HTML 交给后端（存储格式不变）。
+ */
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      default: return '&#39;';
+    }
+  });
+}
+
+/** 纯文本 → HTML：按行成段，空行留一个换行，保证段落感 */
+export function plainTextToHtml(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => (line.trim() ? `<p>${escapeHtml(line)}</p>` : '<p><br></p>'))
+    .join('');
+}
+
+/** HTML → 纯文本：块级标签与 <br> 折算成换行，再取文本（移动端编辑已有内容的初值） */
+export function htmlToPlainText(html: string): string {
+  if (!html) return '';
+  const withBreaks = html
+    .replace(/<\/(p|div|h[1-6]|li|blockquote|tr)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n');
+  const holder = document.createElement('div');
+  holder.innerHTML = withBreaks;
+  return (holder.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 interface RichTextEditorProps {
@@ -161,6 +200,10 @@ export function RichTextEditor({
   onFullscreenChange,
   draftId,
 }: RichTextEditorProps) {
+  // 用触摸能力判断而不是宽度：桌面窗口拉窄到 700px 时不该被换成 textarea
+  const isTouchOnly = useIsTouchDevice();
+  // 移动端 textarea 的受控值（桌面端走 wangEditor，不用它）。初值从 defaultValue 的 HTML 还原成纯文本
+  const [mobileText, setMobileText] = useState(() => (defaultValue ? htmlToPlainText(defaultValue) : ''));
   const [editor, setEditor] = useState<IDomEditor | null>(null);
   const token = useAuthStore((s) => s.token);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
@@ -269,6 +312,24 @@ export function RichTextEditor({
       }
     };
   }, [editor]);
+
+  // 移动端：只给基本 textarea（wangEditor 5 官方不支持移动端，触摸下工具栏点不出来）。
+  // 对外接口不变 —— onChange 吐出的仍是 HTML，所以发帖/回帖/编辑三处调用方零改动。
+  if (isTouchOnly) {
+    return (
+      <Input.TextArea
+        value={mobileText}
+        onChange={(e) => {
+          setMobileText(e.target.value);
+          onChange(plainTextToHtml(e.target.value));
+        }}
+        placeholder={placeholder}
+        autoSize={{ minRows: Math.max(4, Math.round(height / 40)), maxRows: 18 }}
+        autoFocus={autoFocus}
+        className="!rounded-lg"
+      />
+    );
+  }
 
   return (
     <div ref={rootRef} className="overflow-hidden rounded-lg border border-gray-200 bg-white">

@@ -85,7 +85,7 @@ export default function MyProjectsPage() {
             <Title level={4} className="!mb-0">我的项目</Title>
             <Text type="secondary" className="text-[13px]">共 {total} 个</Text>
           </div>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateProject}>
+          <Button type="primary" className="max-md:!h-11" icon={<PlusOutlined />} onClick={handleCreateProject}>
             新建项目
           </Button>
         </div>
