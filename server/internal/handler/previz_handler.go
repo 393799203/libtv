@@ -74,8 +74,12 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 	}
 
 	// 扣费校验：通过后才调用 LLM（文本/视觉模型按次计费）
+	// 必须先注入用户渠道再扣费：定价按「渠道 + 节点 + 模型」查表，
+	// 不注入会回退 wasu，导致电信独有的视觉模型（如 glm-5.3-flash）在 wasu 价格表里查不到，
+	// cost=0 则既不扣费也不拦余额（余额不足直接放行），账单渠道前缀也会错写成 wasu
 	userID := middleware.GetUserID(c)
-	chargedAmount, err := h.biller.ChargeByModel(c.Request.Context(), userID, service.BillingActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析", 1)
+	billCtx := llm.WithChannel(c.Request.Context(), channel)
+	chargedAmount, err := h.biller.ChargeByModel(billCtx, userID, service.BillingActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析", 1)
 	if err != nil {
 		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
 			"code": apperror.CodeFromError(err),
@@ -107,8 +111,8 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		imageURL = base64Data
 	}
 
-	// 调用视觉模型解析场景（注入用户渠道供多 token 路由）
-	ctx := llm.WithChannel(c.Request.Context(), channel)
+	// 调用视觉模型解析场景（复用上面的 billCtx：已注入用户渠道供多 token 路由）
+	ctx := billCtx
 	objects, description, err := h.llmClient.AnalyzeSceneImage(ctx, modelConfig.ModelID, imageURL)
 	if err != nil {
 		log.Printf("[PrevizHandler] 场景解析失败: %v", err)
