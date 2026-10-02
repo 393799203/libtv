@@ -183,7 +183,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		// 调用失败也一样不能让用户买单（超时被掐断、上游 5xx 都算）。
 		// 必须用脱离取消的 context：请求已取消时原 ctx 已失效，退费会直接失败。
 		refundCtx := context.WithoutCancel(c.Request.Context())
-		if refundErr := h.biller.Refund(refundCtx, middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成失败（模型调用超时或报错）"); refundErr != nil {
+		if refundErr := h.biller.Refund(refundCtx, middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成失败（模型调用超时或报错）", service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
 		}
 		response.Fail(c, 500, "生成提示词失败，已退费，请重试: "+err.Error())
@@ -201,7 +201,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		}
 	}
 	if incomplete {
-		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成结果不完整（画面或运动提示词缺失）"); refundErr != nil {
+		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成结果不完整（画面或运动提示词缺失）", service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
 		}
 		response.Fail(c, 500, "生成结果不完整（画面或运动提示词缺失），已退费，请重试")

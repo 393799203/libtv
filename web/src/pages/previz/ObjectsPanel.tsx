@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { App } from 'antd';
 import { usePrevizStore, OBJECT_TYPE_LABELS } from './previzStore';
+import { SCENE_PRESETS } from './scenePresets';
 import { OBJECT_CATEGORIES } from './types';
 
 export function ObjectsPanel() {
+  const { message } = App.useApp();
   const objects = usePrevizStore((s) => s.objects);
   const selectedId = usePrevizStore((s) => s.selectedId);
   const addObject = usePrevizStore((s) => s.addObject);
@@ -32,6 +35,27 @@ export function ObjectsPanel() {
       {/* 添加元素（按分类分组；AI 建白模的补充） */}
       <div className="p-3 border-b border-gray-100 max-h-72 overflow-y-auto">
         <div className="text-xs text-gray-400 font-medium mb-2">添加元素</div>
+        {/* 场景组合件：一键摆出整套布景（追加到当前场景，不动已摆好的东西） */}
+        <div className="px-0.5 pb-2 mb-2 border-b border-gray-100">
+          <div className="text-[10px] text-gray-300 mb-1">场景组合件（一键整套布景，追加）</div>
+          <div className="flex flex-wrap gap-1">
+            {SCENE_PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                className="px-1.5 py-1 text-[11px] text-slate-600 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors cursor-pointer"
+                title={`${preset.label}：${preset.hint}（共 ${preset.objects.length} 个元素）`}
+                onClick={() => {
+                  const st = usePrevizStore.getState();
+                  st.importObjects(preset.objects.map((o) => ({ ...o })), 'append');
+                  message.success(`已加入「${preset.label}」${preset.objects.length} 个元素`);
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {OBJECT_CATEGORIES.map((cat) => (
           <div key={cat.key} className="mb-2">
             <div className="text-[10px] text-gray-300 mb-1">{cat.label}</div>

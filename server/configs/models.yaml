@@ -178,6 +178,7 @@ models:
         description: "字节Seedance 2.0视频生成"
         resolutions: ["480p", "720p", "1080p"]
         duration_range: [4, 15]
+        ref_video_billing: true   # 带参考视频输入时按「输入时长 + 输出时长」计费，单价走「带参考视频」档（6 折预设）
 
       - id: doubao-seedance-2.0-fast
         name: "Seedance 2.0 Fast"
@@ -188,6 +189,7 @@ models:
         description: "字节Seedance 2.0快速版，生成速度更快"
         resolutions: ["480p", "720p"]
         duration_range: [4, 15]
+        ref_video_billing: true   # 带参考视频输入时按「输入时长 + 输出时长」计费，单价走「带参考视频」档（6 折预设）
 
       - id: doubao-seedance-2.5
         name: "Seedance 2.5"
@@ -198,6 +200,7 @@ models:
         description: "字节Seedance 2.5视频生成，长叙事能力强，擅长多镜头连贯剧情与复杂运镜"
         resolutions: ["480p", "720p", "1080p"]
         duration_range: [4, 30]
+        ref_video_billing: true   # 带参考视频输入时按「输入时长 + 输出时长」计费，单价走「带参考视频」档（6 折预设）
 
       - id: wan3.0-video
         name: "Wan 3.0"
@@ -208,6 +211,7 @@ models:
         description: "阿里Wan 3.0全能参考视频生成，最长30秒"
         resolutions: ["480p", "720p", "1080p"]
         duration_range: [2, 30]
+        # 未开启 ref_video_billing：参考视频不参与计费（仍按常规单价 × 输出时长）
 
     # ---------- audio ----------
     audio:
@@ -286,6 +290,7 @@ models:
         description: "Seedance 2.0（cdance2.0-0807，异步任务接口）"
         resolutions: ["480p", "720p", "1080p"]
         duration_range: [4, 15]
+        ref_video_billing: true   # 带参考视频输入时按「输入时长 + 输出时长」计费，单价走「带参考视频」档（6 折预设）
 
       - id: cdance2.0-fast-0807
         name: "Seedance 2.0 Fast"
@@ -295,6 +300,7 @@ models:
         description: "Seedance 2.0 Fast（cdance2.0-fast-0807，生成更快）"
         resolutions: ["480p", "720p"]
         duration_range: [4, 15]
+        ref_video_billing: true   # 带参考视频输入时按「输入时长 + 输出时长」计费，单价走「带参考视频」档（6 折预设）
 
       - id: cdance2.5-0807
         name: "Seedance 2.5"
@@ -304,6 +310,7 @@ models:
         description: "Seedance 2.5（cdance2.5-0807，异步任务接口，长叙事与多镜头连贯能力更强）"
         resolutions: ["480p", "720p", "1080p"]
         duration_range: [4, 30]
+        ref_video_billing: true   # 带参考视频输入时按「输入时长 + 输出时长」计费，单价走「带参考视频」档（6 折预设）
 
       # 与华数同名（wan3.0-video），靠渠道区分 token 与价格；
       # 电信侧走 DashScope 异步协议，与上面 cdance 系列（火山协议）实现不同
@@ -316,6 +323,7 @@ models:
         description: "通义万相 3.0 视频（DashScope 异步协议，支持 2-30 秒长视频）"
         resolutions: ["480p", "720p", "1080p"]
         duration_range: [2, 30]
+        # 未开启 ref_video_billing：参考视频不参与计费（仍按常规单价 × 输出时长）
 
     # ---------- audio ----------
     audio:

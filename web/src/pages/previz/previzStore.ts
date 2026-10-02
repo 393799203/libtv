@@ -15,6 +15,15 @@ import { POSE_CLIP } from './actionLibrary';
 
 // 各元素类型的中文名（用于自动生成对象名）
 export const OBJECT_TYPE_LABELS: Record<PrevizObjectType, string> = {
+  column: '立柱',
+  trafficlight: '红绿灯',
+  busstop: '公交站',
+  trashcan: '垃圾桶',
+  planter: '花坛',
+  shelf: '书架',
+  counter: '吧台',
+  tent: '帐篷',
+  campfire: '篝火',
   // 基础几何
   box: '方块',
   cylinder: '圆柱',
@@ -76,6 +85,16 @@ const OBJECT_DEFAULTS: Record<
   PrevizObjectType,
   { position: Vec3; rotation: Vec3; scale: Vec3; color?: string }
 > = {
+  // 本轮新增场景元素（几何从 y=0 起建，xz 居中）
+  column: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.5, 4, 1.5] },
+  trafficlight: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 3, 1] },
+  busstop: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1.6, 2] },
+  trashcan: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  planter: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1.5, 1, 1.5] },
+  shelf: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 2, 2] },
+  counter: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2, 1, 2] },
+  tent: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2.5, 2, 2.5] },
+  campfire: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   // 基础几何
   box: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   cylinder: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
@@ -235,6 +254,18 @@ interface PrevizState {
   // 路径绘制模式：视口地面点击直接添加路径点（首个点取当前播放头，后续每点 +1 秒）
   pathDrawMode: boolean;
   setPathDrawMode: (v: boolean) => void;
+  /**
+   * 绘制模式锁定的目标角色。
+   * 以前落点目标每次都取"当前选中"，一旦选中丢了（点到空处/选中别的物体）就画不下去，
+   * 用户看到的现象是"点了画布就没用了"。进入绘制模式时锁定，显式选中别的角色时才切换。
+   */
+  pathDrawCharId: string | null;
+  /** 步行速度（米/秒）：绘制轨迹时按"距离 ÷ 速度"自动给每段配时 */
+  walkSpeed: number;
+  setWalkSpeed: (v: number) => void;
+  /** 走位端点平滑加减速：逐段缓入缓出（每段仍严格按其起止时刻过点） */
+  pathEase: boolean;
+  setPathEase: (v: boolean) => void;
   appendDrawnPathPoint: (charId: string, position: Vec3) => void;
   // gizmo 拖拽中标记（拖拽时暂停位置采样回弹）
   gizmoDragging: boolean;
@@ -279,6 +310,13 @@ function insertAction(actions: PrevizCharacter['actions'], action: PrevizCharact
   return next;
 }
 
+// 路径点稳定 id：时间轴拖动关键帧时用于跟踪目标点（按 t 重排后索引会变）
+let pathPointSeq = 0;
+function newPathPointId(): string {
+  pathPointSeq += 1;
+  return `pp-${Date.now().toString(36)}-${pathPointSeq}`;
+}
+
 // 路径点按 t 升序插入
 function insertPathPoint(path: PrevizPathPoint[], point: PrevizPathPoint) {
   const next = [...path, point];
@@ -299,10 +337,22 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
   previewCameraId: null,
   gizmoDragging: false,
   pathDrawMode: false,
+  pathDrawCharId: null,
   poseEditingCharId: null,
+  walkSpeed: 1.2,
+  pathEase: false,
 
   setGizmoDragging: (v) => set({ gizmoDragging: v }),
-  setPathDrawMode: (v) => set({ pathDrawMode: v }),
+  setPathDrawMode: (v) => {
+    const { selectedId, characters } = get();
+    set({
+      pathDrawMode: v,
+      // 开启时锁定当前选中角色；关闭时解锁
+      pathDrawCharId: v && selectedId && characters.some((c) => c.id === selectedId) ? selectedId : null,
+    });
+  },
+  setWalkSpeed: (v) => set({ walkSpeed: Math.min(6, Math.max(0.2, v)) }),
+  setPathEase: (v) => set({ pathEase: v }),
 
   // 进入/退出姿态编辑模式；退出时若选中的是骨骼则一并清除选中
   setPoseEditing: (charId) =>
@@ -366,15 +416,23 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
     }));
   },
 
-  // 绘制模式添加路径点：首个点取当前播放头时刻，后续每个点自动 +1 秒
+  // 绘制模式添加路径点：首个点取当前播放头时刻，后续按"两点距离 ÷ 步行速度"自动配时
   appendDrawnPathPoint: (charId, position) => {
-    const { currentTime } = get();
+    const { currentTime, walkSpeed } = get();
     set((state) => ({
       characters: state.characters.map((c) => {
         if (c.id !== charId) return c;
         const last = c.path[c.path.length - 1];
-        const t = last ? Math.round((last.t + 1) * 100) / 100 : Math.round(currentTime * 100) / 100;
-        return { ...c, path: [...c.path, { t, position }] };
+        // 不再固定 +1 秒：走 5 米和挪半步都算 1 秒会让走位忽快忽慢。
+        // 按统一步行速度反推每段时长，并留 0.2 秒下限避免零时长段。
+        const t = last
+          ? Math.round(
+              (last.t +
+                Math.max(0.2, vecDist(last.position, position) / Math.max(0.1, walkSpeed))) *
+                100
+            ) / 100
+          : Math.round(currentTime * 100) / 100;
+        return { ...c, path: [...c.path, { t, position, id: newPathPointId() }] };
       }),
     }));
   },
@@ -496,6 +554,7 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
               path: insertPathPoint(c.path, {
                 t: Math.round(currentTime * 100) / 100,
                 position: sampleCharacterPosition(c, currentTime),
+                id: newPathPointId(),
               }),
             }
           : c
@@ -514,7 +573,7 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
           const path = c.path.map((p, i) => (i === idx ? { ...p, position } : p));
           return { ...c, path };
         }
-        return { ...c, path: insertPathPoint(c.path, { t: Math.round(t * 100) / 100, position }) };
+        return { ...c, path: insertPathPoint(c.path, { t: Math.round(t * 100) / 100, position, id: newPathPointId() }) };
       }),
     }));
   },
@@ -642,13 +701,15 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
   },
 
   toJSON: () => {
-    const { objects, characters, cameras, duration, fps } = get();
+    const { objects, characters, cameras, duration, fps, walkSpeed, pathEase } = get();
     const scene: PrevizScene = {
       objects,
       characters,
       cameras,
       duration,
       fps,
+      walkSpeed,
+      pathEase,
     };
     return JSON.stringify(scene);
   },
@@ -663,6 +724,8 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
         selectedId: null,
         duration: scene.duration ?? 10,
         fps: scene.fps ?? 24,
+        walkSpeed: scene.walkSpeed ?? 1.2,
+        pathEase: scene.pathEase ?? false,
         playing: false,
         currentTime: 0,
         selectedCameraId: null,
@@ -678,9 +741,56 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
 // ====== 播放采样辅助（供视口/动画使用）======
 
 // 采样角色在 t 时刻的位置：按走位路径线性插值；无路径时用基准位置
+// 两点距离（走位配时用）
+export function vecDist(a: Vec3, b: Vec3): number {
+  return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+}
+
+function lerpAt(a: Vec3, b: Vec3, ta: number, tb: number, t: number): Vec3 {
+  const k = tb === ta ? 0 : (t - ta) / (tb - ta);
+  return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+}
+
+/**
+ * 向心 Catmull-Rom 过点样条（alpha = 0.5）。
+ * 用向心版本而非均匀版本：均匀版在点距差别大时会过冲/打结，向心版不会。
+ * 两点共线时结果与线性插值完全一致，所以老场景（直线走位）表现不变。
+ * 端点用「反射虚拟点」(2a-b / 2b-a)：若直接把端点复制成控制点，结点间距会退化成 0，
+ * 样条会被放大出可见过冲（实测末段过冲 0.5 米），反射后结点等距、曲线不超调。
+ */
+function catmullRomPoint(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, u: number): Vec3 {
+  const d01 = vecDist(p0, p1);
+  const d12 = vecDist(p1, p2);
+  const d23 = vecDist(p2, p3);
+  // 退化保护（有重合点、或本段长度为零）：直接线性，避免除零放大
+  if (d12 < 1e-6 || d01 < 1e-6 || d23 < 1e-6) return lerpAt(p1, p2, 0, 1, u);
+  const t0 = 0;
+  const t1 = t0 + Math.sqrt(d01);
+  const t2 = t1 + Math.sqrt(d12);
+  const t3 = t2 + Math.sqrt(d23);
+  const t = t1 + (t2 - t1) * u;
+  const a1 = lerpAt(p0, p1, t0, t1, t);
+  const a2 = lerpAt(p1, p2, t1, t2, t);
+  const a3 = lerpAt(p2, p3, t2, t3, t);
+  const b1 = lerpAt(a1, a2, t0, t2, t);
+  const b2 = lerpAt(a2, a3, t1, t3, t);
+  return lerpAt(b1, b2, t1, t2, t);
+}
+
+/** 端点反射虚拟点：以 p 为对称中心，取 q 的镜像 */
+function reflectPoint(p: Vec3, q: Vec3): Vec3 {
+  return [2 * p[0] - q[0], 2 * p[1] - q[1], 2 * p[2] - q[2]];
+}
+
+// 弧线强度：0 = 纯直线，1 = 标准 Catmull-Rom。
+// 标准 CR 在直角转弯会"外抛"（本几何实测 0.625 米），走路时容易蹭到场景物件；
+// 混合 0.6 后外抛压到 ~0.37 米，仍是明显弧线。两端 u=0/1 时与线性完全重合，所以过点性不受影响。
+const PATH_CURVE_STRENGTH = 0.6;
+
 export function sampleCharacterPosition(char: PrevizCharacter, t: number): Vec3 {
   const path = char.path;
   if (path.length === 0) return char.position;
+  if (path.length === 1) return path[0].position;
   if (t <= path[0].t) return path[0].position;
   const last = path[path.length - 1];
   if (t >= last.t) return last.position;
@@ -688,12 +798,19 @@ export function sampleCharacterPosition(char: PrevizCharacter, t: number): Vec3 
     const a = path[i];
     const b = path[i + 1];
     if (t >= a.t && t <= b.t) {
-      const ratio = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
-      return [
-        a.position[0] + (b.position[0] - a.position[0]) * ratio,
-        a.position[1] + (b.position[1] - a.position[1]) * ratio,
-        a.position[2] + (b.position[2] - a.position[2]) * ratio,
-      ];
+      const linear = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
+      // 端点平滑加减速：只改变"段内怎么走"，段两端时刻不变 ——
+      // 所以每个走位关键帧仍然严格在它自己的时刻被到达，不会破坏时间约定。
+      const ratio = usePrevizStore.getState().pathEase
+        ? linear * linear * (3 - 2 * linear)
+        : linear;
+      // 相邻两点取前后控制点，转弯走弧线而不是硬折角；端点用反射虚拟点，避免端点过冲
+      const p0 = i > 0 ? path[i - 1].position : reflectPoint(a.position, b.position);
+      const p3 = i + 2 < path.length ? path[i + 2].position : reflectPoint(b.position, a.position);
+      // 时刻仍严格落在用户设定的关键帧上（位置过点，时间按段线性）
+      const curved = catmullRomPoint(p0, a.position, b.position, p3, ratio);
+      const straight = lerpAt(a.position, b.position, 0, 1, ratio);
+      return lerpAt(straight, curved, 0, 1, PATH_CURVE_STRENGTH);
     }
   }
   return last.position;

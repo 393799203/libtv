@@ -109,6 +109,31 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 	// 本次执行实际涉及的节点，供前端重进项目时恢复「生成中」状态
 	nodeIDsJSON, _ := json.Marshal(planNodeIDs(plan))
 
+	// 重复提交保护：同一项目里已有 pending/running 的执行，且它与本次要跑的节点有重叠时直接拒绝。
+	// 线上实证（2026-10-03）：视频超时失败后界面仍显示"生成中"，用户再点一次 →
+	// 同一节点连续被扣三次费（执行 1256/1257/1258）。宁可让用户等，也不能白扣费。
+	if actives, aErr := h.execRepo.ListActiveByProject(c.Request.Context(), projectID); aErr == nil {
+		want := make(map[string]bool)
+		for _, id := range planNodeIDs(plan) {
+			want[id] = true
+		}
+		for _, a := range actives {
+			var ids []string
+			if len(a.NodeIDs) > 0 {
+				_ = json.Unmarshal(a.NodeIDs, &ids)
+			}
+			for _, id := range ids {
+				if want[id] {
+					log.Printf("[Handler] 拒绝重复提交: projectID=%s 节点=%s 已有执行=%d(%s)",
+						projectID, id, a.ID, a.Status)
+					response.Fail(c, http.StatusConflict,
+						fmt.Sprintf("该节点已有生成任务在进行中（#%d %s），请等它结束或刷新页面后再试", a.ID, a.Status))
+					return
+				}
+			}
+		}
+	}
+
 	// 创建执行记录。
 	// 状态先置 pending：任务被 worker 真正取走时才转 running（见 HandleQueuedTask），
 	// 这样排队中的任务在前端显示为「等待生成中」，而不是假装已经在跑。
@@ -241,10 +266,17 @@ func (h *WorkflowHandler) buildPlan(ctx context.Context, projectID, startNodeID,
 	return canvas, plan, ownerUserID, nil
 }
 
+// executionTimeout 执行超时预算 —— 必须覆盖「视频轮询本身」，而不只是覆盖记账写入。
+// 线上实证（2026-10-03 执行 1258）：视频生成恰好跑到 10m0.265s 被 deadline 掐死，
+// 眼看要出结果却整单白费，并且因为失败发生在节点内部被吞掉，执行还被误标成 done（不退费）。
+// 视频类任务轮询常态 10 分钟上下（1256=10m26s / 1257=9m54s），故放宽到 30 分钟；
+// 真正的卡死由后续的看门狗（无进展超时 → 标 failed + 退积分）兜底。
+const executionTimeout = 30 * time.Minute
+
 // runExecutionAsync 降级路径：进程内起协程执行（原行为，进程重启会中断该任务）
 func (h *WorkflowHandler) runExecutionAsync(execID int64, projectID, ownerUserID string, canvas *model.Canvas, plan *engine.ExecutionPlan) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 		defer cancel()
 		_ = h.runExecution(ctx, execID, projectID, ownerUserID, canvas, plan)
 	}()
@@ -261,8 +293,15 @@ func (h *WorkflowHandler) runExecution(ctx context.Context, execID int64, projec
 		log.Printf("[Handler] engine.Execute done")
 	}
 
+	// 收尾的记账类写入一律用「不受执行超时影响」的 ctx。
+	// 线上实证（执行 1256，跑了 10 分 26 秒）：执行 ctx 的 10 分钟 deadline 在收尾前就过期，
+	// 画布回写与状态更新双双 context deadline exceeded →
+	// generation_history 丢记录、DB 停在 running、界面一直转圈、用户重复提交 → 同一节点重复扣费。
+	// 生成阶段仍受原超时约束（真正的卡死该被掐掉），但「记录结果」不该被掐。
+	finalCtx := context.WithoutCancel(ctx)
+
 	// 把每个节点的 output 回写到画布（持久化生成的 content / 后续字段）
-	h.persistNodeOutputs(ctx, canvas, plan)
+	h.persistNodeOutputs(finalCtx, canvas, plan)
 	log.Printf("[Handler] persistNodeOutputs done: executionID=%d", execID)
 
 	status := "done"
@@ -275,7 +314,7 @@ func (h *WorkflowHandler) runExecution(ctx context.Context, execID int64, projec
 		// 失败时**不清理** —— 那些已提交但还没取回结果的上游任务要留给重试继续复用。
 		llm.ClearAsyncTaskRefsOfExecution(execID)
 	}
-	h.execRepo.UpdateStatus(ctx, execID, status, errMsg)
+	h.execRepo.UpdateStatus(finalCtx, execID, status, errMsg)
 	log.Printf("[Handler] execution %d final status=%s", execID, status)
 	return execErr
 }
@@ -303,7 +342,7 @@ func (h *WorkflowHandler) HandleQueuedTask(ctx context.Context, t queue.Task) er
 	_ = h.execRepo.UpdateStatus(ctx, t.ExecutionID, "running", "")
 
 	// 单任务超时与降级路径保持一致（10 分钟）
-	runCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	runCtx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
 	return h.runExecution(runCtx, t.ExecutionID, t.ProjectID, ownerUserID, canvas, plan)
 }

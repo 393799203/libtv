@@ -24,6 +24,30 @@ function loadPricingNodes(): Promise<NodePriceGroup[]> {
 }
 
 /**
+ * 视频节点预估计费（与后端 ChargeVideoByDuration 同一口径）：
+ *   - 连接了参考视频、且模型开启了参考视频计费（ref_video_billing，3 个 Seedance 模型）
+ *     → 单价取「有参」档（后台配置值；没配置时后端已按无参单价的 6 折返回 ref_video_price），
+ *       计费时长 = 输出时长 + 参考视频时长（参考视频时长四舍五入到秒，与后端一致：实测 30.08 秒 → 30 秒）
+ *   - 其余情况 → 无参单价 × 输出时长
+ * 扣费与退费同口径，所以这里显示多少、账单上就是多少
+ */
+function estimateVideoCost(
+  priceItem: PriceModelItem,
+  outputSeconds: number,
+  hasRefVideo: boolean,
+  refVideoSeconds: number
+): number {
+  // 未选时长时按 4s 预估（与清晰度面板的「按 4s 预估」一致）
+  const output = outputSeconds > 0 ? outputSeconds : 4;
+  if (!hasRefVideo || !priceItem.ref_video_billing) {
+    return Math.ceil(priceItem.price * output);
+  }
+  const unit = priceItem.ref_video_price ?? priceItem.price;
+  const ref = refVideoSeconds > 0 ? Math.round(refVideoSeconds) : 0;
+  return Math.ceil(unit * (output + ref));
+}
+
+/**
  * 在价格分组中查找视频模型指定分辨率的单价条目。
  * 分辨率两侧统一小写比较（后端可能返回 720P/1080P/4k 等任意大小写）。
  */
@@ -91,6 +115,10 @@ interface PromptToolbarProps {
   onGenerateAudioChange?: (enabled: boolean) => void;
   // 视频节点专属：是否已引用音频节点（引用后声音开关强制开启，不可关闭）
   audioReferenced?: boolean;
+  // 视频节点专属：是否连了参考视频（决定预估用「有参」单价）
+  hasRefVideo?: boolean;
+  // 视频节点专属：参考视频总时长（秒；节点上没记录时长时传 0：只切换单价、不增加计费时长）
+  refVideoSeconds?: number;
   // 音频节点专属：输入字符数（用于计算费用）
   charCount?: number;
   /**
@@ -334,6 +362,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   onAspectRatioChange,
   pricingNodes,
   selectedDuration,
+  hasRefVideo,
+  refVideoSeconds,
 }: {
   resolution: ResolutionOption;
   aspectRatio: string;
@@ -344,6 +374,8 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   onAspectRatioChange: (r: string) => void;
   pricingNodes?: NodePriceGroup[];
   selectedDuration?: number;
+  hasRefVideo?: boolean;
+  refVideoSeconds?: number;
 }) {
   const [open, setOpen] = useState(false);
   const isVideo = nodeType === 'video';
@@ -415,7 +447,13 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
               <SectionHeader
                 icon={ResSectionIcon}
                 title="清晰度"
-                chip={isVideo ? `按 ${selectedDuration && selectedDuration > 0 ? selectedDuration : 4}s 预估` : undefined}
+                chip={
+                  isVideo
+                    ? `按 ${(selectedDuration && selectedDuration > 0 ? selectedDuration : 4) + (hasRefVideo && (refVideoSeconds || 0) > 0 ? Math.round(refVideoSeconds || 0) : 0)}s 预估${
+                        hasRefVideo && (refVideoSeconds || 0) > 0 ? '（含参考视频）' : ''
+                      }`
+                    : undefined
+                }
               />
               <div className="flex gap-2">
                 {resolutionOptions.map((res) => {
@@ -425,9 +463,10 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                   if (isVideo && pricingNodes && selectedModelId) {
                     const realModelId = models.find((m) => m.value === selectedModelId)?.modelId || selectedModelId;
                     const priceItem = findVideoPricing(pricingNodes, realModelId, res);
-                    if (priceItem && priceItem.price > 0) {
-                      const dur = selectedDuration && selectedDuration > 0 ? selectedDuration : 4;
-                      resPriceLabel = `${Math.ceil(priceItem.price * dur)} 积分`;
+                    if (priceItem) {
+                      // 有参时用「有参」单价 × (输出 + 参考视频) 预估，与底部工具栏、账单口径一致
+                      const cost = estimateVideoCost(priceItem, selectedDuration ?? 0, !!hasRefVideo, refVideoSeconds ?? 0);
+                      if (cost > 0) resPriceLabel = `${cost} 积分`;
                     }
                   }
                   const isPrice = !!resPriceLabel;
@@ -647,6 +686,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   generateAudio = true,
   onGenerateAudioChange,
   audioReferenced = false,
+  hasRefVideo = false,
+  refVideoSeconds = 0,
   charCount = 0,
   storedModelChannel,
 }) {
@@ -698,9 +739,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     if (nodeGroup.billing_type === 'per_second' && nodeType === 'video') {
       const modelPrice = findVideoPricing(pricingNodes, currentModelId, selectedResolution);
       if (!modelPrice) return null;
-      const price = modelPrice.price;
-      if (price === 0) return 0;
-      return Math.ceil(price * selectedDuration);
+      // 连了参考视频就按「有参」单价 + (输出 + 参考视频) 时长预估，见 estimateVideoCost
+      return estimateVideoCost(modelPrice, selectedDuration ?? 0, hasRefVideo, refVideoSeconds);
     }
     const modelPrice = nodeGroup.models.find((m) => m.model_id === currentModelId);
     if (!modelPrice) return null;
@@ -717,7 +757,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     }
     // 按次计费：直接返回单价
     return price;
-  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, selectedResolution, charCount]);
+  }, [pricingNodes, nodeType, selectedModel, models, selectedDuration, selectedResolution, charCount, hasRefVideo, refVideoSeconds]);
 
   return (
     <div className="flex items-center gap-1 pt-2 mt-0.5 border-t border-gray-100 max-md:flex-wrap">
@@ -886,6 +926,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           onAspectRatioChange={onAspectRatioChange}
           pricingNodes={pricingNodes}
           selectedDuration={selectedDuration}
+          hasRefVideo={hasRefVideo}
+          refVideoSeconds={refVideoSeconds}
         />
       )}
 

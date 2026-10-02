@@ -12,7 +12,7 @@ import {
 } from './previzStore';
 import { CharacterView } from './CharacterView';
 import { sampleCameraPose } from './cameraRig';
-import { registerPrevizViewport } from './recorder';
+import { registerPrevizViewport, EDITOR_HELPER_NAME } from './recorder';
 import type { PrevizCamera, PrevizObject } from './types';
 
 // TransformControls 的三种拖拽模式
@@ -23,6 +23,89 @@ const MODE_LABELS: Record<TransformMode, string> = {
   rotate: '旋转',
   scale: '缩放',
 };
+
+/**
+ * 走位绘制控制器。
+ * 为什么不用地面 mesh 的 onClick：那样只要光标下压着任何物体（墙/桌子/人偶/拖动轴），
+ * 事件就被那个物体吃掉 —— 用户点了没反应、也没有任何反馈。
+ * 这里在 canvas 上用捕获阶段拦左键，直接向 y=0 地面做射线求交，
+ * 保证"点哪儿就在哪儿落点"，并渲染一个落点预览环。
+ * 右键不拦：留给你平移/旋转视角。
+ */
+function PathDrawController({ charId }: { charId: string }) {
+  const gl = useThree((s) => s.gl);
+  const camera = useThree((s) => s.camera);
+  const plane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const ray = useMemo(() => new THREE.Raycaster(), []);
+  const [hover, setHover] = useState<[number, number, number] | null>(null);
+
+  const pick = useCallback(
+    (clientX: number, clientY: number): [number, number, number] | null => {
+      const rect = gl.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+      ray.setFromCamera(ndc, camera);
+      const hit = new THREE.Vector3();
+      if (!ray.ray.intersectPlane(plane, hit)) return null;
+      return [hit.x, 0, hit.z];
+    },
+    [gl, camera, plane, ray]
+  );
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    // 挂在 R3F 的事件根节点（canvas 的父容器）上做捕获：
+    // 这样一定早于 canvas 上任何物体/角色/拖动轴的处理器。
+    const el = canvas.parentElement ?? canvas;
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return; // 只接管左键；右键留给相机平移
+      const pt = pick(e.clientX, e.clientY);
+      if (!pt) return;
+      // 抢在物体 / 角色 / 拖动轴的处理器之前，避免"点到物体就没反应"
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      usePrevizStore.getState().appendDrawnPathPoint(charId, pt);
+    };
+    // 关键：R3F 的物体/角色点击是在 click 上触发的。
+    // 只拦 pointerdown 不够 —— 射线打到房子/人偶时，那一边的 onClick 仍会把"选中"改成那个物体，
+    // 左侧面板就切成"没选中人体"的界面（用户实测反馈）。
+    const swallow = (e: Event) => {
+      const pe = e as PointerEvent;
+      if (typeof pe.button === 'number' && pe.button !== 0) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    };
+    const onMove = (e: PointerEvent) => setHover(pick(e.clientX, e.clientY));
+    const onLeave = () => setHover(null);
+    el.addEventListener('pointerdown', onDown, true);
+    for (const type of ['pointerup', 'click', 'dblclick', 'contextmenu'] as const) {
+      if (type === 'contextmenu') continue; // 右键菜单不管，但要放行右键
+      el.addEventListener(type, swallow, true);
+    }
+    el.addEventListener('pointermove', onMove, true);
+    el.addEventListener('pointerleave', onLeave, true);
+    return () => {
+      el.removeEventListener('pointerdown', onDown, true);
+      for (const type of ['pointerup', 'click', 'dblclick', 'contextmenu'] as const) {
+        if (type === 'contextmenu') continue;
+        el.removeEventListener(type, swallow, true);
+      }
+      el.removeEventListener('pointermove', onMove, true);
+      el.removeEventListener('pointerleave', onLeave, true);
+    };
+  }, [gl, pick, charId]);
+
+  if (!hover) return null;
+  // 落点预览环：离地一点并关闭深度测试，保证任何角度都看得见
+  return (
+    <mesh position={hover} rotation={[-Math.PI / 2, 0, 0]} renderOrder={999}>
+      <ringGeometry args={[0.32, 0.46, 40]} />
+      <meshBasicMaterial color="#38bdf8" transparent opacity={0.95} depthTest={false} />
+    </mesh>
+  );
+}
 
 // 圆角方块：白模粘土质感的基础件；圆角半径按最小边自适应（薄板件不会过度圆角）
 // 注：圆角 + 阴影会增加三角面数，同屏元素很多（上百个组合件）时注意性能
@@ -234,6 +317,137 @@ function ObjectContent({ obj, selected }: { obj: PrevizObject; selected: boolean
           </mesh>
           <BBox position={[0.12, 0.86, 0]} args={[0.25, 0.04, 0.05]}>{mat}</BBox>
           <BBox position={[0.24, 0.83, 0]} args={[0.1, 0.05, 0.07]}>{mat}</BBox>
+        </group>
+      );
+
+    // 立柱：柱础 + 柱身 + 柱头，包围盒约 0.5x1.06x0.5
+    case 'column':
+      return (
+        <group>
+          <BBox position={[0, 0.04, 0]} args={[0.5, 0.08, 0.5]}>{mat}</BBox>
+          <mesh position={[0, 0.53, 0]}>
+            <cylinderGeometry args={[0.14, 0.16, 0.9, 16]} />
+            {mat}
+          </mesh>
+          <BBox position={[0, 1.02, 0]} args={[0.44, 0.08, 0.44]}>{mat}</BBox>
+        </group>
+      );
+
+    // 红绿灯：灯杆 + 灯箱 + 三个灯位，包围盒约 0.2x1.5x0.2
+    case 'trafficlight':
+      return (
+        <group>
+          <mesh position={[0, 0.5, 0]}>
+            <cylinderGeometry args={[0.035, 0.045, 1.0, 12]} />
+            {mat}
+          </mesh>
+          <BBox position={[0, 0.6, 0]} args={[0.1, 0.06, 0.1]}>{mat}</BBox>
+          <BBox position={[0, 1.22, 0]} args={[0.18, 0.46, 0.16]}>{mat}</BBox>
+          {[1.38, 1.22, 1.06].map((y) => (
+            <mesh key={y} position={[0, y, 0.09]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.045, 0.045, 0.02, 14]} />
+              {mat}
+            </mesh>
+          ))}
+        </group>
+      );
+
+    // 公交站：立杆 + 站牌 + 小顶棚，包围盒约 0.7x1.78x0.4
+    case 'busstop':
+      return (
+        <group>
+          <mesh position={[-0.28, 0.45, 0]}>
+            <cylinderGeometry args={[0.03, 0.035, 0.9, 10]} />
+            {mat}
+          </mesh>
+          <BBox position={[0.08, 1.08, 0]} args={[0.62, 0.5, 0.05]}>{mat}</BBox>
+          <BBox position={[0, 1.4, 0.06]} args={[0.78, 0.05, 0.34]}>{mat}</BBox>
+        </group>
+      );
+
+    // 垃圾桶：桶身 + 桶沿，包围盒约 0.38x0.56x0.38
+    case 'trashcan':
+      return (
+        <group>
+          <mesh position={[0, 0.25, 0]}>
+            <cylinderGeometry args={[0.18, 0.15, 0.5, 16]} />
+            {mat}
+          </mesh>
+          <mesh position={[0, 0.52, 0]}>
+            <cylinderGeometry args={[0.19, 0.19, 0.05, 16]} />
+            {mat}
+          </mesh>
+        </group>
+      );
+
+    // 花坛：箱体 + 三丛矮植物，包围盒约 0.7x0.62x0.7
+    case 'planter':
+      return (
+        <group>
+          <BBox position={[0, 0.175, 0]} args={[0.7, 0.35, 0.7]}>{mat}</BBox>
+          {[
+            [-0.16, 0.44, -0.12, 0.16],
+            [0.14, 0.42, 0.1, 0.13],
+            [0.02, 0.5, -0.16, 0.11],
+          ].map(([x, y, z, r]) => (
+            <mesh key={`${x}-${z}`} position={[x, y, z]}>
+              <sphereGeometry args={[r, 14, 12]} />
+              {mat}
+            </mesh>
+          ))}
+        </group>
+      );
+
+    // 书架：两侧立板 + 三层层板 + 背板，包围盒约 0.62x1.0x0.32
+    case 'shelf':
+      return (
+        <group>
+          <BBox position={[-0.29, 0.5, 0]} args={[0.05, 1.0, 0.3]}>{mat}</BBox>
+          <BBox position={[0.29, 0.5, 0]} args={[0.05, 1.0, 0.3]}>{mat}</BBox>
+          {[0.22, 0.55, 0.88].map((y) => (
+            <BBox key={y} position={[0, y, 0]} args={[0.6, 0.04, 0.3]}>{mat}</BBox>
+          ))}
+          <BBox position={[0, 0.5, -0.15]} args={[0.58, 1.0, 0.03]}>{mat}</BBox>
+        </group>
+      );
+
+    // 吧台/柜台：台体 + 台面，包围盒约 1.1x0.96x0.6
+    case 'counter':
+      return (
+        <group>
+          <BBox position={[0, 0.45, 0]} args={[1.0, 0.9, 0.5]}>{mat}</BBox>
+          <BBox position={[0, 0.93, 0]} args={[1.1, 0.06, 0.6]}>{mat}</BBox>
+        </group>
+      );
+
+    // 帐篷：四棱锥篷顶 + 地垫，包围盒约 1.5x0.75x1.5
+    case 'tent':
+      return (
+        <group>
+          <mesh position={[0, 0.37, 0]} rotation={[0, Math.PI / 4, 0]}>
+            <coneGeometry args={[0.95, 0.74, 4]} />
+            {mat}
+          </mesh>
+          <BBox position={[0, 0.01, 0]} args={[1.3, 0.02, 1.3]}>{mat}</BBox>
+        </group>
+      );
+
+    // 篝火：两根交叠木柴 + 火苗，包围盒约 0.7x0.5x0.7
+    case 'campfire':
+      return (
+        <group>
+          <mesh position={[0, 0.05, 0]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.05, 0.05, 0.66, 8]} />
+            {mat}
+          </mesh>
+          <mesh position={[0, 0.05, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.05, 0.05, 0.66, 8]} />
+            {mat}
+          </mesh>
+          <mesh position={[0, 0.29, 0]}>
+            <coneGeometry args={[0.17, 0.38, 8]} />
+            {mat}
+          </mesh>
         </group>
       );
 
@@ -705,9 +919,13 @@ export function Viewport3D() {
   const select = usePrevizStore((s) => s.select);
   const setPreviewCamera = usePrevizStore((s) => s.setPreviewCamera);
   const pathDrawMode = usePrevizStore((s) => s.pathDrawMode);
+  const pathDrawCharId = usePrevizStore((s) => s.pathDrawCharId);
   const gizmoDragging = usePrevizStore((s) => s.gizmoDragging); // gizmo 拖拽时禁用轨道相机
-  // 绘制模式的目标角色（选中的人偶）
-  const drawCharId = pathDrawMode && selectedId?.startsWith('char-') ? selectedId : null;
+  // 绘制模式的目标角色：优先"当前显式选中的人偶"，否则用进入绘制模式时锁定的那个
+  // （锁定是为了：中途点到空处/别的物体也不会把绘制目标弄丢）
+  const selectedCharId = selectedId && characters.some((c) => c.id === selectedId) ? selectedId : null;
+  const drawCharId = pathDrawMode ? (selectedCharId ?? pathDrawCharId) : null;
+  const drawCharName = drawCharId ? (characters.find((c) => c.id === drawCharId)?.name ?? '角色') : '';
 
   const [mode, setMode] = useState<TransformMode>('translate');
   // handleObjectChange 是空依赖 useCallback，通过 ref 读最新模式
@@ -808,16 +1026,38 @@ export function Viewport3D() {
 
   return (
     <div className="relative w-full h-full">
+      {/* 绘制模式操作指引：明确"点哪儿、点几下、怎么结束"，不再靠猜 */}
+      {drawCharId && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-600/95 text-white shadow-lg">
+          <span className="text-xs font-medium">
+            正在给「{drawCharName}」画走位：在<u>地面</u>依次点击落点（点得越远，走得越久）
+          </span>
+          <span className="text-[11px] text-blue-100">按 ESC 结束</span>
+          <button
+            className="px-2 py-0.5 text-[11px] rounded bg-white/20 hover:bg-white/30 cursor-pointer"
+            onClick={() => usePrevizStore.getState().setPathDrawMode(false)}
+          >
+            结束绘制
+          </button>
+        </div>
+      )}
       <Canvas
         shadows
         camera={{ position: [8, 6, 8], fov: 50 }}
         onCreated={(state) =>
-          // 登记渲染器/相机引用，供录制模块（P4 白片导出）使用
-          registerPrevizViewport(state.gl, state.camera as THREE.PerspectiveCamera)
+          // 登记渲染器/相机/场景引用，供录制与静帧导出模块使用
+          registerPrevizViewport(
+            state.gl,
+            state.camera as THREE.PerspectiveCamera,
+            state.scene
+          )
         }
         onPointerMissed={() => {
+          const st = usePrevizStore.getState();
           // 姿态编辑模式下不响应落空点击（不退出编辑、不清除选中），退出编辑后恢复原逻辑
-          if (usePrevizStore.getState().poseEditingCharId) return;
+          if (st.poseEditingCharId) return;
+          // 绘制走位时也不清除选中：清掉目标角色就等于把绘制流程打断（用户会以为"点了没反应"）
+          if (st.pathDrawMode) return;
           select(null);
         }}
       >
@@ -842,8 +1082,8 @@ export function Viewport3D() {
           <planeGeometry args={[60, 60]} />
           <shadowMaterial transparent opacity={0.3} />
         </mesh>
-        {/* 地面参考网格 20x20 */}
-        <gridHelper args={[20, 20, '#94a3b8', '#475569']} />
+        {/* 地面参考网格 20x20（编辑器辅助物：导出白片/静帧时自动隐藏） */}
+        <gridHelper name={EDITOR_HELPER_NAME} args={[20, 20, '#94a3b8', '#475569']} />
 
         {objects.map((obj) => (
           <SceneObject key={obj.id} obj={obj} registerRef={registerRef} />
@@ -853,22 +1093,13 @@ export function Viewport3D() {
           <CharacterView key={char.id} char={char} registerRef={registerRef} />
         ))}
 
-        {/* 路径绘制模式：透明地面接收点击，点击处为选中角色追加路径点 */}
-        {drawCharId && (
-          <mesh
-            rotation={[-Math.PI / 2, 0, 0]}
-            position={[0, 0.01, 0]}
-            onClick={(e) => {
-              e.stopPropagation();
-              usePrevizStore.getState().appendDrawnPathPoint(drawCharId, [e.point.x, 0, e.point.z]);
-            }}
-          >
-            <planeGeometry args={[100, 100]} />
-            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-          </mesh>
-        )}
+        {/* 路径绘制模式：捕获阶段接管左键，落点 + 预览环 */}
+        {drawCharId && <PathDrawController charId={drawCharId} />}
 
-        <CharacterPaths registerRef={registerRef} />
+        {/* 走位路径线与路径点（编辑器辅助物：导出白片/静帧时自动隐藏） */}
+        <group name={EDITOR_HELPER_NAME}>
+          <CharacterPaths registerRef={registerRef} />
+        </group>
 
         {/* 相机辅助图标：相机视角下隐藏（正在用该相机看场景） */}
         {!previewCameraId &&
@@ -882,7 +1113,8 @@ export function Viewport3D() {
         <CameraPreviewDriver />
 
         {/* 选中目标后挂变换控制器（makeDefault 的 OrbitControls 会在拖拽时自动禁用） */}
-        {selectedObj3d && gizmoMode && !previewCameraId && (
+        {/* 绘制走位时隐藏拖动轴：否则点击容易打在轴上（既落不了点，还会把角色拖走） */}
+        {selectedObj3d && gizmoMode && !previewCameraId && !pathDrawMode && (
           <TransformControls
             object={selectedObj3d}
             mode={gizmoMode}

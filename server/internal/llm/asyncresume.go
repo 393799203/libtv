@@ -33,6 +33,13 @@ type AsyncTaskRef struct {
 	// 若最终发现该任务已不可复用（过期/失败），需要把这笔钱退还给用户后再重新下发，
 	// 否则用户会「第一次白付 + 第二次再付」。
 	ChargedAmount int64 `json:"chargedAmount"`
+	// 下面三项是扣费时的计费口径（分辨率 / 计费总时长=输出+参考视频 / 其中参考视频时长），
+	// 随任务登记一起持久化：进程重启后续跑时若发现任务不可复用，退费按同一口径写账单，
+	// 退费记录与当初的扣费记录能一一对上（见 BillingService.Refund 的 ChargeExtra）。
+	// 旧登记（本次改动前落盘）没有这三项，取出为零值，退费只少了展示信息不影响金额
+	ChargeResolution string `json:"chargeResolution"`
+	ChargeSeconds    int    `json:"chargeSeconds"`
+	ChargeRefSeconds int    `json:"chargeRefSeconds"`
 }
 
 // asyncTaskTTL 登记有效期，与上游任务的可查询保留期（约 24h）对齐
@@ -115,6 +122,33 @@ func RecordSubmittedTask(ctx context.Context, provider, model, taskID string) {
 		h.CreateAt = time.Now().Format(time.RFC3339)
 	}
 	SaveAsyncTaskRef(h)
+}
+
+// TakeAsyncTaskRef 原子地「认领」任务登记（Redis GETDEL），返回被认领的那份登记；
+// 同一份登记只会被认领一次，并发调用中只有一个能拿到，其余拿到 nil。
+//
+// 用途：「复用失败 → 退还当初下发它的那笔扣费」这条路径必须先认领再退费。
+// 队列重投 / 前端重复触发会让同一个执行（execID 相同，登记 key 相同）并发跑多份，
+// 若每份都各自读一次登记再退费，同一笔扣费就会被退多次 —— 线上实例：
+// 2026-10-03 01:17–01:19 一个 20 秒窗口里 5 笔扣费退了 8 次，多退 13590 积分。
+// 认领成功的那一份负责退费，其余执行退化为「跳过」（任务确实已不可复用，但钱只退一次）。
+func TakeAsyncTaskRef(execID int64, nodeID string) *AsyncTaskRef {
+	rdb := cache.Client()
+	if rdb == nil {
+		return nil
+	}
+	// 独立 ctx：调用方 ctx 往往已随失败/关停被取消，而认领必须完成（否则退费不会发生）
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	raw, err := rdb.GetDel(ctx, asyncTaskKey(execID, nodeID)).Result()
+	if err != nil || raw == "" {
+		return nil
+	}
+	var ref AsyncTaskRef
+	if err := json.Unmarshal([]byte(raw), &ref); err != nil || ref.TaskID == "" {
+		return nil
+	}
+	return &ref
 }
 
 // ClearAsyncTaskRef 清除单个节点的任务登记（该节点结果已产出，不再需要复用）

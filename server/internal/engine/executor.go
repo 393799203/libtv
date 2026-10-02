@@ -28,11 +28,18 @@ type NodeOutput struct {
 }
 
 // refundWithFreshCtx 用独立 context 退费：
-// 生成失败时原 ctx 往往已超时/取消（如视频轮询 10 分钟超时），用死 ctx 退费会直接失败导致用户积分损失
-func refundWithFreshCtx(biller *service.BillingService, userID string, amount int64, action, modelName, scene, reason string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+// 生成失败时原 ctx 往往已超时/取消（如视频轮询 10 分钟超时），用死 ctx 退费会直接失败导致用户积分损失。
+// extra 为扣费时的计费口径，需原样传入（视频带分辨率/时长/参考视频时长；按次等无口径的传零值），
+// 退费账单才能与扣费账单口径一致。
+// ctx 传「扣费时那个 ctx」：新 ctx 里没有渠道信息，必须从原 ctx 带过去，
+// 否则退费账单的「渠道-模型」前缀会回退成默认渠道（线上实例：dianxin 扣费、退费却记成 wasu-xxx）
+func refundWithFreshCtx(ctx context.Context, biller *service.BillingService, userID string, amount int64, action, modelName, scene, reason string, extra service.ChargeExtra) error {
+	refundCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return biller.Refund(ctx, userID, amount, action, modelName, scene, reason)
+	if ch := llm.ChannelFrom(ctx); ch != "" {
+		refundCtx = llm.WithChannel(refundCtx, ch)
+	}
+	return biller.Refund(refundCtx, userID, amount, action, modelName, scene, reason, extra)
 }
 
 // ExecutionContext 执行上下文（节点间数据传递）
@@ -455,6 +462,23 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 
 		wg.Wait()
 
+		// 节点"自报失败"也必须算本层失败：
+		// executor 有些失败路径返回的是 &NodeOutput{Status:"failed"}, nil（error 为 nil），
+		// 只看 levelErrors 会把这一层当成成功，执行被标 done —— 线上实证 2026-10-03 执行 1258：
+		// 视频被 10 分钟超时掐死，节点与积分都正确标失败并退费，执行却显示 done（界面"成功但没东西"）。
+		// 这里按 outputs 里每个节点的 Status 兜底一次，保证"失败就是失败"。
+		for _, out := range outputs {
+			if out != nil && out.Status == "failed" {
+				msg := "节点执行失败"
+				if out.Data != nil {
+					if s, ok := out.Data["error"].(string); ok && s != "" {
+						msg = s
+					}
+				}
+				levelErrors = append(levelErrors, fmt.Errorf("node %s failed: %s", out.NodeID, msg))
+			}
+		}
+
 		if len(levelErrors) > 0 {
 			e.emit(WorkflowEvent{
 				ExecutionID: executionID,
@@ -614,7 +638,7 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(t.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionStory, data.Model, "故事生成", err.Error()); refundErr != nil {
+		if refundErr := refundWithFreshCtx(ctx, t.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionStory, data.Model, "故事生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[TextExecutor] 退费失败: %v", refundErr)
 		}
 		return nil, fmt.Errorf("generate story: %w", err)
@@ -771,7 +795,7 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
 		// LLM调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(s.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionScript, data.Model, "分镜剧本生成", err.Error()); refundErr != nil {
+		if refundErr := refundWithFreshCtx(ctx, s.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionScript, data.Model, "分镜剧本生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[ScriptExecutor] 退费失败: %v", refundErr)
 		}
 		return nil, fmt.Errorf("generate script: %w", err)
@@ -925,6 +949,19 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				} else {
 					log.Printf("[ImageExecutor] ❌ @引用的图片节点找不到数据: nodeId=%s", m.NodeID)
 				}
+			} else if m.NodeType == "previz" {
+				// ✅ 白模预演节点：用它导出的静帧作为构图参考图
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						StillUrl string `json:"stillUrl"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil && nd.StillUrl != "" {
+						referenceImageURLs = append(referenceImageURLs, nd.StillUrl)
+						log.Printf("[ImageExecutor] ✅ 从@引用的白模节点提取静帧作为参考图: nodeId=%s stillUrl=%s", m.NodeID, nd.StillUrl)
+					} else {
+						log.Printf("[ImageExecutor] ⚠️ @引用的白模节点还没有静帧（需先在预演编辑器导出静帧）: nodeId=%s", m.NodeID)
+					}
+				}
 			}
 		}
 	} else {
@@ -976,12 +1013,18 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				var nd struct {
 					Type     string `json:"type"`     // 节点类型
 					ImageUrl string `json:"imageUrl"` // 图片URL
+					StillUrl string `json:"stillUrl"` // 白模预演导出的静帧
 					StyleId  string `json:"styleId"`  // 风格图标识
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil {
-					log.Printf("[ImageExecutor] 上游节点数据: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
-					// ✅ 检查是否是图片节点（通过type字段或imageUrl字段判断）
-					if nd.Type == "image" || nd.ImageUrl != "" {
+					log.Printf("[ImageExecutor] 上游节点数据: type=%s imageUrl=%s stillUrl=%s", nd.Type, nd.ImageUrl, nd.StillUrl)
+					// ✅ 白模预演节点：静帧即参考图（锁构图）
+					if nd.Type == "previz" && nd.StillUrl != "" {
+						referenceImageURLs = append(referenceImageURLs, nd.StillUrl)
+						log.Printf("[ImageExecutor] ✅ 使用上游白模节点的静帧作为参考图: upstreamNodeID=%s stillUrl=%s", sourceNodeID, nd.StillUrl)
+					} else if nd.Type == "previz" {
+						log.Printf("[ImageExecutor] ⚠️ 上游白模节点还没有静帧（需先在预演编辑器导出静帧）: upstreamNodeID=%s", sourceNodeID)
+					} else if nd.Type == "image" || nd.ImageUrl != "" {
 						// 区分风格图和普通参考图
 						if strings.HasPrefix(sourceNodeID, "style-") || nd.StyleId != "" {
 							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
@@ -1113,7 +1156,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
 		if err != nil {
 			// API调用失败，退还已扣费用
-			if refundErr := refundWithFreshCtx(i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成", err.Error()); refundErr != nil {
+			if refundErr := refundWithFreshCtx(ctx, i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
 				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
 			}
 			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
@@ -1123,7 +1166,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generatedURLs, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size, count)
 		if err != nil {
 			// API调用失败，退还已扣费用
-			if refundErr := refundWithFreshCtx(i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成", err.Error()); refundErr != nil {
+			if refundErr := refundWithFreshCtx(ctx, i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
 				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
 			}
 			return nil, fmt.Errorf("generate image: %w", err)
@@ -1165,7 +1208,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		projectID := execCtx.GetProjectID()
 		if userID != "" && projectID != "" {
 			for _, url := range ownURLs {
-				if err := i.generationHistoryService.RecordGeneration(ctx, userID, projectID, node.ID, "image", data.Prompt, data.Model, url); err != nil {
+				if err := i.generationHistoryService.RecordGeneration(detachedCtx(ctx), userID, projectID, node.ID, "image", data.Prompt, data.Model, url); err != nil {
 					log.Printf("[ImageExecutor] 记录生成历史失败: %v", err)
 				}
 			}
@@ -1363,6 +1406,24 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 						log.Printf("[VideoExecutor] ✅ 参考音频: nodeId=%s audioUrl=%s", m.NodeID, nd.AudioUrl)
 					}
 				}
+			} else if m.NodeType == "previz" {
+				// ✅ 白模预演节点：白片作视频参考（走位/动作/运镜以此为准），静帧作图片参考
+				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
+					var nd struct {
+						VideoUrl string `json:"videoUrl"`
+						StillUrl string `json:"stillUrl"`
+					}
+					if err := json.Unmarshal(raw, &nd); err == nil {
+						if nd.VideoUrl != "" {
+							videoURLs = append(videoURLs, nd.VideoUrl)
+							log.Printf("[VideoExecutor] ✅ 白模白片作为参考视频: nodeId=%s videoUrl=%s", m.NodeID, nd.VideoUrl)
+						}
+						if nd.StillUrl != "" {
+							imageURLs = append(imageURLs, nd.StillUrl)
+							log.Printf("[VideoExecutor] ✅ 白模静帧作为参考图: nodeId=%s stillUrl=%s", m.NodeID, nd.StillUrl)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1381,10 +1442,21 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					ImageUrl string `json:"imageUrl"`
 					VideoUrl string `json:"videoUrl"`
 					AudioUrl string `json:"audioUrl"`
+					StillUrl string `json:"stillUrl"` // 白模预演导出的静帧
 					Type     string `json:"type"`
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil {
-					if nd.Type == "image" && nd.ImageUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 9 {
+					if nd.Type == "previz" {
+						// ✅ 白模预演节点：白片补充视频参考，静帧补充图片参考
+						if nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {
+							videoURLs = append(videoURLs, nd.VideoUrl)
+							log.Printf("[VideoExecutor] ✅ 从上游白模节点获取参考视频（白片）: nodeId=%s", sourceNodeID)
+						}
+						if nd.StillUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 9 {
+							imageURLs = append(imageURLs, nd.StillUrl)
+							log.Printf("[VideoExecutor] ✅ 从上游白模节点获取参考图（静帧）: nodeId=%s", sourceNodeID)
+						}
+					} else if nd.Type == "image" && nd.ImageUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 9 {
 						imageURLs = append(imageURLs, nd.ImageUrl)
 						log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
 					} else if nd.Type == "video" && nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {
@@ -1432,6 +1504,24 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	}
 	data.Duration = llm.ClampVideoDuration(data.Duration, minDur, maxDur)
 
+	// 计费时长里的「输入视频时长」：只有 models.yaml 开启 ref_video_billing 的模型
+	// （当前 3 个 Seedance 模型）才测量并计入，其余模型（wan3.0 等）保持「只按输出时长」计费。
+	// 首尾帧模式与参考素材互斥，video.go 的 collectMedia 会把参考视频直接丢掉，
+	// 那种情况参考视频既没上送也不该计费，故一并排除。
+	// 测量与模型侧的限制校验共用 ffprobe 口径（恰好等于受模型限制约束的那个数）；
+	// 测量失败时按 0 计（本次只算输出时长），失败原因在日志里
+	billRefVideo := v.modelManager != nil && v.modelManager.RefVideoBilling(execCtx.GetChannel(), model)
+	var refVideoSeconds float64
+	if billRefVideo {
+		if data.VideoMode == "first-last-frame" {
+			log.Printf("[VideoExecutor] 首尾帧模式忽略参考视频（不上送也不计费）: nodeId=%s refVideos=%d", node.ID, len(videoURLs))
+		} else if len(videoURLs) > 0 {
+			refVideoSeconds = llm.SumRefVideoDuration(ctx, videoURLs)
+			log.Printf("[VideoExecutor] 参考视频计费: nodeId=%s refVideos=%d 参考视频总时长=%.2fs 输出时长=%ds",
+				node.ID, len(videoURLs), refVideoSeconds, data.Duration)
+		}
+	}
+
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 
@@ -1443,20 +1533,34 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	resumeRef := llm.LoadAsyncTaskRef(ctx, execID, node.ID)
 	taskRef := llm.NewAsyncTaskRef(execID, node.ID)
 	var chargedAmount int64
+	// chargeDetail 本次扣费的计费口径（分辨率 / 计费时长 / 其中参考视频时长）：
+	// 调用失败退费时原样回传，退费账单与扣费账单口径完全一致
+	var chargeDetail service.ChargeExtra
 
 	if resumeRef != nil {
 		taskRef.Provider, taskRef.Model = resumeRef.Provider, resumeRef.Model
 		taskRef.TaskID, taskRef.ChargedAmount = resumeRef.TaskID, resumeRef.ChargedAmount
+		// 复用失败要退当初那笔钱，口径也得跟着复用过来（改动前落盘的旧登记没有这三项，取出为零值）
+		taskRef.ChargeResolution, taskRef.ChargeSeconds, taskRef.ChargeRefSeconds =
+			resumeRef.ChargeResolution, resumeRef.ChargeSeconds, resumeRef.ChargeRefSeconds
 		log.Printf("[VideoExecutor] ♻ 命中已提交的上游任务: taskID=%s model=%s（%s）→ 续取结果，跳过重复下发与扣费",
 			resumeRef.TaskID, resumeRef.Model, resumeRef.CreateAt)
 	} else {
-		// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景；视频模型按秒计费，按分辨率+时长计）
+		// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景）。
+		// 视频按秒计费：计费时长 = 输出视频时长 + 参考视频时长（见 ChargeVideoByDuration），
+		// 单价按分辨率档位；带参考视频输入时取「带参考视频」档（后台未配置则按无参考视频单价 6 折）
 		var chargeErr error
-		chargedAmount, chargeErr = v.biller.ChargeByDurationWithResolution(ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成", resolution, data.Duration)
+		chargedAmount, chargeDetail, chargeErr = v.biller.ChargeVideoByDuration(
+			ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成",
+			resolution, data.Duration, refVideoSeconds)
 		if chargeErr != nil {
 			return nil, chargeErr
 		}
 		taskRef.ChargedAmount = chargedAmount
+		// 计费口径随任务登记落盘：进程重启后若该任务不可复用，退费按同一口径写账单
+		taskRef.ChargeResolution = chargeDetail.Resolution
+		taskRef.ChargeSeconds = chargeDetail.Seconds
+		taskRef.ChargeRefSeconds = chargeDetail.RefVideoSeconds
 	}
 	ctx = llm.WithAsyncTaskHolder(ctx, taskRef)
 
@@ -1477,21 +1581,33 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
 		if resumeRef != nil {
-			// 复用失败：该上游任务已不可用（过期/已失败），清掉登记；
-			// 同时退还当初下发它的那笔扣费 —— 重试会重新下发并重新扣费，
-			// 不退的话用户等于为一个拿不到结果的任务白付一次
-			llm.ClearAsyncTaskRef(execID, node.ID)
-			if resumeRef.ChargedAmount > 0 {
+			// 复用失败：该上游任务已不可用（过期/已失败），退还当初下发它的那笔扣费 ——
+			// 重试会重新下发并重新扣费，不退的话用户等于为一个拿不到结果的任务白付一次。
+			// 认领必须先做（GETDEL 原子操作）：同一个执行可能被并发跑多份（队列重投/重复触发），
+			// 只有认领到登记的那一份去退费，否则同一笔扣费会被退多次
+			ref := llm.TakeAsyncTaskRef(execID, node.ID)
+			if ref == nil {
+				log.Printf("[VideoExecutor] 任务登记已被其它执行认领并处理，跳过重复退费（node=%s）", node.ID)
+			} else if ref.ChargedAmount > 0 {
 				reason := "上游任务已失效，退还该次扣费并稍后重新生成: " + err.Error()
-				if refundErr := refundWithFreshCtx(v.biller, execCtx.GetUserID(), resumeRef.ChargedAmount, service.BillingActionVideo, model, "视频生成", reason); refundErr != nil {
+				// 退费口径取自任务登记（当初扣费时落盘的那一份），与扣费账单一致
+				resumeExtra := service.ChargeExtra{
+					Resolution:      ref.ChargeResolution,
+					Seconds:         ref.ChargeSeconds,
+					RefVideoSeconds: ref.ChargeRefSeconds,
+				}
+				if refundErr := refundWithFreshCtx(ctx, v.biller, execCtx.GetUserID(), ref.ChargedAmount, service.BillingActionVideo, model, "视频生成", reason, resumeExtra); refundErr != nil {
 					log.Printf("[VideoExecutor] 复用失败退费失败: %v", refundErr)
+					// 放回登记：后续重试还能把这次扣费退掉，避免用户白付
+					llm.SaveAsyncTaskRef(ref)
 				} else {
-					log.Printf("[VideoExecutor] 复用失败，已退还上次扣费 %d 积分（重试时重新下发并扣费）", resumeRef.ChargedAmount)
+					log.Printf("[VideoExecutor] 复用失败，已退还上次扣费 %d 积分（口径 %s/%d秒，其中参考视频 %d 秒；重试时重新下发并扣费）",
+						ref.ChargedAmount, resumeExtra.Resolution, resumeExtra.Seconds, resumeExtra.RefVideoSeconds)
 				}
 			}
 		} else if chargedAmount > 0 {
-			// API调用失败，退还已扣费用
-			if refundErr := refundWithFreshCtx(v.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成", err.Error()); refundErr != nil {
+			// API调用失败，退还已扣费用（口径用本次扣费的那一份，退费账单与扣费账单一致）
+			if refundErr := refundWithFreshCtx(ctx, v.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成", err.Error(), chargeDetail); refundErr != nil {
 				log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
 			}
 		}
@@ -1523,7 +1639,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		userID := execCtx.GetUserID()
 		projectID := execCtx.GetProjectID()
 		if userID != "" && projectID != "" {
-			if err := v.generationHistoryService.RecordGeneration(ctx, userID, projectID, node.ID, "video", data.Prompt, data.Model, ownVideoURL); err != nil {
+			if err := v.generationHistoryService.RecordGeneration(detachedCtx(ctx), userID, projectID, node.ID, "video", data.Prompt, data.Model, ownVideoURL); err != nil {
 				log.Printf("[VideoExecutor] 记录生成历史失败: %v", err)
 			}
 		}
@@ -1692,7 +1808,7 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
 		// API调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(a.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionAudio, model, "音频生成", err.Error()); refundErr != nil {
+		if refundErr := refundWithFreshCtx(ctx, a.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionAudio, model, "音频生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[AudioExecutor] 退费失败: %v", refundErr)
 		}
 		return &NodeOutput{
@@ -1873,6 +1989,43 @@ func roundTo8(n int) int {
 	return ((n + 4) / 8) * 8
 }
 
+// detachedCtx 返回「不受执行超时影响」的 ctx，专供生成结束后的记账类写入使用。
+// 线上实证（2026-10-02 执行 1256）：执行 ctx 是 10 分钟硬超时，而视频轮询本身跑到 10 分 26 秒，
+// 收尾写库时 deadline 已过期 → generation_history 丢记录、执行状态卡 running、界面一直转圈、
+// 用户以为没成功又点一次 → 同一节点重复扣费。这里去掉取消/超时（DB 驱动自带超时兜底）。
+func detachedCtx(ctx context.Context) context.Context {
+	return context.WithoutCancel(ctx)
+}
+
+// PrevizExecutor 白模预演节点执行器。
+//
+// 白模的搭建、走位、录制与静帧导出全部发生在前端预演编辑器里，引擎侧不做任何推理；
+// 这里只需要"承认"该节点，把它已导出的白片/静帧当作节点输出暴露给下游。
+// 关键作用：若不给 previz 注册执行器，引擎会把该节点判为 failed（no executor for node type），
+// 用户一把白模连给图片/视频节点再点生成，白模节点就会变红报错。
+type PrevizExecutor struct{}
+
+func NewPrevizExecutor() *PrevizExecutor { return &PrevizExecutor{} }
+
+func (p *PrevizExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
+	var d struct {
+		VideoUrl string `json:"videoUrl"`
+		StillUrl string `json:"stillUrl"`
+	}
+	if len(node.Data) > 0 {
+		_ = json.Unmarshal(node.Data, &d)
+	}
+	log.Printf("[PrevizExecutor] nodeID=%s 白片=%v 静帧=%v（不调用模型、不扣积分）", node.ID, d.VideoUrl != "", d.StillUrl != "")
+	return &NodeOutput{
+		NodeID: node.ID,
+		Status: "success",
+		Data: map[string]interface{}{
+			"videoUrl": d.VideoUrl,
+			"stillUrl": d.StillUrl,
+		},
+	}, nil
+}
+
 // NewDefaultRegistry 创建默认执行器注册表（biller 为积分扣费服务，各执行器在真实 AI 调用前扣费并记账）
 func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
@@ -1881,5 +2034,7 @@ func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, vid
 	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService))
 	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService, modelManager))
 	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller, modelManager))
+	// 白模预演：无模型调用，仅承认前端已导出的白片/静帧，避免节点被判为失败
+	registry.Register("previz", NewPrevizExecutor())
 	return registry
 }

@@ -171,6 +171,7 @@ export interface PrevizNodeData extends BaseNodeFields, Record<string, unknown> 
   label: string;
   scene?: string;     // 白模场景 JSON 字符串（见 pages/previz/types.ts 的 PrevizScene）
   videoUrl?: string;  // 导出的白片视频 URL（P4 阶段使用）
+  stillUrl?: string;  // 导出的白模静帧 PNG URL（作为图生图/图生视频的构图参考）
 }
 
 // 节点数据联合类型

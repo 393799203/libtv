@@ -245,11 +245,25 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <span className="truncate">{r.model || '-'}</span>
-                              {/* 视频按「分辨率档位 × 秒数」定价，这两项直接决定金额，挂在模型后面最直观 */}
+                              {/* 视频按「分辨率档位 × 计费时长」定价，这两项直接决定金额，挂在模型后面最直观；
+                                  带参考视频输入时计费时长 = 输出时长 + 参考视频时长，悬停可看拆分 */}
                               {(!!r.resolution || (r.duration ?? 0) > 0) && (
-                                <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
-                                  {[r.resolution, r.duration ? `${r.duration} 秒` : ''].filter(Boolean).join(' · ')}
-                                </span>
+                                <Tooltip
+                                  title={
+                                    (r.ref_video_duration ?? 0) > 0 ? (
+                                      <div className="text-[12px] leading-5">
+                                        <div>计费时长 {(r.duration ?? 0)} 秒 = 输出 {(r.duration ?? 0) - (r.ref_video_duration ?? 0)} 秒 + 参考视频 {r.ref_video_duration} 秒</div>
+                                      </div>
+                                    ) : undefined
+                                  }
+                                >
+                                  <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
+                                    {[r.resolution, r.duration ? `${r.duration} 秒` : ''].filter(Boolean).join(' · ')}
+                                    {(r.ref_video_duration ?? 0) > 0 && (
+                                      <span className="ml-1 text-gray-400">含参考视频 {r.ref_video_duration} 秒</span>
+                                    )}
+                                  </span>
+                                </Tooltip>
                               )}
                             </div>
                           )}

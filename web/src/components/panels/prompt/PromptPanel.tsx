@@ -91,6 +91,15 @@ function getUpstreamInputs(
             label: d.label || `音频${num}`,
             previewUrl: d.audioUrl,
           };
+        case 'previz':
+          // 白模预演：白片可作视频参考、静帧可作图片构图参考，两者都可能存在
+          return {
+            nodeId: sourceNode.id,
+            nodeType: 'previz',
+            label: d.label || `白模${num}`,
+            thumbnail: d.stillUrl,
+            previewUrl: d.videoUrl ?? d.stillUrl,
+          };
         default:
           return null;
       }
@@ -400,15 +409,64 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     ? ((data as { generateAudio?: boolean }).generateAudio !== false)
     : true;
   // 上游已连接的图片节点数量（用于控制模式可用性）
+  // 白模预演节点若已导出静帧，同样可充当图片参考
   const upstreamImageCount = useMemo(
-    () => upstreamInputs.filter((i) => i.nodeType === 'image').length,
+    () =>
+      upstreamInputs.filter(
+        (i) => i.nodeType === 'image' || (i.nodeType === 'previz' && !!i.thumbnail)
+      ).length,
     [upstreamInputs]
   );
   // 上游已连接的视频节点数量（用于控制模式可用性）
+  // 白模预演节点若已导出白片，同样可充当视频参考
   const upstreamVideoCount = useMemo(
-    () => upstreamInputs.filter((i) => i.nodeType === 'video').length,
+    () =>
+      upstreamInputs.filter(
+        (i) => i.nodeType === 'video' || (i.nodeType === 'previz' && !!i.previewUrl)
+      ).length,
     [upstreamInputs]
   );
+
+  // 参考视频时长（秒）：只用于工具栏的费用预估，判定规则与后端 VideoExecutor 保持一致 ——
+  //   ① 提示词里 @ 引用的视频节点优先（白模预演节点按白片算），可多个；
+  //   ② 没有任何视频引用时，回退到上游连接的视频/白模节点（后端这种情况下也只补一个）；
+  //   ③ 首尾帧模式后端不上送参考视频、也不计费，这里同样按「无参考视频」处理；
+  //   ④ 还没出片的节点（没有 videoUrl）不算参考，与后端一致。
+  // 时长取节点上记录的 duration（生成视频即请求时长，与后端 ffprobe 实测四舍五入一致）；
+  // 白模节点没有时长字段，此时 hasRefVideo=true 而 refVideoSeconds=0：单价按「有参」算、时长只算输出
+  const { hasRefVideo, refVideoSeconds } = useMemo(() => {
+    if (nodeType !== 'video' || videoMode === 'first-last-frame') {
+      return { hasRefVideo: false, refVideoSeconds: 0 };
+    }
+    const { nodes } = useCanvasStore.getState();
+    const refDurationOf = (id: string): number => {
+      const node = nodes.find((n) => n.id === id);
+      if (!node) return 0;
+      const d = node.data as { videoUrl?: string; duration?: number };
+      if (!d?.videoUrl) return 0;
+      return typeof d.duration === 'number' && d.duration > 0 ? d.duration : 0;
+    };
+    const mentionedVideos = mentions.filter((m) => m.nodeType === 'video' || m.nodeType === 'previz');
+    if (mentionedVideos.length > 0) {
+      let seconds = 0;
+      let any = false;
+      for (const m of mentionedVideos) {
+        const node = nodes.find((n) => n.id === m.nodeId);
+        const hasVideo = !!(node?.data as { videoUrl?: string } | undefined)?.videoUrl;
+        if (!hasVideo) continue;
+        any = true;
+        seconds += refDurationOf(m.nodeId);
+      }
+      return { hasRefVideo: any, refVideoSeconds: seconds };
+    }
+    const upstreamVideo = upstreamInputs.find(
+      (i) => (i.nodeType === 'video' || i.nodeType === 'previz') && !!i.previewUrl
+    );
+    if (!upstreamVideo) return { hasRefVideo: false, refVideoSeconds: 0 };
+    return { hasRefVideo: true, refVideoSeconds: refDurationOf(upstreamVideo.nodeId) };
+    // upstreamSignature 已覆盖 store 里读到的字段（与上面的 upstreamInputs 同一套门控）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeType, videoMode, mentions, upstreamInputs, upstreamSignature]);
 
   // 音频节点：计算输入字符数（用于费用预估）
   // 包括提示词文本 + 上游文本节点内容
@@ -653,6 +711,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onGenerateAudioChange={handleGenerateAudioChange}
         audioReferenced={nodeType === 'video' && (mentions.some((m) => m.nodeType === 'audio') || hasUpstreamAudio)}
         charCount={audioCharCount}
+        hasRefVideo={hasRefVideo}
+        refVideoSeconds={refVideoSeconds}
       />
 
       {/* 拖拽徽标：绿底圆形白色+号（小尺寸），跟随光标（pointer-events-none 不拦截落点） */}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"libtv/internal/config"
@@ -997,6 +998,16 @@ func clampDuration(duration, min, max int) int {
 	return duration
 }
 
+// SumRefVideoDuration 汇总参考视频总时长（秒），获取失败的跳过。
+// executor 用它算视频计费时长（计费时长 = 输出时长 + 参考视频时长），
+// 与模型侧「参考视频时长 + 生成时长」限制校验走同一测量口径（ffprobe），
+// 因此计费时长恰好等于受模型限制约束的那个数。
+// 结果按 URL 缓存（见 getVideoDurationFromURL）：同一次生成里计费与限制校验、
+// 以及同一参考视频被多个节点引用时不会重复下载探测
+func SumRefVideoDuration(ctx context.Context, videoURLs []string) float64 {
+	return sumRefVideoDuration(ctx, videoURLs)
+}
+
 // sumRefVideoDuration 汇总参考视频总时长（秒），获取失败的跳过
 func sumRefVideoDuration(ctx context.Context, videoURLs []string) float64 {
 	var total float64
@@ -1208,8 +1219,40 @@ func findFFprobe() string {
 	return "ffprobe"
 }
 
-// getVideoDurationFromURL 下载视频到临时文件并用 ffprobe 获取时长（秒）
+// refDurationCache 参考视频时长缓存：URL → 时长（秒）。
+// 探测一次要下载整个视频再跑 ffprobe，而同一个参考视频在一次生成里会被问两次
+// （excutor 计费一次、seedance-fast / wan3.0 的限制校验一次），
+// 多个分镜引用同一条视频时还会成倍放大，故按 URL 短期缓存成功结果
+var refDurationCache sync.Map // url -> refDurationEntry
+
+type refDurationEntry struct {
+	seconds float64
+	at      time.Time
+}
+
+// refDurationCacheTTL 缓存有效期：超过后重新探测（避免长期占内存，也容忍上游换文件）
+const refDurationCacheTTL = 30 * time.Minute
+
+// getVideoDurationFromURL 下载视频到临时文件并用 ffprobe 获取时长（秒）。
+// 成功结果按 URL 缓存 30 分钟（见 refDurationCache）
 func getVideoDurationFromURL(ctx context.Context, videoURL string) (float64, error) {
+	if cached, ok := refDurationCache.Load(videoURL); ok {
+		if entry, ok := cached.(refDurationEntry); ok && time.Since(entry.at) < refDurationCacheTTL {
+			return entry.seconds, nil
+		}
+		refDurationCache.Delete(videoURL)
+	}
+
+	seconds, err := probeVideoDurationFromURL(ctx, videoURL)
+	if err != nil {
+		return 0, err
+	}
+	refDurationCache.Store(videoURL, refDurationEntry{seconds: seconds, at: time.Now()})
+	return seconds, nil
+}
+
+// probeVideoDurationFromURL 实际下载 + ffprobe 探测视频时长（秒）
+func probeVideoDurationFromURL(ctx context.Context, videoURL string) (float64, error) {
 	// 构造完整 URL
 	fullURL := videoURL
 	if strings.HasPrefix(fullURL, "/") {

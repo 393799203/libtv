@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -66,6 +67,20 @@ func main() {
 		log.Fatalf("connect database: %v", err)
 	}
 
+	// 价格唯一维度新增「是否带参考视频输入」（has_reference_video）后，唯一索引由 4 列扩为 5 列。
+	// GORM AutoMigrate 不会改动同名已存在索引的列，若直接迁移，旧 4 列唯一约束会挡住
+	// 同一（渠道+节点+模型+分辨率）下「带参考视频」那一档单价，导致价格保存失败。
+	// 这里只在该索引定义里还没有新列时删掉它，让下面的 AutoMigrate 按新定义重建
+	// （判断索引列而非索引是否存在，避免每次启动都重建索引）
+	var priceIndexDef string
+	if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = ?", "idx_price_channel_node_model_res").
+		Scan(&priceIndexDef).Error; err == nil && priceIndexDef != "" && !strings.Contains(priceIndexDef, "has_reference_video") {
+		log.Printf("检测到旧的模型价格唯一索引（缺 has_reference_video 列），删除后按新维度重建")
+		if err := db.Migrator().DropIndex(&model.ModelPrice{}, "idx_price_channel_node_model_res"); err != nil {
+			log.Printf("warning: drop old index idx_price_channel_node_model_res failed: %v", err)
+		}
+	}
+
 	// 自动迁移
 	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}); err != nil {
 		log.Fatalf("migrate: %v", err)
@@ -118,6 +133,11 @@ func main() {
 	// 首次启动时写入默认套餐
 	if err := pointsPackageService.SeedDefaults(context.Background()); err != nil {
 		log.Printf("warning: seed default points packages failed: %v", err)
+	}
+	// 补齐「带参考视频」档默认价 = 无参考视频单价 6 折：
+	// 价格管理页打开时这一档就是配好的价，运营直接改；已有配置不覆盖
+	if err := pricingService.SeedRefVideoPrices(context.Background()); err != nil {
+		log.Printf("warning: seed ref video prices failed: %v", err)
 	}
 
 	// 支付宝支付服务（积分超市充值；configs/config.yaml payment.alipay 未配置时支付功能关闭）

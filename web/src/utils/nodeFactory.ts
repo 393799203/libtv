@@ -8,7 +8,7 @@ const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
   video: { width: 480 },
   audio: { width: 320 },
   script: { width: 320, minWidth: 320 },
-  previz: { width: 320, minWidth: 320 },
+  previz: { width: 480, minWidth: 480 },  // 与视频节点同宽（同为媒体类节点）
 };
 
 /**
@@ -122,6 +122,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         label: '白模预演',
         scene: undefined,
         videoUrl: undefined,
+        stillUrl: undefined,
       };
   }
 }

@@ -3,9 +3,11 @@ import type { NodeType } from './canvas';
 // 上游输入类型
 export interface UpstreamInput {
   nodeId: string;
-  nodeType: 'image' | 'video' | 'text' | 'script' | 'audio';
+  nodeType: 'image' | 'video' | 'text' | 'script' | 'audio' | 'previz';
   label: string;
+  /** 图片类缩略（previz 用其白模静帧） */
   thumbnail?: string;
+  /** 视频类预览地址（previz 用其白片） */
   previewUrl?: string;
   textSnippet?: string;
 }
@@ -65,7 +67,8 @@ export type ToolbarControl =
 
 // 每种节点对应的提示词面板配置
 export interface PromptPanelConfig {
-  acceptedInputs: ('image' | 'video' | 'text' | 'script' | 'audio')[];
+  // previz（白模预演）：产出白片视频 / 白模静帧，可作为视频或图片参考被下游消费
+  acceptedInputs: ('image' | 'video' | 'text' | 'script' | 'audio' | 'previz')[];
   defaultModel: string;
   defaultResolution: ResolutionOption;
   defaultAspectRatio: AspectRatioOption;

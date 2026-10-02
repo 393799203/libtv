@@ -74,7 +74,8 @@ export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> =
 
 export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   image: {
-    acceptedInputs: ['image', 'text', 'script'],
+    // previz：白模预演的静帧可作构图参考（锁构图）
+    acceptedInputs: ['image', 'text', 'script', 'previz'],
     defaultModel: 'doubao-seedream-5.0-lite',  // 默认模型 ID（豆包 Seedream 5.0 Lite）
     defaultResolution: '2K',
     defaultAspectRatio: '16:9',
@@ -84,7 +85,8 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     maxLength: 2000,
   },
   video: {
-    acceptedInputs: ['image', 'video', 'text', 'script', 'audio'],
+    // previz：白模预演的白片可作视频参考（走位/动作/镜头以此为准）
+    acceptedInputs: ['image', 'video', 'text', 'script', 'audio', 'previz'],
     defaultModel: 'doubao-seedance-2.0-fast',  // 默认模型 ID（seedance2.0 fast）
     defaultResolution: '720p',
     defaultAspectRatio: '16:9',

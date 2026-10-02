@@ -4,6 +4,16 @@
 // 场景元素类型（共 35 种，按分类组织）
 // 基础几何为单几何体，其余为组合式白模组件（内部比例写死、外包围盒约 1m，scale 表达实际米数）
 export type PrevizObjectType =
+  // 本轮新增（丰富场景元素）
+  | 'column' // 立柱
+  | 'trafficlight' // 红绿灯
+  | 'busstop' // 公交站
+  | 'trashcan' // 垃圾桶
+  | 'planter' // 花坛
+  | 'shelf' // 书架/货架
+  | 'counter' // 吧台/柜台
+  | 'tent' // 帐篷
+  | 'campfire' // 篝火
   // 基础几何
   | 'box'
   | 'cylinder'
@@ -62,16 +72,16 @@ export const OBJECT_CATEGORIES: PrevizObjectCategory[] = [
   {
     key: 'structure',
     label: '建筑结构',
-    types: ['stairs', 'house', 'fence', 'ramp', 'platform', 'door', 'window', 'arch', 'railing'],
+    types: ['stairs', 'house', 'fence', 'ramp', 'platform', 'door', 'window', 'arch', 'railing', 'column'],
   },
   {
     key: 'street',
     label: '街道设施',
-    types: ['road', 'streetlamp', 'bench', 'signboard', 'sidewalk', 'utilitypole'],
+    types: ['road', 'streetlamp', 'bench', 'signboard', 'sidewalk', 'utilitypole', 'trafficlight', 'busstop', 'trashcan', 'planter'],
   },
-  { key: 'furniture', label: '家具', types: ['table', 'chair', 'sofa', 'bed', 'cabinet', 'screen'] },
+  { key: 'furniture', label: '家具', types: ['table', 'chair', 'sofa', 'bed', 'cabinet', 'screen', 'shelf', 'counter'] },
   { key: 'vehicle', label: '载具', types: ['car', 'truck', 'motorcycle', 'bicycle'] },
-  { key: 'nature', label: '自然', types: ['tree', 'rock', 'bush', 'water', 'hill', 'pool', 'mountain', 'fountain', 'bridge'] },
+  { key: 'nature', label: '自然', types: ['tree', 'rock', 'bush', 'water', 'hill', 'pool', 'mountain', 'fountain', 'bridge', 'tent', 'campfire'] },
 ];
 
 // 三元组（位置/旋转/缩放）
@@ -92,6 +102,11 @@ export interface PrevizObject {
 export interface PrevizPathPoint {
   t: number; // 时间（秒）
   position: Vec3;
+  /**
+   * 稳定 id（可选，老场景没有）。
+   * 时间轴拖动关键帧时靠它跟踪"正在拖的是哪个点"——路径点按 t 重排后索引会变，索引不可靠。
+   */
+  id?: string;
 }
 
 // 动作片段：start 时刻开始播放 clip 动画（clip 为 GLB 动画名；自定义姿势用 __pose__ 占位）
@@ -166,6 +181,8 @@ export interface PrevizScene {
   cameras: PrevizCamera[];
   duration: number; // 场景时长（秒）
   fps: number;      // 帧率（P3 时间轴用）
+  walkSpeed?: number; // 步行速度（米/秒）：绘制轨迹时按距离自动配时用；缺省 1.2
+  pathEase?: boolean; // 走位端点平滑加减速（逐段缓入缓出）；缺省 false（保持既有场景手感）
 }
 
 // 创建空场景
@@ -176,5 +193,7 @@ export function createEmptyScene(): PrevizScene {
     cameras: [],
     duration: 10,
     fps: 24,
+    walkSpeed: 1.2,
+    pathEase: false,
   };
 }

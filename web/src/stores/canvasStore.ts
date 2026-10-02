@@ -651,6 +651,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             if (!style.minHeight) style.minHeight = 200;
             return { ...base, style };
           }
+          // 白模预演节点：宽度对齐视频节点（480，媒体类节点同宽）。
+          // 仅在仍是旧默认值 320 或未设置时归一化，不覆盖用户手动调过的宽度
+          if (node.type === 'previz') {
+            const style = { ...node.style };
+            const w = typeof style.width === 'number' ? style.width : undefined;
+            if (w === undefined || w === 320) {
+              style.width = 480;
+              style.minWidth = 480;
+            }
+            return { ...base, style };
+          }
           return base;
         }),
         edges: data.edges,

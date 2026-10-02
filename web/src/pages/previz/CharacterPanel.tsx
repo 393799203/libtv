@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Select, App, Slider } from 'antd';
+import { Select, App, Slider, InputNumber } from 'antd';
 import {
   DeleteOutlined,
   PlusOutlined,
@@ -32,6 +32,10 @@ export function CharacterPanel() {
   const renameAction = usePrevizStore((s) => s.renameAction);
   const pathDrawMode = usePrevizStore((s) => s.pathDrawMode);
   const setPathDrawMode = usePrevizStore((s) => s.setPathDrawMode);
+  const walkSpeed = usePrevizStore((s) => s.walkSpeed);
+  const setWalkSpeed = usePrevizStore((s) => s.setWalkSpeed);
+  const pathEase = usePrevizStore((s) => s.pathEase);
+  const setPathEase = usePrevizStore((s) => s.setPathEase);
   const poseEditingCharId = usePrevizStore((s) => s.poseEditingCharId);
   const setPoseEditing = usePrevizStore((s) => s.setPoseEditing);
   const savePoseAction = usePrevizStore((s) => s.savePoseAction);
@@ -371,7 +375,7 @@ export function CharacterPanel() {
                         ? 'bg-blue-500 text-white hover:bg-blue-600'
                         : 'text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600'
                     }`}
-                    title="开启后在视口地面连续点击绘制轨迹（每个点间隔1秒），再次点击或 ESC 结束"
+                    title="开启后在视口地面连续点击绘制轨迹（按步行速度自动配时），再次点击或 ESC 结束"
                     onClick={() => setPathDrawMode(!pathDrawMode)}
                   >
                     <HighlightOutlined className="text-[9px]" />
@@ -389,8 +393,31 @@ export function CharacterPanel() {
               </div>
               {pathDrawMode && (
                 <div className="text-[11px] text-blue-500 mb-1">
-                  在地面点击添加路径点（首个点取当前播放头时刻，后续每点 +1 秒），拖小球可微调
+                  ① 在<u>地面</u>依次点击落点 → ② 每点一下加一个路径点（首个点取当前播放头时刻，
+                  后续按「距离 ÷ 步行速度」自动配时）→ ③ 转弯自动走弧线 → ④ 按 ESC 或再点「绘制中…」结束。
+                  绘制期间会锁定当前角色，点到空处也不会中断。
                 </div>
+              )}
+              {/* 步行速度：绘制轨迹时用它把距离换算成时长 */}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-[11px] text-gray-500 w-16 shrink-0">步行速度</span>
+                <InputNumber
+                  size="small"
+                  min={0.2}
+                  max={6}
+                  step={0.1}
+                  value={walkSpeed}
+                  onChange={(v) => setWalkSpeed(typeof v === 'number' ? v : 1.2)}
+                  className="!w-20"
+                />
+                <span className="text-[11px] text-gray-400">米/秒</span>
+                <span className="text-[10px] text-gray-300 ml-auto">点击落点即按此速度配时</span>
+              </div>
+              {selectedChar.path.length >= 2 && (
+                <label className="flex items-center gap-1.5 mb-1.5 text-[11px] text-gray-500 cursor-pointer">
+                  <input type="checkbox" checked={pathEase} onChange={(e) => setPathEase(e.target.checked)} />
+                  起步/到点平滑加减速（不走"机器人匀速直线"）
+                </label>
               )}
               {selectedChar.path.length >= 2 && (
                 <label className="flex items-center gap-1.5 mb-1.5 text-[11px] text-gray-500 cursor-pointer">

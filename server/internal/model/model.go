@@ -380,9 +380,13 @@ type BillingRecord struct {
 	// 视频按「分辨率档位」定价，账单里必须能看出这笔是按哪一档算的，否则事后无法复核。
 	// 非视频节点为空；本次改动之前的历史账单也为空（那时没有存这一列）。
 	Resolution string `gorm:"size:10;default:''" json:"resolution"`
-	// Duration 视频节点的时长（秒）：与 Resolution 一起构成「单价 × 秒数」的复核依据。
+	// Duration 视频节点的**计费时长**（秒）：与 Resolution 一起构成「单价 × 秒数」的复核依据。
+	// 带参考视频输入时，计费时长 = 输入（参考）视频时长 + 输出视频时长，故本列是两者之和。
 	// 非视频节点、或按次/按字数计费的记录为 0；历史账单同样为 0。
 	Duration int `gorm:"default:0" json:"duration"`
+	// RefVideoDuration 计费时长中「参考视频（输入视频）」那一部分（秒）：
+	// Duration - RefVideoDuration 即输出视频时长。无参考视频输入、非视频节点与历史账单均为 0。
+	RefVideoDuration int `gorm:"not null;default:0" json:"ref_video_duration"`
 	// OrderNo 充值对应的商户订单号（payment_orders.order_no）。
 	// 仅支付宝充值有；后台手工充值为空。与支付宝对账时靠它对上流水。
 	OrderNo string `gorm:"size:64;default:''" json:"order_no"`
@@ -400,19 +404,25 @@ func (BillingRecord) TableName() string { return "billing_records" }
 // ========== 模型计费价格配置 ==========
 
 // ModelPrice 模型价格配置（运营后台「价格管理」维护）
-// 以（渠道 + 节点 + 模型 + 分辨率）为维度存储单价：
+// 以（渠道 + 节点 + 模型 + 分辨率 + 是否带参考视频输入）为维度存储单价：
 //   - Channel：AI Token 渠道（wasu=华数 / dianxin=电信），两渠道价格完全独立配置，
 //     同名模型（如 deepseek-v4.1-flash）在不同渠道可有不同价格
-//   - 文本/剧本/图片/语音节点：resolution 为空，按次或按字计费
-//   - 视频节点：resolution 为 480p/720p/1080p/4k，同一模型不同分辨率可配置不同价格
+//   - 文本/剧本/图片/语音节点：resolution 为空、has_reference_video 恒为 false，按次或按字计费
+//   - 视频节点：resolution 为 480p/720p/1080p/4k，同一模型不同分辨率可配置不同价格；
+//     带参考视频输入时单价单独配置一档（has_reference_video=true，运营后台预设为无参考视频单价的 6 折）
 type ModelPrice struct {
 	ID int64 `gorm:"primaryKey;autoIncrement" json:"id"`
 	// Channel AI Token 渠道：wasu=华数 / dianxin=电信
-	Channel    string  `gorm:"size:20;not null;default:'wasu';uniqueIndex:idx_price_channel_node_model_res,priority:1" json:"channel"`
-	NodeType   string  `gorm:"size:20;not null;uniqueIndex:idx_price_channel_node_model_res,priority:2" json:"node_type"`    // 节点类型：text/script/image/video/audio
-	ModelID    string  `gorm:"size:100;not null;uniqueIndex:idx_price_channel_node_model_res,priority:3" json:"model_id"`    // 模型 ID（对应 models.yaml 的 id）
-	Resolution string  `gorm:"size:10;default:'';uniqueIndex:idx_price_channel_node_model_res,priority:4" json:"resolution"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
-	Price      float64 `gorm:"not null;default:0" json:"price"`                                                              // 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
+	Channel  string `gorm:"size:20;not null;default:'wasu';uniqueIndex:idx_price_channel_node_model_res,priority:1" json:"channel"`
+	NodeType string `gorm:"size:20;not null;uniqueIndex:idx_price_channel_node_model_res,priority:2" json:"node_type"` // 节点类型：text/script/image/video/audio
+	ModelID  string `gorm:"size:100;not null;uniqueIndex:idx_price_channel_node_model_res,priority:3" json:"model_id"` // 模型 ID（对应 models.yaml 的 id）
+	// Resolution 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
+	Resolution string `gorm:"size:10;default:'';uniqueIndex:idx_price_channel_node_model_res,priority:4" json:"resolution"`
+	// HasReferenceVideo 是否「带参考视频输入」档单价：仅视频节点会置 true。
+	// false 档 = 无参考视频输入的常规单价，true 档 = 带参考视频输入的单价（可查不到，见计费侧 6 折预设兜底）
+	HasReferenceVideo bool `gorm:"not null;default:false;uniqueIndex:idx_price_channel_node_model_res,priority:5" json:"has_reference_video"`
+	// Price 单价：按次=积分/次，按秒=积分/秒；0 表示暂不扣费
+	Price float64 `gorm:"not null;default:0" json:"price"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

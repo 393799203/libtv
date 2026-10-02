@@ -46,9 +46,19 @@ export const PrevizNode = memo<NodeProps<PrevizNodeType>>(function PrevizNode({ 
   return (
     <BaseNode id={id} data={data} selected={selected} hideInputHandle>
       <div className="w-full flex flex-col gap-2">
-        {data.videoUrl ? (
-          /* 已导出白片：显示视频缩略 */
-          <div className="relative w-full h-40 flex items-center justify-center bg-gray-900 rounded overflow-hidden">
+        {data.stillUrl ? (
+          /* 已导出静帧：优先展示白模图（锁构图参考，完整显示不裁切） */
+          <div className="relative w-full h-64 rounded overflow-hidden bg-gray-900 flex items-center justify-center">
+            <img src={data.stillUrl} alt="白模静帧" className="max-w-full max-h-full object-contain" />
+            {data.videoUrl && (
+              <span className="absolute bottom-1 right-1 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 text-[10px] text-white">
+                <PlayCircleOutlined /> 白片
+              </span>
+            )}
+          </div>
+        ) : data.videoUrl ? (
+          /* 只导出了白片：显示视频缩略 */
+          <div className="relative w-full h-64 flex items-center justify-center bg-gray-900 rounded overflow-hidden">
             <video
               src={data.videoUrl}
               className="absolute inset-0 w-full h-full object-cover opacity-50"
@@ -59,13 +69,13 @@ export const PrevizNode = memo<NodeProps<PrevizNodeType>>(function PrevizNode({ 
           </div>
         ) : (
           /* 未导出：占位图 + 场景摘要 */
-          <div className="w-full h-28 rounded-lg bg-gray-50 flex flex-col items-center justify-center gap-1.5">
+          <div className="w-full h-40 rounded-lg bg-gray-50 flex flex-col items-center justify-center gap-1.5">
             <DeploymentUnitOutlined className="text-3xl text-gray-300" />
             <span className="text-xs text-gray-400">{summary}</span>
           </div>
         )}
 
-        {data.videoUrl && (
+        {(data.stillUrl || data.videoUrl) && (
           <span className="text-xs text-gray-400">{summary}</span>
         )}
 

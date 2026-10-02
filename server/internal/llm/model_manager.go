@@ -26,6 +26,11 @@ type ModelConfig struct {
 	// DurationRange 视频时长范围 [min, max]（秒）。未配置时回退默认 4-15；
 	// 例：wan3.0-video [2,30]、cdance2.5-0807 [4,30]
 	DurationRange []int `yaml:"duration_range"`
+	// RefVideoBilling 带参考视频输入时是否按「输入视频时长 + 输出视频时长」计费（并单独配置单价）。
+	// 当前仅 3 个 Seedance 模型开启（华数 doubao-seedance-2.0 / -fast / 2.5，
+	// 电信 cdance2.0-0807 / cdance2.0-fast-0807 / cdance2.5-0807）；
+	// wan3.0 系列不开：仍按「常规单价 × 输出时长」计费，参考视频不影响扣费
+	RefVideoBilling bool `yaml:"ref_video_billing"`
 }
 
 // ModelsConfig models.yaml 的完整结构
@@ -200,4 +205,19 @@ func (mm *ModelManager) VideoDurationRange(channel, modelID string) (int, int) {
 		return minDur, maxDur
 	}
 	return m.DurationRange[0], m.DurationRange[1]
+}
+
+// RefVideoBilling 该模型是否按「参考视频（输入）时长」计费：
+// models.yaml 的 ref_video_billing=true 时，带参考视频输入的一次生成按
+// 「输入视频时长 + 输出视频时长」计费，单价走「带参考视频」档（见 BillingService）。
+// 未配置（或查不到模型）一律按 false：只按输出时长与常规单价计费，不会多扣用户积分
+func (mm *ModelManager) RefVideoBilling(channel, modelID string) bool {
+	if mm == nil || modelID == "" {
+		return false
+	}
+	m := mm.FindModelByIDForChannel(channel, modelID)
+	if m == nil {
+		return false
+	}
+	return m.RefVideoBilling
 }

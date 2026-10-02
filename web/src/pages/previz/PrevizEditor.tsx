@@ -33,6 +33,11 @@ export default function PrevizEditor() {
   const characters = usePrevizStore((s) => s.characters);
   const cameras = usePrevizStore((s) => s.cameras);
   const duration = usePrevizStore((s) => s.duration);
+  // 这两个是场景级设置，也要订阅：否则只改设置不会触发下面的防抖保存，
+  // 刷新后设置就丢了（实测踩过）。
+  const fps = usePrevizStore((s) => s.fps);
+  const walkSpeed = usePrevizStore((s) => s.walkSpeed);
+  const pathEase = usePrevizStore((s) => s.pathEase);
 
   // ====== 初始化：确保画布已加载，再把节点 data.scene 读进 previz store ======
   useEffect(() => {
@@ -118,7 +123,7 @@ export default function PrevizEditor() {
       saveSceneRef.current();
     }, SAVE_DEBOUNCE);
     return () => clearTimeout(timer);
-  }, [objects, characters, cameras, duration, ready]);
+  }, [objects, characters, cameras, duration, fps, walkSpeed, pathEase, ready]);
 
   // Delete / Backspace 删除选中目标（几何体 / 角色 / 路径点；输入框内不响应）；ESC 退出路径绘制模式
   useEffect(() => {

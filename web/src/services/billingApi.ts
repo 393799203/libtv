@@ -21,8 +21,16 @@ export interface BillingRecord {
    * 注意：本次改动之前产生的历史账单没有这一项（返回空），页面显示为「-」。
    */
   resolution?: string;
-  /** 视频节点的时长（秒），非视频节点、按次计费为 0；历史账单同样为 0 */
+  /**
+   * 视频节点的**计费时长**（秒），非视频节点、按次计费为 0；历史账单同样为 0。
+   * 带参考视频输入时，计费时长 = 输出视频时长 + 参考视频时长（见 ref_video_duration）
+   */
   duration?: number;
+  /**
+   * 计费时长中「参考视频（输入视频）」那一部分（秒）：duration - ref_video_duration 即输出视频时长。
+   * 无参考视频输入、非视频节点与历史账单为 0。扣费与退费记录口径一致（退费记录也带这两项）
+   */
+  ref_video_duration?: number;
   /** 描述文案 */
   remark: string;
   /**

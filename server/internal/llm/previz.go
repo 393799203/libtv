@@ -118,6 +118,144 @@ func sanitizePrevizObject(raw previzSceneObjectRaw) (PrevizSceneObject, bool) {
 	}, true
 }
 
+// salvageTruncatedJSON 抢救被 max_tokens 截断的输出。
+// 实测形态：{"objects":[{"type":"plane",...},{"type":"pool","scale  ← 断在对象中间。
+// 做法：扫描 objects 数组，记录最后一个"完整对象"的结束位置，然后补上 ]} 收口。
+// 这样前半段已经完整描述出来的几何体不会白丢，用户能直接得到可用场景。
+func salvageTruncatedJSON(s string) (string, bool) {
+	key := strings.Index(s, `"objects"`)
+	if key < 0 {
+		return "", false
+	}
+	open := strings.Index(s[key:], "[")
+	if open < 0 {
+		return "", false
+	}
+	open += key
+	depth, inStr, esc := 0, false, false
+	lastComplete := -1
+	for i := open; i < len(s); i++ {
+		ch := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case ch == '\\':
+				esc = true
+			case ch == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inStr = true
+		case '{', '[':
+			depth++
+		case '}':
+			depth--
+			if depth == 1 {
+				lastComplete = i // objects 数组里某个对象刚好结束
+			}
+		case ']':
+			depth--
+		}
+	}
+	if lastComplete < 0 {
+		return "", false
+	}
+	return s[:lastComplete+1] + "]}", true
+}
+
+// extractJSONObject 从模型输出里尽力抠出最外层的 JSON 对象。
+// 背景：模型经常在 JSON 前后带说明文字、或留下尾随逗号，直接 Unmarshal 会整体失败，
+// 用户白跑一次生成（虽然会自动退费，但体验很差）。这里做两层容错：
+//  1. 定位最外层 {}（正确跳过字符串与转义，嵌套对象不会被提前截断）
+//  2. 去掉对象/数组结尾前多余逗号
+// 若括号不闭合（通常是 max_tokens 截断），原样返回，交由上层报错。
+func extractJSONObject(raw string) string {
+	start := strings.Index(raw, "{")
+	if start < 0 {
+		return raw
+	}
+	depth := 0
+	inStr, esc, end := false, false, -1
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case ch == '\\':
+				esc = true
+			case ch == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inStr = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i
+			}
+		}
+		if end >= 0 {
+			break
+		}
+	}
+	if end < 0 {
+		// 括号不闭合 —— 基本就是被 max_tokens 截断了，尽力抢救完整的那部分
+		if fixed, ok := salvageTruncatedJSON(raw[start:]); ok {
+			return stripTrailingCommas(fixed)
+		}
+		return raw
+	}
+	return stripTrailingCommas(raw[start : end+1])
+}
+
+// stripTrailingCommas 去掉 } 或 ] 之前多余的逗号（模型很爱加，严格 JSON 不允许）。
+func stripTrailingCommas(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if inStr {
+			b.WriteByte(ch)
+			switch {
+			case esc:
+				esc = false
+			case ch == '\\':
+				esc = true
+			case ch == '"':
+				inStr = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inStr = true
+			b.WriteByte(ch)
+			continue
+		}
+		if ch == ',' {
+			j := i + 1
+			for j < len(s) && (s[j] == ' ' || s[j] == '\n' || s[j] == '\t' || s[j] == '\r') {
+				j++
+			}
+			if j < len(s) && (s[j] == '}' || s[j] == ']') {
+				continue
+			}
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
+}
+
 // AnalyzeSceneImage 调用视觉模型分析参考图，返回清洗后的几何体布局 + 场景概述
 func (c *Client) AnalyzeSceneImage(ctx context.Context, model, imageURL string) ([]PrevizSceneObject, string, error) {
 	resp, err := c.ChatWithImages(
@@ -126,7 +264,7 @@ func (c *Client) AnalyzeSceneImage(ctx context.Context, model, imageURL string) 
 		"请分析这张参考图的空间结构，输出白模场景的几何体布局 JSON。",
 		[]string{imageURL},
 		WithTemperature(0.2),
-		WithMaxTokens(4096),
+		WithMaxTokens(8192),
 	)
 	if err != nil {
 		return nil, "", err
@@ -145,12 +283,17 @@ func (c *Client) AnalyzeSceneImage(ctx context.Context, model, imageURL string) 
 		Objects     []previzSceneObjectRaw `json:"objects"`
 		Description string                 `json:"description"`
 	}
-	if err := json.Unmarshal([]byte(cleanJSONMarkdown(content)), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(extractJSONObject(cleanJSONMarkdown(content))), &parsed); err != nil {
 		preview := content
 		if len(preview) > 500 {
 			preview = preview[:500]
 		}
-		log.Printf("[Previz] 场景解析 JSON 反序列化失败: %v raw=%s", err, preview)
+		tail := ""
+		if len(content) > 300 {
+			tail = content[len(content)-300:]
+		}
+		// 带上长度与尾部：长度顶到 max_tokens 附近基本就是被截断，而不是模型乱写
+		log.Printf("[Previz] 场景解析 JSON 反序列化失败: %v 总长=%d raw头=%s raw尾=%s", err, len(content), preview, tail)
 		return nil, "", fmt.Errorf("场景解析结果格式有误")
 	}
 

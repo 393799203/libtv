@@ -21,16 +21,19 @@ func normalizePriceChannel(channel string) string {
 	return channel
 }
 
-// ModelPriceRepo 模型价格配置数据访问（价格以「渠道 + 节点 + 模型 + 分辨率」为唯一维度）
+// ModelPriceRepo 模型价格配置数据访问
+// （价格以「渠道 + 节点 + 模型 + 分辨率 + 是否带参考视频输入」为唯一维度）
 type ModelPriceRepo interface {
 	// ListAll 返回指定渠道的全部已配置价格记录（channel 为空时按 wasu）
 	ListAll(ctx context.Context, channel string) ([]model.ModelPrice, error)
 	// GetByNodeModel 按（渠道 + 节点 + 模型）查价格（不存在时返回 gorm.ErrRecordNotFound），非视频节点使用
 	GetByNodeModel(ctx context.Context, channel, nodeType, modelID string) (*model.ModelPrice, error)
-	// GetByNodeModelResolution 按（渠道 + 节点 + 模型 + 分辨率）查价格，视频节点使用
-	GetByNodeModelResolution(ctx context.Context, channel, nodeType, modelID, resolution string) (*model.ModelPrice, error)
-	// BatchUpsert 按 (channel, node_type, model_id, resolution) 批量新增或更新价格
+	// GetByNodeModelResolution 按（渠道 + 节点 + 模型 + 分辨率 + 是否带参考视频输入）查价格，视频节点使用
+	GetByNodeModelResolution(ctx context.Context, channel, nodeType, modelID, resolution string, hasRefVideo bool) (*model.ModelPrice, error)
+	// BatchUpsert 按 (channel, node_type, model_id, resolution, has_reference_video) 批量新增或更新价格
 	BatchUpsert(ctx context.Context, prices []model.ModelPrice) error
+	// DeleteRefVideoPrice 删除「带参考视频」档价格，使其回到 6 折预设（后台「恢复默认」用）
+	DeleteRefVideoPrice(ctx context.Context, channel, nodeType, modelID, resolution string) error
 }
 
 type modelPriceRepo struct {
@@ -52,8 +55,10 @@ func (r *modelPriceRepo) ListAll(ctx context.Context, channel string) ([]model.M
 
 func (r *modelPriceRepo) GetByNodeModel(ctx context.Context, channel, nodeType, modelID string) (*model.ModelPrice, error) {
 	var price model.ModelPrice
+	// 非视频节点只有「无参考视频」一档，固定带 has_reference_video = false，
+	// 避免视频节点多出来的那一档被误查出来
 	if err := r.db.WithContext(ctx).
-		Where("channel = ? AND node_type = ? AND model_id = ?", normalizePriceChannel(channel), nodeType, modelID).
+		Where("channel = ? AND node_type = ? AND model_id = ? AND has_reference_video = false", normalizePriceChannel(channel), nodeType, modelID).
 		First(&price).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, gorm.ErrRecordNotFound
@@ -63,10 +68,11 @@ func (r *modelPriceRepo) GetByNodeModel(ctx context.Context, channel, nodeType, 
 	return &price, nil
 }
 
-func (r *modelPriceRepo) GetByNodeModelResolution(ctx context.Context, channel, nodeType, modelID, resolution string) (*model.ModelPrice, error) {
+func (r *modelPriceRepo) GetByNodeModelResolution(ctx context.Context, channel, nodeType, modelID, resolution string, hasRefVideo bool) (*model.ModelPrice, error) {
 	var price model.ModelPrice
 	if err := r.db.WithContext(ctx).
-		Where("channel = ? AND node_type = ? AND model_id = ? AND resolution = ?", normalizePriceChannel(channel), nodeType, modelID, resolution).
+		Where("channel = ? AND node_type = ? AND model_id = ? AND resolution = ? AND has_reference_video = ?",
+			normalizePriceChannel(channel), nodeType, modelID, resolution, hasRefVideo).
 		First(&price).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, gorm.ErrRecordNotFound
@@ -76,7 +82,7 @@ func (r *modelPriceRepo) GetByNodeModelResolution(ctx context.Context, channel, 
 	return &price, nil
 }
 
-// BatchUpsert (channel, node_type, model_id, resolution) 冲突时更新 price（PostgreSQL ON CONFLICT）
+// BatchUpsert (channel, node_type, model_id, resolution, has_reference_video) 冲突时更新 price（PostgreSQL ON CONFLICT）
 func (r *modelPriceRepo) BatchUpsert(ctx context.Context, prices []model.ModelPrice) error {
 	if len(prices) == 0 {
 		return nil
@@ -87,8 +93,18 @@ func (r *modelPriceRepo) BatchUpsert(ctx context.Context, prices []model.ModelPr
 	}
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "channel"}, {Name: "node_type"}, {Name: "model_id"}, {Name: "resolution"}},
+			Columns:   []clause.Column{{Name: "channel"}, {Name: "node_type"}, {Name: "model_id"}, {Name: "resolution"}, {Name: "has_reference_video"}},
 			DoUpdates: clause.AssignmentColumns([]string{"price", "updated_at"}),
 		}).
 		Create(&prices).Error
+}
+
+// DeleteRefVideoPrice 删除某（渠道 + 节点 + 模型 + 分辨率）下的「带参考视频」档价格：
+// 删掉后该档不再有独立配置，计费侧回到「无参考视频单价 × 6 折」的预设兜底。
+// 记录本就不存在时也返回 nil（删除是幂等的）
+func (r *modelPriceRepo) DeleteRefVideoPrice(ctx context.Context, channel, nodeType, modelID, resolution string) error {
+	return r.db.WithContext(ctx).
+		Where("channel = ? AND node_type = ? AND model_id = ? AND resolution = ? AND has_reference_video = true",
+			normalizePriceChannel(channel), nodeType, modelID, resolution).
+		Delete(&model.ModelPrice{}).Error
 }
