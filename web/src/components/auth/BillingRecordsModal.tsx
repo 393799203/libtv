@@ -228,7 +228,17 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                           </div>
                         </td>
                         <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
-                        <td className="py-2.5 text-gray-500 text-[12px]">{r.model || '-'}</td>
+                        <td className="py-2.5 text-gray-500 text-[12px]">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate">{r.model || '-'}</span>
+                            {/* 视频按「分辨率档位 × 秒数」定价，这两项直接决定金额，挂在模型后面最直观 */}
+                            {(!!r.resolution || (r.duration ?? 0) > 0) && (
+                              <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
+                                {[r.resolution, r.duration ? `${r.duration} 秒` : ''].filter(Boolean).join(' · ')}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td
                           className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${
                             r.type === 'deduct' ? 'text-red-500' : 'text-green-600'

@@ -163,7 +163,7 @@ func (s *BillingService) ChargeByModel(ctx context.Context, userID, action, mode
 	}
 	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
 	cost := int64(math.Round(unit * float64(count)))
-	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+	return s.chargeCost(ctx, userID, action, modelID, scene, chargeExtra{}, cost)
 }
 
 // ChargeByDuration 按秒计费（视频/语音）：费用 = 单价 × 秒数（向上取整，不足 1 秒按 1 秒计）
@@ -174,7 +174,7 @@ func (s *BillingService) ChargeByDuration(ctx context.Context, userID, action, m
 	}
 	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
 	cost := int64(math.Ceil(unit * float64(seconds)))
-	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+	return s.chargeCost(ctx, userID, action, modelID, scene, chargeExtra{Seconds: seconds}, cost)
 }
 
 // ChargeByDurationWithResolution 按秒计费（视频节点，按分辨率定价）：费用 = 单价 × 秒数
@@ -184,7 +184,7 @@ func (s *BillingService) ChargeByDurationWithResolution(ctx context.Context, use
 	}
 	unit := s.modelUnitPriceWithResolution(ctx, actionNodeTypes[action], modelID, resolution)
 	cost := int64(math.Ceil(unit * float64(seconds)))
-	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+	return s.chargeCost(ctx, userID, action, modelID, scene, chargeExtra{Resolution: resolution, Seconds: seconds}, cost)
 }
 
 // ChargeByChars 按字符数计费（音频）：费用 = 单价 × (字符数 / 100)（向上取整）
@@ -196,14 +196,23 @@ func (s *BillingService) ChargeByChars(ctx context.Context, userID, action, mode
 	unit := s.modelUnitPrice(ctx, actionNodeTypes[action], modelID)
 	// 单价是每 100 字的价格，计算实际费用
 	cost := int64(math.Ceil(unit * float64(chars) / 100.0))
-	return s.chargeCost(ctx, userID, action, modelID, scene, cost)
+	return s.chargeCost(ctx, userID, action, modelID, scene, chargeExtra{}, cost)
+}
+
+// chargeExtra 账单附加信息。
+// 视频节点按「分辨率档位」和「秒数」定价，账单里必须能看出这笔钱是按哪一档、多少秒算出来的，
+// 否则事后无法复核（本次改动前这两项没有落库，历史账单只能靠画布快照反推）。
+// 非视频节点传零值。
+type chargeExtra struct {
+	Resolution string
+	Seconds    int
 }
 
 // chargeCost 扣费 + 记账：
 // 费用 <= 0 → 不扣费但仍写入一条 0 积分记录（便于验证扣费链路）；
 // 积分不足 → ErrInsufficientCredits；
-// 账单记录模型（model）、场景（scene）与扣费后剩余积分（balance_after）
-func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelName, scene string, cost int64) (int64, error) {
+// 账单记录模型（model）、场景（scene）、分辨率/时长（视频）与扣费后剩余积分（balance_after）
+func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelName, scene string, extra chargeExtra, cost int64) (int64, error) {
 	if cost > 0 {
 		ok, err := s.userRepo.DeductCredits(ctx, userID, cost)
 		if err != nil {
@@ -234,6 +243,8 @@ func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelNa
 		Action:       action,
 		Model:        displayModel,
 		Scene:        scene,
+		Resolution:   extra.Resolution,
+		Duration:     extra.Seconds,
 		Remark:       s.remarkOf(action, scene),
 		BalanceAfter: balance,
 	})

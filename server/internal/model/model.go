@@ -376,6 +376,13 @@ type BillingRecord struct {
 	Model string `gorm:"size:100" json:"model"`
 	// Scene 扣费场景（如 图片生成 / 视频生成 / 提示词生成）
 	Scene string `gorm:"size:50" json:"scene"`
+	// Resolution 视频节点的分辨率（480p/720p/1080p/4k）。
+	// 视频按「分辨率档位」定价，账单里必须能看出这笔是按哪一档算的，否则事后无法复核。
+	// 非视频节点为空；本次改动之前的历史账单也为空（那时没有存这一列）。
+	Resolution string `gorm:"size:10;default:''" json:"resolution"`
+	// Duration 视频节点的时长（秒）：与 Resolution 一起构成「单价 × 秒数」的复核依据。
+	// 非视频节点、或按次/按字数计费的记录为 0；历史账单同样为 0。
+	Duration int `gorm:"default:0" json:"duration"`
 	// Remark 描述（展示给用户看的文案）
 	Remark string `gorm:"size:255" json:"remark"`
 	// BalanceAfter 本次变动后的剩余积分
