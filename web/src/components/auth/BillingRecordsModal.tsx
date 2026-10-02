@@ -195,7 +195,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                     <th className="py-2 font-normal">时间</th>
                     <th className="py-2 font-normal">类型</th>
                     <th className="py-2 font-normal">场景</th>
-                    <th className="py-2 font-normal">模型</th>
+                    <th className="py-2 font-normal">模型 / 订单号</th>
                     <th className="py-2 font-normal text-right">积分变动</th>
                     <th className="py-2 font-normal text-right">剩余积分</th>
                   </tr>
@@ -229,15 +229,30 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                         </td>
                         <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
                         <td className="py-2.5 text-gray-500 text-[12px]">
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate">{r.model || '-'}</span>
-                            {/* 视频按「分辨率档位 × 秒数」定价，这两项直接决定金额，挂在模型后面最直观 */}
-                            {(!!r.resolution || (r.duration ?? 0) > 0) && (
-                              <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
-                                {[r.resolution, r.duration ? `${r.duration} 秒` : ''].filter(Boolean).join(' · ')}
-                              </span>
-                            )}
-                          </div>
+                          {r.order_no ? (
+                            /* 充值行：模型列为空，改放支付订单号（对账用）。号很长，截断显示、悬停看全 */
+                            <Tooltip
+                              title={
+                                <div className="text-[12px] leading-5">
+                                  <div>商户订单号：{r.order_no}</div>
+                                  <div>支付宝交易号：{r.alipay_trade_no || '-'}</div>
+                                </div>
+                              }
+                            >
+                              {/* 订单号不省略：弹窗宽 960px，34 位的号一行放得下；实在放不下也换行显示全 */}
+                              <span className="inline-block break-all align-bottom cursor-help">{r.order_no}</span>
+                            </Tooltip>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate">{r.model || '-'}</span>
+                              {/* 视频按「分辨率档位 × 秒数」定价，这两项直接决定金额，挂在模型后面最直观 */}
+                              {(!!r.resolution || (r.duration ?? 0) > 0) && (
+                                <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
+                                  {[r.resolution, r.duration ? `${r.duration} 秒` : ''].filter(Boolean).join(' · ')}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td
                           className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${

@@ -1,6 +1,8 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache redis && \
+# tzdata 必需：compose 里设了 TZ=Asia/Shanghai，alpine 默认不带时区库，
+# 缺了它 TZ 解析不出来会退回 UTC，Redis 自身日志的时间戳就差 8 小时
+RUN apk add --no-cache redis tzdata && \
     mkdir -p /data
 
 # 必须切到 /data：redis 的 appendonly 默认写到工作目录（dir 配置），

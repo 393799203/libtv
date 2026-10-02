@@ -244,7 +244,8 @@ func (h *UserHandler) Recharge(c *gin.Context) {
 		remark = "后台充值"
 	}
 
-	if err := h.billingService.Recharge(c.Request.Context(), id, req.Amount, "后台充值", remark); err != nil {
+	// 后台手工充值没有支付宝订单，订单号传零值（真实充值走支付宝回调，那里会带上订单号）
+	if err := h.billingService.Recharge(c.Request.Context(), id, req.Amount, "后台充值", remark, service.RechargeOrder{}); err != nil {
 		response.FailWith(c, err)
 		return
 	}

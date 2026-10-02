@@ -333,7 +333,7 @@ func (s *PaymentService) chargeOrder(ctx context.Context, orderNo, alipayTradeNo
 
 	// 到账：调用既有 Recharge（加分 + 记账单）
 	remark := fmt.Sprintf("支付宝购买「%s」", order.PackageName)
-	if err := s.billing.Recharge(ctx, order.UserID, order.Points, "积分充值", remark); err != nil {
+	if err := s.billing.Recharge(ctx, order.UserID, order.Points, "积分充值", remark, RechargeOrder{OrderNo: orderNo, AlipayTradeNo: alipayTradeNo}); err != nil {
 		log.Printf("[Payment] ⚠️ 到账失败，回滚订单状态: orderNo=%s userID=%s points=%d err=%v", orderNo, order.UserID, order.Points, err)
 		// 回滚抢占状态，让支付宝重试
 		s.db.Model(&model.PaymentOrder{}).Where("order_no = ?", orderNo).

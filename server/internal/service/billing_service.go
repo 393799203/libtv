@@ -310,8 +310,15 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 	return nil
 }
 
+// RechargeOrder 充值的支付订单信息，用于和支付宝对账。
+// 只有支付宝回调过来的充值才带这两个号；后台手工充值没有支付宝订单，传零值。
+type RechargeOrder struct {
+	OrderNo       string // 商户订单号（payment_orders.order_no / 支付宝 out_trade_no）
+	AlipayTradeNo string // 支付宝交易号（trade_no）
+}
+
 // Recharge 充值积分（后续管理端 / 支付回调调用）
-func (s *BillingService) Recharge(ctx context.Context, userID string, amount int64, scene, remark string) error {
+func (s *BillingService) Recharge(ctx context.Context, userID string, amount int64, scene, remark string, order RechargeOrder) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -329,12 +336,14 @@ func (s *BillingService) Recharge(ctx context.Context, userID string, amount int
 		scene = "积分充值"
 	}
 	s.writeRecord(ctx, &model.BillingRecord{
-		UserID:       userID,
-		Type:         "recharge",
-		Amount:       amount,
-		Scene:        scene,
-		Remark:       remark,
-		BalanceAfter: balance,
+		UserID:        userID,
+		Type:          "recharge",
+		Amount:        amount,
+		Scene:         scene,
+		Remark:        remark,
+		BalanceAfter:  balance,
+		OrderNo:       order.OrderNo,
+		AlipayTradeNo: order.AlipayTradeNo,
 	})
 	return nil
 }

@@ -25,6 +25,13 @@ export interface BillingRecord {
   duration?: number;
   /** 描述文案 */
   remark: string;
+  /**
+   * 充值的商户订单号（payment_orders.order_no / 支付宝 out_trade_no）。
+   * 仅支付宝充值有；后台手工充值为空字符串。对账时靠它和支付宝流水对上。
+   */
+  order_no?: string;
+  /** 支付宝交易号（trade_no）：仅支付宝充值有，退款/对账的唯一凭据 */
+  alipay_trade_no?: string;
   /** 本次变动后的剩余积分 */
   balance_after: number;
   created_at: string;

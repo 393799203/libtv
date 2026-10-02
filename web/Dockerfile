@@ -1,6 +1,8 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache nginx && \
+# tzdata 必需：compose 里设了 TZ=Asia/Shanghai，但 alpine 默认不带时区库，
+# 缺了它 TZ 解析不出来会静默退回 UTC，nginx 日志就比北京时间差 8 小时
+RUN apk add --no-cache nginx tzdata && \
     mkdir -p /usr/share/nginx/html
 
 COPY dist/ /usr/share/nginx/html/

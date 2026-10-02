@@ -383,6 +383,11 @@ type BillingRecord struct {
 	// Duration 视频节点的时长（秒）：与 Resolution 一起构成「单价 × 秒数」的复核依据。
 	// 非视频节点、或按次/按字数计费的记录为 0；历史账单同样为 0。
 	Duration int `gorm:"default:0" json:"duration"`
+	// OrderNo 充值对应的商户订单号（payment_orders.order_no）。
+	// 仅支付宝充值有；后台手工充值为空。与支付宝对账时靠它对上流水。
+	OrderNo string `gorm:"size:64;default:''" json:"order_no"`
+	// AlipayTradeNo 支付宝交易号（支付宝侧 trade_no）：退款与对账的唯一凭据，仅支付宝充值有。
+	AlipayTradeNo string `gorm:"size:64;default:''" json:"alipay_trade_no"`
 	// Remark 描述（展示给用户看的文案）
 	Remark string `gorm:"size:255" json:"remark"`
 	// BalanceAfter 本次变动后的剩余积分

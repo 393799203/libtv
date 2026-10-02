@@ -11,6 +11,9 @@ services:
       # （不用 standalone 续期：80 常驻被本容器占用，standalone 抢不到端口会续期失败）
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
+    # 与后端对齐时区：否则 nginx 的访问/错误日志比北京时间差 8 小时，排查时容易误判时间线
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       - backend
     networks:
@@ -72,6 +75,8 @@ services:
       - POSTGRES_DB=libtv
       - POSTGRES_USER=libtv
       - POSTGRES_PASSWORD=libtv123
+      # 时区对齐：影响 Postgres 日志与会话默认时区（库内存的是 timestamptz 绝对时刻，数据不受影响）
+      - TZ=Asia/Shanghai
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -100,6 +105,8 @@ services:
     environment:
       # 供 healthcheck 里的 redis-cli 自动鉴权（避免在命令行出现明文密码）
       - REDISCLI_AUTH=libtv-redis-2026
+      # 时区对齐：仅影响 Redis 自身日志的时间戳
+      - TZ=Asia/Shanghai
     volumes:
       - redis-data:/data
     networks:
