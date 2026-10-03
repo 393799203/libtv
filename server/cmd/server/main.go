@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"libtv/internal/audit"
 	"libtv/internal/billing"
 	"log"
 	"net/http"
@@ -172,7 +173,9 @@ func main() {
 	// 生成历史记录
 	generationHistoryService := service.NewGenerationHistoryService(generationHistoryRepo)
 	providerTaskService := billing.NewLedger(providerTaskRepo)
-	providerTaskHandler := handler.NewProviderTaskHandler(providerTaskService)
+	// 对账一致性自检：四份数据交叉核对，异常行自动标记 + 写备注（只读+标记，不动钱）
+	auditChecker := audit.NewChecker(db, providerTaskRepo)
+	providerTaskHandler := handler.NewProviderTaskHandler(providerTaskService, auditChecker)
 
 	// 初始化工作流引擎
 	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService, providerTaskService)
@@ -232,6 +235,9 @@ func main() {
 
 	// Redis 就绪后把客户端交给幂等存储（直连 AI 接口防双击/防重复扣费）
 	idemStore.SetClient(cache.Client())
+
+	// 一致性自检定时跑：启动 2 分钟后一次，之后每 10 分钟一次（只读+标记）
+	auditChecker.Start(context.Background(), 10*time.Minute, 2*time.Minute)
 
 	// 生成任务队列：任务入 Redis Stream，由 worker 池消费。
 	// worker 数即全局并发闸门；未确认的消息在进程重启后由 XAUTOCLAIM 认领续跑。
@@ -495,6 +501,7 @@ func main() {
 			providerTasks.GET("/stats", providerTaskHandler.Stats)
 			// 手动退费：只有「上游明确报错」才自动退，其余失败一律在这里由管理员决定
 			providerTasks.POST("/:id/refund", providerTaskHandler.Refund)
+			providerTasks.POST("/audit", providerTaskHandler.RunAudit) // 立即跑一次一致性自检
 		}
 
 		// 媒体维护：给缺失缩略图的图片补图（仅管理员）

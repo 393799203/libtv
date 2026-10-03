@@ -34,6 +34,12 @@ type ProviderTaskRepo interface {
 	RevertRefund(ctx context.Context, id int64, note string) error
 	// MarkRefundedFromClaim 占住之后退费成功：落终态与操作人
 	MarkRefundedFromClaim(ctx context.Context, id int64, note string) error
+	// SetAlert 一致性自检结果落库：alert 为空表示恢复正常（清标记）。
+	// reason 为中文说明，会以固定前缀追加进备注；同一行的旧自动段落会被替换，不会重复堆积，
+	// 也不会碰管理员手写的备注内容。
+	SetAlert(ctx context.Context, id int64, alert, reason string) error
+	// AlertedRows 当前被标记为异常的行（自检用来对比「该标记」与「已标记」，避免重复写库）
+	AlertedRows(ctx context.Context) (map[int64]string, error)
 }
 
 // ProviderTaskView 对账列表的一行：除对账本身的事实外，补上给人看的名称
@@ -41,6 +47,8 @@ type ProviderTaskRepo interface {
 type ProviderTaskView struct {
 	model.ProviderTask
 	ProjectName string `json:"project_name"`
+	// ProjectNameSnapshot 项目被删除后仍能认出「这是哪个项目」的名称快照
+	ProjectNameSnapshot string `json:"project_name_snapshot"`
 	// UserName 昵称，UserEmail 邮箱（昵称可能为空，展示时优先昵称、其次邮箱）
 	UserName  string `json:"user_name"`
 	UserEmail string `json:"user_email"`
@@ -53,7 +61,9 @@ type ProviderTaskView struct {
 
 // ProviderTaskFilter 对账列表筛选条件（空值表示不筛）
 type ProviderTaskFilter struct {
-	Status    string
+	Status string
+	// OnlyAlert 只看异常行（一致性自检标记出来的）
+	OnlyAlert bool
 	TaskKind  string
 	ProjectID string
 	UserID    string
@@ -74,6 +84,8 @@ type ProviderTaskStats struct {
 	AutoRefunded   int64 `json:"auto_refunded"`
 	ManualRefunded int64 `json:"manual_refunded"`
 	Submitted      int64 `json:"submitted"`
+	// Alerted 一致性自检标出来的异常行数（只提示，不代表钱的状态被改过）
+	Alerted        int64 `json:"alerted"`
 	ChargedCredits int64 `json:"charged_credits"`
 	RefundedCredit int64 `json:"refunded_credits"`
 }
@@ -90,6 +102,15 @@ func NewProviderTaskRepo(db *gorm.DB) ProviderTaskRepo {
 func (r *providerTaskRepo) Upsert(ctx context.Context, task *model.ProviderTask) error {
 	if task == nil || task.TaskID == "" {
 		return nil
+	}
+	// 项目名快照：只在写入时补一次。项目以后被删掉，这行仍认得出来是哪个项目
+	// （对账行是永久记录，项目不是 —— 线上已经出现过删项目后整行认不出来的情况）。
+	if task.ProjectID != "" && task.ProjectName == "" {
+		var name string
+		if err := r.db.WithContext(ctx).Model(&model.Project{}).
+			Select("name").Where("id = ?", task.ProjectID).Scan(&name).Error; err == nil {
+			task.ProjectName = name
+		}
 	}
 	// 退款事实是「只能增」的：refunded_amount 取旧值和新值的较大者，refund_source 一旦
 	// 写上就不再清空。理由有两条，都是钱：
@@ -147,17 +168,33 @@ func (r *providerTaskRepo) Upsert(ctx context.Context, task *model.ProviderTask)
 
 // applyFilter 组装筛选条件（列表与统计共用，保证两者口径一致）
 func (r *providerTaskRepo) applyFilter(q *gorm.DB, filter ProviderTaskFilter) *gorm.DB {
+	if filter.OnlyAlert {
+		q = q.Where("coalesce(alert, '') <> ''")
+	}
 	if filter.Status != "" {
 		q = q.Where("status = ?", filter.Status)
 	}
 	if filter.ProjectID != "" {
-		// 允许按项目名搜：运营手里通常只有项目名，没有 UUID
-		q = q.Where("project_id = ? OR project_id IN (?)",
-			filter.ProjectID,
-			r.db.Model(&model.Project{}).Select("id").Where("name ILIKE ?", "%"+filter.ProjectID+"%"))
+		// 项目名或项目 ID，都支持**部分输入**：
+		//   - 名字模糊匹配（运营手里常常只有项目名）；
+		//   - ID 模糊匹配 + 忽略连字符（UUID 从各种地方复制过来常常没带 "-"，或者只贴了其中一段）；
+		//   - 大小写不敏感（UUID 里可能有十六进制大写字母）。
+		kw := "%" + filter.ProjectID + "%"
+		noDash := "%" + strings.ReplaceAll(filter.ProjectID, "-", "") + "%"
+		q = q.Where(
+			"project_id ILIKE ? OR replace(project_id, '-', '') ILIKE ? OR project_id IN (?)",
+			kw, noDash,
+			r.db.Model(&model.Project{}).Select("id").Where("name ILIKE ?", kw))
 	}
 	if filter.UserID != "" {
-		q = q.Where("user_id = ?", filter.UserID)
+		// 昵称 / 邮箱 / 用户 ID 都支持部分输入（与项目筛选同一口径）
+		kw := "%" + filter.UserID + "%"
+		noDash := "%" + strings.ReplaceAll(filter.UserID, "-", "") + "%"
+		q = q.Where(
+			"user_id ILIKE ? OR replace(user_id, '-', '') ILIKE ? OR user_id IN (?)",
+			kw, noDash,
+			r.db.Model(&model.User{}).Select("id").
+				Where("nickname ILIKE ? OR email ILIKE ?", kw, kw))
 	}
 	if filter.TaskKind != "" {
 		q = q.Where("task_kind = ?", filter.TaskKind)
@@ -245,6 +282,9 @@ func (r *providerTaskRepo) fillNames(ctx context.Context, items []ProviderTaskVi
 	}
 	for i := range items {
 		items[i].ProjectName = projectNames[items[i].ProjectID]
+		// 名称快照单独给出去，不回填成 project_name —— 界面要靠「实时名为空」判断项目已删除，
+		// 静默回填会让管理员以为项目还在。
+		items[i].ProjectNameSnapshot = items[i].ProviderTask.ProjectName
 		if u, ok := users[items[i].UserID]; ok {
 			items[i].UserName = u.Nickname
 			items[i].UserEmail = u.Email
@@ -263,6 +303,7 @@ func (r *providerTaskRepo) Stats(ctx context.Context, filter ProviderTaskFilter)
 		count(*) filter (where status = 'refunded' and refund_source = 'auto') as auto_refunded,
 		count(*) filter (where status = 'refunded' and refund_source = 'manual') as manual_refunded,
 		count(*) filter (where status = 'submitted') as submitted,
+		count(*) filter (where coalesce(alert, '') <> '') as alerted,
 		coalesce(sum(charged_amount), 0) as charged_credits,
 		coalesce(sum(refunded_amount), 0) as refunded_credit`).Scan(&stats).Error
 	return stats, err
@@ -329,4 +370,115 @@ func (r *providerTaskRepo) RevertRefund(ctx context.Context, id int64, note stri
 		Updates(map[string]interface{}{
 			"status": "pending_review", "refunded_amount": 0, "note": note, "updated_at": time.Now(),
 		}).Error
+}
+
+// 自动核对写进备注的段落用一对标记包起来：【自动核对】…【核对结束】。
+//
+// 为什么要包起来（而不是只写前缀）：管理员可能在机器写完之后又往备注里补话，
+// 只按前缀「从标记删到结尾」会把管理员的话一起删掉。包起来之后自检可以精确地
+// 只摘掉自己那一段，两边的人工内容都不受影响。重跑自检时整段替换，也不会越堆越长。
+const (
+	alertNoteOpen  = "【自动核对】"
+	alertNoteClose = "【核对结束】"
+)
+
+// alertSegment 生成机器段落
+func alertSegment(reason string) string {
+	return alertNoteOpen + reason + alertNoteClose
+}
+
+func (r *providerTaskRepo) SetAlert(ctx context.Context, id int64, alert, reason string) error {
+	var row struct {
+		ID   int64
+		Note string
+	}
+	if err := r.db.WithContext(ctx).Model(&model.ProviderTask{}).
+		Select("id", "note").Where("id = ?", id).Scan(&row).Error; err != nil {
+		return err
+	}
+	if row.ID == 0 {
+		return nil
+	}
+
+	// 1) 先摘掉上一次自动写入的段落（只摘自己写的那段，人工备注原样保留）
+	note := stripAlertSegment(row.Note)
+	if alert != "" && reason != "" {
+		if note == "" {
+			note = alertSegment(reason)
+		} else {
+			note = note + "；" + alertSegment(reason)
+		}
+	}
+	// 备注是 varchar(255)：按字节安全截断（切在半个汉字上会让整行写不进去，反而把异常标记丢了）
+	note = textcut.NotLongerThan(note, 240)
+
+	updates := map[string]interface{}{
+		"note":       note,
+		"updated_at": time.Now(),
+	}
+	if alert == "" {
+		updates["alert"] = ""
+		updates["alert_at"] = nil
+	} else {
+		updates["alert"] = alert
+		updates["alert_at"] = time.Now()
+	}
+	return r.db.WithContext(ctx).Model(&model.ProviderTask{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// stripAlertSegment 去掉备注里由自检写入的段落（含历史遗留下来的多段），保留人工内容。
+//
+// 三种情况：
+//   - 有结束标记 → 精确删除这一段（连带处理它两侧的分隔符，避免留下「；；」或把两句话粘死）；
+//   - 没有结束标记（旧数据/被截断）→ 从标记处删到结尾；
+//   - 本来就没有机器段落 → 原样返回。
+func stripAlertSegment(note string) string {
+	for {
+		i := strings.Index(note, alertNoteOpen)
+		if i < 0 {
+			break
+		}
+		j := strings.Index(note[i:], alertNoteClose)
+		if j < 0 {
+			note = note[:i]
+			break
+		}
+		start, end := i, i+j+len(alertNoteClose)
+
+		hadPrevSep := start >= len("；") && note[start-len("；"):start] == "；"
+		if hadPrevSep {
+			start -= len("；")
+		}
+		hadNextSep := strings.HasPrefix(note[end:], "；")
+		if hadNextSep {
+			end += len("；")
+		}
+		// 删掉这一段后，如果两侧都还有人工内容、且两侧都不带分隔符了 → 补一个，
+		// 否则会把用户写的两句话粘成一句（"前段后段"）。
+		left, right := note[:start], note[end:]
+		join := ""
+		if left != "" && right != "" && !strings.HasSuffix(left, "；") && !strings.HasPrefix(right, "；") {
+			join = "；"
+		}
+		note = left + join + right
+	}
+	note = strings.TrimSpace(note)
+	return strings.TrimSuffix(note, "；")
+}
+
+func (r *providerTaskRepo) AlertedRows(ctx context.Context) (map[int64]string, error) {
+	var rows []struct {
+		ID    int64
+		Alert string
+	}
+	err := r.db.WithContext(ctx).Model(&model.ProviderTask{}).
+		Select("id", "alert").Where("coalesce(alert, '') <> ''").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		out[row.ID] = row.Alert
+	}
+	return out, nil
 }

@@ -3,6 +3,7 @@ import { App, Button, Input, Pagination, Popover, Select, Table, Tag, Tooltip } 
 import type { ColumnsType } from 'antd/es/table';
 import {
   ReloadOutlined,
+  SafetyOutlined,
   CopyOutlined,
   WarningOutlined,
   LinkOutlined,
@@ -31,6 +32,17 @@ const STATUS_META: Record<string, { text: string; color: string }> = {
   pending_review: { text: '待人工决定', color: 'orange' },
   failed: { text: '待人工决定', color: 'orange' },
   refunded: { text: '已退费', color: 'default' },
+};
+
+/** 一致性自检的异常代码 → 中文标签（与后端 audit.AlertLabel 对齐） */
+const ALERT_LABEL: Record<string, string> = {
+  no_result: '无产物地址',
+  no_history: '无交付凭据',
+  stuck: '卡在进行中',
+  refund_delivered: '既退费又交付',
+  amount_mismatch: '金额对不上',
+  no_user: '无归属用户',
+  orphan_exec: '执行记录缺失',
 };
 
 /** 任务类型：视频是异步任务（有上游任务号），其余是同步调用（用本地编号记账） */
@@ -71,11 +83,26 @@ export default function ProviderTaskReconciliation() {
   const [taskId, setTaskId] = useState('');
   const [projectIdInput, setProjectIdInput] = useState('');
   const [projectId, setProjectId] = useState('');
+  const [userIdInput, setUserIdInput] = useState('');
+  const [userId, setUserId] = useState('');
+  // 刷新令牌：点击「刷新」时自增，保证即使筛选值没变也真的重新请求一次
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [onlyAlert, setOnlyAlert] = useState(false);
+  const [auditing, setAuditing] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
     providerTaskApi
-      .list({ status, task_kind: taskKind, task_id: taskId, project_id: projectId, page, page_size: pageSize })
+      .list({
+        status,
+        task_kind: taskKind,
+        task_id: taskId,
+        project_id: projectId,
+        user_id: userId,
+        only_alert: onlyAlert ? '1' : undefined,
+        page,
+        page_size: pageSize,
+      })
       .then((res) => {
         setItems(res.items || []);
         setTotal(res.total || 0);
@@ -85,7 +112,7 @@ export default function ProviderTaskReconciliation() {
         // HTTP 错误已由 api.ts 拦截器统一提示
       })
       .finally(() => setLoading(false));
-  }, [status, taskKind, taskId, projectId, page, pageSize]);
+  }, [status, taskKind, taskId, projectId, userId, onlyAlert, page, pageSize, refreshToken]);
 
   useEffect(() => {
     load();
@@ -222,10 +249,23 @@ export default function ProviderTaskReconciliation() {
         ) : (
           body
         );
+        // 一致性自检标记出来的异常：在状态旁边挂一个红色标记，悬停看原因（原因同时写进了备注）
+        const alertNode = row.alert ? (
+          <Tooltip
+            title={`一致性自检：${ALERT_LABEL[row.alert] || row.alert} —— 原因已写入备注，请人工核查（自检只做标记，不会自动退费）`}
+          >
+            <Tag color="red" className="ml-1">
+              ⚠ {ALERT_LABEL[row.alert] || row.alert}
+            </Tag>
+          </Tooltip>
+        ) : null;
         return (
           <div className="leading-5">
             <div className="text-[12px] text-gray-600">{formatTime(row.created_at)}</div>
-            <div className="mt-0.5">{tagNode}</div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-y-0.5">
+              {tagNode}
+              {alertNode}
+            </div>
           </div>
         );
       },
@@ -252,9 +292,28 @@ export default function ProviderTaskReconciliation() {
       render: (_: string, r) => (
         <div className="text-[12px] leading-5">
           <div className="text-gray-800 truncate" title={r.project_name || r.project_id || ''}>
-            {/* 提示词/白模解析这类直连接口不一定带项目：完全没有项目时显示「-」，
-                只有「有 project_id 但名字查不到」才算项目已删除 */}
-            {r.project_name || (r.project_id ? '（项目已删除）' : '-')}
+            {/* 三种情况分清楚（对账行是永久记录，项目不是）：
+                · 实时查得到名字 → 直接显示（项目改名会跟着变）；
+                · 查不到但这一行写入了名称快照 → 显示「原名（项目已删除）」，
+                  管理员至少知道是哪个项目，不用去别处翻；
+                · 连快照都没有（上线快照之前的历史行）→ 带上项目号前 8 位，便于追溯；
+                · 压根没带项目（提示词/白模解析这类直连接口）→ 显示「-」。 */}
+            {r.project_name ? (
+              r.project_name
+            ) : r.project_id ? (
+              r.project_name_snapshot ? (
+                <span>
+                  {r.project_name_snapshot}
+                  <span className="text-gray-400">（项目已删除）</span>
+                </span>
+              ) : (
+                <span className="text-gray-500">
+                  （项目已删除 · {r.project_id.slice(0, 8)}）
+                </span>
+              )
+            ) : (
+              '-'
+            )}
           </div>
           <div className="text-[10px] text-gray-400 truncate" title={r.project_id}>
             {r.project_id || '-'}
@@ -428,6 +487,36 @@ export default function ProviderTaskReconciliation() {
           ]}
         />
         <Input
+          value={userIdInput}
+          onChange={(e) => setUserIdInput(e.target.value)}
+          onPressEnter={() => {
+            setUserId(userIdInput.trim());
+            setPage(1);
+          }}
+          placeholder="昵称 / 邮箱 / 用户ID（支持部分输入）"
+          style={{ width: 200 }}
+          allowClear
+          onClear={() => {
+            setUserId('');
+            setPage(1);
+          }}
+        />
+        <Input
+          value={projectIdInput}
+          onChange={(e) => setProjectIdInput(e.target.value)}
+          onPressEnter={() => {
+            setProjectId(projectIdInput.trim());
+            setPage(1);
+          }}
+          placeholder="项目名 / 项目ID（支持部分输入）"
+          style={{ width: 300 }}
+          allowClear
+          onClear={() => {
+            setProjectId('');
+            setPage(1);
+          }}
+        />
+        <Input
           value={taskIdInput}
           onChange={(e) => setTaskIdInput(e.target.value)}
           onPressEnter={() => {
@@ -442,24 +531,62 @@ export default function ProviderTaskReconciliation() {
             setPage(1);
           }}
         />
-        <Input
-          value={projectIdInput}
-          onChange={(e) => setProjectIdInput(e.target.value)}
-          onPressEnter={() => {
-            setProjectId(projectIdInput.trim());
+        <Select
+          value={onlyAlert ? 'alert' : ''}
+          onChange={(v) => {
+            setOnlyAlert(v === 'alert');
             setPage(1);
           }}
-          placeholder="项目名或项目 ID"
-          style={{ width: 300 }}
-          allowClear
-          onClear={() => {
-            setProjectId('');
-            setPage(1);
-          }}
+          style={{ width: 132 }}
+          options={[
+            { value: '', label: '全部记录' },
+            { value: 'alert', label: `只看异常${stats?.alerted ? ` (${stats.alerted})` : ''}` },
+          ]}
         />
-        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-          刷新
+        <Button
+          icon={<SafetyOutlined />}
+          loading={auditing}
+          onClick={async () => {
+            setAuditing(true);
+            try {
+              const rep = await providerTaskApi.runAudit();
+              // 自检只做标记、不动钱；结果如实汇报（新标记/恢复/无主问题）
+              if (rep.marked > 0) {
+                message.warning(
+                  `发现 ${rep.marked} 条异常数据，已自动标记并写入备注（可在「只看异常」里查看）`
+                );
+              } else {
+                message.success(`一致性核对通过（耗时 ${rep.duration}）`);
+              }
+              if (rep.orphans?.length) {
+                message.warning(
+                  `另有 ${rep.orphans.length} 条「有扣费流水但无对账记录」的问题，已写入服务端日志`
+                );
+              }
+              load();
+            } catch {
+              // HTTP 错误已由 api.ts 拦截器统一提示
+            } finally {
+              setAuditing(false);
+            }
+          }}
+        >
+          立即核对
         </Button>
+        <Button
+          icon={<ReloadOutlined />}
+          loading={loading}
+          onClick={() => {
+            // 关键：把输入框里的当前值提交为筛选条件再拉取。
+            // 原来直接 load()，用的是「回车时提交过的旧值」，所以填了项目点刷新列表不动、回车才生效。
+            setTaskId(taskIdInput.trim());
+            setProjectId(projectIdInput.trim());
+            setUserId(userIdInput.trim());
+            setPage(1);
+            setRefreshToken((v) => v + 1); // 值没变时也强制刷新一次
+          }}
+          title="刷新列表（会把输入框里的筛选条件一起提交）"
+        />
       </div>
 
       <Table<ProviderTask>

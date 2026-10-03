@@ -31,6 +31,13 @@ export interface ProviderTask {
   /** 用户昵称（可能为空）与邮箱 */
   user_name?: string;
   user_email?: string;
+  /** 项目名（实时查询；项目已删除时为空） */
+  /** 项目名快照（写入对账行时记下的名字）：项目被删掉后仍能认出是哪个项目 */
+  project_name_snapshot?: string;
+  /** 一致性自检发现的异常代码（空=正常）：no_result / no_history / stuck / refund_delivered / amount_mismatch / no_user / orphan_exec */
+  alert?: string;
+  /** 被标记为异常的时间（异常排除后清空） */
+  alert_at?: string | null;
   /** 真·上游任务号（同步调用没有，后端留空） */
   upstream_task_id?: string;
   /** 任务类型（取值同计费动作：ai.video / ai.image / ai.story …） */
@@ -59,6 +66,8 @@ export interface ProviderTaskStats {
   pending_review: number;
   charged_credits: number;
   refunded_credits: number;
+  /** 一致性自检标记出来的异常行数 */
+  alerted?: number;
 }
 
 export interface ProviderTaskQuery {
@@ -68,6 +77,8 @@ export interface ProviderTaskQuery {
   project_id?: string;
   user_id?: string;
   task_id?: string;
+  /** 只看一致性自检标记出来的异常行 */
+  only_alert?: string;
   page?: number;
   page_size?: number;
 }
@@ -89,4 +100,26 @@ export const providerTaskApi = {
    */
   refund: (id: number, reason?: string) =>
     api.post<{ task: ProviderTask }>(`/admin/provider-tasks/${id}/refund`, { reason }),
+
+  /**
+   * 立即跑一次一致性自检（只读+标记，不动钱）。
+   * 返回本次结果：新标记 / 恢复 / 无主问题清单。
+   */
+  runAudit: () => api.post<AuditReport>('/admin/provider-tasks/audit'),
 };
+
+export interface AuditFinding {
+  row_id: number;
+  alert: string;
+  reason: string;
+}
+
+export interface AuditReport {
+  started_at: string;
+  duration: string;
+  marked: number;
+  cleared: number;
+  findings: AuditFinding[] | null;
+  /** 没有对应行、只能靠日志提示的问题（如「有扣费流水但找不到对账行」） */
+  orphans: string[] | null;
+}

@@ -495,6 +495,20 @@ type ProviderTask struct {
 	ChargedAmount int64 `gorm:"default:0" json:"charged_amount"`
 	// RefundedAmount 已退还给用户的积分
 	RefundedAmount int64 `gorm:"default:0" json:"refunded_amount"`
+	// ProjectName 写入这一行时项目叫什么名字（**快照**，不是外键）。
+	//
+	// 为什么快照一份：项目可以被用户删掉，而对账行是永久记录 —— 删掉之后
+	// 界面只能显示「（项目已删除）」，管理员既看不出是哪个项目、也无法判断这行该不该退。
+	// 展示时优先用**实时**项目名（项目改名要跟着变），实时查不到时才回落到这份快照。
+	// 线上实例：10-03 14:40 另一用户的「故事生成」行，项目被删后整行认不出来。
+	ProjectName string `gorm:"size:255;default:''" json:"-"`
+	// Alert 一致性自检发现的异常代码（空=正常）。
+	//
+	// 说明：这是**自动核对**打的标记，只表示「这行数据自相矛盾/缺凭据，需要人看一眼」，
+	// 不代表钱的状态被改动 —— 自检只读+标记，绝不自动改金额或改状态。
+	Alert string `gorm:"size:32;default:''" json:"alert"`
+	// AlertAt 最近一次被标记的时间（异常排除后会被清空）
+	AlertAt *time.Time `json:"alert_at"`
 	// ChargeResolution / ChargeSeconds / ChargeRefSeconds 当初扣费的计费口径
 	// （分辨率 / 计费总时长 / 其中参考视频时长）。人工退费要按同一口径写退费账单，
 	// 否则退费记录和扣费记录对不上（视频按分辨率档位定价，口径就是复核依据）。

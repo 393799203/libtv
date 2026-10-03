@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"libtv/internal/audit"
 	"libtv/internal/billing"
 	"net/http"
 	"strconv"
@@ -21,11 +22,28 @@ import (
 // 但上游按生成后计费照样收了我们钱 —— 这是唯一会真金白银漏出去的一类。
 type ProviderTaskHandler struct {
 	service *billing.Ledger
+	// checker 一致性自检：后台「立即核对」按钮手动触发一次（只读+标记，不动钱）
+	checker *audit.Checker
 }
 
 // NewProviderTaskHandler 创建对账处理器
-func NewProviderTaskHandler(svc *billing.Ledger) *ProviderTaskHandler {
-	return &ProviderTaskHandler{service: svc}
+func NewProviderTaskHandler(svc *billing.Ledger, checker *audit.Checker) *ProviderTaskHandler {
+	return &ProviderTaskHandler{service: svc, checker: checker}
+}
+
+// RunAudit POST /api/admin/provider-tasks/audit
+// 手动跑一次一致性自检（后台「立即核对」按钮）：只读+标记，绝不改金额或状态。
+func (h *ProviderTaskHandler) RunAudit(c *gin.Context) {
+	if h.checker == nil {
+		response.Fail(c, 500, "一致性自检未启用")
+		return
+	}
+	report := h.checker.RunLogged(c.Request.Context())
+	if report == nil {
+		response.Fail(c, 500, "一致性自检执行失败，请查看服务端日志")
+		return
+	}
+	response.OK(c, report)
 }
 
 // List GET /api/admin/provider-tasks?status=&project_id=&user_id=&task_id=&page=&page_size=
@@ -37,6 +55,7 @@ func (h *ProviderTaskHandler) List(c *gin.Context) {
 		TaskKind:  strings.TrimSpace(c.Query("task_kind")),
 		ProjectID: strings.TrimSpace(c.Query("project_id")),
 		UserID:    strings.TrimSpace(c.Query("user_id")),
+		OnlyAlert: c.Query("only_alert") == "1" || c.Query("only_alert") == "true",
 		TaskID:    strings.TrimSpace(c.Query("task_id")),
 		Page:      page,
 		PageSize:  size,
@@ -99,6 +118,7 @@ func (h *ProviderTaskHandler) Stats(c *gin.Context) {
 		TaskKind:  strings.TrimSpace(c.Query("task_kind")),
 		ProjectID: strings.TrimSpace(c.Query("project_id")),
 		UserID:    strings.TrimSpace(c.Query("user_id")),
+		OnlyAlert: c.Query("only_alert") == "1" || c.Query("only_alert") == "true",
 		TaskID:    strings.TrimSpace(c.Query("task_id")),
 	}
 	stats, err := h.service.Stats(c.Request.Context(), filter)
