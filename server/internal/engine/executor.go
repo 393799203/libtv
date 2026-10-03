@@ -1767,14 +1767,9 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	ctx = llm.WithAsyncTaskHolder(ctx, taskRef)
 	// 把上游真实进度透出到节点进度：轮询每 5s 报一次「上游处理中 62%」，
 	// 引擎的 10s 心跳带上它 → 界面显示「已运行 3m20s · 上游处理中 62%」
-	videoStart := time.Now()
-	ctx = llm.WithProgressReporter(ctx, func(msg string, percent int) {
-		waited := time.Since(videoStart).Round(time.Second)
-		if percent > 0 {
-			msg = fmt.Sprintf("%s %d%% · 已等待 %s", msg, percent, waited)
-		} else {
-			msg = fmt.Sprintf("%s · 已等待 %s", msg, waited)
-		}
+	// 只透出上游自己的状态（"上游生成中" / "上游生成中 62%"）：本地耗时由心跳统一带
+	// （"已运行 3m20s"），这里再叠一个"已等待"就是同一句话说两遍
+	ctx = llm.WithProgressReporter(ctx, func(msg string, _ int) {
 		execCtx.SetNodeProgress(node.ID, msg)
 	})
 

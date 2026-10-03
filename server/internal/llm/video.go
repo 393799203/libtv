@@ -510,7 +510,9 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 			return "", fmt.Errorf("电信视频任务失败: %s", string(respBody))
 		default:
 			log.Printf("[VideoGen] 电信任务轮询 (attempt %d): status=%s", i+1, status)
-			reportProgress(ctx, fmt.Sprintf("上游处理中（%s）", status), 0)
+			// 给用户看的文案统一成中文：上游的英文 status（running/processing/queued）
+			// 直接透出去既读不懂又和「上游处理中」重复
+			reportProgress(ctx, "上游生成中", 0)
 		}
 	}
 
@@ -754,7 +756,7 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			return "", fmt.Errorf("电信 wan3.0 视频任务失败: %s %s", code, msg)
 		default:
 			log.Printf("[VideoGen] 电信 wan3.0 任务轮询 (attempt %d): status=%s", i+1, status)
-			reportProgress(ctx, fmt.Sprintf("上游处理中（%s）", status), 0)
+			reportProgress(ctx, "上游生成中", 0)
 		}
 	}
 
@@ -1227,9 +1229,12 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 			return "", fmt.Errorf("task failed: %s", reason)
 		}
 		// PROCESSING → 继续轮询，同时把上游真实进度透出（"62%" → 62）
-		reportProgress(ctx,
-			fmt.Sprintf("上游处理中 %s", strings.TrimSpace(taskResp.Data.Progress)),
-			parsePercent(taskResp.Data.Progress))
+		progress := strings.TrimSpace(taskResp.Data.Progress)
+		if progress != "" && parsePercent(progress) > 0 {
+			reportProgress(ctx, fmt.Sprintf("上游生成中 %s", progress), parsePercent(progress))
+		} else {
+			reportProgress(ctx, "上游生成中", 0)
+		}
 	}
 
 	return "", fmt.Errorf("%w（已轮询 %d 次 / %s）", ErrVideoPollTimeout, maxAttempts, c.pollBudgetText())

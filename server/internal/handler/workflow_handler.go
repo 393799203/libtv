@@ -652,6 +652,10 @@ func mergeNodeOutputData(existing map[string]json.RawMessage, out *engine.NodeOu
 		b, _ := json.Marshal(out.Status)
 		existing["status"] = b
 	}
+	// 终态就不再是「进行中」：残留的进度文案（"已运行 40s · 上游生成中"）必须清掉，
+	// 否则前端按运行态渲染文案时，任务明明结束了却一直显示「上游处理中」。
+	// 数据库里已积了一批这种记录，节点上看起来就像永远没跑完。
+	delete(existing, "progressMessage")
 	if out.Status == "success" {
 		delete(existing, "error")
 		// 各节点类型的产物字段都在这（漏一个，该类型的结果就只在浏览器里活着，

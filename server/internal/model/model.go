@@ -461,10 +461,13 @@ func (PointsPackage) TableName() string { return "points_packages" }
 
 // GenerationHistory 节点生成历史（图片/视频）
 type GenerationHistory struct {
-	ID        string    `gorm:"size:36;primaryKey" json:"id"`
-	UserID    string    `gorm:"size:36;not null;index" json:"user_id"`
-	ProjectID string    `gorm:"size:36;not null;index" json:"project_id"`
-	NodeID    string    `gorm:"size:36;not null;index" json:"node_id"`
+	ID        string `gorm:"size:36;primaryKey" json:"id"`
+	UserID    string `gorm:"size:36;not null;index" json:"user_id"`
+	ProjectID string `gorm:"size:36;not null;index" json:"project_id"`
+	// node_id 不是 uuid 而是画布节点 ID：分镜类节点是 "shot-video-shot-1-script-1790607874837"
+	// 这种拼接 ID（41+ 字符），36 位会把插入直接打回 —— 以前每张分镜图/分镜视频都
+	// 静默写不进生成历史（日志里只有一句 "value too long for type character varying(36)"）。
+	NodeID    string    `gorm:"size:64;not null;index" json:"node_id"`
 	NodeType  string    `gorm:"size:20;not null" json:"node_type"` // image / video
 	Prompt    string    `gorm:"type:text" json:"prompt"`
 	Model     string    `gorm:"size:100" json:"model"`

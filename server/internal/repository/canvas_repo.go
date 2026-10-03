@@ -64,7 +64,13 @@ func (r *canvasRepo) Save(ctx context.Context, canvas *model.Canvas) error {
 			return err
 		}
 
-		content := mergeStickyProducts(existing.Content, canvas.Content)
+		// 瞬态字段（运行期间的进度文案）不进数据库：它只对「正在跑」的那几秒有意义，
+		// 存进去之后节点已经是 success/failed 了，文案还留着，前端一旦按旧值渲染就会
+		// 出现「明明没在生成却一直显示上游处理中」。所有写画布的入口（前端保存 / 引擎
+		// 逐节点落库 / 看门狗）都经过这里，所以在这一层剥最省事也最可靠。
+		content := stripTransientNodeFields(canvas.Content)
+		content = mergeStickyProducts(existing.Content, content)
+		canvas.Content = content
 		canvas.ID = existing.ID
 		canvas.Version = existing.Version + 1
 
@@ -172,6 +178,60 @@ func mergeStickyProducts(oldRaw, newRaw datatypes.JSON) datatypes.JSON {
 		return datatypes.JSON(merged)
 	}
 	return newRaw
+}
+
+// transientNodeFields 画布节点的瞬态字段：只在「正在运行」时有意义，一律不落库。
+var transientNodeFields = []string{"progressMessage"}
+
+// stripTransientNodeFields 从画布内容里剥掉瞬态字段（nodes[].data.progressMessage）。
+// 解析失败时原样返回：宁可存一份带文案的画布，也不能因为清洗失败把画布写坏。
+func stripTransientNodeFields(raw datatypes.JSON) datatypes.JSON {
+	if len(raw) == 0 {
+		return raw
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return raw
+	}
+	rawNodes, ok := doc["nodes"]
+	if !ok {
+		return raw
+	}
+	var nodes []map[string]json.RawMessage
+	if err := json.Unmarshal(rawNodes, &nodes); err != nil {
+		return raw
+	}
+	changed := false
+	for _, n := range nodes {
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal(n["data"], &data); err != nil {
+			continue
+		}
+		nodeChanged := false
+		for _, f := range transientNodeFields {
+			if _, ok := data[f]; ok {
+				delete(data, f)
+				nodeChanged = true
+			}
+		}
+		if !nodeChanged {
+			continue
+		}
+		if merged, err := json.Marshal(data); err == nil {
+			n["data"] = merged
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	if mergedNodes, err := json.Marshal(nodes); err == nil {
+		doc["nodes"] = mergedNodes
+	}
+	if merged, err := json.Marshal(doc); err == nil {
+		return datatypes.JSON(merged)
+	}
+	return raw
 }
 
 // nodeDataByID 解析画布内容里每个节点的 data 字段（节点 ID → data 的键值）
