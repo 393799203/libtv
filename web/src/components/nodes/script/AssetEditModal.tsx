@@ -275,10 +275,7 @@ export const AssetEditModal = memo<AssetEditModalProps>(
         });
 
         // Step 4: 执行图片节点
-        const resp = await workflowApi.execute(projectId, {
-          startNodeId: imageNodeId,
-          mode: 'single',
-        });
+        const resp = await workflowApi.execute(projectId, imageNodeId);
 
         if (!resp?.executionId) {
           throw new Error('启动图像生成失败');

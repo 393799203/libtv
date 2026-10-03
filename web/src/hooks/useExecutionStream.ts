@@ -4,6 +4,7 @@ import { useExecutionStore } from '@/stores/executionStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useAuthStore } from '@/stores/authStore';
 import { workflowApi } from '@/services/workflowApi';
+import { reconcileNodesOnTerminal, pendingNodeIdsOf } from '@/utils/executionTerminal';
 import { canvasApi } from '@/services/canvasApi';
 import api from '@/services/api';
 import { createNode } from '@/utils/nodeFactory';
@@ -132,6 +133,7 @@ export function useExecutionStream(
   projectId: string | null,
   executionId: string | number | null,
   nodeId?: string, // 当前执行的节点 ID（用于轮询时获取该节点最新数据）
+  nodeIds?: string[], // 本次执行涉及的节点（重新进入项目恢复订阅时由 getActive 带回）
 ): UseExecutionStreamResult {
   const esRef = useRef<EventSource | null>(null);
 
@@ -163,6 +165,20 @@ export function useExecutionStream(
     const noteMessage = () => {
       lastMessageAt = Date.now();
     };
+
+    // 本执行「出现过」的节点集合：终态收尾只处理这些节点，不再扫全画布。
+    // 之前 execution_failed / 轮询终态会把整张画布所有 running/pending 一起标成同一终态，
+    // 而行内支持多执行并行（activeStreams 是数组）—— A 执行失败会把还在跑的 B 节点也标失败。
+    const seenNodeIds = new Set<string>();
+    if (nodeId) seenNodeIds.add(nodeId);
+    // 恢复订阅（刷新后重连）时没有单个 nodeId，但有执行涉及的节点列表：
+    // 必须种进 seenNodeIds，否则终态收口会「没有可收口的节点」，节点永久停在生成中
+    nodeIds?.forEach((id) => seenNodeIds.add(id));
+
+    // 「补齐漏掉的节点」的异步任务：execution_completed 时回查后端最新节点数据。
+    // onFinal 会等它结束再存画布 —— 否则可能把「running」存进服务端，
+    // 覆盖掉后端收尾写入的 success（画布写没有乐观锁，后写者赢），刷新后又变回「生成中」。
+    let reconcilePromise: Promise<void> = Promise.resolve();
 
     const ensurePolling = (reason: string) => {
       if (closedIntentionally) return; // 主动关闭（正常完成），不启动轮询
@@ -266,18 +282,24 @@ export function useExecutionStream(
               }
             }
 
-            // 收尾所有还在 running/pending 的节点
-            store.nodes.forEach((n) => {
-              const s = n.data.status;
-              if (s === 'running' || s === 'pending') {
-                store.updateNodeData(n.id, {
-                  status: finalStatus,
-                  error: finalStatus === 'failed' ? errorMsg : undefined,  // ✅ 保存错误消息到节点error字段
-                  progressMessage: undefined,
-                } as never);
-              }
-            });
-            useExecutionStore.getState().setLastError(null);
+            // 收尾本执行见过的、还在 running/pending 的节点（不扫全画布，避免误伤并行执行的节点）。
+            // 与 SSE 的 execution_completed 共用同一份收口实现：轮询兜底路径原来只写画布、
+            // 不写 executionStore，于是 generatingNodeId 永不清除 —— 生成按钮永久停在
+            // 「生成中…」且重试被拦（必须刷新页面）。
+            const pending = pendingNodeIdsOf(seenNodeIds);
+            if (pending.length > 0) {
+              await reconcileNodesOnTerminal(
+                projectId,
+                executionId,
+                pending,
+                finalStatus,
+                finalStatus === 'failed' ? errorMsg : undefined,
+              );
+            } else {
+              const es = useExecutionStore.getState();
+              es.setGeneratingNodeId(null);
+              es.removeActiveStream(executionId);
+            }
             stopPolling();
             return;
           }
@@ -327,6 +349,8 @@ export function useExecutionStream(
       try {
         const event: WSEvent = JSON.parse(raw.data);
         useExecutionStore.getState().handleWSEvent(event);
+
+        if (event.nodeId) seenNodeIds.add(event.nodeId);
 
         if (event.type === 'node_completed' && event.nodeId && event.data) {
           const data = event.data as {
@@ -404,9 +428,11 @@ export function useExecutionStream(
             (event.data as { error?: string } | undefined)?.error ||
             (event.data as { errorMsg?: string } | undefined)?.errorMsg ||
             '执行失败';
-          // ✅ 更新所有running/pending状态的节点为failed
+          // ✅ 更新本执行「见过的」running/pending 节点为failed（不扫全画布：
+          // 并行执行时别的执行的节点不该被牵连标失败、更不该挂上本次的错误文案）
           const store = useCanvasStore.getState();
           store.nodes.forEach((n) => {
+            if (!seenNodeIds.has(n.id)) return;
             const s = n.data.status;
             if (s === 'running' || s === 'pending') {
               store.updateNodeData(n.id, {
@@ -416,6 +442,18 @@ export function useExecutionStream(
               } as never);
             }
           });
+        } else if (event.type === 'execution_completed') {
+          // ✅ 执行成功也必须兜底一次收尾。
+          //
+          // 原来这个分支不存在：成功路径完全依赖每个节点的 node_completed 事件。
+          // 事件确实可能收不到（连接建立时执行刚好结束、引擎订阅缓冲满被丢弃、断线期间发生），
+          // 漏一次的节点就会永久停在 running —— 更糟的是 onFinal 会立刻把这个 running
+          // 存进服务端画布，刷新后也回不到正确状态（节点永远「生成中」）。
+          // 这里对仍处于 running/pending 的节点逐个回查后端最新节点数据补齐。
+          const pending = pendingNodeIdsOf(seenNodeIds);
+          if (pending.length > 0 && projectId) {
+            reconcilePromise = reconcileNodesOnTerminal(projectId, executionId, pending, 'success');
+          }
         } else if (event.type === 'node_started' && event.nodeId) {
           useCanvasStore.getState().updateNodeData(event.nodeId, {
             status: 'running',
@@ -459,18 +497,22 @@ export function useExecutionStream(
         }
       }).catch(() => { /* 静默失败，下次页面加载会重新同步 */ });
 
-      // 执行完成后自动保存画布
-      const store = useCanvasStore.getState();
-      const pid = store.projectId;
-      if (pid) {
-        const viewport = store._cache.get(pid)?.savedViewport || { x: 0, y: 0, zoom: 1 };
-        canvasApi.saveCanvas(pid, {
-          nodes: store.nodes,
-          edges: store.edges,
-          viewport,
-        }).catch((e) => console.warn('[SSE] execution final auto-save failed:', e));
-      }
-      setTimeout(() => close(), 100);
+      // 执行完成后自动保存画布。
+      // 必须等 reconcilePromise（漏掉的节点回查补齐）结束：先把状态修正到终态再存盘，
+      // 否则会把 running 写进服务端画布，与该执行已经结束的事实矛盾（刷新后节点又转圈）。
+      void reconcilePromise.finally(() => {
+        const store = useCanvasStore.getState();
+        const pid = store.projectId;
+        if (pid) {
+          const viewport = store._cache.get(pid)?.savedViewport || { x: 0, y: 0, zoom: 1 };
+          canvasApi.saveCanvas(pid, {
+            nodes: store.nodes,
+            edges: store.edges,
+            viewport,
+          }).catch((e) => console.warn('[SSE] execution final auto-save failed:', e));
+        }
+        setTimeout(() => close(), 100);
+      });
     };
 
     es.addEventListener('execution_completed', onFinal as EventListener);

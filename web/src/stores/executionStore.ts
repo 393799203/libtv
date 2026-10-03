@@ -6,6 +6,12 @@ export interface ActiveStream {
   projectId: string;
   executionId: string | number;
   nodeId?: string;
+  /**
+   * 本次执行涉及的节点（后端 getActive 会带回）。
+   * 用途：终态收口时知道「哪些节点属于这次执行」，只收口这些节点，
+   * 不再扫全画布（并行执行时不会误伤别的执行的节点）。
+   */
+  nodeIds?: string[];
 }
 
 interface ExecutionState {
@@ -32,8 +38,6 @@ interface ExecutionState {
   handleWSEvent: (event: WSEvent) => void;
   setGeneratingNodeId: (id: string | null) => void;
   setLastError: (msg: string | null) => void;
-  setNodeError: (nodeId: string, msg: string | null) => void;
-  resetExecution: () => void;
   addActiveStream: (stream: ActiveStream) => void;
   removeActiveStream: (executionId: string | number) => void;
 }
@@ -156,26 +160,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     }
   },
 
-  resetExecution: () =>
-    set({
-      currentExecution: null,
-      status: 'idle',
-      isExecuting: false,
-      generatingNodeId: null,
-      lastError: null,
-      nodeErrors: {},
-      activeStreams: [],
-    }),
-
   setGeneratingNodeId: (id) => set({ generatingNodeId: id }),
   setLastError: (msg) => set({ lastError: msg }),
-  setNodeError: (nodeId, msg) =>
-    set((s) => {
-      const next = { ...s.nodeErrors };
-      if (msg) next[nodeId] = msg;
-      else delete next[nodeId];
-      return { nodeErrors: next };
-    }),
   addActiveStream: (stream) =>
     set((s) => {
       // 同 executionId 不重复添加

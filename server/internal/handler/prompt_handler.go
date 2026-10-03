@@ -182,7 +182,9 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	if err != nil {
 		// 调用失败也一样不能让用户买单（超时被掐断、上游 5xx 都算）。
 		// 必须用脱离取消的 context：请求已取消时原 ctx 已失效，退费会直接失败。
-		refundCtx := context.WithoutCancel(c.Request.Context())
+		// 必须把「扣费时那个 ctx 里的渠道」带进退费 ctx：裸 Request.Context() 没有渠道信息，
+		// 退费会按默认渠道（wasu）记账 —— 电信用户扣费记 dianxin、退费记 wasu，账单自相矛盾
+		refundCtx := llm.WithChannel(context.WithoutCancel(c.Request.Context()), llm.ChannelFrom(billCtx))
 		if refundErr := h.biller.Refund(refundCtx, middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成失败（模型调用超时或报错）", service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
 		}
@@ -201,7 +203,9 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		}
 	}
 	if incomplete {
-		if refundErr := h.biller.Refund(c.Request.Context(), middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成结果不完整（画面或运动提示词缺失）", service.ChargeExtra{}); refundErr != nil {
+		// 同上一处：口径与扣费一致（含渠道）
+		refundCtx := llm.WithChannel(c.Request.Context(), llm.ChannelFrom(billCtx))
+		if refundErr := h.biller.Refund(refundCtx, middleware.GetUserID(c), chargedAmount, service.BillingActionPromptGenerate, modelConfig.ModelID, "提示词生成", "生成结果不完整（画面或运动提示词缺失）", service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[PromptHandler] 退费失败: %v", refundErr)
 		}
 		response.Fail(c, 500, "生成结果不完整（画面或运动提示词缺失），已退费，请重试")

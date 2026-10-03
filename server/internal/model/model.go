@@ -374,6 +374,13 @@ type BillingRecord struct {
 	Action string `gorm:"size:50" json:"action"`
 	// Model 调用的模型 ID（如 doubao-seedance-2.0-fast，非模型调用时为空）
 	Model string `gorm:"size:100" json:"model"`
+	// Channel 实际调用的 AI 渠道（wasu=华数 / dianxin=电信）。
+	//
+	// 以前渠道是拼进 Model 的（wasu-cdance2.5-0807）：那串值既不是模型 ID 也不是渠道，
+	// 前端只能整串显示，筛选/对账还得反解析。现在渠道独立成列，Model 只存纯模型 ID。
+	// 本次改动之前的历史账单这一列为空 —— 读取时按 Model 里的渠道前缀回填（见
+	// service.NormalizeBillingChannel），数据库里的原始文本保持不变。
+	Channel string `gorm:"size:20;default:''" json:"channel"`
 	// Scene 扣费场景（如 图片生成 / 视频生成 / 提示词生成）
 	Scene string `gorm:"size:50" json:"scene"`
 	// Resolution 视频节点的分辨率（480p/720p/1080p/4k）。

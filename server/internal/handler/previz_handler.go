@@ -90,7 +90,10 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 
 	// 退费辅助：解析/调用失败不能让用户买单
 	refund := func(reason string) {
-		if refundErr := h.biller.Refund(c.Request.Context(), userID, chargedAmount, service.BillingActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析", reason, service.ChargeExtra{}); refundErr != nil {
+		// 退费口径与扣费一致：渠道从 billCtx 带过来（裸 Request.Context() 没有渠道，
+		// 退费会按默认 wasu 记账，与扣费的那条 dianxin 记录对不上）
+		refundCtx := llm.WithChannel(c.Request.Context(), llm.ChannelFrom(billCtx))
+		if refundErr := h.biller.Refund(refundCtx, userID, chargedAmount, service.BillingActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析", reason, service.ChargeExtra{}); refundErr != nil {
 			log.Printf("[PrevizHandler] 退费失败(%s): %v", reason, refundErr)
 		}
 	}

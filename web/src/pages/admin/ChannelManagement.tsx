@@ -9,8 +9,6 @@ const POLICY_OPTIONS: Array<{ value: ChannelPolicy; label: string; desc: string 
   { value: 'per_user', label: '按各自渠道', desc: '华数用户走华数，电信用户走电信（各自用户来源渠道）' },
 ];
 
-const CHANNEL_LABEL: Record<string, string> = { wasu: '华数', dianxin: '电信' };
-
 /**
  * 渠道管理：全局 AI Token 渠道策略切换（华数/电信）
  * 三档：全A（all_wasu）/ 全B（all_dianxin）/ 按各自渠道（per_user）

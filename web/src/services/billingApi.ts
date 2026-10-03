@@ -11,8 +11,17 @@ export interface BillingRecord {
   amount: number;
   /** 计费动作（充值时为空） */
   action: string;
-  /** 调用的模型 ID（非模型调用时为空） */
+  /**
+   * 调用的模型 ID（非模型调用时为空）—— **纯模型 ID**，不含渠道前缀。
+   * 历史账单里渠道曾被拼进这个字段（wasu-cdance2.5-0807），后端读取时会拆开，
+   * 所以这个字段永远是纯模型 ID，渠道看下面的 channel。
+   */
   model: string;
+  /**
+   * 实际调用的渠道（wasu=华数 / dianxin=电信），界面用标签展示。
+   * 更早的历史账单没有记录渠道（返回空串）→ 不显示标签，不猜。
+   */
+  channel?: string;
   /** 扣费场景（如 图片生成 / 视频生成 / 提示词生成） */
   scene: string;
   /**

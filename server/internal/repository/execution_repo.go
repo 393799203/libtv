@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"libtv/internal/model"
 
@@ -13,6 +14,10 @@ type ExecutionRepo interface {
 	Create(ctx context.Context, exec *model.WorkflowExecution) error
 	FindByID(ctx context.Context, id int64) (*model.WorkflowExecution, error)
 	UpdateStatus(ctx context.Context, id int64, status string, errMsg string) error
+	// ListStaleActive 查询超过给定时刻仍未结束（pending/running）的执行（看门狗用）
+	ListStaleActive(ctx context.Context, startedBefore time.Time) ([]*model.WorkflowExecution, error)
+	// UpdateStatusIfActive 仅在执行仍处于 pending/running 时写状态，返回是否写成功（看门狗用）
+	UpdateStatusIfActive(ctx context.Context, id int64, status string, errMsg string) (bool, error)
 	DeleteByProjectID(ctx context.Context, projectID string) error
 	ListByProjectID(ctx context.Context, projectID string) ([]*model.WorkflowExecution, error)
 	// ListActiveByProject 查询项目下仍在进行中（pending/running）的执行，
@@ -41,11 +46,52 @@ func (r *executionRepo) FindByID(ctx context.Context, id int64) (*model.Workflow
 }
 
 func (r *executionRepo) UpdateStatus(ctx context.Context, id int64, status string, errMsg string) error {
+	return r.db.WithContext(ctx).Model(&model.WorkflowExecution{}).
+		Where("id = ?", id).
+		Updates(statusUpdates(status, errMsg)).Error
+}
+
+// UpdateStatusIfActive 仅在执行仍处于 pending/running 时才写状态，返回是否真的写成功。
+//
+// 看门狗收口必须走这个条件写：它和「执行刚好跑完并写了 done」的正常路径会并发，
+// 若无条件覆盖，一条刚刚成功的执行（产物已上传、画布已写 success）会被后写的
+// failed 盖掉 —— 用户看到的就是「明明生成了、都传上去了，却显示失败」。
+func (r *executionRepo) UpdateStatusIfActive(ctx context.Context, id int64, status string, errMsg string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.WorkflowExecution{}).
+		Where("id = ? AND status IN ?", id, []string{"pending", "running"}).
+		Updates(statusUpdates(status, errMsg))
+	return res.RowsAffected > 0, res.Error
+}
+
+// statusUpdates 组装状态字段更新集合（status / error_msg / finished_at）
+func statusUpdates(status string, errMsg string) map[string]interface{} {
 	updates := map[string]interface{}{"status": status}
 	if errMsg != "" {
 		updates["error_msg"] = errMsg
+	} else if status == "running" || status == "pending" {
+		// 复位重跑时清掉上一轮的失败原因：否则前端会把旧错误挂到正在重跑的执行上
+		updates["error_msg"] = ""
 	}
-	return r.db.WithContext(ctx).Model(&model.WorkflowExecution{}).Where("id = ?", id).Updates(updates).Error
+	// 终态补 finished_at。此前从不写，线上执行记录 finished_at 几乎全是 NULL ——
+	// 既看不到耗时（排障时无法判断"跑了多久/TTL 有没有踩线"），也失去了卡死判据。
+	if status == "done" || status == "failed" {
+		updates["finished_at"] = time.Now()
+	}
+	return updates
+}
+
+// ListStaleActive 查询「超过给定时刻仍未结束」的执行（看门狗用）。
+// 以 started_at 为基准：它是入队/开始时刻，重试不会刷新 —— 也就是说看门狗判的是
+// 「这次执行整体挂了多久」，与执行自身的预算（每 attempt 30 分钟 + 退避）匹配。
+func (r *executionRepo) ListStaleActive(ctx context.Context, startedBefore time.Time) ([]*model.WorkflowExecution, error) {
+	var execs []*model.WorkflowExecution
+	err := r.db.WithContext(ctx).
+		Where("status IN ?", []string{"pending", "running"}).
+		Where("COALESCE(started_at, created_at) < ?", startedBefore).
+		Order("id ASC").
+		Limit(50).
+		Find(&execs).Error
+	return execs, err
 }
 
 func (r *executionRepo) DeleteByProjectID(ctx context.Context, projectID string) error {

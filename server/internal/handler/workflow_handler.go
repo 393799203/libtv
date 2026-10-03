@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"libtv/internal/config"
@@ -17,6 +18,7 @@ import (
 	"libtv/internal/pkg/response"
 	"libtv/internal/queue"
 	"libtv/internal/repository"
+	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -33,6 +35,13 @@ type WorkflowHandler struct {
 	// genQueue 生成任务队列：非 nil 时生成任务入 Redis Stream 由 worker 消费
 	// （进程重启不丢任务、失败重试、并发受控）；为 nil 时降级为进程内直接起协程
 	genQueue *queue.Queue
+	// billingService 计费服务：看门狗退还「已扣但没取回结果」的积分时用（见 SetBillingService）
+	billingService *service.BillingService
+	// generationHistoryService 生成历史：看门狗判断节点产物「是否已经交付」的证据来源
+	generationHistoryService *service.GenerationHistoryService
+	// canvasLocks 按项目串行化画布写入：同一层里多个节点并行收尾会同时做
+	// 读-改-写，不加锁会互相覆盖（一个节点的产物被另一个的旧快照盖掉）
+	canvasLocks sync.Map // projectID -> *sync.Mutex
 }
 
 // SetQueue 注入生成任务队列（传 nil 表示降级为进程内执行）
@@ -46,7 +55,7 @@ func NewWorkflowHandler(
 	eng *engine.WorkflowEngine,
 	registry *engine.ExecutorRegistry,
 ) *WorkflowHandler {
-	return &WorkflowHandler{
+	h := &WorkflowHandler{
 		execRepo:    execRepo,
 		aiTaskRepo:  aiTaskRepo,
 		canvasRepo:  canvasRepo,
@@ -54,16 +63,19 @@ func NewWorkflowHandler(
 		engine:      eng,
 		registry:    registry,
 	}
+	// 节点产出即时落库：引擎每完成一个节点就把该节点产物写进画布，
+	// 不再等整条执行收尾（见 engine.SetNodeOutputHook 的注释）
+	if eng != nil {
+		eng.SetNodeOutputHook(h.persistNodeOutput)
+	}
+	return h
 }
 
 type ExecuteRequest struct {
-	ProjectID   string `json:"projectId"`
+	ProjectID string `json:"projectId"`
+	// StartNodeID 必填：本次只执行这一个节点（节点内"生成"按钮）。
+	// 全图执行与"重新生成下游"已下线，不再有执行粒度参数。
 	StartNodeID string `json:"startNodeId"`
-	// Mode 控制执行粒度：
-	//   ""          → 全图执行（默认）
-	//   "single"    → 只跑 StartNodeID 一个节点（用于节点内"生成"按钮）
-	//   "downstream"→ 跑 StartNodeID + 所有 BFS 后代（"重新生成下游"按钮）
-	Mode string `json:"mode"`
 }
 
 func (h *WorkflowHandler) Execute(c *gin.Context) {
@@ -87,19 +99,21 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		return
 	}
 
-	// startNodeId 也支持 query 传
+	// startNodeId 支持 query 或 body 传，且**必须传**：
+	// 全图执行与"重新生成下游"已下线（产品里没有入口），留着 API 只会被误用 ——
+	// 一次不带 startNodeId 的请求会把画布上所有节点都生成一遍、逐个扣费。
 	startNodeID := c.Query("startNodeId")
 	if startNodeID == "" {
 		startNodeID = req.StartNodeID
 	}
-	mode := req.Mode
-	if mode == "" {
-		mode = c.Query("mode")
+	if startNodeID == "" {
+		response.Fail(c, http.StatusBadRequest, "缺少 startNodeId：现在只支持单节点执行")
+		return
 	}
 
-	// 加载画布 → 校验 → 拓扑排序 → 按 mode 裁剪
+	// 加载画布 → 校验 → 拓扑排序 → 裁剪为「只跑这一个节点」
 	// （与队列 worker 共用 buildPlan，保证两条路径行为一致）
-	canvas, plan, ownerUserID, err := h.buildPlan(c.Request.Context(), projectID, startNodeID, mode)
+	canvas, plan, ownerUserID, err := h.buildPlan(c.Request.Context(), projectID, startNodeID)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
@@ -161,11 +175,10 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 			ProjectID:   projectID,
 			UserID:      ownerUserID,
 			StartNodeID: startNodeID,
-			Mode:        mode,
 		}
 		if qErr := h.genQueue.Enqueue(c.Request.Context(), task); qErr == nil {
-			log.Printf("[Handler] 任务已入队: executionID=%d projectID=%s startNodeID=%s mode=%s",
-				exec.ID, projectID, startNodeID, mode)
+			log.Printf("[Handler] 任务已入队: executionID=%d projectID=%s startNodeID=%s",
+				exec.ID, projectID, startNodeID)
 			response.OK(c, gin.H{"executionId": exec.ID, "queued": true})
 			return
 		} else {
@@ -223,7 +236,7 @@ func (h *WorkflowHandler) GetActiveExecutions(c *gin.Context) {
 
 // buildPlan 加载画布 → 校验 → 拓扑排序 → 按 mode 裁剪，产出可执行计划。
 // startNodeID 为空表示全图执行；mode=downstream 跑该节点及其所有后代，否则只跑该节点。
-func (h *WorkflowHandler) buildPlan(ctx context.Context, projectID, startNodeID, mode string) (*model.Canvas, *engine.ExecutionPlan, string, error) {
+func (h *WorkflowHandler) buildPlan(ctx context.Context, projectID, startNodeID string) (*model.Canvas, *engine.ExecutionPlan, string, error) {
 	canvas, err := h.canvasRepo.FindByProjectID(ctx, projectID)
 	if err != nil || canvas == nil {
 		return nil, nil, "", fmt.Errorf("canvas not found for project: %s", projectID)
@@ -248,20 +261,11 @@ func (h *WorkflowHandler) buildPlan(ctx context.Context, projectID, startNodeID,
 		return nil, nil, "", fmt.Errorf("topological sort failed: %w", err)
 	}
 
-	// 按 mode 裁剪 plan
-	// 注意：当前 MVP 的 executor 不消费上游输出，所以"单节点"和"上游节点重跑"语义重合。
-	// 保留 single / downstream 两个粒度足以覆盖所有用户操作（节点内生成 / 重新生成下游）。
-	if startNodeID != "" {
-		switch mode {
-		case "downstream":
-			plan, err = engine.FilterDownstream(plan, startNodeID)
-		default:
-			// 不传 mode / 传 "single" / 传未知值：都按"只跑这一个节点"处理
-			plan, err = engine.FilterSingle(plan, startNodeID)
-		}
-		if err != nil {
-			return nil, nil, "", fmt.Errorf("filter plan failed: %w", err)
-		}
+	// 裁剪为「只跑 startNodeID 这一个节点」：保留全图 Schema（含上游 data 与连接），
+	// 让执行器仍能反查上游已保存的数据（这是节点生成本身的需要，不是"全图执行"）。
+	plan, err = engine.FilterSingle(plan, startNodeID)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("filter plan failed: %w", err)
 	}
 	return canvas, plan, ownerUserID, nil
 }
@@ -330,7 +334,7 @@ func (h *WorkflowHandler) HandleQueuedTask(ctx context.Context, t queue.Task) er
 		return nil
 	}
 
-	canvas, plan, ownerUserID, err := h.buildPlan(ctx, t.ProjectID, t.StartNodeID, t.Mode)
+	canvas, plan, ownerUserID, err := h.buildPlan(ctx, t.ProjectID, t.StartNodeID)
 	if err != nil {
 		// 永久性错误（画布被删、DSL 校验失败等）：重试无意义，判失败并确认消息
 		log.Printf("[Handler] 重建执行计划失败（不重试）: executionID=%d err=%v", t.ExecutionID, err)
@@ -341,7 +345,7 @@ func (h *WorkflowHandler) HandleQueuedTask(ctx context.Context, t queue.Task) er
 	// 重试场景下状态复位为 running，便于前端展示"进行中"
 	_ = h.execRepo.UpdateStatus(ctx, t.ExecutionID, "running", "")
 
-	// 单任务超时与降级路径保持一致（10 分钟）
+	// 单任务超时与降级路径保持一致（executionTimeout，30 分钟）
 	runCtx, cancel := context.WithTimeout(context.Background(), executionTimeout)
 	defer cancel()
 	return h.runExecution(runCtx, t.ExecutionID, t.ProjectID, ownerUserID, canvas, plan)
@@ -493,6 +497,29 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 			log.Printf("[SSE] client disconnected: execID=%d", execID)
 			return
 		case <-heartbeat.C:
+			// 心跳前先查一次执行状态兜底。引擎事件有两种情况会永远收不到：
+			//   ① 本连接建立时执行恰好刚结束（下面 :443 读状态与 :476 订阅之间存在窗口，
+			//      那时终态事件已经发完，之后再也不会有事件）；
+			//   ② 引擎 emit 的订阅缓冲（64）满而静默丢弃，终态事件正好被丢。
+			// 两种情况下前端只会一直收到心跳 —— 心跳又不断刷新前端的 45s 静默熔断，
+			// 于是界面永久停在「已运行 Ns」。所以这里主动查库，发现终态就推送并关流。
+			if exec, err := h.execRepo.FindByID(c.Request.Context(), execID); err == nil && exec != nil &&
+				(exec.Status == "done" || exec.Status == "failed") {
+				eventType := "execution_completed"
+				if exec.Status == "failed" {
+					eventType = "execution_failed"
+				}
+				payload, _ := json.Marshal(map[string]interface{}{
+					"type":        eventType,
+					"executionId": execID,
+					"status":      exec.Status,
+					"errorMsg":    exec.ErrorMsg,
+				})
+				_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, string(payload))
+				flusher.Flush()
+				log.Printf("[SSE] 心跳兜底推送终态并关流: execID=%d status=%s", execID, exec.Status)
+				return
+			}
 			// 用真实 event 而不是 SSE 注释行：
 			// - 注释行只有部分代理会识别为"活动"
 			// - 真实 event 客户端 EventSource 一定会触发 message，更新前端超时熔断器
@@ -509,8 +536,20 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 				return
 			}
 			flusher.Flush()
+			// 终态事件推送后直接结束流：让浏览器明确知道流已收尾（连接关闭 → 前端 onerror
+			// 会走 polling 兜底再确认一次），也避免流一直悬着、只靠心跳续命 ——
+			// 那种情况下若终态事件本身丢了，前端会一直停在「已运行 Ns」且熔断永不触发。
+			if isTerminalEventName(event.Type) {
+				log.Printf("[SSE] 终态事件已推送，关闭流: execID=%d type=%s", execID, event.Type)
+				return
+			}
 		}
 	}
+}
+
+// isTerminalEventName 判断 SSE 事件名是否为执行终态（前端按这些名字收尾并关闭订阅）
+func isTerminalEventName(name string) bool {
+	return name == "execution_completed" || name == "execution_failed"
 }
 
 // toInt 把引擎输出里的数值字段转成 int（Go 侧是 int，经 JSON 往返可能是 float64/json.Number）
@@ -533,6 +572,117 @@ func toInt(v interface{}) (int, bool) {
 // persistNodeOutputs 把执行结果回写到画布节点 data 中
 // - 把用户输入的 prompt 写回 data.prompt（持久化提示词）
 // - 把生成的 content 写回 data.content（持久化生成结果）
+// lockCanvas 取项目级画布写锁（返回后由调用方 Unlock）
+func (h *WorkflowHandler) lockCanvas(projectID string) *sync.Mutex {
+	v, _ := h.canvasLocks.LoadOrStore(projectID, &sync.Mutex{})
+	m, _ := v.(*sync.Mutex)
+	if m == nil {
+		m = &sync.Mutex{}
+	}
+	m.Lock()
+	return m
+}
+
+// persistNodeOutput 单个节点产出后立即写进画布（引擎钩子，见 engine.SetNodeOutputHook）。
+//
+// 这是「状态必须等于事实」的关键一步：视频跑完、上传到对象存储的同一个瞬间，
+// 画布就该是 success + videoUrl，而不是等整条执行结束（期间进程被杀/超时/卡死
+// 都会让结果只留在内存里，用户看到「明明生成了还显示生成中」）。
+// 失败节点同样立即落库：状态 + 原因必须马上可见。
+func (h *WorkflowHandler) persistNodeOutput(ctx context.Context, projectID string, out *engine.NodeOutput) {
+	if h.canvasRepo == nil || projectID == "" || out == nil || out.NodeID == "" {
+		return
+	}
+	lock := h.lockCanvas(projectID)
+	defer lock.Unlock()
+
+	canvas, err := h.canvasRepo.FindByProjectID(ctx, projectID)
+	if err != nil || canvas == nil || len(canvas.Content) == 0 {
+		return
+	}
+	var dsl engine.CanvasDSL
+	if err := json.Unmarshal([]byte(canvas.Content), &dsl); err != nil {
+		log.Printf("[NodePersist] 解析画布失败: projectID=%s err=%v", projectID, err)
+		return
+	}
+	hit := false
+	for i := range dsl.Nodes {
+		if dsl.Nodes[i].ID != out.NodeID {
+			continue
+		}
+		var existing map[string]json.RawMessage
+		if err := json.Unmarshal(dsl.Nodes[i].Data, &existing); err != nil {
+			existing = make(map[string]json.RawMessage)
+		}
+		mergeNodeOutputData(existing, out)
+		merged, err := json.Marshal(existing)
+		if err != nil {
+			return
+		}
+		dsl.Nodes[i].Data = merged
+		hit = true
+		break
+	}
+	if !hit {
+		// 节点不在画布上（已被删除/快照过期）→ 不新建节点，避免污染画布
+		return
+	}
+	updated, err := json.Marshal(dsl)
+	if err != nil {
+		return
+	}
+	canvas.Content = datatypes.JSON(updated)
+	if err := h.canvasRepo.Save(ctx, canvas); err != nil {
+		log.Printf("[NodePersist] ⚠️ 节点产物落库失败: projectID=%s node=%s err=%v", projectID, out.NodeID, err)
+		return
+	}
+	log.Printf("[NodePersist] 节点已落库: node=%s status=%s projectID=%s", out.NodeID, out.Status, projectID)
+}
+
+// mergeNodeOutputData 把节点产出合并进画布节点 data —— 产物/状态写回规则的唯一实现。
+//
+// 规则（与前端类型保持一致）：
+//   - status 一定写（前端徽章与 Done 判定看它）；
+//   - success：清掉历史 error，写入 content/imageUrl/videoUrl/thumbUrl、width/height、imageUrls；
+//   - failed：写入 error（前端 BaseNode 读 data.error 才显示红框与原因）；
+//   - 绝不删除既有产物字段：失败/重跑都不能把上一次已交付的 URL 抹掉（宁可留着旧结果，
+//     也不能让用户手里正在看的视频因为一次失败而消失）。
+func mergeNodeOutputData(existing map[string]json.RawMessage, out *engine.NodeOutput) {
+	if out.Status != "" {
+		b, _ := json.Marshal(out.Status)
+		existing["status"] = b
+	}
+	if out.Status == "success" {
+		delete(existing, "error")
+		// 各节点类型的产物字段都在这（漏一个，该类型的结果就只在浏览器里活着，
+		// 关掉页面就丢：audioUrl=音频、stillUrl=白模静帧、thumbUrl=缩略图）
+		for _, field := range []string{"content", "imageUrl", "videoUrl", "thumbUrl", "audioUrl", "stillUrl"} {
+			if v, ok := out.Data[field].(string); ok && v != "" {
+				b, _ := json.Marshal(v)
+				existing[field] = b
+			}
+		}
+		// 尺寸必须回写：前端右上角显示的是原图尺寸，缺了它前端只能加载图片来测，
+		// 而画布渲染的是缩略图 —— 测出来就是缩略图尺寸（2560×1440 的图显示成 640×360）。
+		for _, field := range []string{"width", "height"} {
+			if n, ok := toInt(out.Data[field]); ok && n > 0 {
+				b, _ := json.Marshal(n)
+				existing[field] = b
+			}
+		}
+		// 多图/多缩略图场景（数组）
+		for _, field := range []string{"imageUrls", "thumbUrls"} {
+			if urls, ok := out.Data[field].([]string); ok && len(urls) > 0 {
+				b, _ := json.Marshal(urls)
+				existing[field] = b
+			}
+		}
+	} else if out.Error != "" {
+		b, _ := json.Marshal(out.Error)
+		existing["error"] = b
+	}
+}
+
 func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.Canvas, plan *engine.ExecutionPlan) {
 	if canvas == nil || plan == nil {
 		return
@@ -572,45 +722,10 @@ func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.
 		// 2) 回写节点状态与引擎产物。
 		// 状态单独回写：前端徽章/Done 判定看 status，媒体内容看 imageUrl/videoUrl，
 		// 两者缺一都会出现"图有了但节点还是未生成"这类矛盾显示。
-		//
-		// 产物字段必须覆盖多媒体：原来只回写 content（文本/剧本类），
-		// 图片 imageUrl/imageUrls、视频 videoUrl 都落不下 —— 于是「生成后还没等前端保存
-		// 就退出/刷新页面」时，积分已扣但结果永久丢失（前端写回是另一条独立路径，
-		// 关掉页面就没了）。这里按字段名逐一合并，与前端类型保持一致。
+		// 合并规则统一在 mergeNodeOutputData 里（与「节点即时落库」共用同一份实现，
+		// 避免两处规则漂移：产物字段、尺寸、多图、错误清空都只有一处定义）。
 		if out, ok := outputs[n.ID]; ok {
-			if out.Status != "" {
-				statusBytes, _ := json.Marshal(out.Status)
-				existing["status"] = statusBytes
-			}
-			if out.Status == "success" {
-				// 成功时清掉历史错误：否则"失败过一次、之后重试成功"的节点
-				// 会一直挂着旧 error，前端红框与错误文案不会消失。
-				delete(existing, "error")
-				for _, field := range []string{"content", "imageUrl", "videoUrl", "thumbUrl"} {
-					if v, ok := out.Data[field].(string); ok && v != "" {
-						fieldBytes, _ := json.Marshal(v)
-						existing[field] = fieldBytes
-					}
-				}
-				// 尺寸必须回写：前端右上角显示的是原图尺寸，缺了它前端只能加载图片来测，
-				// 而画布渲染的是缩略图 —— 测出来就是缩略图尺寸（2560×1440 的图显示成 640×360）。
-				for _, field := range []string{"width", "height"} {
-					if n, ok := toInt(out.Data[field]); ok && n > 0 {
-						nBytes, _ := json.Marshal(n)
-						existing[field] = nBytes
-					}
-				}
-				// 多图场景（imageUrls 为数组）
-				if urls, ok := out.Data["imageUrls"].([]string); ok && len(urls) > 0 {
-					urlsBytes, _ := json.Marshal(urls)
-					existing["imageUrls"] = urlsBytes
-				}
-			} else if out.Error != "" {
-				// 失败原因必须回写画布：前端 BaseNode 读 data.error 才显示红框和具体原因
-				// （只写 status 会变成"失败了但不知道为什么"，重进项目更是什么都没有）。
-				errBytes, _ := json.Marshal(out.Error)
-				existing["error"] = errBytes
-			}
+			mergeNodeOutputData(existing, out)
 		}
 
 		merged, err := json.Marshal(existing)
@@ -620,11 +735,14 @@ func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.
 		dsl.Nodes[i].Data = merged
 	}
 
-	// 写回
+	// 写回（与「节点即时落库」共用同一把项目级锁：两者会并发，
+	// 不加锁就是两个读-改-写互相覆盖）
 	updated, err := json.Marshal(dsl)
 	if err != nil {
 		return
 	}
+	lock := h.lockCanvas(canvas.ProjectID)
+	defer lock.Unlock()
 	canvas.Content = datatypes.JSON(updated)
 	_ = h.canvasRepo.Save(ctx, canvas)
 }

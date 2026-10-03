@@ -155,7 +155,12 @@ func main() {
 
 	llmClient := llm.NewScriptClient(config.C.AI, channelRouter)
 	imageClient := llm.NewImageClient(config.C.AI, "wasu", channelRouter)
-	videoClient := llm.NewVideoClient(config.C.AI, "wasu", channelRouter)
+	// 上游视频任务轮询预算（config.yaml 的 video 段）：必须显著小于执行超时，
+	// 否则执行 ctx 先到期，失败退费与收尾会被 deadline 掐掉
+	videoClient := llm.NewVideoClient(config.C.AI, "wasu", llm.VideoPollConfig{
+		Interval: time.Duration(config.C.Video.PollIntervalSec) * time.Second,
+		Timeout:  time.Duration(config.C.Video.PollTimeoutSec) * time.Second,
+	}, channelRouter)
 	audioClient := llm.NewAudioClient(config.C.AI, "wasu", channelRouter)
 
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
@@ -498,6 +503,18 @@ func main() {
 		IdleTimeout:    0, // 不设空闲超时
 		MaxHeaderBytes: 1 << 20,
 	}
+	// ==================== 无进展看门狗 ====================
+	// 执行卡死（进程被杀/收尾没跑成）时把执行收口：退积分 + 画布节点标失败 + 执行落 failed。
+	// 没有它，卡死的执行会永久停在 running：前端永久显示「生成中」、重复提交闸门永久 409、
+	// 扣掉的钱没人退。退出时随 ctx 一起停。
+	watchdogCtx, stopWatchdog := context.WithCancel(context.Background())
+	defer stopWatchdog()
+	workflowHandler.SetBillingService(billingService)
+	// 交付证据来源：节点产物上传成功后写入的生成历史，看门狗据此区分
+	//「结果已交付、只是状态没写」与「真失败」，避免误判已生成的视频
+	workflowHandler.SetGenerationHistoryService(generationHistoryService)
+	workflowHandler.StartExecutionWatchdog(watchdogCtx, 0)
+
 	// 优雅退出：先停止接收新请求，再停止队列 worker。
 	// 未确认的队列消息留给下次启动的 XAUTOCLAIM 认领续跑（这正是队列化的核心收益）
 	quit := make(chan os.Signal, 1)
@@ -510,6 +527,7 @@ func main() {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("HTTP 关闭异常: %v", err)
 		}
+		stopWatchdog() // 看门狗先停：避免关停期间还去改库
 		if genQueue != nil {
 			genQueue.Stop(8 * time.Second)
 		}

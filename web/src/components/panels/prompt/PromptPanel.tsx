@@ -582,7 +582,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     }
 
     // 2) 调统一入口（自动：存盘 → 调后端 → 订阅 SSE）
-    await generate({ mode: 'single' });
+    await generate();
   }, [projectId, nodeType, buildUpdateData, onUpdate, generate]);
 
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）；UI 值从 data 派生

@@ -40,6 +40,11 @@ type AsyncTaskRef struct {
 	ChargeResolution string `json:"chargeResolution"`
 	ChargeSeconds    int    `json:"chargeSeconds"`
 	ChargeRefSeconds int    `json:"chargeRefSeconds"`
+	// DownloadFailures 该上游任务「下载转存」失败的累计次数。
+	// 视频已经生成但转存到自有存储失败时，不立即退费也不重新下发 —— 先靠队列重试复用
+	// 这个已完成的上游任务重新转存（不重新扣费）。只有转存反复失败（达到上限）才退费收场，
+	// 避免用户既拿不到视频又一直挂着这笔钱。
+	DownloadFailures int `json:"downloadFailures"`
 }
 
 // asyncTaskTTL 登记有效期，与上游任务的可查询保留期（约 24h）对齐
@@ -117,7 +122,15 @@ func RecordSubmittedTask(ctx context.Context, provider, model, taskID string) {
 	if h == nil || taskID == "" {
 		return
 	}
-	h.Provider, h.Model, h.TaskID = provider, model, taskID
+	// 只在有值时覆盖：调用方可能只知道 taskID（如华数取结果路径传空 model），
+	// 空值覆盖会把执行器预先写入的模型名抹掉，导致看门狗退费时账单缺模型
+	if provider != "" {
+		h.Provider = provider
+	}
+	if model != "" {
+		h.Model = model
+	}
+	h.TaskID = taskID
 	if h.CreateAt == "" {
 		h.CreateAt = time.Now().Format(time.RFC3339)
 	}
@@ -149,6 +162,79 @@ func TakeAsyncTaskRef(execID int64, nodeID string) *AsyncTaskRef {
 		return nil
 	}
 	return &ref
+}
+
+// progressReporterKey 上游进度上报回调的 ctx 键
+type progressReporterKey struct{}
+
+// WithProgressReporter 注入「上游进度」回调（executor 注入 → 轮询把真实进度透出到节点）。
+//
+// 用途：视频轮询期间界面原来只有「已运行 12s」这种自说自话的计时，用户无法判断
+// 上游到底在不在动、走到哪一步。轮询每 5 秒就能拿到上游的真实 status/进度，
+// 透出去以后节点上显示的是「上游处理中 62% · 已等待 3m20s」。
+func WithProgressReporter(ctx context.Context, fn func(message string, percent int)) context.Context {
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, progressReporterKey{}, fn)
+}
+
+// reportProgress 上报一次上游进度（未注入回调时是空操作）
+func reportProgress(ctx context.Context, message string, percent int) {
+	if ctx == nil {
+		return
+	}
+	if fn, ok := ctx.Value(progressReporterKey{}).(func(string, int)); ok && fn != nil {
+		fn(message, percent)
+	}
+}
+
+// refundedKeyPrefix 退费幂等标记的键前缀。按「上游任务号」而不是节点维度记账。
+//
+// 为什么按任务号：同一个节点在一次执行里可能被重新下发（退款后重试会拿到新的 taskID），
+// 那时新任务对应的扣费当然要允许再退；而**同一个上游任务**对应的那笔扣费只应退一次。
+// 队列重投、并发副本、失败后重试复用登记这几条路径都可能对同一笔扣费发起退费。
+const refundedKeyPrefix = "refunded:task:"
+
+func refundedKey(taskID string) string { return refundedKeyPrefix + taskID }
+
+// TryMarkRefunded 认领「这笔扣费由我负责退」的资格（SETNX）。
+//
+// 返回 true = 本次调用去退费；false = 这笔扣费已经退过（或正在退），应跳过。
+// taskID 为空（提交阶段就失败，没拿到上游任务号）时一律返回 true：
+// 那种情况没有登记可被复用（重试必然重新下发并重新扣费），不存在重复退费路径。
+// Redis 不可用/写失败时也返回 true —— 退费优先于幂等，宁可走老的 GETDEL 认领保护。
+func TryMarkRefunded(taskID string) bool {
+	if taskID == "" {
+		return true
+	}
+	rdb := cache.Client()
+	if rdb == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ok, err := rdb.SetNX(ctx, refundedKey(taskID), "1", asyncTaskTTL).Result()
+	if err != nil {
+		log.Printf("[AsyncTask] ⚠️ 退费幂等标记写入失败（改为直接退费）: %v", err)
+		return true
+	}
+	return ok
+}
+
+// UnmarkRefunded 撤销退费幂等标记：只在「认领到了资格、但退费本身失败」时调用，
+// 让后续重试还能把这次扣费补退给用户。
+func UnmarkRefunded(taskID string) {
+	if taskID == "" {
+		return
+	}
+	rdb := cache.Client()
+	if rdb == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = rdb.Del(ctx, refundedKey(taskID)).Err()
 }
 
 // ClearAsyncTaskRef 清除单个节点的任务登记（该节点结果已产出，不再需要复用）

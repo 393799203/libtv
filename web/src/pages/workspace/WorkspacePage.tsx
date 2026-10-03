@@ -37,7 +37,7 @@ function isEffectivelyEmptyCanvas(nodes: { data?: Record<string, unknown> }[]): 
 // 单个 SSE 订阅实例（按 executionId 建立独立 EventSource）
 // 不渲染任何 UI，仅用于 hooks 内部订阅
 function StreamSubscriber({ stream }: { stream: ActiveStream }) {
-  useExecutionStream(stream.projectId, stream.executionId, stream.nodeId);
+  useExecutionStream(stream.projectId, stream.executionId, stream.nodeId, stream.nodeIds);
   return null;
 }
 

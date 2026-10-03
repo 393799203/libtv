@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"libtv/internal/apperr"
 	"libtv/internal/llm"
 	"libtv/internal/service"
 )
@@ -42,6 +44,97 @@ func refundWithFreshCtx(ctx context.Context, biller *service.BillingService, use
 	return biller.Refund(refundCtx, userID, amount, action, modelName, scene, reason, extra)
 }
 
+// isNoRetryVideoFailure 判断视频节点的这次失败是否「重试有害」。
+//
+// 命中条件都满足同一个前提：**本次扣费已经退还给用户、界面也已经显示失败**。
+// 此时自动重试只有两种结局，都不是用户想要的：
+//   - 重新下发 → 重新扣费：用户从没要求过第二次生成，却被动付了第二次钱；
+//   - 复用那个仍在跑的上游任务 → 不扣费拿到视频：白送一次生成。
+//
+// 因此这类失败一律交给用户自己决定是否重试。
+//
+// 具体三类：
+//   - ErrVideoPollTimeout：上游一直在 processing，轮询预算用尽（本轮新增 25 分钟预算）；
+//   - DeadlineExceeded：执行自身的 30 分钟预算耗尽（此时轮询预算还没走完）；
+//   - Canceled：用户主动停止生成 —— 停止更不该被队列自动重跑。
+func isNoRetryVideoFailure(err error) bool {
+	return errors.Is(err, llm.ErrVideoPollTimeout) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
+}
+
+// refundCharge 退还视频节点的一次扣费，并保证「同一个上游任务对应的那笔扣费」只退一次。
+//
+// taskID 为该次扣费对应的上游任务号（提交阶段就失败、还没拿到任务号时传空）。
+// 三层保护叠加，缺一条都会漏钱：
+//  1. 调用方先 TakeAsyncTaskRef（GETDEL）认领登记 —— 并发副本里只有一个拿得到；
+//  2. 这里以任务号为幂等键 SETNX —— 拦住「重试复用同一登记再退一次」这类顺序重复；
+//  3. 退费成功后由调用方消费掉登记 —— 登记只能对应一笔尚未退还的扣费。
+func (v *VideoExecutor) refundCharge(ctx context.Context, execCtx *ExecutionContext, taskID string, amount int64, model, reason string, extra service.ChargeExtra) error {
+	if !llm.TryMarkRefunded(taskID) {
+		log.Printf("[VideoExecutor] 上游任务 %s 的扣费已退过，跳过重复退费（node 无关）", taskID)
+		return nil
+	}
+	if err := refundWithFreshCtx(ctx, v.biller, execCtx.GetUserID(), amount, service.BillingActionVideo, model, "视频生成", reason, extra); err != nil {
+		// 退费没成功 → 撤掉幂等标记，后续重试还能补退（否则这笔钱就永远退不掉了）
+		llm.UnmarkRefunded(taskID)
+		return err
+	}
+	return nil
+}
+
+// handleDownloadFailure 处理「视频已生成、但转存到自有存储失败」。
+//
+// 这里刻意不做「退费用临时 URL 顶成功」：上游 URL 会过期，那是假成功。
+// 策略按失败次数分档（计数存在任务登记里，跨队列重试累计）：
+//   - 第 1 次：保留任务登记直接失败 —— 队列重试会命中登记、复用这个**已完成的上游任务**
+//     重新转存（不重新下发、不重新扣费），这是最省用户钱又能真正交付的路径；
+//   - 达到上限（downloadFailureLimit）：退费 + 消费登记 + 标记不自动重试，
+//     把决定权交回用户（不再让这笔钱悬着，也不偷偷再扣一次）。
+func (v *VideoExecutor) handleDownloadFailure(ctx context.Context, execCtx *ExecutionContext, nodeID, model, upstreamURL string, dlErr error, taskRef *llm.AsyncTaskRef, chargeDetail service.ChargeExtra) (*NodeOutput, error) {
+	const downloadFailureLimit = 2
+
+	failures := 0
+	if taskRef != nil {
+		taskRef.DownloadFailures++
+		failures = taskRef.DownloadFailures
+		// 落盘累计次数：队列重试时通过登记读回来，才能判断是否已达上限
+		llm.SaveAsyncTaskRef(taskRef)
+	}
+	log.Printf("[VideoExecutor] ❌ 视频已生成但转存失败（累计第 %d/%d 次）: upstream=%s err=%v",
+		failures, downloadFailureLimit, upstreamURL, dlErr)
+
+	msg := fmt.Sprintf("视频已生成，但转存到自有存储失败（已自动重试 %d 次）：%v", downloadFailureLimit, dlErr)
+	if failures < downloadFailureLimit {
+		// 交给队列重试：复用同一个上游任务重新转存，不重新扣费
+		msg += "；系统将自动重试转存（不会重复扣费）"
+		return &NodeOutput{NodeID: nodeID, Status: "failed", Error: msg}, nil
+	}
+
+	// 反复失败 → 退费收场，交给用户决定是否重新生成
+	msg += "；已退还本次积分，请稍后重试"
+	execCtx.MarkNonRetryable()
+	// 退费金额优先用登记里记的那笔扣费；登记缺失（异常情况）时退不了就只报错，不猜金额
+	amount := taskRef.ChargedAmount
+	_ = chargeDetail
+	if amount > 0 && v.biller != nil {
+		extra := service.ChargeExtra{
+			Resolution:      taskRef.ChargeResolution,
+			Seconds:         taskRef.ChargeSeconds,
+			RefVideoSeconds: taskRef.ChargeRefSeconds,
+		}
+		if err := v.refundCharge(ctx, execCtx, taskRef.TaskID, amount, model, msg, extra); err != nil {
+			log.Printf("[VideoExecutor] ⚠️ 转存失败收场的退费也失败了（需人工核对）: %v", err)
+			msg = fmt.Sprintf("视频转存失败且退费失败，请联系管理员（exec=%d node=%s）", execCtx.GetExecutionID(), nodeID)
+		} else {
+			// 钱退了 → 登记必须消费掉：否则重试会复用该任务不扣费出片（免费），
+			// 或者按已退金额再退一次（双退费）
+			llm.TakeAsyncTaskRef(execCtx.GetExecutionID(), nodeID)
+		}
+	}
+	return &NodeOutput{NodeID: nodeID, Status: "failed", Error: msg}, nil
+}
+
 // ExecutionContext 执行上下文（节点间数据传递）
 type ExecutionContext struct {
 	mu      sync.RWMutex
@@ -61,6 +154,50 @@ type ExecutionContext struct {
 	channel string
 	// executionID 本次执行ID（异步任务登记 / 重启续跑复用已提交任务时用于定位）
 	executionID int64
+	// nonRetryable 本次执行出现了「重试有害」的失败（见 MarkNonRetryable）
+	nonRetryable bool
+	// nodeProgress 节点当前进度文案（由节点执行器写入，如「上游处理中 62%」），
+	// 引擎的 10s 进度心跳会带上它，界面因此能看到上游的真实进展而不只是"已运行 Ns"
+	nodeProgress map[string]string
+}
+
+// SetNodeProgress 记录某节点的进度文案（给心跳用）
+func (ec *ExecutionContext) SetNodeProgress(nodeID, msg string) {
+	if nodeID == "" || msg == "" {
+		return
+	}
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	if ec.nodeProgress == nil {
+		ec.nodeProgress = make(map[string]string)
+	}
+	ec.nodeProgress[nodeID] = msg
+}
+
+// GetNodeProgress 取某节点的进度文案（没有则返回空串）
+func (ec *ExecutionContext) GetNodeProgress(nodeID string) string {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	return ec.nodeProgress[nodeID]
+}
+
+// MarkNonRetryable 标记本次执行失败后**不要重试**。
+//
+// 供节点执行器在「失败已经收口（扣费已退、用户已看到失败），重试反而会更糟」时调用：
+// 典型是上游视频任务轮询超时 —— 自动重试要么重新下发重新扣费（用户以为失败却扣两次），
+// 要么复用那个仍在跑的上游任务（不扣费拿到视频 = 免费出片）。
+// 引擎在层失败返回时会据此给错误打上 apperr.ErrNoRetry，队列识别后不再安排重试。
+func (ec *ExecutionContext) MarkNonRetryable() {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	ec.nonRetryable = true
+}
+
+// NonRetryable 本次执行是否被标记为「失败后不重试」
+func (ec *ExecutionContext) NonRetryable() bool {
+	ec.mu.RLock()
+	defer ec.mu.RUnlock()
+	return ec.nonRetryable
 }
 
 func NewExecutionContext() *ExecutionContext {
@@ -68,6 +205,7 @@ func NewExecutionContext() *ExecutionContext {
 		outputs:          make(map[string]*NodeOutput),
 		upstreamByTarget: make(map[string][]string),
 		nodeDataByID:     make(map[string]json.RawMessage),
+		nodeProgress:     make(map[string]string),
 		projectID:        "",
 		userID:           "",
 	}
@@ -228,6 +366,8 @@ type WorkflowEngine struct {
 	subscribers map[int64]map[chan WorkflowEvent]struct{} // executionID -> set of chans
 	// channelResolver 解析用户最终 AI 渠道（全局策略 + 用户渠道）；nil 时回退 wasu
 	channelResolver func(ctx context.Context, userID string) string
+	// nodeOutputHook 单个节点一有结果就落库的钩子（由 handler 注入，见 SetNodeOutputHook）
+	nodeOutputHook func(ctx context.Context, projectID string, out *NodeOutput)
 }
 
 func NewWorkflowEngine(registry *ExecutorRegistry) *WorkflowEngine {
@@ -240,6 +380,29 @@ func NewWorkflowEngine(registry *ExecutorRegistry) *WorkflowEngine {
 // SetChannelResolver 设置渠道路由回调（由 main.go 注入：全局策略 + 用户渠道 → 最终渠道）
 func (e *WorkflowEngine) SetChannelResolver(fn func(ctx context.Context, userID string) string) {
 	e.channelResolver = fn
+}
+
+// SetNodeOutputHook 注入「单个节点产出后立即落库」的钩子（handler 注入：把该节点产物写进画布）。
+//
+// 为什么要即时落库：原来所有节点产物只在 Execute 全部结束时由 handler 一次性写画布，
+// 中间任何一件事出问题（进程被杀、执行超时、上游卡死、队列重投）都会让
+// 「已经生成并上传到对象存储的结果」只活在内存里 —— 画布仍旧是 running，
+// 用户看到的就是「明明生成了还说生成中」，看门狗/重启续跑也拿不到任何凭据。
+func (e *WorkflowEngine) SetNodeOutputHook(fn func(ctx context.Context, projectID string, out *NodeOutput)) {
+	e.nodeOutputHook = fn
+}
+
+// recordNodeOutput 节点一有结果立即落库（成功/失败都算）。
+//
+// 用独立 ctx + 短超时：执行 ctx 可能已经取消（用户停止/执行超时/进程关停），
+// 但「把这个节点的真相写下去」必须完成，否则又回到「状态没跟上」的老问题。
+func (e *WorkflowEngine) recordNodeOutput(projectID string, out *NodeOutput) {
+	if e.nodeOutputHook == nil || out == nil || projectID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	e.nodeOutputHook(ctx, projectID, out)
 }
 
 // Subscribe 订阅某个 execution 的事件。返回只读 channel；调用方在断开时调 Unsubscribe。
@@ -361,7 +524,13 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 							return
 						case <-t.C:
 							elapsed := time.Since(execStart)
-							log.Printf("[Engine] node %s (%s) still running, elapsed=%v", n.ID, n.Type, elapsed.Round(time.Second))
+							// 进度文案 = 本地耗时 + 上游真实进度（若节点执行器上报了）：
+							// 只有「已运行 12s」时用户无法判断上游到底动没动
+							msg := fmt.Sprintf("已运行 %ds", int(elapsed.Seconds()))
+							if detail := execCtx.GetNodeProgress(n.ID); detail != "" {
+								msg = fmt.Sprintf("%s · %s", msg, detail)
+							}
+							log.Printf("[Engine] node %s (%s) still running, elapsed=%v detail=%q", n.ID, n.Type, elapsed.Round(time.Second), execCtx.GetNodeProgress(n.ID))
 							e.emit(WorkflowEvent{
 								ExecutionID: executionID,
 								EventType:   EventNodeProgress,
@@ -370,7 +539,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 								Data: map[string]interface{}{
 									"elapsed":   elapsed.Seconds(),
 									"elapsedMs": elapsed.Milliseconds(),
-									"message":   fmt.Sprintf("已运行 %ds", int(elapsed.Seconds())),
+									"message":   msg,
 								},
 								Timestamp: time.Now().UnixMilli(),
 							})
@@ -394,11 +563,13 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 					levelErrors = append(levelErrors, err)
 					mu.Unlock()
 
-					execCtx.SetOutput(n.ID, &NodeOutput{
+					noExecOut := &NodeOutput{
 						NodeID: n.ID,
 						Status: "failed",
 						Error:  err.Error(),
-					})
+					}
+					execCtx.SetOutput(n.ID, noExecOut)
+					e.recordNodeOutput(projectID, noExecOut)
 
 					e.emit(WorkflowEvent{
 						ExecutionID: executionID,
@@ -430,6 +601,8 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 					mu.Unlock()
 
 					execCtx.SetOutput(n.ID, failedOutput)
+					// 失败也立即落库：节点失败态与原因必须马上可见（否则页面一关就只剩 idle）
+					e.recordNodeOutput(projectID, failedOutput)
 
 					e.emit(WorkflowEvent{
 						ExecutionID: executionID,
@@ -448,6 +621,10 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 				mu.Lock()
 				outputs[n.ID] = output
 				mu.Unlock()
+
+				// ✅ 产物立即落库：这一刻起，画布/DB 就等于「已经做完的事实」，
+				// 进程再被杀也不会出现「视频已上传、状态还是生成中」
+				e.recordNodeOutput(projectID, output)
 
 				e.emit(WorkflowEvent{
 					ExecutionID: executionID,
@@ -488,6 +665,11 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 			})
 			// 即使失败也保存已收集的输出
 			e.saveOutputs(outputs)
+			// 该层里有节点把失败标成「不重试」（如视频轮询超时：钱已退、界面已显示失败，
+			// 重试要么重复扣费、要么复用旧任务免费出片）→ 给错误打标记，队列据此跳过重试
+			if execCtx.NonRetryable() {
+				return fmt.Errorf("%w: level %d failed: %v", apperr.ErrNoRetry, levelIdx, levelErrors)
+			}
 			return fmt.Errorf("level %d failed: %v", levelIdx, levelErrors)
 		}
 	}
@@ -1180,9 +1362,27 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	ownURLs := make([]string, 0, len(generatedURLs))
 	thumbURLs := make([]string, 0, len(generatedURLs))
 	for idx, generatedURL := range generatedURLs {
-		imageInfo, dlErr := i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID(), width, height)
+		// 转存带重试：失败一次就回退上游临时 URL 的话，用户过一阵拿到的是死链
+		// （图确实生成过、钱也扣了）。多数失败是瞬时网络问题，重试即可救回。
+		var imageInfo *imageInfo
+		var dlErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			imageInfo, dlErr = i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID(), width, height)
+			if dlErr == nil {
+				break
+			}
+			log.Printf("[ImageExecutor] ⚠️ 下载转存失败(idx=%d 第%d/3次): %v", idx, attempt, dlErr)
+			if attempt < 3 {
+				select {
+				case <-ctx.Done():
+					dlErr = ctx.Err()
+					attempt = 3
+				case <-time.After(time.Duration(attempt) * 3 * time.Second):
+				}
+			}
+		}
 		if dlErr != nil {
-			log.Printf("[ImageExecutor] 下载上传失败(idx=%d)，使用原始URL: %v", idx, dlErr)
+			log.Printf("[ImageExecutor] ❌ 下载上传失败(idx=%d)，回退上游临时 URL（可能过期，需人工核查）: %v", idx, dlErr)
 			ownURLs = append(ownURLs, generatedURL)
 			thumbURLs = append(thumbURLs, "")
 		} else {
@@ -1557,12 +1757,26 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			return nil, chargeErr
 		}
 		taskRef.ChargedAmount = chargedAmount
+		// 模型名随登记落盘：看门狗退费按登记写账单（渠道由 client 侧登记真实调用渠道）
+		taskRef.Model = model
 		// 计费口径随任务登记落盘：进程重启后若该任务不可复用，退费按同一口径写账单
 		taskRef.ChargeResolution = chargeDetail.Resolution
 		taskRef.ChargeSeconds = chargeDetail.Seconds
 		taskRef.ChargeRefSeconds = chargeDetail.RefVideoSeconds
 	}
 	ctx = llm.WithAsyncTaskHolder(ctx, taskRef)
+	// 把上游真实进度透出到节点进度：轮询每 5s 报一次「上游处理中 62%」，
+	// 引擎的 10s 心跳带上它 → 界面显示「已运行 3m20s · 上游处理中 62%」
+	videoStart := time.Now()
+	ctx = llm.WithProgressReporter(ctx, func(msg string, percent int) {
+		waited := time.Since(videoStart).Round(time.Second)
+		if percent > 0 {
+			msg = fmt.Sprintf("%s %d%% · 已等待 %s", msg, percent, waited)
+		} else {
+			msg = fmt.Sprintf("%s · 已等待 %s", msg, waited)
+		}
+		execCtx.SetNodeProgress(node.ID, msg)
+	})
 
 	// 调用视频生成API；注入用户渠道供多 token 路由
 	videoURL, err := v.videoClient.GenerateVideo(
@@ -1580,6 +1794,13 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	)
 	if err != nil {
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
+		// 这类失败（轮询超时 / 执行预算耗尽 / 用户主动停止）：本次扣费马上要退给用户、
+		// 界面也会显示失败，自动重试只会「重复扣费」或「复用仍在跑的上游任务免费出片」
+		// → 标记不重试，交给用户自己决定
+		if isNoRetryVideoFailure(err) {
+			execCtx.MarkNonRetryable()
+			log.Printf("[VideoExecutor] ⛔ 该失败不自动重试（本次扣费将退还，由用户决定是否重新生成）node=%s err=%v", node.ID, err)
+		}
 		if resumeRef != nil {
 			// 复用失败：该上游任务已不可用（过期/已失败），退还当初下发它的那笔扣费 ——
 			// 重试会重新下发并重新扣费，不退的话用户等于为一个拿不到结果的任务白付一次。
@@ -1596,7 +1817,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					Seconds:         ref.ChargeSeconds,
 					RefVideoSeconds: ref.ChargeRefSeconds,
 				}
-				if refundErr := refundWithFreshCtx(ctx, v.biller, execCtx.GetUserID(), ref.ChargedAmount, service.BillingActionVideo, model, "视频生成", reason, resumeExtra); refundErr != nil {
+				if refundErr := v.refundCharge(ctx, execCtx, ref.TaskID, ref.ChargedAmount, model, reason, resumeExtra); refundErr != nil {
 					log.Printf("[VideoExecutor] 复用失败退费失败: %v", refundErr)
 					// 放回登记：后续重试还能把这次扣费退掉，避免用户白付
 					llm.SaveAsyncTaskRef(ref)
@@ -1607,8 +1828,17 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			}
 		} else if chargedAmount > 0 {
 			// API调用失败，退还已扣费用（口径用本次扣费的那一份，退费账单与扣费账单一致）
-			if refundErr := refundWithFreshCtx(ctx, v.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionVideo, model, "视频生成", err.Error(), chargeDetail); refundErr != nil {
+			if refundErr := v.refundCharge(ctx, execCtx, taskRef.TaskID, chargedAmount, model, err.Error(), chargeDetail); refundErr != nil {
 				log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
+			} else {
+				// 退费成功 → 立刻消费掉这次的任务登记。
+				// 登记只能对应「一笔尚未退还的扣费」：留着它，队列重试会命中登记走复用路径 ——
+				// 复用成功即不扣费拿到视频（免费出片），复用失败则按已退金额再退一次（双退费）。
+				// GETDEL 原子认领：并发副本里只有一个能消费掉，不会误删他次的登记。
+				if claimed := llm.TakeAsyncTaskRef(execID, node.ID); claimed != nil {
+					log.Printf("[VideoExecutor] 已消费任务登记（该笔扣费已退还，重试将重新下发并扣费）: taskID=%s amount=%d",
+						claimed.TaskID, claimed.ChargedAmount)
+				}
 			}
 		}
 		return &NodeOutput{
@@ -1622,19 +1852,36 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	log.Printf("[VideoExecutor] ✅ 视频生成成功: nodeId=%s videoUrl=%s", node.ID, videoURL)
 
-	// 结果已取回，任务登记不再需要（避免后续误复用已消费的任务）
-	llm.ClearAsyncTaskRef(execID, node.ID)
-
-	// 下载视频并使用 FileUploadService 上传到 users/<userID>/canvas/<projectID>/（与图片保存机制一致）
-	ownVideoURL, dlErr := v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID())
-	if dlErr != nil {
-		log.Printf("[VideoExecutor] ⚠️ 视频下载上传失败，使用原始URL: %v", dlErr)
-		ownVideoURL = videoURL
-	} else {
-		log.Printf("[VideoExecutor] ✅ 视频已保存: original=%s -> ownURL=%s", videoURL, ownVideoURL)
+	// 下载视频并使用 FileUploadService 上传到 users/<userID>/canvas/<projectID>/（与图片保存机制一致）。
+	// 必须转存成功才算交付：原来失败时直接拿上游的临时 URL 当成功结果 ——
+	// 那个 URL 有有效期，用户过一阵再看就是死链，而账单早就扣了（假成功）。
+	var ownVideoURL string
+	var dlErr error
+	const downloadAttempts = 3
+	for attempt := 1; attempt <= downloadAttempts; attempt++ {
+		ownVideoURL, dlErr = v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID())
+		if dlErr == nil {
+			break
+		}
+		log.Printf("[VideoExecutor] ⚠️ 视频下载转存失败（第 %d/%d 次）: %v", attempt, downloadAttempts, dlErr)
+		if attempt < downloadAttempts {
+			select {
+			case <-ctx.Done():
+				dlErr = ctx.Err()
+				attempt = downloadAttempts
+			case <-time.After(time.Duration(attempt) * 5 * time.Second):
+			}
+		}
 	}
+	if dlErr != nil {
+		return v.handleDownloadFailure(ctx, execCtx, node.ID, model, videoURL, dlErr, taskRef, chargeDetail)
+	}
+	log.Printf("[VideoExecutor] ✅ 视频已保存: original=%s -> ownURL=%s", videoURL, ownVideoURL)
 
-	// 记录生成历史
+	// 记录生成历史。
+	// 这条记录不只是「历史」：它是流程之外唯一一份「该节点确实交付了」的凭据 ——
+	// 看门狗/排障靠它区分「结果已交付、只是执行状态没写」与「真失败」，
+	// 所以要在清理任务登记之前写，并且用 detached ctx（不随执行 ctx 取消而丢）。
 	if ownVideoURL != "" && v.generationHistoryService != nil {
 		userID := execCtx.GetUserID()
 		projectID := execCtx.GetProjectID()
@@ -1644,6 +1891,12 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			}
 		}
 	}
+
+	// 产物已落库（对象存储 + 生成历史），任务登记才真正不再需要。
+	// 放在这里而不是「拿到上游 URL 就清」：上传/落库期间进程若被杀，登记还在，
+	// 后续重试可以直接复用那个已完成的上游任务把视频取回来（不重复扣费），
+	// 而不是留下一笔「已扣费、产物却没落下来」的账。
+	llm.ClearAsyncTaskRef(execID, node.ID)
 
 	return &NodeOutput{
 		NodeID: node.ID,

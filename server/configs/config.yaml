@@ -52,7 +52,22 @@ queue:
   stream: "libtv:gen:tasks"
   dead_stream: "libtv:gen:dead"
   consumer_group: "libtv:gen"
-  visibility_timeout_sec: 900   # 超过此时长未确认即视为 worker 中断，重新认领续跑
+  # 租约时长（同时是「处理中锁 TTL」与「reclaim 认定 worker 失联的 idle 阈值」）。
+  # worker 执行期间会**定期续租**（延长锁 + 重置消息 idle，见 startLeaseRenewal），
+  # 所以长任务（视频轮询最长 25 分钟）不会被误判失联；而 worker 真死掉时，
+  # 最长一个租约周期就会被 reclaim 认领续跑 —— 续租之前的问题正是「没有续租」，
+  # 于是跑超租约的执行会被抢走并与原 worker 并发重跑（重复扣费/重复退费）。
+  visibility_timeout_sec: 900
+
+# 视频生成（上游异步任务）轮询预算
+#   • 轮询 = 每 poll_interval_sec 查一次上游任务状态，直到出片或超时
+#   • poll_timeout_sec 必须显著小于执行超时（handler 的 executionTimeout = 30 分钟 = 1800s），
+#     否则执行 ctx 先到期，失败退费与画布收尾只能走 deadline 路径
+#   • 历史实现固定 10 分钟（120 次 × 5s）：慢视频（长/多参考、高分辨率）常需 10~25 分钟，
+#     到点即整单作废；这里默认 25 分钟，留 5 分钟给退费与收尾
+video:
+  poll_interval_sec: 5
+  poll_timeout_sec: 1500        # 25 分钟
 
 # 生成接口限流（防狂点）
 ratelimit:

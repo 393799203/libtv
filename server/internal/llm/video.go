@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,16 +19,45 @@ import (
 	"libtv/internal/config"
 )
 
+// ErrVideoPollTimeout 上游视频任务轮询超时（任务一直在 processing，预算用尽）。
+//
+// 单独做成哨兵错误，是为了让上层（executor → engine → 队列）能识别出「这类失败不该自动重试」：
+// 本次扣费会在节点内退还并告知用户失败，自动重试要么重复扣费、要么复用旧任务变成免费出片。
+var ErrVideoPollTimeout = errors.New("视频任务轮询超时")
+
+// VideoPollConfig 上游异步视频任务的轮询预算。
+//
+// 轮询是「每 Interval 查一次任务状态，直到出片或超时」，Timeout 决定总等待上限。
+// 该预算必须**显著小于**执行超时（handler.executionTimeout = 30 分钟）：
+// 否则执行 ctx 先到期，节点失败与退费收尾只能走 deadline 路径（历史上执行 1256/1258 即如此）。
+type VideoPollConfig struct {
+	Interval time.Duration // 每次轮询的间隔（<=0 用默认 5s）
+	Timeout  time.Duration // 轮询总预算（<=0 用默认 25 分钟）
+}
+
+// 默认轮询预算。
+//
+// 历史值固定为 120 次 × 5s = 10 分钟，线上实证（2026-10-03 执行 1258）视频恰好跑到
+// 10m0.265s 被判超时 —— 也就是把 executionTimeout 从 10 分钟抬到 30 分钟**没有任何效果**，
+// 真正的木板是这个固定次数。慢视频（长参考视频/多参考/高分辨率）出片常态 10~20 分钟，
+// 因此默认给 25 分钟，留 5 分钟给「失败退费 + 画布收尾」。
+const (
+	defaultVideoPollInterval = 5 * time.Second
+	defaultVideoPollTimeout  = 25 * time.Minute
+)
+
 // VideoClient 视频生成客户端（华数TokenHub doubao-seedance）
 type VideoClient struct {
-	apiKey  string
-	baseURL string
-	httpCli *http.Client
-	router  *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
+	apiKey       string
+	baseURL      string
+	httpCli      *http.Client
+	router       *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
+	pollInterval time.Duration  // 轮询间隔
+	pollTimeout  time.Duration  // 轮询总预算
 }
 
 // NewVideoClient 创建视频生成客户端
-func NewVideoClient(cfg config.AIConfig, providerName string, router ...*ChannelRouter) *VideoClient {
+func NewVideoClient(cfg config.AIConfig, providerName string, poll VideoPollConfig, router ...*ChannelRouter) *VideoClient {
 	p := cfg.Providers[providerName]
 
 	var r *ChannelRouter
@@ -35,9 +66,11 @@ func NewVideoClient(cfg config.AIConfig, providerName string, router ...*Channel
 	}
 
 	return &VideoClient{
-		apiKey:  p.APIKey,
-		baseURL: p.BaseURL,
-		router:  r,
+		apiKey:       p.APIKey,
+		baseURL:      p.BaseURL,
+		router:       r,
+		pollInterval: poll.Interval,
+		pollTimeout:  poll.Timeout,
 		httpCli: &http.Client{
 			Timeout: 10 * time.Minute, // 视频生成耗时较长
 			Transport: &http.Transport{
@@ -47,6 +80,28 @@ func NewVideoClient(cfg config.AIConfig, providerName string, router ...*Channel
 			},
 		},
 	}
+}
+
+// pollBudget 折算轮询间隔与最大次数；未配置时回退默认（5s × 25 分钟 = 300 次）。
+func (c *VideoClient) pollBudget() (time.Duration, int) {
+	interval, budget := c.pollInterval, c.pollTimeout
+	if interval <= 0 {
+		interval = defaultVideoPollInterval
+	}
+	if budget <= 0 {
+		budget = defaultVideoPollTimeout
+	}
+	attempts := int(budget / interval)
+	if attempts < 1 {
+		attempts = 1
+	}
+	return interval, attempts
+}
+
+// pollBudgetText 预算的可读描述，用于超时报错
+func (c *VideoClient) pollBudgetText() string {
+	interval, attempts := c.pollBudget()
+	return (time.Duration(attempts) * interval).Round(time.Second).String()
 }
 
 // creds 按 ctx 渠道解析 apiKey/baseURL（router 非空时动态切换）
@@ -343,13 +398,13 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (string, error) {
 	apiKey, baseURL := c.creds(ctx)
 	pollURL := fmt.Sprintf("%s/contents/generations/tasks/%s", baseURL, taskID)
-	maxAttempts := 120 // 每5秒一次，共10分钟
+	interval, maxAttempts := c.pollBudget()
 
 	for i := 0; i < maxAttempts; i++ {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(interval):
 		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
@@ -455,10 +510,11 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 			return "", fmt.Errorf("电信视频任务失败: %s", string(respBody))
 		default:
 			log.Printf("[VideoGen] 电信任务轮询 (attempt %d): status=%s", i+1, status)
+			reportProgress(ctx, fmt.Sprintf("上游处理中（%s）", status), 0)
 		}
 	}
 
-	return "", fmt.Errorf("电信视频任务超时（10分钟）: taskID=%s", taskID)
+	return "", fmt.Errorf("%w（电信，已等待 %s）: taskID=%s", ErrVideoPollTimeout, c.pollBudgetText(), taskID)
 }
 
 // ==================== 电信 wan3.0-video（DashScope 异步协议）====================
@@ -610,13 +666,13 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (string, error) {
 	apiKey, baseURL := c.creds(ctx)
 	pollURL := fmt.Sprintf("%s/tasks/%s", baseURL, taskID)
-	maxAttempts := 120 // 每5秒一次，共10分钟
+	interval, maxAttempts := c.pollBudget()
 
 	for i := 0; i < maxAttempts; i++ {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(interval):
 		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
@@ -698,10 +754,11 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			return "", fmt.Errorf("电信 wan3.0 视频任务失败: %s %s", code, msg)
 		default:
 			log.Printf("[VideoGen] 电信 wan3.0 任务轮询 (attempt %d): status=%s", i+1, status)
+			reportProgress(ctx, fmt.Sprintf("上游处理中（%s）", status), 0)
 		}
 	}
 
-	return "", fmt.Errorf("电信 wan3.0 视频任务超时（10分钟）: taskID=%s", taskID)
+	return "", fmt.Errorf("%w（电信 wan3.0，已等待 %s）: taskID=%s", ErrVideoPollTimeout, c.pollBudgetText(), taskID)
 }
 
 // ==================== 豆包 Seedance 系列（火山引擎）====================
@@ -1113,13 +1170,13 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string, error) {
 	apiKey, baseURL := c.creds(ctx)
 	url := fmt.Sprintf("%s/video/generations/%s", baseURL, taskID)
-	maxAttempts := 120 // 最多轮询120次（每5秒一次，共10分钟）
+	interval, maxAttempts := c.pollBudget()
 
 	for i := 0; i < maxAttempts; i++ {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.After(interval):
 		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -1169,10 +1226,29 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 			}
 			return "", fmt.Errorf("task failed: %s", reason)
 		}
-		// PROCESSING → 继续轮询
+		// PROCESSING → 继续轮询，同时把上游真实进度透出（"62%" → 62）
+		reportProgress(ctx,
+			fmt.Sprintf("上游处理中 %s", strings.TrimSpace(taskResp.Data.Progress)),
+			parsePercent(taskResp.Data.Progress))
 	}
 
-	return "", fmt.Errorf("poll timeout after %d attempts", maxAttempts)
+	return "", fmt.Errorf("%w（已轮询 %d 次 / %s）", ErrVideoPollTimeout, maxAttempts, c.pollBudgetText())
+}
+
+// parsePercent 把上游的进度字符串（"100%" / "62" / ""）解析成 0-100 的整数，失败返回 0
+func parsePercent(raw string) int {
+	raw = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(raw), "%"))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0
+	}
+	if n > 100 {
+		n = 100
+	}
+	return n
 }
 
 // extractVideoAPIErrorMessage 从视频 API 错误响应体中提取可读的真实原因。

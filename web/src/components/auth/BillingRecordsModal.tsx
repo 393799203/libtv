@@ -4,6 +4,7 @@ import { SearchOutlined, ReloadOutlined, QuestionCircleOutlined } from '@ant-des
 import dayjs from 'dayjs';
 import { billingApi, type BillingRecord, type BillingType } from '@/services/billingApi';
 import { pricingApi } from '@/services/pricingApi';
+import { channelLabel, channelTagColor } from '@/constants/channel';
 
 const { RangePicker } = DatePicker;
 
@@ -214,6 +215,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                                 title={
                                   <div className="text-[12px] leading-5">
                                     <div>场景：{r.scene || '-'}</div>
+                                    <div>渠道：{channelLabel(r.channel) || '-'}</div>
                                     <div>模型：{r.model || '-'}</div>
                                     <div>动作：{r.action || '-'}</div>
                                     <div>备注：{r.remark || '-'}</div>
@@ -244,6 +246,16 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                             </Tooltip>
                           ) : (
                             <div className="flex items-center gap-1.5">
+                              {/* 渠道用标签表示（华数/电信），不再拼在模型名前：
+                                   模型列只显示纯模型 ID，一眼能分清「哪个模型」和「走的哪条渠道」 */}
+                              {channelLabel(r.channel) && (
+                                <Tag
+                                  color={channelTagColor(r.channel)}
+                                  className="!m-0 shrink-0 !text-[11px] !leading-4"
+                                >
+                                  {channelLabel(r.channel)}
+                                </Tag>
+                              )}
                               <span className="truncate">{r.model || '-'}</span>
                               {/* 视频按「分辨率档位 × 计费时长」定价，这两项直接决定金额，挂在模型后面最直观；
                                   带参考视频输入时计费时长 = 输出时长 + 参考视频时长，悬停可看拆分 */}

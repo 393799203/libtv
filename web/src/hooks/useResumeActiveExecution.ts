@@ -35,6 +35,30 @@ function countRestored(ids: Set<string>): number {
 }
 
 /**
+ * 清理画布上残留的「生成中」节点。
+ *
+ * 只在「后端确认该项目没有进行中的执行」时调用：此时 canvas 里任何 running/pending
+ * 都是过期状态（上次生成期间进程被杀、页面被关，或前端在收尾前把 running 存进了画布），
+ * 必须置回 idle —— 否则节点永久转圈、按钮被防重复点击拦住，用户只能刷新且不敢重试。
+ *
+ * 注意：不写画布脏标记以外的东西，也不动 success/failed 的节点。
+ */
+async function clearStaleRunningNodes(projectId: string): Promise<void> {
+  const ready = await waitCanvasReady(projectId);
+  if (!ready) return;
+  const store = useCanvasStore.getState();
+  const stale = store.nodes.filter(
+    (n) => n.data.status === 'running' || n.data.status === 'pending',
+  );
+  if (stale.length === 0) return;
+  stale.forEach((n) => {
+    store.updateNodeStatus(n.id, 'idle');
+    store.updateNodeData(n.id, { progressMessage: undefined } as never);
+  });
+  console.log('[ResumeActive] 已清理残留的生成中节点:', stale.map((n) => n.id));
+}
+
+/**
  * 进入项目时恢复"仍在进行中的生成"。
  *
  * 背景：生成是在后端队列里跑的，与页面无关；但前端订阅进度用的 executionId
@@ -61,6 +85,10 @@ export function useResumeActiveExecution(projectId: string | null | undefined): 
         if (cancelled) return;
         if (list.length === 0) {
           console.log('[ResumeActive] 该项目没有进行中的生成');
+          // 没有进行中的执行，却仍有节点挂在 running/pending：这是残留状态
+          // （上次生成期间进程被杀/页面被关，前端把 running 存进了画布）。
+          // 不清掉的话节点会永久转圈、按钮不可用，用户以为还在生成而不敢动。
+          await clearStaleRunningNodes(projectId);
           return;
         }
 
@@ -70,7 +98,13 @@ export function useResumeActiveExecution(projectId: string | null | undefined): 
           console.warn('[ResumeActive] 画布未在超时内就绪，放弃恢复节点状态');
           // 订阅仍然要建，保证结果能回填
           list.forEach((item) =>
-            useExecutionStore.getState().addActiveStream({ projectId, executionId: item.executionId }),
+            useExecutionStore
+              .getState()
+              .addActiveStream({
+                projectId,
+                executionId: item.executionId,
+                nodeIds: item.nodeIds ?? [],
+              }),
           );
           return;
         }
@@ -106,7 +140,13 @@ export function useResumeActiveExecution(projectId: string | null | undefined): 
         }
 
         list.forEach((item) =>
-          useExecutionStore.getState().addActiveStream({ projectId, executionId: item.executionId }),
+          useExecutionStore
+            .getState()
+            .addActiveStream({
+              projectId,
+              executionId: item.executionId,
+              nodeIds: item.nodeIds ?? [],
+            }),
         );
         useExecutionStore.getState().setExecutionStatus('running');
 

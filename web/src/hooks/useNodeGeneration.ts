@@ -21,7 +21,7 @@ export interface UseNodeGenerationResult {
   /** 错误信息 */
   error: string | null;
   /** 单节点生成 */
-  generate: (params?: { mode?: 'single' | 'downstream' }) => Promise<void>;
+  generate: () => Promise<void>;
   /** 暂存画布（只保存不生成） */
   saveCanvas: () => Promise<void>;
   /** 手动清掉错误 */
@@ -92,26 +92,29 @@ export function useNodeGeneration(
         return;
       }
 
-      const mode = params?.mode ?? 'single';
-
       // 1) 立即设置为生成中（按钮马上显示状态）
       setGeneratingNodeId(nodeId);
 
-      // 2) 持久化画布
-      await persistCanvas();
+      // 2) 持久化画布 + 置节点为运行中
+      //    这两步必须在 try 里：原来 persistCanvas 在 try 之外，一旦存盘抛错（网络/401/4xx）
+      //    就再没人清 generatingNodeId —— 按钮永久停在「生成中…」，重试又被防重复点击拦住，
+      //    用户只能刷新页面。
+      try {
+        await persistCanvas();
 
-      // 3) 设置节点运行状态
-      if (mode !== 'downstream') {
+        // 3) 设置节点运行状态（只跑这一个节点，直接置运行中）
         updateNodeData(nodeId, { status: 'running' } as Partial<LibTVNodeData>);
         updateNodeStatus(nodeId, 'running');
+      } catch (e) {
+        console.error('[useNodeGeneration] 生成前置步骤失败（画布存盘/置状态）:', e);
+        setGeneratingNodeId(null);
+        updateNodeStatus(nodeId, 'idle');
+        return;
       }
 
       // 4) 调后端 API
       try {
-        const resp = await workflowApi.execute(projectId, {
-          startNodeId: nodeId,
-          mode,
-        });
+        const resp = await workflowApi.execute(projectId, nodeId);
         if (resp?.executionId != null) {
           setCurrentExecution({
             id: resp.executionId,

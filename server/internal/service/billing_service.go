@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 
 	"libtv/internal/llm"
 	"libtv/internal/model"
@@ -109,6 +110,37 @@ func billingChannel(ctx context.Context) string {
 		return ch
 	}
 	return "wasu"
+}
+
+// legacyChannelPrefixes 历史账单把渠道拼在模型名前（wasu-xxx / dianxin-xxx）。
+// 读取时按前缀拆回去，展示口径统一为「渠道标签 + 纯模型 ID」。
+var legacyChannelPrefixes = []string{"wasu-", "dianxin-"}
+
+// NormalizeBillingChannel 规范化一条账单记录的「渠道 + 模型」，供展示使用。
+//
+// 新记录：渠道在独立的 channel 列里，模型列本来就是纯模型 ID，直接返回。
+// 历史记录：channel 为空且模型名带渠道前缀（wasu-cdance2.5-0807）→ 拆成
+// channel=wasu + model=cdance2.5-0807。**只改返回值，不动数据库里的原始文本**，
+// 保证账本可追溯（历史那串值本身也是"当初确实走的这个渠道"的证据）。
+//
+// 注意：只在带前缀时拆分，且真实模型 ID 不会以 wasu-/dianxin- 开头
+// （线上核过：cdance2.0-0807 / doubao-* / wan3.0-video / deepseek-* 等），不会误拆。
+func NormalizeBillingChannel(rec *model.BillingRecord) {
+	if rec == nil {
+		return
+	}
+	for _, prefix := range legacyChannelPrefixes {
+		if !strings.HasPrefix(rec.Model, prefix) {
+			continue
+		}
+		// 模型列永远只展示纯模型 ID：前缀一律剥掉
+		rec.Model = strings.TrimPrefix(rec.Model, prefix)
+		// 渠道以独立列为准（新记录、以及人工校正过的历史记录）；该列为空才用前缀兜底
+		if rec.Channel == "" {
+			rec.Channel = strings.TrimSuffix(prefix, "-")
+		}
+		return
+	}
 }
 
 // lookupPriceModelID 将调用方传入的模型标识（配置 ID 或 API model_id）在**指定渠道内**归一为配置 ID。
@@ -320,22 +352,16 @@ func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelNa
 	if err != nil {
 		return cost, err
 	}
-	// 账单模型显示「渠道-模型」：从 ctx 取渠道（executor 已注入），
-	// 无渠道时回退 wasu；历史纯 ID 记录保持原样（无前缀）
-	channel := "wasu"
-	if ch := llm.ChannelFrom(ctx); ch != "" {
-		channel = ch
-	}
-	displayModel := modelName
-	if displayModel != "" {
-		displayModel = channel + "-" + displayModel
-	}
+	// 账单记录实际调用的渠道（executor 已注入 ctx），无渠道时回退 wasu。
+	// 渠道独立成列，模型列只存纯模型 ID —— 不再拼成「wasu-模型名」这种四不像。
+	channel := billingChannel(ctx)
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:     userID,
 		Type:       "deduct",
 		Amount:     cost,
 		Action:     action,
-		Model:      displayModel,
+		Model:      modelName,
+		Channel:    channel,
 		Scene:      scene,
 		Resolution: extra.Resolution,
 		Duration:   extra.Seconds,
@@ -388,21 +414,15 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 		}
 		remark = fmt.Sprintf("%s失败退还：%s", scene, reason)
 	}
-	// 退费账单模型同样带渠道前缀，与扣费记录显示一致
-	channel := "wasu"
-	if ch := llm.ChannelFrom(ctx); ch != "" {
-		channel = ch
-	}
-	displayModel := modelName
-	if displayModel != "" {
-		displayModel = channel + "-" + displayModel
-	}
+	// 退费账单与扣费同口径：渠道同样独立成列（原样退回当初那条记录里的渠道）
+	channel := billingChannel(ctx)
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:     userID,
 		Type:       "refund",
 		Amount:     amount,
 		Action:     action,
-		Model:      displayModel,
+		Model:      modelName,
+		Channel:    channel,
 		Scene:      scene,
 		Resolution: extra.Resolution,
 		Duration:   extra.Seconds,

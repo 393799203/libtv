@@ -13,6 +13,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"libtv/internal/apperr"
 	"libtv/internal/config"
 )
 
@@ -34,7 +36,6 @@ type Task struct {
 	ProjectID   string `json:"project_id"`
 	UserID      string `json:"user_id"`
 	StartNodeID string `json:"start_node_id"`
-	Mode        string `json:"mode"`  // ""=全图 / single=仅该节点 / downstream=该节点及后代
 	Retry       int    `json:"retry"` // 已重试次数
 }
 
@@ -288,6 +289,15 @@ func (q *Queue) handle(ctx context.Context, consumer, msgID string, values map[s
 		defer q.rdb.Del(context.Background(), lockKey)
 	}
 
+	// 长任务续租：视频类执行的单次 attempt 上限是 30 分钟（其中上游轮询可达 25 分钟），
+	// 而处理中锁的 TTL 与 reclaim 的 MinIdle 是同一个值 —— 不续租的话，执行跑到 TTL 就会被
+	// reclaim 抢走、并在锁过期后与本 worker **并发重跑同一个 execution**
+	// （线上实证：2026-10-03 01:17–01:19 一个 20 秒窗口里 5 笔扣费退了 8 次）。
+	// 续租做两件事：延长处理中锁 + 重置消息 idle 时间（不动投递计数），
+	// 让「我还在跑」这件事对 reclaim 可见。执行收尾（含 ACK）时停掉。
+	stopRenewal := q.startLeaseRenewal(consumer, msgID, lockKey)
+	defer stopRenewal()
+
 	log.Printf("[Queue] ▶ 开始执行: execution=%d project=%s 第%d次尝试", task.ExecutionID, task.ProjectID, task.Retry+1)
 	start := time.Now()
 
@@ -309,6 +319,14 @@ func (q *Queue) handle(ctx context.Context, consumer, msgID string, values map[s
 
 	// 失败：按指数退避重试，超出次数进死信
 	log.Printf("[Queue] ❌ 执行失败: execution=%d 耗时=%s err=%v", task.ExecutionID, elapsed, runErr)
+	// 「重试有害」的失败（如视频轮询超时：扣费已退、界面已显示失败）：
+	// 重试要么重新下发重新扣费（用户以为失败却扣两次），要么复用旧上游任务（免费出片）。
+	// 执行状态已由 handler 落为 failed，这里直接确认消息，不重试也不进死信
+	if errors.Is(runErr, apperr.ErrNoRetry) {
+		log.Printf("[Queue] ⛔ 失败被标记为不重试，直接确认: execution=%d", task.ExecutionID)
+		q.ack(msgID)
+		return
+	}
 	task.Retry++
 	if task.Retry <= q.cfg.MaxRetry {
 		backoff := retryBackoff(task.Retry)
@@ -346,6 +364,79 @@ func (q *Queue) toDead(values map[string]interface{}, reason string) {
 		return
 	}
 	log.Printf("[Queue] ☠ 转入死信: %s", reason)
+}
+
+// HasExecutionLock 判断某个执行当前是否有 worker 在跑（处理中锁存在即为在跑）。
+//
+// 看门狗用它区分「真卡死」与「只是跑得久」：锁由 worker 持有并**定期续租**
+// （见 startLeaseRenewal），所以锁在 = 有人活着在推进，不该被判失败。
+func (q *Queue) HasExecutionLock(ctx context.Context, execID int64) bool {
+	if q == nil || q.rdb == nil || execID <= 0 {
+		return false
+	}
+	c, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	n, err := q.rdb.Exists(c, fmt.Sprintf("lock:exec:%d", execID)).Result()
+	return err == nil && n > 0
+}
+
+// startLeaseRenewal 周期性续租「处理中锁 + 队列消息」，返回停止函数（幂等）。
+//
+// 间隔取可见性超时的 1/3（上限 5 分钟、下限 30 秒）：任何时刻都留有两倍以上余量，
+// 即使 Redis 短暂不可用也不会立刻失去租约。
+//
+// 注意 XClaimJustID 的语义：XCLAIM 会把消息的「最后投递时间」重置为现在（这正是我们要的），
+// JUSTID 只是不把投递计数 +1（避免续租把重试次数耗光）。
+// 认领到同一个 consumer 名下，消息归属不变。
+func (q *Queue) startLeaseRenewal(consumer, msgID, lockKey string) func() {
+	ttl := time.Duration(q.cfg.VisibilityTimeoutSec) * time.Second
+	if ttl <= 0 {
+		ttl = 900 * time.Second
+	}
+	interval := ttl / 3
+	if interval > 5*time.Minute {
+		interval = 5 * time.Minute
+	}
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+
+	done := make(chan struct{})
+	var once sync.Once
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+			}
+			// 独立 ctx：执行 ctx 可能已取消（如执行超时），续租本身仍应完成
+			c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := q.rdb.Expire(c, lockKey, ttl).Err(); err != nil && err != redis.Nil {
+				log.Printf("[Queue] ⚠️ 续租处理中锁失败 (%s): %v", lockKey, err)
+			}
+			claimArgs := &redis.XClaimArgs{
+				Stream:   q.cfg.Stream,
+				Group:    q.cfg.ConsumerGroup,
+				Consumer: consumer,
+				MinIdle:  0, // 无条件重置投递时间
+				Messages: []string{msgID},
+			}
+			if err := q.rdb.XClaimJustID(c, claimArgs).Err(); err != nil && err != redis.Nil {
+				log.Printf("[Queue] ⚠️ 续租队列消息失败 (%s): %v", msgID, err)
+			}
+			cancel()
+		}
+	}()
+	return func() {
+		once.Do(func() { close(done) })
+		wg.Wait()
+	}
 }
 
 // retryBackoff 指数退避：30s → 1m → 2m → 4m（上限 10 分钟）

@@ -9,6 +9,7 @@ import (
 	"libtv/internal/middleware"
 	"libtv/internal/pkg/response"
 	"libtv/internal/repository"
+	"libtv/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -83,6 +84,11 @@ func (h *BillingHandler) List(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "获取费用明细失败")
 		return
+	}
+	// 展示口径统一：渠道单独给前端打标签，模型列只给纯模型 ID。
+	// 历史记录（渠道拼在模型名里）在这里拆开，不改动数据库里的原始账本文本。
+	for i := range records {
+		service.NormalizeBillingChannel(&records[i])
 	}
 	response.OK(c, gin.H{
 		"items":     records,

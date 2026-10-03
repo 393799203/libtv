@@ -39,9 +39,14 @@ psql_q() {
   docker compose exec -T db psql -U libtv -d libtv -t -A -c "$1" 2>/dev/null | tr -d '[:space:]'
 }
 
-# 新鲜活跃数（真正可能在跑的）与陈旧僵尸数
+# 活跃执行数：**任何** pending/running 都算「可能正在跑」。
+#
+# 原来只看 FRESH_WINDOW 以内的记录，把更老的 running 当"僵尸"直接重启 —— 结果一条
+# 跑了 20 分钟（视频轮询最长 25 分钟）的正常生成会被重启杀掉，任务中断、上游白跑。
+# 现在执行预算固定在 30 分钟（轮询 25 分钟 + 退费收尾），老记录也可能是真的还在跑；
+# 真卡死的由看门狗（35 分钟）自动收口，所以这里一律保守拦下。
 active_fresh() {
-  psql_q "SELECT count(*) FROM workflow_executions WHERE status IN ('running','pending') AND created_at > now() - interval '${FRESH_WINDOW} minutes';"
+  psql_q "SELECT count(*) FROM workflow_executions WHERE status IN ('running','pending');"
 }
 stale_zombie() {
   psql_q "SELECT count(*) FROM workflow_executions WHERE status IN ('running','pending') AND created_at <= now() - interval '${FRESH_WINDOW} minutes';"
@@ -63,7 +68,7 @@ gate() {
     fi
     log "🛑 有 $n 个生成进行中 → 跳过后端重启（前端部署不受影响）"
     log "   镜像已构建；生成结束后执行：./deploy.sh backend"
-    [ "$stale" != "0" ] && log "   另有 $stale 条陈旧 running 记录，可执行：./deploy.sh clean-zombies"
+    [ "$stale" != "0" ] && log "   其中 $stale 条已超过 ${FRESH_WINDOW} 分钟（可能卡死）：看门狗会自动收口，或 FORCE=1 强制重启"
     return 1
   fi
   log "✅ 无进行中的生成，可安全重启后端"

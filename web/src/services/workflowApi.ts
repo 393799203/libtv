@@ -15,21 +15,16 @@ export interface ActiveExecutionItem {
   nodeIds: string[];
 }
 
-/** 执行粒度（与后端 handler 的 mode 字段对齐） */
-export type ExecuteMode = '' | 'single' | 'downstream';
-
 export const workflowApi = {
-  // 执行工作流
-  // options.startNodeId: 指定起点节点
-  // options.mode:
-  //   ''         → 全图执行（默认）
-  //   'single'   → 只跑 startNode 一个节点（节点内"生成"按钮）
-  //   'downstream'→ 跑 startNode + 所有下游 BFS 后代（"重新生成下游"按钮）
-  execute: (projectId: string, options?: { startNodeId?: string; mode?: ExecuteMode }) =>
-    api.post<ExecuteResponse>(`/projects/${projectId}/workflows/execute`, {
-      startNodeId: options?.startNodeId,
-      mode: options?.mode ?? '',
-    }),
+  /**
+   * 执行单个节点。
+   *
+   * startNodeId 必填：后端只支持单节点执行 —— 全图执行与"重新生成下游"已下线
+   * （产品里没有入口，API 留着只会被误用：一次不带 startNodeId 的请求会把画布上
+   * 所有节点都生成一遍并逐个扣费）。留空后端会直接 400。
+   */
+  execute: (projectId: string, startNodeId: string) =>
+    api.post<ExecuteResponse>(`/projects/${projectId}/workflows/execute`, { startNodeId }),
 
   // 停止执行
   stop: (projectId: string, executionId: string) =>

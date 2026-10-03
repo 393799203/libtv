@@ -13,12 +13,25 @@ type Config struct {
 	Database  DatabaseConfig  `yaml:"database"`
 	Redis     RedisConfig     `yaml:"redis"`
 	Queue     QueueConfig     `yaml:"queue"`
+	Video     VideoConfig     `yaml:"video"`
 	RateLimit RateLimitConfig `yaml:"ratelimit"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	Storage   StorageConfig   `yaml:"storage"`
 	AI        AIConfig        `yaml:"ai"`
 	Payment   PaymentConfig   `yaml:"payment"`
 	CORS      CORSConfig      `yaml:"cors"`
+}
+
+// VideoConfig 视频生成（上游异步任务）的轮询预算。
+//
+// 轮询是「每 PollIntervalSec 查一次任务状态，直到出片或超时」，PollTimeoutSec 决定总等待上限。
+// 约束：必须**显著小于**执行超时（handler.executionTimeout = 30 分钟 = 1800s），
+// 否则执行 ctx 先到期，节点失败、退费与画布收尾只能走 deadline 路径。
+// 历史实现固定 120 次 × 5s = 10 分钟，慢视频（长参考视频/多参考/高分辨率）常需 10~25 分钟，
+// 到点即整单作废并按失败退费；默认给 25 分钟，留 5 分钟给退费与收尾。
+type VideoConfig struct {
+	PollIntervalSec int `yaml:"poll_interval_sec"` // 轮询间隔（秒，<=0 用默认 5）
+	PollTimeoutSec  int `yaml:"poll_timeout_sec"`  // 轮询总预算（秒，<=0 用默认 1500 = 25 分钟）
 }
 
 // QueueConfig 生成任务队列（Redis Stream）。
