@@ -12,8 +12,10 @@ export const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const;
 export const VIDEO_RESOLUTION_OPTIONS = ['480p', '720p', '1080p', '4K'] as const;
 export type VideoResolutionOption = typeof VIDEO_RESOLUTION_OPTIONS[number];
 
-// wan3.0（阿里万相）支持的画幅比例（其余视频模型不限制；free=自适应，后端映射为 adaptive）
-export const WAN3_VIDEO_ASPECT_RATIOS = ['free', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
+// wan3.0（阿里万相）支持的画幅比例（其余视频模型不限制）。
+// 'adaptive' = 自适应：这是上游（火山 Seedance / 阿里万相）认的协议值，画布与后端都用它。
+// 历史上这个枚举叫 'free'，已统一改名 —— 老画布里的 'free' 由 normalizeAspectRatio 兼容。
+export const WAN3_VIDEO_ASPECT_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
 
 // ==================== 视频时长范围 ====================
 
@@ -41,12 +43,37 @@ export function buildDurationOptions(model?: Pick<ModelOption, 'durationRange'>)
 
 export const QUALITY_OPTIONS = ['低画质', '标准画质', '高画质'] as const;
 
+/**
+ * 画幅比例归一化：把历史枚举值 'free'（以及空值）统一成 'adaptive'。
+ *
+ * 为什么需要：'free' 是早期的画布内部值，现在统一成上游协议同名的 'adaptive'。
+ * 线上已落库的画布里没有任何 'free'（改名前统计：画布表 0 条、执行快照 0 条），
+ * 所以只是防御性兼容 —— 万一有本地草稿或旧版本前端写入过 'free'，读的时候要对上。
+ */
+export function normalizeAspectRatio(value?: string | null): string {
+  if (!value || value === 'free') return 'adaptive';
+  return value;
+}
+
+/**
+ * 画幅比例的**显示**文案：'adaptive'（以及历史值 'free'）要显示成「自适应」。
+ *
+ * 枚举值必须和上游协议同名（adaptive），但界面上不能把协议词直接摊给用户看 ——
+ * 比例按钮上原来渲染的是原始值，于是显示成 "free"（像"免费"）、改名后又显示成
+ * "adaptive"（英文协议词）。凡是把比例当文本显示的地方，一律走这个函数。
+ */
+export function aspectRatioLabel(value?: string | null): string {
+  const v = normalizeAspectRatio(value);
+  if (v === 'adaptive') return '自适应';
+  return v;
+}
+
 // ==================== 比例选项（按行排列，精确匹配截图）====================
 
 export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> = [
   // 第1行：自适应 + 常用竖屏/横屏
   [
-    { value: 'free', label: '自适应' },
+    { value: 'adaptive', label: '自适应' },
     { value: '1:1', label: '1:1' },
     { value: '1:2', label: '1:2' },
     { value: '2:1', label: '2:1' },
@@ -99,7 +126,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     acceptedInputs: ['text', 'script', 'image'],
     defaultModel: 'deepseek-v4-flash',
     defaultResolution: '1K',
-    defaultAspectRatio: 'free',
+    defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
     placeholder: '写下你想讲的故事、场景或角色设定...',
@@ -109,7 +136,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     acceptedInputs: ['text', 'script'],
     defaultModel: 'audio-default',
     defaultResolution: '1K',
-    defaultAspectRatio: 'free',
+    defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: ['model', 'voice', 'speed'],
     placeholder: '输入要转换为语音的文本...',
@@ -119,7 +146,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     acceptedInputs: ['text'],
     defaultModel: 'script-default',
     defaultResolution: '1K',
-    defaultAspectRatio: 'free',
+    defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
     placeholder: '连接上游文本节点后，点击生成剧本分镜...',
@@ -130,7 +157,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     acceptedInputs: [],
     defaultModel: '',
     defaultResolution: '1K',
-    defaultAspectRatio: 'free',
+    defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: [],
     placeholder: '',

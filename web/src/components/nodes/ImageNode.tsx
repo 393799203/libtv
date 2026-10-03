@@ -168,7 +168,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     }
     // 无图片时根据 aspectRatio 计算高度
     const ratio = (data as { aspectRatio?: string }).aspectRatio || '16:9';
-    if (ratio === 'free') return 190; // 自适应保持默认高度
+    if (ratio === 'adaptive' || ratio === 'free') return 190; // 自适应保持默认高度（free 为历史值）
     const parts = ratio.split(':').map(Number);
     if (parts.length !== 2 || !parts[0] || !parts[1]) return 190;
     const [w, h] = parts;

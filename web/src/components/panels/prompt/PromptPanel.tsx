@@ -1,3 +1,4 @@
+import { normalizeAspectRatio } from '../../../configs/promptConfig';
 import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -365,9 +366,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const selectedResolution: ResolutionOption = ('resolution' in data && (data as any).resolution)
     ? (data as any).resolution as ResolutionOption
     : (config.defaultResolution as ResolutionOption) || '1K';
-  const selectedAspectRatio: string = ('aspectRatio' in data && (data as any).aspectRatio)
-    ? (data as any).aspectRatio
-    : config.defaultAspectRatio;
+  const selectedAspectRatio: string = normalizeAspectRatio(
+    ('aspectRatio' in data && (data as any).aspectRatio) || config.defaultAspectRatio
+  );
   // 画质：无即时写回，仍用本地 state（暂存/生成时统一写回）
   const [selectedQuality, setSelectedQuality] = useState<string>(
     ('quality' in data && (data as any).quality)

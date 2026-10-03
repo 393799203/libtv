@@ -2553,8 +2553,10 @@ func calculateSizeFromResolutionAndRatio(resolution, aspectRatio string) (int, i
 
 	// 2. 解析宽高比
 	var ratioW, ratioH float64
-	if aspectRatio == "free" || aspectRatio == "" {
-		// 自适应比例，默认使用16:9
+	// 自适应比例 → 本地按 16:9 估尺寸（上游按输入图/视频自己定，这里只用于画布与请求预检）。
+	// "free" 是历史枚举值，已统一改名为 "adaptive"（前端 normalizeAspectRatio 做兼容）；
+	// 两个值都要认，否则老画布（以及旧版本前端）会走到下面的按 ":" 切分，落到 16:9 兜底分支。
+	if aspectRatio == "free" || aspectRatio == "adaptive" || aspectRatio == "" {
 		ratioW = 16
 		ratioH = 9
 	} else {

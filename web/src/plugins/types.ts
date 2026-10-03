@@ -21,7 +21,7 @@ export interface PromptPanelConfig {
   defaultModel: string;
   /** 默认分辨率（无则填空） */
   defaultResolution: string;
-  /** 默认画幅比例（'free' 表示自适应） */
+  /** 默认画幅比例（'adaptive' 表示自适应；历史值 'free' 已改名） */
   defaultAspectRatio: string;
   /** 可选模型列表 */
   availableModels: Array<{

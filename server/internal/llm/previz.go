@@ -172,6 +172,7 @@ func salvageTruncatedJSON(s string) (string, bool) {
 // 用户白跑一次生成（虽然会自动退费，但体验很差）。这里做两层容错：
 //  1. 定位最外层 {}（正确跳过字符串与转义，嵌套对象不会被提前截断）
 //  2. 去掉对象/数组结尾前多余逗号
+//
 // 若括号不闭合（通常是 max_tokens 截断），原样返回，交由上层报错。
 func extractJSONObject(raw string) string {
 	start := strings.Index(raw, "{")

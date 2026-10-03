@@ -35,7 +35,7 @@ export type ResolutionOption = '1K' | '2K' | '4K' | '480p' | '720p' | '1080p';
 
 // 比例选项
 export type AspectRatioOption =
-  | 'free'     // 自适应
+  | 'adaptive' // 自适应（历史值 'free' 由 normalizeAspectRatio 兼容）
   | '1:1'
   | '9:16'
   | '16:9'

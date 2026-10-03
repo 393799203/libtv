@@ -866,13 +866,16 @@ func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, pr
 		content = append(content, entry)
 	}
 
+	// 比例规范化：有参考视频时必须 adaptive（上游强制），选「自适应」时也必须落成 adaptive
+	effectiveRatio := seedanceRatio(ratio, len(videoURLs) > 0)
+
 	payload, err := json.Marshal(VideoRequest{
 		Model:    model,
 		Prompt:   prompt,
 		Duration: duration,
 		Metadata: VideoMetadata{
 			Resolution:    resolution,
-			Ratio:         ratio,
+			Ratio:         effectiveRatio,
 			GenerateAudio: generateAudio,
 			Content:       content,
 		},
@@ -881,9 +884,44 @@ func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, pr
 		return nil, fmt.Errorf("marshal video request: %w", err)
 	}
 
+	if effectiveRatio != ratio {
+		log.Printf("[VideoGen] 比例已改写: %q → %q（%s）", ratio, effectiveRatio, seedanceRatioReason(ratio, len(videoURLs) > 0))
+	}
 	log.Printf("[VideoGen] 发起请求: model=%s mode=%s duration=%ds resolution=%s ratio=%s imageCount=%d promptLen=%d",
-		model, videoModeLabel(videoMode, len(items) > 0), duration, resolution, ratio, len(items), len(prompt))
+		model, videoModeLabel(videoMode, len(items) > 0), duration, resolution, effectiveRatio, len(items), len(prompt))
 	return payload, nil
+}
+
+// seedanceRatio 决定送给 Seedance（火山，cdance 系列）的比例字段。
+//
+// 两条规则都是踩过的坑：
+//
+//  1. **有参考视频 → 必须 adaptive**。上游会把这种任务判定成「视频延长」，并明确要求
+//     「For this task type the output ratio follows the input video selected by the model
+//     for extension. `ratio` must be `adaptive`」—— 我们原来把节点上的 16:9 原样透传，
+//     于是任务被直接拒掉。线上实例：10-02 23:19 那次「剧情延伸」节点
+//     （引用了上一个视频节点）报的正是这条错，而同一节点在引用视频还没出片时（退化成
+//     纯图生视频）却能成功 —— 差别只在有没有参考视频。
+//
+//  2. **选「自适应」→ 落成 adaptive**。前端比例选择器里「自适应」的值是 `free`
+//     （见 web/src/configs/promptConfig.ts），万相那条路有 wanRatio 做映射，Seedance
+//     这条路原来没有，于是 `free` 会被原样发给上游（上游只认 adaptive）。
+func seedanceRatio(ratio string, hasRefVideo bool) string {
+	if hasRefVideo {
+		return "adaptive"
+	}
+	switch strings.ToLower(strings.TrimSpace(ratio)) {
+	case "", "free", "auto", "自适应":
+		return "adaptive"
+	}
+	return ratio
+}
+
+func seedanceRatioReason(ratio string, hasRefVideo bool) string {
+	if hasRefVideo {
+		return "有参考视频，上游要求视频延长任务的比例必须是 adaptive"
+	}
+	return "选的是自适应，映射为上游认的 adaptive"
 }
 
 // normalizeSeedanceParams 豆包 Seedance 系列（火山引擎）参数规范化：

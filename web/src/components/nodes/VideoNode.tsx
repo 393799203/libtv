@@ -204,7 +204,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     }
     // 无视频时根据 aspectRatio 计算
     const ratio = (data as { aspectRatio?: string }).aspectRatio || '16:9';
-    if (ratio === 'free') return 270; // 自适应默认 16:9
+    if (ratio === 'adaptive' || ratio === 'free') return 270; // 自适应默认 16:9（free 为历史值）
     const parts = ratio.split(':').map(Number);
     if (parts.length !== 2 || !parts[0] || !parts[1]) return 270;
     const [w, h] = parts;

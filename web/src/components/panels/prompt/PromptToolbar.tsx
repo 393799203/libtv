@@ -2,7 +2,7 @@ import { memo, useMemo, useState, useEffect } from 'react';
 import { SoundOutlined } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
-import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS, buildDurationOptions } from '@/configs/promptConfig';
+import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS, buildDurationOptions, aspectRatioLabel } from '@/configs/promptConfig';
 import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
 import { useModelStore } from '@/stores/modelStore';
 
@@ -282,7 +282,7 @@ const ModelSelector = memo(function ModelSelector({
 // active：选中态（深色实心）；size：卡片内更大、触发按钮上更小
 function RatioIcon({ value, active, size = 22 }: { value: string; active: boolean; size?: number }) {
   // 自适应：虚线框 + 淡填充
-  if (value === 'free') {
+  if (value === 'adaptive' || value === 'free') { // free 为历史值
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none">
         <rect x="3.4" y="3.4" width={size - 6.8} height={size - 6.8} rx="2.6"
@@ -393,9 +393,20 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   const allowedAspectRatios: readonly string[] | null =
     isVideo && !!selectedModelId && selectedModelId.includes('wan3.0') ? WAN3_VIDEO_ASPECT_RATIOS : null;
 
+  // 引用了参考视频（= 上游会把这次任务判成「视频延长」）时，比例由输入视频决定：
+  // 上游只接受 adaptive —— 后端已按同一条件把 ratio 改写为 adaptive（seedanceRatio），
+  // 界面也必须同步选中「自适应」，否则会出现「界面显示 16:9、实际发出去的是自适应」这种
+  // 前后端不一致（用户按 16:9 预期画面，拿回来的是输入视频的比例）。
+  // 判定口径与后端完全一致：被引用的视频节点必须已经出片（没有 videoUrl 不算参考）。
+  const refVideoForcesAdaptive = isVideo && !!hasRefVideo;
+
   // 当前比例不被模型支持时自动回退到自适应（free），与分辨率回退同理
   const effectiveAspectRatio =
-    allowedAspectRatios && !allowedAspectRatios.includes(aspectRatio) ? 'free' : aspectRatio;
+    refVideoForcesAdaptive
+      ? 'adaptive'
+      : allowedAspectRatios && !allowedAspectRatios.includes(aspectRatio)
+        ? 'adaptive'
+        : aspectRatio;
 
   // 回退值与父组件状态不一致时回写，保证生成时提交的比例与 UI 显示一致
   useEffect(() => {
@@ -428,9 +439,14 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
       <button
         className={TBTN}
         onClick={() => setOpen(!open)}
+        title={
+          refVideoForcesAdaptive
+            ? '已引用参考视频（视频延长）：比例由输入视频决定，固定为自适应'
+            : undefined
+        }
       >
         <RatioIcon value={effectiveAspectRatio} active={true} />
-        <span className={TVAL}>{effectiveAspectRatio}</span>
+        <span className={TVAL}>{aspectRatioLabel(effectiveAspectRatio)}</span>
         <span className="px-1.5 py-px rounded-md bg-gray-100 text-[10px] font-semibold text-gray-500 leading-relaxed">
           {effectiveResolution}
         </span>
@@ -507,8 +523,13 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
               <SectionHeader
                 icon={RatioSectionIcon}
                 title="比例"
-                chip={effectiveAspectRatio === 'free' ? '自适应' : effectiveAspectRatio}
+                chip={aspectRatioLabel(effectiveAspectRatio)}
               />
+              {refVideoForcesAdaptive && (
+                <div className="mt-2 text-[11px] text-amber-600 leading-relaxed">
+                  已引用参考视频（视频延长）：比例由输入视频决定，已固定为自适应
+                </div>
+              )}
               <div className="grid grid-cols-5 gap-2">
                 {aspectRatioRows.flat().map((item, index) => {
                   // 占位：空值渲染为透明占位元素
