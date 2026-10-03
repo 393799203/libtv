@@ -180,8 +180,12 @@ export function AIBuildModal({
     const hintKey = `analyze-${Date.now()}`;
     message.loading({ content: 'AI 正在解析场景（约 1-2 分钟）…', key: hintKey, duration: 0 });
     try {
-      const res = await previzApi.analyzeScene(imageUrl, model);
+      const res = await previzApi.analyzeScene(imageUrl, model, projectId);
       message.destroy(hintKey);
+      if (res.replayed) {
+        // 同一张参考图在窗口内重复解析：返回上一次结果、没有重新调用、没有扣费
+        message.info('这是刚刚解析的结果（重复点击不会重复扣费）');
+      }
       if (!res.objects || res.objects.length === 0) {
         message.warning('未解析出场景对象，请换一张更清晰的参考图');
         return;

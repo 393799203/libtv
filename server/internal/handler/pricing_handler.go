@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"libtv/internal/billing"
 	"net/http"
 
 	"libtv/internal/middleware"
@@ -12,11 +13,11 @@ import (
 
 // PricingHandler 模型价格配置（运营后台「价格管理」页签）
 type PricingHandler struct {
-	pricingService *service.PricingService
+	pricingService *billing.PricingService
 	channelService *service.ChannelService
 }
 
-func NewPricingHandler(pricingService *service.PricingService, channelService ...*service.ChannelService) *PricingHandler {
+func NewPricingHandler(pricingService *billing.PricingService, channelService ...*service.ChannelService) *PricingHandler {
 	h := &PricingHandler{pricingService: pricingService}
 	if len(channelService) > 0 {
 		h.channelService = channelService[0]
@@ -48,7 +49,7 @@ func (h *PricingHandler) List(c *gin.Context) {
 func (h *PricingHandler) Save(c *gin.Context) {
 	var req struct {
 		Channel string                  `json:"channel"`
-		Items   []service.PriceSaveItem `json:"items" binding:"required,dive"`
+		Items   []billing.PriceSaveItem `json:"items" binding:"required,dive"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "价格配置参数非法")

@@ -26,6 +26,7 @@ interface GeneratePromptRequest {
   scenes: AssetReference[];        // 场景列表
   props: AssetReference[];         // 道具列表
   imageCount?: number;             // 需要几份画面提示词（1=单张参考图；2=起始画面+结束画面）
+  projectId?: string;              // 所在项目（对账页要显示项目名，可选）
 }
 
 interface GeneratePromptData {

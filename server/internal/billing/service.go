@@ -1,4 +1,4 @@
-package service
+package billing
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"time"
 
 	"libtv/internal/llm"
 	"libtv/internal/model"
@@ -18,14 +19,14 @@ import (
 
 // 计费动作（扣费维度）：细分到每次真实 AI 调用，账单可精确到模型与场景
 const (
-	BillingActionWorkflowExecute = "workflow.execute"  // 工作流入口（中间件仅校验余额，不扣费）
-	BillingActionPromptGenerate  = "prompt.generate"   // 提示词生成
-	BillingActionStory           = "ai.story"          // 故事生成（文本节点）
-	BillingActionScript          = "ai.script"         // 分镜剧本生成（脚本节点）
-	BillingActionImage           = "ai.image"          // 图片生成（图片节点）
-	BillingActionVideo           = "ai.video"          // 视频生成（视频节点）
-	BillingActionAudio           = "ai.audio"          // 音频生成（音频节点）
-	BillingActionPrevizAnalyze   = "ai.previz_analyze" // 白模场景解析（previz 节点）
+	ActionWorkflowExecute = "workflow.execute"  // 工作流入口（中间件仅校验余额，不扣费）
+	ActionPromptGenerate  = "prompt.generate"   // 提示词生成
+	ActionStory           = "ai.story"          // 故事生成（文本节点）
+	ActionScript          = "ai.script"         // 分镜剧本生成（脚本节点）
+	ActionImage           = "ai.image"          // 图片生成（图片节点）
+	ActionVideo           = "ai.video"          // 视频生成（视频节点）
+	ActionAudio           = "ai.audio"          // 音频生成（音频节点）
+	ActionPrevizAnalyze   = "ai.previz_analyze" // 白模场景解析（previz 节点）
 )
 
 // ErrInsufficientCredits 积分不足（HTTP 402，前端可用 code=4002 区分提示充值）
@@ -33,37 +34,37 @@ var ErrInsufficientCredits = apperror.New(4002, 402, "积分不足，请先充�
 
 // actionRemarks 计费动作的账单描述（展示给用户看的文案）
 var actionRemarks = map[string]string{
-	BillingActionPromptGenerate: "提示词生成",
-	BillingActionStory:          "故事生成",
-	BillingActionScript:         "分镜剧本生成",
-	BillingActionImage:          "图片生成",
-	BillingActionVideo:          "视频生成",
-	BillingActionAudio:          "音频生成",
-	BillingActionPrevizAnalyze:  "白模场景解析",
+	ActionPromptGenerate: "提示词生成",
+	ActionStory:          "故事生成",
+	ActionScript:         "分镜剧本生成",
+	ActionImage:          "图片生成",
+	ActionVideo:          "视频生成",
+	ActionAudio:          "音频生成",
+	ActionPrevizAnalyze:  "白模场景解析",
 }
 
 // defaultPrices 动作级兜底策略表（仅 EnsureBalance 前置校验用，当前全部为 0 即放行）
 // 真实扣费单价以 model_prices 表（运营后台价格管理）为准，按（节点 + 模型）维度计费
 var defaultPrices = map[string]int64{
-	BillingActionPromptGenerate: 0,
-	BillingActionStory:          0,
-	BillingActionScript:         0,
-	BillingActionImage:          0,
-	BillingActionVideo:          0,
-	BillingActionAudio:          0,
-	BillingActionPrevizAnalyze:  0,
+	ActionPromptGenerate: 0,
+	ActionStory:          0,
+	ActionScript:         0,
+	ActionImage:          0,
+	ActionVideo:          0,
+	ActionAudio:          0,
+	ActionPrevizAnalyze:  0,
 }
 
 // actionNodeTypes 扣费 action → 定价节点映射：价格按（节点 + 模型）维度配置，
 // 同一模型在不同节点可设不同价格（如 llm 模型在文本 / 剧本节点分开定价）
 var actionNodeTypes = map[string]string{
-	BillingActionPromptGenerate: "text", // 提示词生成使用文本节点的模型列表
-	BillingActionStory:          "text",
-	BillingActionScript:         "script",
-	BillingActionImage:          "image",
-	BillingActionVideo:          "video",
-	BillingActionAudio:          "audio",
-	BillingActionPrevizAnalyze:  "previz", // 白模解析独立定价维度（价格管理页「白模解析」分组）
+	ActionPromptGenerate: "text", // 提示词生成使用文本节点的模型列表
+	ActionStory:          "text",
+	ActionScript:         "script",
+	ActionImage:          "image",
+	ActionVideo:          "video",
+	ActionAudio:          "audio",
+	ActionPrevizAnalyze:  "previz", // 白模解析独立定价维度（价格管理页「白模解析」分组）
 }
 
 // RefVideoPriceDiscount 带参考视频输入的预设折扣：只对 models.yaml 里
@@ -72,7 +73,7 @@ var actionNodeTypes = map[string]string{
 // 价格管理页也用同一折扣预填输入框，避免两边口径不一致
 const RefVideoPriceDiscount = 0.6
 
-// BillingService 积分扣费服务：
+// Service 积分扣费服务：
 //  1. EnsureBalance 实现 middleware.CreditBiller，供扣费中间件在 AI 入口做余额校验（只校验不扣费）
 //  2. ChargeByModel / ChargeVideoByDuration / ChargeByChars 在真实 AI 调用点扣费并写入账单明细：
 //     单价来自 model_prices 表（运营后台「价格管理」维护，保存后即时生效）：
@@ -81,7 +82,7 @@ const RefVideoPriceDiscount = 0.6
 //     单价走「带参考视频」档（未配置 → 无参考视频单价的 6 折）
 //  3. Refund / Recharge 退款 / 充值，同样写入账单明细；
 //     退费必须回传扣费时的口径（ChargeExtra），扣费与退费的账单才能对得上
-type BillingService struct {
+type Service struct {
 	userRepo     repository.UserRepo
 	billingRepo  repository.BillingRepo
 	priceRepo    repository.ModelPriceRepo // 模型价格配置（nil 时全部按 0 处理）
@@ -89,8 +90,8 @@ type BillingService struct {
 	prices       map[string]int64
 }
 
-func NewBillingService(userRepo repository.UserRepo, billingRepo repository.BillingRepo, priceRepo repository.ModelPriceRepo, modelManager *llm.ModelManager) *BillingService {
-	return &BillingService{
+func NewService(userRepo repository.UserRepo, billingRepo repository.BillingRepo, priceRepo repository.ModelPriceRepo, modelManager *llm.ModelManager) *Service {
+	return &Service{
 		userRepo:     userRepo,
 		billingRepo:  billingRepo,
 		priceRepo:    priceRepo,
@@ -99,13 +100,40 @@ func NewBillingService(userRepo repository.UserRepo, billingRepo repository.Bill
 	}
 }
 
+// refundTimeout 退费请求的独立超时：失败现场的原 ctx 往往已超时/取消，
+// 用死 ctx 退费会直接失败，用户积分就白扣了 —— 所以退费一律另起 ctx。
+const refundTimeout = 30 * time.Second
+
+// RefundDetached 用独立 context 退费，渠道从原 ctx 带过来。
+//
+// 用 ctx 传「扣费时那个 ctx」很关键：新 ctx 里没有渠道信息，不带过去退费账单的
+// 「渠道-模型」标签会回退成默认渠道（线上实例：dianxin 扣费、退费却记成 wasu-xxx）。
+func (s *Service) RefundDetached(ctx context.Context, userID string, amount int64, action, modelName, scene, reason string, extra ChargeExtra) error {
+	channel := ""
+	if ctx != nil {
+		channel = llm.ChannelFrom(ctx)
+	}
+	return s.RefundOnChannel(userID, amount, action, modelName, scene, reason, extra, channel)
+}
+
+// RefundOnChannel 指定渠道退费（渠道为空时按默认渠道记账）。
+// 人工退费用它：渠道取当初真实调用的那个（对账行的 provider）。
+func (s *Service) RefundOnChannel(userID string, amount int64, action, modelName, scene, reason string, extra ChargeExtra, channel string) error {
+	refundCtx, cancel := context.WithTimeout(context.Background(), refundTimeout)
+	defer cancel()
+	if channel != "" {
+		refundCtx = llm.WithChannel(refundCtx, channel)
+	}
+	return s.Refund(refundCtx, userID, amount, action, modelName, scene, reason, extra)
+}
+
 // Price 返回指定动作单次调用消耗的积分（仅动作级前置校验用）
-func (s *BillingService) Price(action string) int64 {
+func (s *Service) Price(action string) int64 {
 	return s.prices[action]
 }
 
 // billingChannel 取计费渠道：从 ctx 解析（executor 已注入用户最终渠道），空值回退 wasu
-func billingChannel(ctx context.Context) string {
+func channelOf(ctx context.Context) string {
 	if ch := llm.ChannelFrom(ctx); ch != "" {
 		return ch
 	}
@@ -116,7 +144,7 @@ func billingChannel(ctx context.Context) string {
 // 读取时按前缀拆回去，展示口径统一为「渠道标签 + 纯模型 ID」。
 var legacyChannelPrefixes = []string{"wasu-", "dianxin-"}
 
-// NormalizeBillingChannel 规范化一条账单记录的「渠道 + 模型」，供展示使用。
+// NormalizeChannel 规范化一条账单记录的「渠道 + 模型」，供展示使用。
 //
 // 新记录：渠道在独立的 channel 列里，模型列本来就是纯模型 ID，直接返回。
 // 历史记录：channel 为空且模型名带渠道前缀（wasu-cdance2.5-0807）→ 拆成
@@ -125,7 +153,7 @@ var legacyChannelPrefixes = []string{"wasu-", "dianxin-"}
 //
 // 注意：只在带前缀时拆分，且真实模型 ID 不会以 wasu-/dianxin- 开头
 // （线上核过：cdance2.0-0807 / doubao-* / wan3.0-video / deepseek-* 等），不会误拆。
-func NormalizeBillingChannel(rec *model.BillingRecord) {
+func NormalizeChannel(rec *model.BillingRecord) {
 	if rec == nil {
 		return
 	}
@@ -145,7 +173,7 @@ func NormalizeBillingChannel(rec *model.BillingRecord) {
 
 // lookupPriceModelID 将调用方传入的模型标识（配置 ID 或 API model_id）在**指定渠道内**归一为配置 ID。
 // 按渠道归一可避免同名模型（如 deepseek-v4.1-flash 在华数/电信各有一份）跨渠道误取价格
-func (s *BillingService) lookupPriceModelID(channel, modelID string) string {
+func (s *Service) lookupPriceModelID(channel, modelID string) string {
 	if s.modelManager == nil || modelID == "" {
 		return modelID
 	}
@@ -161,11 +189,11 @@ func (s *BillingService) lookupPriceModelID(channel, modelID string) string {
 
 // modelUnitPrice 返回指定渠道下某节点模型的单价（按次模型=积分/次，按秒模型=积分/秒）；
 // 未配置或查询失败时返回 0（暂不扣费）。每次调用实时查库，后台改价即时生效
-func (s *BillingService) modelUnitPrice(ctx context.Context, nodeType, modelID string) float64 {
+func (s *Service) modelUnitPrice(ctx context.Context, nodeType, modelID string) float64 {
 	if s.priceRepo == nil || modelID == "" {
 		return 0
 	}
-	channel := billingChannel(ctx)
+	channel := channelOf(ctx)
 	// 归一：调用方可能传配置 ID（id）也可能传 API 模型 ID（model_id），统一映射到配置 ID 查价
 	lookupID := s.lookupPriceModelID(channel, modelID)
 	record, err := s.priceRepo.GetByNodeModel(ctx, channel, nodeType, lookupID)
@@ -181,7 +209,7 @@ func (s *BillingService) modelUnitPrice(ctx context.Context, nodeType, modelID s
 // modelUnitPriceWithResolution 返回指定渠道下模型按分辨率的单价（视频节点用）；
 // hasRefVideo 指定「带参考视频输入」档（仅视频节点有这一档）；
 // 未配置或查询失败时返回 0（暂不扣费）
-func (s *BillingService) modelUnitPriceWithResolution(ctx context.Context, nodeType, modelID, resolution string, hasRefVideo bool) float64 {
+func (s *Service) modelUnitPriceWithResolution(ctx context.Context, nodeType, modelID, resolution string, hasRefVideo bool) float64 {
 	record, ok := s.lookupPrice(ctx, nodeType, modelID, resolution, hasRefVideo)
 	if !ok {
 		return 0
@@ -191,11 +219,11 @@ func (s *BillingService) modelUnitPriceWithResolution(ctx context.Context, nodeT
 
 // lookupPrice 查询指定维度的价格记录，ok=false 表示该维度**未配置**（区别于「配置为 0 = 免费」，
 // 带参考视频档的 6 折预设兜底需要区分这两种情况）
-func (s *BillingService) lookupPrice(ctx context.Context, nodeType, modelID, resolution string, hasRefVideo bool) (*model.ModelPrice, bool) {
+func (s *Service) lookupPrice(ctx context.Context, nodeType, modelID, resolution string, hasRefVideo bool) (*model.ModelPrice, bool) {
 	if s.priceRepo == nil || modelID == "" {
 		return nil, false
 	}
-	channel := billingChannel(ctx)
+	channel := channelOf(ctx)
 	// 归一：调用方可能传配置 ID（id）也可能传 API 模型 ID（model_id），统一映射到配置 ID 查价
 	lookupID := s.lookupPriceModelID(channel, modelID)
 	record, err := s.priceRepo.GetByNodeModelResolution(ctx, channel, nodeType, lookupID, resolution, hasRefVideo)
@@ -212,11 +240,11 @@ func (s *BillingService) lookupPrice(ctx context.Context, nodeType, modelID, res
 // refVideoBillingEnabled 该模型是否按「参考视频（输入）时长」计费：
 // 由 models.yaml 的 ref_video_billing 决定（当前仅 3 个 Seedance 模型开启）。
 // 未配置的模型（含 wan3.0 系列）参考视频不参与计费，只按输出时长与常规单价扣费
-func (s *BillingService) refVideoBillingEnabled(ctx context.Context, modelID string) bool {
+func (s *Service) refVideoBillingEnabled(ctx context.Context, modelID string) bool {
 	if s.modelManager == nil || modelID == "" {
 		return false
 	}
-	return s.modelManager.RefVideoBilling(billingChannel(ctx), modelID)
+	return s.modelManager.RefVideoBilling(channelOf(ctx), modelID)
 }
 
 // RefVideoPrice 带参考视频输入的单价（积分/秒，仅视频节点）：
@@ -231,7 +259,7 @@ func RefVideoPrice(basePrice float64) float64 {
 
 // ChargeByModel 按次计费（文本/剧本/图片/提示词）：费用 = 单价 × 次数（四舍五入取整）
 // 返回本次实际扣减的积分（供调用失败时通过 Refund 退还）
-func (s *BillingService) ChargeByModel(ctx context.Context, userID, action, modelID, scene string, count int) (int64, error) {
+func (s *Service) ChargeByModel(ctx context.Context, userID, action, modelID, scene string, count int) (int64, error) {
 	if count <= 0 {
 		count = 1
 	}
@@ -242,7 +270,7 @@ func (s *BillingService) ChargeByModel(ctx context.Context, userID, action, mode
 
 // ChargeByDuration 按秒计费（语音等）：费用 = 单价 × 秒数（向上取整，不足 1 秒按 1 秒计）
 // 返回本次实际扣减的积分
-func (s *BillingService) ChargeByDuration(ctx context.Context, userID, action, modelID, scene string, seconds int) (int64, error) {
+func (s *Service) ChargeByDuration(ctx context.Context, userID, action, modelID, scene string, seconds int) (int64, error) {
 	if seconds <= 0 {
 		seconds = 1
 	}
@@ -263,7 +291,7 @@ func (s *BillingService) ChargeByDuration(ctx context.Context, userID, action, m
 // refVideoSeconds 为实测的参考视频总时长（秒，可为小数）；测量失败传 0 时该部分不计入时长。
 // 返回（实际扣减积分, 本次计费口径 ChargeExtra）：口径需随退费一起回传，
 // 保证退费账单与扣费账单的分辨率 / 计费时长 / 参考视频时长完全一致
-func (s *BillingService) ChargeVideoByDuration(ctx context.Context, userID, action, modelID, scene, resolution string, outputSeconds int, refVideoSeconds float64) (int64, ChargeExtra, error) {
+func (s *Service) ChargeVideoByDuration(ctx context.Context, userID, action, modelID, scene, resolution string, outputSeconds int, refVideoSeconds float64) (int64, ChargeExtra, error) {
 	// 参考视频时长计入计费的前提：模型开启了该规则，且确实测到了输入时长
 	billRef := refVideoSeconds > 0 && s.refVideoBillingEnabled(ctx, modelID)
 
@@ -279,7 +307,7 @@ func (s *BillingService) ChargeVideoByDuration(ctx context.Context, userID, acti
 // 无参考视频（或该模型未开启 ref_video_billing）取常规档；
 // 带参考视频输入取「带参考视频」档，未配置该档时按常规单价的 6 折预设兜底 ——
 // 后台还没来得及配这一档时，用户也不会被按原价多扣
-func (s *BillingService) videoUnitPrice(ctx context.Context, modelID, resolution string, hasRefVideo bool) float64 {
+func (s *Service) videoUnitPrice(ctx context.Context, modelID, resolution string, hasRefVideo bool) float64 {
 	base := s.modelUnitPriceWithResolution(ctx, "video", modelID, resolution, false)
 	if !hasRefVideo {
 		return base
@@ -308,7 +336,7 @@ func videoBilledSeconds(outputSeconds int, refVideoSeconds float64, billRef bool
 
 // ChargeByChars 按字符数计费（音频）：费用 = 单价 × (字符数 / 100)（向上取整）
 // 单价表示每 100 字的积分，返回本次实际扣减的积分
-func (s *BillingService) ChargeByChars(ctx context.Context, userID, action, modelID, scene string, chars int) (int64, error) {
+func (s *Service) ChargeByChars(ctx context.Context, userID, action, modelID, scene string, chars int) (int64, error) {
 	if chars <= 0 {
 		return 0, nil
 	}
@@ -332,13 +360,18 @@ type ChargeExtra struct {
 	Seconds int
 	// RefVideoSeconds 计费时长中参考视频（输入）那部分（秒），无参考视频时为 0
 	RefVideoSeconds int
+	// TaskID 上游异步任务号（视频生成才有）。
+	// 落库意义：账单行是**永久**记录，而任务登记（Redis，24h）在退费后就被消费掉了 ——
+	// 没有这一列，事后就无法回答「这笔失败到底有没有让上游真的接单并计费」，
+	// 也找不回上游可能已经产出的结果。线上实例：10-03 00:04 那次超时中断。
+	TaskID string
 }
 
 // chargeCost 扣费 + 记账：
 // 费用 <= 0 → 不扣费但仍写入一条 0 积分记录（便于验证扣费链路）；
 // 积分不足 → ErrInsufficientCredits；
 // 账单记录模型（model）、场景（scene）、分辨率/时长/参考视频时长（视频）与扣费后剩余积分（balance_after）
-func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelName, scene string, extra ChargeExtra, cost int64) (int64, error) {
+func (s *Service) chargeCost(ctx context.Context, userID, action, modelName, scene string, extra ChargeExtra, cost int64) (int64, error) {
 	if cost > 0 {
 		ok, err := s.userRepo.DeductCredits(ctx, userID, cost)
 		if err != nil {
@@ -348,13 +381,17 @@ func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelNa
 			return 0, ErrInsufficientCredits
 		}
 	}
+	// 钱已经扣了：从这里往后任何一步失败都不能把调用掐掉 ——
+	// 否则用户被扣了费却没拿到服务，也拿不到任何失败记录（既没调用、也没退费）。
+	// 只记账失败的场景（余额快照读不到 / 账单写不进去）大声打日志，但让调用继续。
 	balance, err := s.userRepo.GetCredits(ctx, userID)
 	if err != nil {
-		return cost, err
+		log.Printf("[Billing] ⚠️ 扣费成功但读取余额快照失败（不影响本次调用）: user=%s cost=%d err=%v", userID, cost, err)
+		balance = 0
 	}
 	// 账单记录实际调用的渠道（executor 已注入 ctx），无渠道时回退 wasu。
 	// 渠道独立成列，模型列只存纯模型 ID —— 不再拼成「wasu-模型名」这种四不像。
-	channel := billingChannel(ctx)
+	channel := channelOf(ctx)
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:     userID,
 		Type:       "deduct",
@@ -364,6 +401,7 @@ func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelNa
 		Channel:    channel,
 		Scene:      scene,
 		Resolution: extra.Resolution,
+		TaskID:     extra.TaskID,
 		Duration:   extra.Seconds,
 		// 参考视频时长单独落库：Duration 是计费总时长，这一列是其中输入视频那部分，
 		// 两者相减即输出视频时长，事后能按「单价 × (输出 + 输入)」完整复核这笔扣费
@@ -376,7 +414,7 @@ func (s *BillingService) chargeCost(ctx context.Context, userID, action, modelNa
 
 // EnsureBalance AI 入口余额校验（中间件用，只校验不扣费不记账）：
 // 单价 <= 0 → 直接放行；余额不足 → ErrInsufficientCredits
-func (s *BillingService) EnsureBalance(ctx context.Context, userID, action string) error {
+func (s *Service) EnsureBalance(ctx context.Context, userID, action string) error {
 	cost := s.Price(action)
 	if cost <= 0 {
 		return nil
@@ -395,16 +433,20 @@ func (s *BillingService) EnsureBalance(ctx context.Context, userID, action strin
 // extra 必须传「当初扣费时的那一份口径」（ChargeVideoByDuration 的返回值 / 随任务登记持久化的那份）：
 // 退费账单与扣费账单记录同样的分辨率、计费时长与参考视频时长，事后核对时两边能一一对上；
 // 按次/按字数等无口径的退费传 ChargeExtra{}（零值）
-func (s *BillingService) Refund(ctx context.Context, userID string, amount int64, action, modelName, scene, reason string, extra ChargeExtra) error {
+func (s *Service) Refund(ctx context.Context, userID string, amount int64, action, modelName, scene, reason string, extra ChargeExtra) error {
 	if amount <= 0 {
 		return nil
 	}
 	if err := s.userRepo.AddCredits(ctx, userID, amount); err != nil {
 		return err
 	}
+	// 钱已经回到用户账上了：从这里往后任何失败都不能再往上抛错误 ——
+	// 上层把「退费失败」当信号（写待人工复核），一旦误报，管理员会照着重退一次，
+	// 同一笔扣费就退了两遍（真金白银）。余额快照读不到只影响账单上的一列展示。
 	balance, err := s.userRepo.GetCredits(ctx, userID)
 	if err != nil {
-		return err
+		log.Printf("[Billing] ⚠️ 退费成功但读取余额快照失败（不影响退费结果）: user=%s amount=%d err=%v", userID, amount, err)
+		balance = 0
 	}
 	// 构建退费备注，包含退费原因；截断到安全长度（remark 字段 varchar(255)，按字符计）
 	remark := fmt.Sprintf("%s失败退还", scene)
@@ -415,7 +457,7 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 		remark = fmt.Sprintf("%s失败退还：%s", scene, reason)
 	}
 	// 退费账单与扣费同口径：渠道同样独立成列（原样退回当初那条记录里的渠道）
-	channel := billingChannel(ctx)
+	channel := channelOf(ctx)
 	s.writeRecord(ctx, &model.BillingRecord{
 		UserID:     userID,
 		Type:       "refund",
@@ -425,6 +467,7 @@ func (s *BillingService) Refund(ctx context.Context, userID string, amount int64
 		Channel:    channel,
 		Scene:      scene,
 		Resolution: extra.Resolution,
+		TaskID:     extra.TaskID,
 		Duration:   extra.Seconds,
 		// 与扣费同口径：退费也带上参考视频时长，退费账单能还原出「退的是哪一档、多少秒」
 		RefVideoDuration: extra.RefVideoSeconds,
@@ -442,7 +485,7 @@ type RechargeOrder struct {
 }
 
 // Recharge 充值积分（后续管理端 / 支付回调调用）
-func (s *BillingService) Recharge(ctx context.Context, userID string, amount int64, scene, remark string, order RechargeOrder) error {
+func (s *Service) Recharge(ctx context.Context, userID string, amount int64, scene, remark string, order RechargeOrder) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -473,7 +516,7 @@ func (s *BillingService) Recharge(ctx context.Context, userID string, amount int
 }
 
 // remarkOf 账单描述：优先动作文案，其次场景，兜底动作标识
-func (s *BillingService) remarkOf(action, scene string) string {
+func (s *Service) remarkOf(action, scene string) string {
 	if remark := actionRemarks[action]; remark != "" {
 		return remark
 	}
@@ -484,7 +527,7 @@ func (s *BillingService) remarkOf(action, scene string) string {
 }
 
 // writeRecord 写入账单明细（余额变动成功后才调用；写入失败仅记日志不影响主流程）
-func (s *BillingService) writeRecord(ctx context.Context, record *model.BillingRecord) {
+func (s *Service) writeRecord(ctx context.Context, record *model.BillingRecord) {
 	if err := s.billingRepo.Create(ctx, record); err != nil {
 		log.Printf("[Billing] 写入账单明细失败: userID=%s type=%s amount=%d err=%v", record.UserID, record.Type, record.Amount, err)
 	}

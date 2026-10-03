@@ -25,6 +25,15 @@ import (
 // 本次扣费会在节点内退还并告知用户失败，自动重试要么重复扣费、要么复用旧任务变成免费出片。
 var ErrVideoPollTimeout = errors.New("视频任务轮询超时")
 
+// ErrUpstreamRejected 上游明确拒绝了这次任务（参数不合法、内容不过审、任务直接 failed 等）。
+//
+// 为什么要单独标出来：退费规则只看这一条 —— **上游自己说不行**才自动退费；
+// 其余失败（请求超时、没拿到任务号、连接中断、轮询预算耗尽、转存失败）都属于
+// 「我们不知道上游到底做了什么」，上游很可能已经受理并按生成后计费，
+// 这时单方面退费等于白付上游一次（线上实例：10-03 00:04 创建超时后自动退款，
+// 而上游任务照跑照计费）。那类失败不自动退，落到 provider_tasks 由管理员手动处理。
+var ErrUpstreamRejected = errors.New("上游明确拒绝本次任务")
+
 // VideoPollConfig 上游异步视频任务的轮询预算。
 //
 // 轮询是「每 Interval 查一次任务状态，直到出片或超时」，Timeout 决定总等待上限。
@@ -54,9 +63,29 @@ type VideoClient struct {
 	router       *ChannelRouter // 渠道路由（多渠道 token 切换用）；nil 时退化为单渠道固定凭据
 	pollInterval time.Duration  // 轮询间隔
 	pollTimeout  time.Duration  // 轮询总预算
+	// createCli 创建任务专用客户端（超时 VideoCreateTimeout）：
+	// 与查询共用 httpCli 的话，创建会被拉长到查询级超时，一步走错整单就没了
+	createCli *http.Client
 }
 
 // NewVideoClient 创建视频生成客户端
+// VideoCreateTimeout 创建上游视频任务（POST）的单次请求超时。
+//
+// 创建是整条链路里唯一「拿不到任务号就全瞎」的一步：任务号只出现在创建响应里，
+// 拿不到它，就既无法续查、也无法在失败时找回结果。而上游完全可能已经受理并生成
+// （电信按生成后计费），我们这边单方面超时中断 = 白付一次 + 丢掉成片。
+// 所以这一步给短超时（健康情况约 1 秒）+ 超时后重试一次，见 doCreateWithRetry。
+// 线上实例：10-03 00:04 那次创建请求被拖满 10 分钟 → 我们退款收工，
+// 上游那边任务照跑、照计费，且当天它的调用统计里确实多了一次成功。
+const VideoCreateTimeout = 2 * time.Minute
+
+// VideoRequestTimeout 状态查询等短请求（GET）的单次超时。
+//
+// 轮询循环撞上它只会记一条日志然后继续下一轮（三个渠道的轮询都是这个行为），
+// 所以给短一点反而是好事：一次挂死只花 60 秒，而不是把 25 分钟的轮询预算吃掉十分钟。
+// 健康情况下查询约 0.2 秒，撞上它说明上游确实异常了。
+const VideoRequestTimeout = 60 * time.Second
+
 func NewVideoClient(cfg config.AIConfig, providerName string, poll VideoPollConfig, router ...*ChannelRouter) *VideoClient {
 	p := cfg.Providers[providerName]
 
@@ -72,7 +101,16 @@ func NewVideoClient(cfg config.AIConfig, providerName string, poll VideoPollConf
 		pollInterval: poll.Interval,
 		pollTimeout:  poll.Timeout,
 		httpCli: &http.Client{
-			Timeout: 10 * time.Minute, // 视频生成耗时较长
+			Timeout: VideoRequestTimeout,
+			Transport: &http.Transport{
+				DisableKeepAlives:   true,
+				MaxIdleConns:        0,
+				MaxIdleConnsPerHost: 0,
+			},
+		},
+		// 创建任务单独一个客户端：超时更宽（2 分钟），因为这一步失败就无法补救
+		createCli: &http.Client{
+			Timeout: VideoCreateTimeout,
 			Transport: &http.Transport{
 				DisableKeepAlives:   true,
 				MaxIdleConns:        0,
@@ -80,6 +118,37 @@ func NewVideoClient(cfg config.AIConfig, providerName string, poll VideoPollConf
 			},
 		},
 	}
+}
+
+// doCreateWithRetry 创建上游视频任务：用 createCli（2 分钟）试一次，失败再试一次。
+//
+// 为什么必须重试：创建请求一超时，我们的状态就是「不知道上游收没收到」——
+// 上游可能已经在生成并在生成后计费。重试的代价是极小概率多跑一次上游任务，
+// 收益是用户拿得到成片、我们不必白付；不重试则必然二选一：白付上游，或者让用户白等。
+// build 每次重新构造请求（请求体是一次性 reader，必须重建）。
+func (c *VideoClient) doCreateWithRetry(ctx context.Context, label string, build func(ctx context.Context) (*http.Request, error)) (*http.Response, error) {
+	const attempts = 2
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		httpReq, err := build(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.createCli.Do(httpReq)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if attempt < attempts {
+			log.Printf("[VideoGen] ⚠️ %s 创建失败（第 %d/%d 次）: %v → 重试一次", label, attempt, attempts, err)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+	return nil, fmt.Errorf("%s 创建请求连续 %d 次无响应: %w", label, attempts, lastErr)
 }
 
 // pollBudget 折算轮询间隔与最大次数；未配置时回退默认（5s × 25 分钟 = 300 次）。
@@ -343,15 +412,16 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 	// 创建任务
 	apiKey, baseURL := c.creds(ctx)
 	createURL := fmt.Sprintf("%s/contents/generations/tasks", baseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("create dianxin video task: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
 	start := time.Now()
-	resp, err := c.httpCli.Do(httpReq)
+	resp, err := c.doCreateWithRetry(ctx, "电信视频任务", func(ctx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create dianxin video task: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		return httpReq, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("dianxin video http request: %w", err)
 	}
@@ -359,7 +429,7 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] 电信视频创建失败: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("电信视频API错误 (status=%d): %s", resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+		return "", fmt.Errorf("%w: 电信视频API错误 (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
 	}
 	log.Printf("[VideoGen] 电信视频任务创建成功: 耗时=%s", time.Since(start).Round(time.Millisecond))
 
@@ -377,7 +447,7 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 		return "", fmt.Errorf("解析电信视频响应失败: %w", err)
 	}
 	if createResp.Error != nil {
-		return "", fmt.Errorf("电信视频API错误: %s", createResp.Error.Message)
+		return "", fmt.Errorf("%w: 电信视频API错误: %s", ErrUpstreamRejected, createResp.Error.Message)
 	}
 	taskID := createResp.ID
 	if taskID == "" {
@@ -458,7 +528,7 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 		}
 
 		if task.Error != nil && task.Error.Message != "" {
-			return "", fmt.Errorf("电信视频任务失败: %s", task.Error.Message)
+			return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, task.Error.Message)
 		}
 
 		// 状态字段可能在 data 内
@@ -489,7 +559,7 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 				videoURL = task.Data.ResultURL
 			}
 			if task.Data.FailReason != "" {
-				return "", fmt.Errorf("电信视频任务失败: %s", task.Data.FailReason)
+				return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, task.Data.FailReason)
 			}
 		}
 		if videoURL == "" && task.Output != nil {
@@ -507,7 +577,7 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 			log.Printf("[VideoGen] 电信任务成功但无URL (attempt %d): %s", i+1, string(respBody))
 			continue
 		case "failed", "error":
-			return "", fmt.Errorf("电信视频任务失败: %s", string(respBody))
+			return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, string(respBody))
 		default:
 			log.Printf("[VideoGen] 电信任务轮询 (attempt %d): status=%s", i+1, status)
 			// 给用户看的文案统一成中文：上游的英文 status（running/processing/queued）
@@ -599,16 +669,17 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 
 	apiKey, baseURL := c.creds(ctx)
 	createURL := fmt.Sprintf("%s/services/aigc/video-generation/video-synthesis", baseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("create dianxin wan task: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("X-DashScope-Async", "enable")
-
 	start := time.Now()
-	resp, err := c.httpCli.Do(httpReq)
+	resp, err := c.doCreateWithRetry(ctx, "电信 wan3.0 任务", func(ctx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create dianxin wan task: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		httpReq.Header.Set("X-DashScope-Async", "enable")
+		return httpReq, nil
+	})
 	if err != nil {
 		return "", fmt.Errorf("dianxin wan http request: %w", err)
 	}
@@ -616,7 +687,7 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] 电信 wan3.0 创建失败: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("电信 wan3.0 API错误 (status=%d): %s", resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+		return "", fmt.Errorf("%w: 电信 wan3.0 API错误 (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
 	}
 	log.Printf("[VideoGen] 电信 wan3.0 任务创建成功: 耗时=%s", time.Since(start).Round(time.Millisecond))
 
@@ -640,10 +711,10 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 		return "", fmt.Errorf("解析电信 wan3.0 响应失败: %w", err)
 	}
 	if createResp.Error != nil && createResp.Error.Message != "" {
-		return "", fmt.Errorf("电信 wan3.0 API错误: %s", createResp.Error.Message)
+		return "", fmt.Errorf("%w: 电信 wan3.0 API错误: %s", ErrUpstreamRejected, createResp.Error.Message)
 	}
 	if createResp.Output.Code != "" || createResp.Output.Message != "" {
-		return "", fmt.Errorf("电信 wan3.0 API错误: %s %s", createResp.Output.Code, createResp.Output.Message)
+		return "", fmt.Errorf("%w: 电信 wan3.0 API错误: %s %s", ErrUpstreamRejected, createResp.Output.Code, createResp.Output.Message)
 	}
 	taskID := createResp.Output.TaskID
 	if taskID == "" {
@@ -718,7 +789,7 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 		}
 
 		if task.Error != nil && task.Error.Message != "" {
-			return "", fmt.Errorf("电信 wan3.0 视频任务失败: %s", task.Error.Message)
+			return "", fmt.Errorf("%w: 电信 wan3.0 视频任务失败: %s", ErrUpstreamRejected, task.Error.Message)
 		}
 
 		var status, videoURL string
@@ -743,7 +814,7 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			}
 			log.Printf("[VideoGen] 电信 wan3.0 任务成功但无URL (attempt %d): %s", i+1, string(respBody))
 			continue
-		case "failed", "unknown", "canceled", "cancelled":
+		case "failed", "canceled", "cancelled":
 			code, msg := task.Code, task.Message
 			if task.Output != nil {
 				if code == "" {
@@ -753,7 +824,7 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 					msg = task.Output.Message
 				}
 			}
-			return "", fmt.Errorf("电信 wan3.0 视频任务失败: %s %s", code, msg)
+			return "", fmt.Errorf("%w: 电信 wan3.0 视频任务失败: %s %s", ErrUpstreamRejected, code, msg)
 		default:
 			log.Printf("[VideoGen] 电信 wan3.0 任务轮询 (attempt %d): status=%s", i+1, status)
 			reportProgress(ctx, "上游生成中", 0)
@@ -1111,15 +1182,16 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 	apiKey, baseURL := c.creds(ctx)
 	url := fmt.Sprintf("%s/video/generations", baseURL)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
 	start := time.Now()
-	resp, err := c.httpCli.Do(httpReq)
+	resp, err := c.doCreateWithRetry(ctx, "华数视频任务", func(ctx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		return httpReq, nil
+	})
 	if err != nil {
 		log.Printf("[VideoGen] error after %s: %v", time.Since(start), err)
 		return "", fmt.Errorf("http request: %w", err)
@@ -1134,7 +1206,7 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("Video API error (status=%d): %s", resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+		return "", fmt.Errorf("%w: Video API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
 	}
 
 	var videoResp VideoResponse
@@ -1142,9 +1214,9 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 		return "", fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// 检查错误
+	// 检查错误：创建请求被上游明确拒绝（HTTP 200 但体内带 error）→ 上游没接单，可自动退费
 	if videoResp.Error != nil {
-		return "", fmt.Errorf("Video API error: %s", videoResp.Error.Message)
+		return "", fmt.Errorf("%w: Video API error: %s", ErrUpstreamRejected, videoResp.Error.Message)
 	}
 
 	// 情况1：直接返回视频URL（output.url 或 data[0].url）
@@ -1218,7 +1290,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 				return taskResp.Data.ResultURL, nil
 			}
 			return "", fmt.Errorf("task succeeded but no result_url")
-		case "FAIL", "FAILED", "FAILURE", "ERROR", "CANCELED", "CANCELLED":
+		case "FAIL", "FAILED", "FAILURE", "ERROR":
 			reason := taskResp.Data.FailReason
 			if reason == "" {
 				reason = taskResp.Message
@@ -1226,7 +1298,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 			if reason == "" {
 				reason = "unknown"
 			}
-			return "", fmt.Errorf("task failed: %s", reason)
+			return "", fmt.Errorf("%w: task failed: %s", ErrUpstreamRejected, reason)
 		}
 		// PROCESSING → 继续轮询，同时把上游真实进度透出（"62%" → 62）
 		progress := strings.TrimSpace(taskResp.Data.Progress)

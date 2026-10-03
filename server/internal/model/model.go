@@ -379,7 +379,7 @@ type BillingRecord struct {
 	// 以前渠道是拼进 Model 的（wasu-cdance2.5-0807）：那串值既不是模型 ID 也不是渠道，
 	// 前端只能整串显示，筛选/对账还得反解析。现在渠道独立成列，Model 只存纯模型 ID。
 	// 本次改动之前的历史账单这一列为空 —— 读取时按 Model 里的渠道前缀回填（见
-	// service.NormalizeBillingChannel），数据库里的原始文本保持不变。
+	// billing.NormalizeChannel），数据库里的原始文本保持不变。
 	Channel string `gorm:"size:20;default:''" json:"channel"`
 	// Scene 扣费场景（如 图片生成 / 视频生成 / 提示词生成）
 	Scene string `gorm:"size:50" json:"scene"`
@@ -399,6 +399,11 @@ type BillingRecord struct {
 	OrderNo string `gorm:"size:64;default:''" json:"order_no"`
 	// AlipayTradeNo 支付宝交易号（支付宝侧 trade_no）：退款与对账的唯一凭据，仅支付宝充值有。
 	AlipayTradeNo string `gorm:"size:64;default:''" json:"alipay_trade_no"`
+	// TaskID 上游异步任务号（视频生成才有）。
+	// 账单行是永久记录，而异步任务登记（Redis，24h）在退费成功后就被消费掉了 ——
+	// 少了这一列，事后既无法向渠道核对「这笔失败有没有让上游真的接单并计费」，
+	// 也找不回上游可能已经产出的结果。线上实例：10-03 00:04 那次超时中断。
+	TaskID string `gorm:"size:64;default:''" json:"task_id"`
 	// Remark 描述（展示给用户看的文案）
 	Remark string `gorm:"size:255" json:"remark"`
 	// BalanceAfter 本次变动后的剩余积分
@@ -460,6 +465,61 @@ func (PointsPackage) TableName() string { return "points_packages" }
 // ========== 生成历史记录 ==========
 
 // GenerationHistory 节点生成历史（图片/视频）
+// ProviderTask 上游任务对账表：每一次「下发到上游的视频任务」一行。
+//
+// 为什么需要它：任务号是跟渠道对账的唯一凭据，但它原本只存在 Redis 任务登记里
+// （gen:task:<执行ID>:<节点ID>，TTL 24 小时，退费成功后立刻被消费掉）——
+// 既留不下来、也查不了。线上教训（10-03 00:04 那次创建请求超时中断）：
+// 事后完全无法回答「上游到底有没有接单、有没有计费」，也找不回上游可能已产出的成片。
+//
+// 这张表按任务号（TaskID）去重：同一任务被续查/复用多次只留一行、状态取最新，
+// 于是「钱（billing_records）↔ 上游任务（本表）↔ 成品（generation_history）」
+// 三方可以按 TaskID / (执行, 节点) 对齐。
+type ProviderTask struct {
+	ID int64 `gorm:"primaryKey;autoIncrement" json:"id"`
+	// TaskID 上游返回的任务号（对账主键）
+	TaskID string `gorm:"size:128;not null;uniqueIndex" json:"task_id"`
+	// Provider 渠道：wasu=华数 / dianxin=电信
+	Provider string `gorm:"size:20;default:'';index" json:"provider"`
+	Model    string `gorm:"size:100;default:''" json:"model"`
+	// ExecID / NodeID 这次任务属于哪次执行、哪个画布节点
+	ExecID int64  `gorm:"index" json:"exec_id"`
+	NodeID string `gorm:"size:64;index" json:"node_id"`
+	// UserID / ProjectID 归属（对账时按人、按项目筛）
+	UserID    string `gorm:"size:36;index" json:"user_id"`
+	ProjectID string `gorm:"size:36;index" json:"project_id"`
+	// Status 该上游任务的最终去向：submitted 已下发 / delivered 已交付 /
+	// failed 失败未交付 / refunded 失败且已退费
+	Status string `gorm:"size:20;default:'submitted';index" json:"status"`
+	// ChargedAmount 下发该任务时扣掉的积分（复用旧任务续查时为当初那笔）
+	ChargedAmount int64 `gorm:"default:0" json:"charged_amount"`
+	// RefundedAmount 已退还给用户的积分
+	RefundedAmount int64 `gorm:"default:0" json:"refunded_amount"`
+	// ChargeResolution / ChargeSeconds / ChargeRefSeconds 当初扣费的计费口径
+	// （分辨率 / 计费总时长 / 其中参考视频时长）。人工退费要按同一口径写退费账单，
+	// 否则退费记录和扣费记录对不上（视频按分辨率档位定价，口径就是复核依据）。
+	ChargeResolution string `gorm:"size:32;default:''" json:"charge_resolution"`
+	ChargeSeconds    int    `gorm:"default:0" json:"charge_seconds"`
+	ChargeRefSeconds int    `gorm:"default:0" json:"charge_ref_seconds"`
+	// TaskKind 任务类型（对账页可筛选）：视频是异步任务（有上游任务号），
+	// 图片/文本/剧本/故事/音频是同步调用（没有任务号，用本地编号当 key）。
+	// 取值用计费动作，如 ai.video / ai.image / ai.story
+	TaskKind string `gorm:"size:32;default:'';index" json:"task_kind"`
+	// RefundSource 退费来源：auto=上游明确拒绝后自动退（上游不会计费，我们没有成本）；
+	// manual=管理员人工判断后退（上游没明确拒绝，很可能已生成并计费，是真实成本）。
+	// 两者在「已退费」里含义完全不同，必须分开统计，不能笼统说「退了」
+	RefundSource string `gorm:"size:16;default:''" json:"refund_source"`
+	// ResultURL 交付给用户的产物地址（我们自己的存储/CDN）；未交付为空
+	ResultURL string `gorm:"size:1000;default:''" json:"result_url"`
+	// ProviderURL 上游返回的原始产物地址：转存失败时它仍然有效，
+	// 留着它才能证明「上游确实出了片」，也才有机会人工把片子捞回来
+	ProviderURL string `gorm:"size:1000;default:''" json:"provider_url"`
+	// Note 失败原因或处理说明（截断到 255，供人工核对时快速定位）
+	Note      string    `gorm:"size:255;default:''" json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type GenerationHistory struct {
 	ID        string `gorm:"size:36;primaryKey" json:"id"`
 	UserID    string `gorm:"size:36;not null;index" json:"user_id"`

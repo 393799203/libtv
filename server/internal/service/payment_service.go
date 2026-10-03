@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"libtv/internal/billing"
 	"log"
 	"math"
 	"net/http"
@@ -38,7 +39,7 @@ var (
 // PaymentService 支付宝支付服务（积分超市购买积分）
 type PaymentService struct {
 	db      *gorm.DB
-	billing *BillingService
+	billing *billing.Service
 	cfg     config.AlipayConfig
 
 	privKey *rsa.PrivateKey
@@ -46,7 +47,7 @@ type PaymentService struct {
 }
 
 // NewPaymentService 创建支付服务；签名密钥解析失败时返回错误
-func NewPaymentService(db *gorm.DB, billing *BillingService, cfg config.AlipayConfig) (*PaymentService, error) {
+func NewPaymentService(db *gorm.DB, billing *billing.Service, cfg config.AlipayConfig) (*PaymentService, error) {
 	s := &PaymentService{db: db, billing: billing, cfg: cfg}
 
 	if cfg.Enabled {
@@ -333,7 +334,7 @@ func (s *PaymentService) chargeOrder(ctx context.Context, orderNo, alipayTradeNo
 
 	// 到账：调用既有 Recharge（加分 + 记账单）
 	remark := fmt.Sprintf("支付宝购买「%s」", order.PackageName)
-	if err := s.billing.Recharge(ctx, order.UserID, order.Points, "积分充值", remark, RechargeOrder{OrderNo: orderNo, AlipayTradeNo: alipayTradeNo}); err != nil {
+	if err := s.billing.Recharge(ctx, order.UserID, order.Points, "积分充值", remark, billing.RechargeOrder{OrderNo: orderNo, AlipayTradeNo: alipayTradeNo}); err != nil {
 		log.Printf("[Payment] ⚠️ 到账失败，回滚订单状态: orderNo=%s userID=%s points=%d err=%v", orderNo, order.UserID, order.Points, err)
 		// 回滚抢占状态，让支付宝重试
 		s.db.Model(&model.PaymentOrder{}).Where("order_no = ?", orderNo).

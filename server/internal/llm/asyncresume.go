@@ -40,6 +40,13 @@ type AsyncTaskRef struct {
 	ChargeResolution string `json:"chargeResolution"`
 	ChargeSeconds    int    `json:"chargeSeconds"`
 	ChargeRefSeconds int    `json:"chargeRefSeconds"`
+	// ResultURL / ProviderURL 产物地址：交付给用户的地址与上游返回的原始地址。
+	// 上游是「生成后计费」，转存失败时上游地址仍然有效 —— 留着它既能在对账页上
+	// 证明「上游确实出了片」，也才有机会人工把片子捞回来。
+	ResultURL   string `json:"resultURL,omitempty"`
+	ProviderURL string `json:"providerURL,omitempty"`
+	// RefundSource 退费来源（auto/manual），只在退费路径上有值
+	RefundSource string `json:"refundSource,omitempty"`
 	// DownloadFailures 该上游任务「下载转存」失败的累计次数。
 	// 视频已经生成但转存到自有存储失败时，不立即退费也不重新下发 —— 先靠队列重试复用
 	// 这个已完成的上游任务重新转存（不重新扣费）。只有转存反复失败（达到上限）才退费收场，
@@ -115,6 +122,29 @@ func SaveAsyncTaskRef(ref *AsyncTaskRef) {
 		ref.Provider, ref.Model, ref.TaskID, ref.ExecID, ref.NodeID)
 }
 
+// TaskSubmittedHook 拿到上游任务号那一刻的回调（provider/model/taskID）。
+//
+// 与 Redis 登记的区别：登记是运行时凭据（24h、退费后即被消费），
+// 而回调让上层把这次下发**当场**写进永久账（provider_tasks 对账表）——
+// 否则生成还在跑的那几分钟里，运营在对账页上什么都看不到（线上反馈过这个问题）。
+type TaskSubmittedHook func(provider, model, taskID string)
+
+type taskSubmittedHookKey struct{}
+
+// WithTaskSubmittedHook 注册「任务已提交」回调（executor 用它写对账表）。
+func WithTaskSubmittedHook(ctx context.Context, hook TaskSubmittedHook) context.Context {
+	return context.WithValue(ctx, taskSubmittedHookKey{}, hook)
+}
+
+func taskSubmittedHook(ctx context.Context) TaskSubmittedHook {
+	if v := ctx.Value(taskSubmittedHookKey{}); v != nil {
+		if h, ok := v.(TaskSubmittedHook); ok {
+			return h
+		}
+	}
+	return nil
+}
+
 // RecordSubmittedTask 在拿到上游 taskID 后立即登记（client 层调用）。
 // 必须在轮询之前调用：先落盘再等待，进程若在轮询期间被杀，重启后可直接续查。
 func RecordSubmittedTask(ctx context.Context, provider, model, taskID string) {
@@ -135,6 +165,10 @@ func RecordSubmittedTask(ctx context.Context, provider, model, taskID string) {
 		h.CreateAt = time.Now().Format(time.RFC3339)
 	}
 	SaveAsyncTaskRef(h)
+	// 通知上层：任务号一到手就写永久对账（不依赖 Redis 是否可用）
+	if hook := taskSubmittedHook(ctx); hook != nil {
+		hook(h.Provider, h.Model, taskID)
+	}
 }
 
 // TakeAsyncTaskRef 原子地「认领」任务登记（Redis GETDEL），返回被认领的那份登记；

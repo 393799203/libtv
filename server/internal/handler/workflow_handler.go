@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"libtv/internal/billing"
 	"log"
 	"net/http"
 	"strconv"
@@ -35,8 +36,10 @@ type WorkflowHandler struct {
 	// genQueue 生成任务队列：非 nil 时生成任务入 Redis Stream 由 worker 消费
 	// （进程重启不丢任务、失败重试、并发受控）；为 nil 时降级为进程内直接起协程
 	genQueue *queue.Queue
-	// billingService 计费服务：看门狗退还「已扣但没取回结果」的积分时用（见 SetBillingService）
-	billingService *service.BillingService
+	// providerTaskService 上游任务对账：看门狗把「已扣费但没交付」的任务标成待人工退费。
+	// 看门狗**不再自己退钱** —— 退款规则是「只有上游明确拒绝才自动退，其余交人工复核」，
+	// 卡死属于「我们不知道上游做了什么」，所以只标记、不动积分。
+	providerTaskService *billing.Ledger
 	// generationHistoryService 生成历史：看门狗判断节点产物「是否已经交付」的证据来源
 	generationHistoryService *service.GenerationHistoryService
 	// canvasLocks 按项目串行化画布写入：同一层里多个节点并行收尾会同时做

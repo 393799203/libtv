@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"libtv/internal/billing"
 	"log"
 	"time"
 
@@ -47,7 +48,7 @@ func (h *WorkflowHandler) StartExecutionWatchdog(ctx context.Context, interval t
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
-		log.Printf("[Watchdog] 已启动：每 %s 巡检一次，「超过 %s 未结束且无 worker 在跑」的执行判失败并退还积分",
+		log.Printf("[Watchdog] 已启动：每 %s 巡检一次，「超过 %s 未结束且无 worker 在跑」的执行判失败并交人工复核（不自动退费）",
 			interval, watchdogBudget().Round(time.Minute))
 		for {
 			select {
@@ -62,7 +63,11 @@ func (h *WorkflowHandler) StartExecutionWatchdog(ctx context.Context, interval t
 }
 
 // SetBillingService 注入计费服务：看门狗退还「已扣但没取回结果」的积分时用
-func (h *WorkflowHandler) SetBillingService(b *service.BillingService) { h.billingService = b }
+// SetProviderTaskService 注入上游任务对账服务：看门狗把「已扣费但没交付」的任务
+// 标成「待人工退费」，不再自己退钱（退款规则见 executor 失败分支的说明）
+func (h *WorkflowHandler) SetProviderTaskService(s *billing.Ledger) {
+	h.providerTaskService = s
+}
 
 // SetGenerationHistoryService 注入生成历史服务：看门狗用它判断「产物其实已经交付」，
 // 避免把已生成并上传对象存储的结果误判成失败（见 failStaleExecution 的收口前提）
@@ -149,60 +154,48 @@ func (h *WorkflowHandler) failStaleExecution(ctx context.Context, exec *model.Wo
 		return
 	}
 
-	msg := fmt.Sprintf("看门狗：执行已超过 %s 没有结果（进程中断或任务卡死），已判定失败并退还本次已扣积分",
+	msg := fmt.Sprintf("看门狗：执行已超过 %s 没有结果（进程中断或任务卡死），已判定失败；本次扣费未自动退还，已提交人工复核",
 		waited)
 	log.Printf("[Watchdog] 判定执行卡死: execID=%d projectID=%s 已等待=%s 未交付节点=%d/%d",
 		exec.ID, exec.ProjectID, waited, len(missing), len(nodeIDs))
 
-	// 1) 只退还「已扣费但没交付」的那部分：登记里带着当初扣的金额与计费口径。
-	//    已交付的节点在成功时就清掉了登记，这里再显式跳过一遍，确保「交付了就不退钱」。
-	userID := ""
-	refunded := int64(0)
-	refundCount := 0
+	// 1) 不自动退费（产品口径）：执行卡死属于「我们不知道上游到底做了什么」——
+	//    上游很可能已经受理、并在生成后计费，我们单方面退费就是白付上游一次。
+	//    这里只把「已扣费但没交付」的任务标成「待人工退费」，退不退由管理员在对账页决定。
+	//    已交付的节点在成功时就清掉了登记，这里再显式跳过一遍，确保「交付了就不进人工队列」。
+	projectUser := ""
+	marked := 0
 	for _, nodeID := range missing {
 		ref := llm.LoadAsyncTaskRef(ctx, exec.ID, nodeID)
-		if ref == nil || ref.ChargedAmount <= 0 {
+		if ref == nil || ref.TaskID == "" || ref.ChargedAmount <= 0 {
 			continue
 		}
-		if userID == "" {
-			userID = h.ownerOfExecution(ctx, exec)
-			if userID == "" {
-				log.Printf("[Watchdog] 取不到执行 %d 的项目属主，跳过退费（需人工核对）", exec.ID)
-				break
-			}
+		if projectUser == "" {
+			projectUser = h.ownerOfExecution(ctx, exec)
 		}
-		// 认领登记（GETDEL）：并发副本/看门狗/重试里只有一个能退这笔钱
-		claimed := llm.TakeAsyncTaskRef(exec.ID, nodeID)
-		if claimed == nil || claimed.ChargedAmount <= 0 {
-			continue
+		if h.providerTaskService == nil {
+			log.Printf("[Watchdog] 对账服务不可用，跳过标记（需人工核对）exec=%d node=%s", exec.ID, nodeID)
+			break
 		}
-		// 幂等：同一笔扣费只退一次
-		if !llm.TryMarkRefunded(claimed.TaskID) {
-			log.Printf("[Watchdog] 上游任务 %s 的扣费已退过，跳过（exec=%d node=%s）", claimed.TaskID, exec.ID, nodeID)
-			continue
-		}
-		refundCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		// 渠道从任务登记带过来（登记里的 Provider 就是当初真实调用的渠道）：
-		// 新 ctx 没有渠道信息，不带上就会按默认渠道记账，退费账单的渠道标签就错了
-		if claimed.Provider != "" {
-			refundCtx = llm.WithChannel(refundCtx, claimed.Provider)
-		}
-		extra := service.ChargeExtra{
-			Resolution:      claimed.ChargeResolution,
-			Seconds:         claimed.ChargeSeconds,
-			RefVideoSeconds: claimed.ChargeRefSeconds,
-		}
-		err := h.billingService.Refund(refundCtx, userID, claimed.ChargedAmount,
-			service.BillingActionVideo, claimed.Model, "视频生成",
-			"看门狗：执行卡死且该节点未交付，退还本次扣费", extra)
-		cancel()
-		if err != nil {
-			log.Printf("[Watchdog] ⚠️ 退还执行 %d 节点 %s 的扣费失败: %v", exec.ID, nodeID, err)
-			llm.UnmarkRefunded(claimed.TaskID) // 撤标记，留给后续核对补退
-			continue
-		}
-		refunded += claimed.ChargedAmount
-		refundCount++
+		// 对账记录：金额与计费口径取自任务登记（当初扣费时落盘的那一份）
+		_ = h.providerTaskService.Record(ctx, &model.ProviderTask{
+			TaskID:           ref.TaskID,
+			TaskKind:         billing.ActionVideo,
+			Provider:         ref.Provider,
+			Model:            ref.Model,
+			ExecID:           exec.ID,
+			NodeID:           nodeID,
+			UserID:           projectUser,
+			ProjectID:        exec.ProjectID,
+			Status:           billing.StatusPendingReview,
+			ChargedAmount:    ref.ChargedAmount,
+			RefundedAmount:   0,
+			Note:             "看门狗：执行卡死且该节点未交付，待人工复核是否退费",
+			ChargeResolution: ref.ChargeResolution,
+			ChargeSeconds:    ref.ChargeSeconds,
+			ChargeRefSeconds: ref.ChargeRefSeconds,
+		})
+		marked++
 	}
 
 	// 2) 按证据修正画布：已交付的保留成功（缺 URL 的补上），没交付的标 failed。
@@ -222,7 +215,7 @@ func (h *WorkflowHandler) failStaleExecution(ctx context.Context, exec *model.Wo
 		log.Printf("[Watchdog] 执行 %d 已被其它路径收口（可能刚好成功），本次不判失败", exec.ID)
 		return
 	}
-	log.Printf("[Watchdog] ✅ 已收口执行 %d：退还 %d 笔共 %d 积分", exec.ID, refundCount, refunded)
+	log.Printf("[Watchdog] ✅ 已收口执行 %d：%d 笔待人工复核退费（不自动退费）", exec.ID, marked)
 }
 
 // ownerOfExecution 取该执行的用户（退费需要记账到人）
@@ -254,7 +247,7 @@ func (h *WorkflowHandler) deliveredByNode(ctx context.Context, exec *model.Workf
 	}
 	rows, err := h.generationHistoryService.LatestByProjectNodes(ctx, exec.ProjectID, nodeIDs, since)
 	if err != nil {
-		// 取不到证据时按「没交付」处理：宁可走失败路径（钱退给用户），也不能凭猜测记成功
+		// 取不到证据时按「没交付」处理：宁可走失败路径（交人工复核，不自动退费），也不能凭猜测记成功
 		log.Printf("[Watchdog] 查询交付证据失败（按未交付处理）: exec=%d err=%v", exec.ID, err)
 		return out
 	}

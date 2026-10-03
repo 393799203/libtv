@@ -13,14 +13,15 @@ export interface AnalyzedSceneObject {
 export interface AnalyzeSceneResult {
   objects: AnalyzedSceneObject[];
   description: string; // 场景一句话概述
+  replayed?: boolean;  // true=窗口内重复点击，返回的是上一次结果（未重新解析、未再扣费）
 }
 
 export const previzApi = {
   // AI 建白模：参考图 → 几何体布局（视觉模型解析约 1-2 分钟，超时放宽到 5 分钟与后端对齐）
-  analyzeScene: (imageUrl: string, model?: string) =>
+  analyzeScene: (imageUrl: string, model?: string, projectId?: string) =>
     api.post<AnalyzeSceneResult>(
       '/previz/analyze-scene',
-      { image_url: imageUrl, model },
+      { image_url: imageUrl, model, projectId },
       { timeout: 300000 }
     ),
 };

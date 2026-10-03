@@ -212,6 +212,10 @@ func (c *ImageClient) doRequest(ctx context.Context, payload []byte) ([]string, 
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[ImageGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
+		if UpstreamRejectedStatus(resp.StatusCode) {
+			return nil, fmt.Errorf("%w: Image API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, string(respBody))
+		}
+		// 5xx / 408 / 429：网关或限流，上游可能已经受理了这次生成 —— 不当作「明确拒绝」
 		return nil, fmt.Errorf("Image API error (status=%d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -228,7 +232,8 @@ func (c *ImageClient) doRequest(ctx context.Context, payload []byte) ([]string, 
 	}
 
 	if imgResp.Error != nil {
-		return nil, fmt.Errorf("Image API error: %s", imgResp.Error.Message)
+		// 200 但体内带 error：同样是上游明确拒绝（网关把拒绝包在 200 里返回）
+		return nil, fmt.Errorf("%w: Image API error: %s", ErrUpstreamRejected, imgResp.Error.Message)
 	}
 
 	if len(imgResp.Data) == 0 {

@@ -1,0 +1,492 @@
+import { useCallback, useEffect, useState } from 'react';
+import { App, Button, Input, Pagination, Popover, Select, Table, Tag, Tooltip } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import {
+  ReloadOutlined,
+  CopyOutlined,
+  WarningOutlined,
+  LinkOutlined,
+} from '@ant-design/icons';
+import {
+  providerTaskApi,
+  type ProviderTask,
+  type ProviderTaskStats,
+} from '@/services/providerTaskApi';
+
+/**
+ * 上游任务对账：每一次下发到上游的视频任务一行。
+ *
+ * 为什么需要这一页：任务号是跟渠道对账的唯一凭据，但它以前只存在 Redis 任务登记里
+ * （24 小时、退费后即被消费），事后既查不了「上游到底有没有接单、有没有计费」，
+ * 也找不回上游可能已产出的成片（10-03 00:04 那次创建超时中断就是这个教训）。
+ *
+ * 默认把「已退费」的行排在前面 —— 那类行 = 用户拿回了积分，但上游按生成后计费
+ * 照样收了我们钱，是唯一会真金白银漏出去的一类，最该先看。
+ */
+// 状态就四种（含旧数据的 failed/已退费兜底）：
+// 进行中 → 已交付 / 上游报失败自动退费 / 上游没返回待人工决定
+const STATUS_META: Record<string, { text: string; color: string }> = {
+  submitted: { text: '进行中', color: 'blue' },
+  delivered: { text: '已交付', color: 'green' },
+  pending_review: { text: '待人工决定', color: 'orange' },
+  failed: { text: '待人工决定', color: 'orange' },
+  refunded: { text: '已退费', color: 'default' },
+};
+
+/** 任务类型：视频是异步任务（有上游任务号），其余是同步调用（用本地编号记账） */
+const KIND_LABEL: Record<string, string> = {
+  'ai.video': '视频',
+  'ai.image': '图片',
+  'ai.story': '故事',
+  'ai.script': '剧本',
+  'ai.audio': '音频',
+  'ai.previz_analyze': '白模解析',
+  'prompt.generate': '提示词',
+};
+
+const providerText = (p: string) => (p === 'dianxin' ? '电信' : p === 'wasu' ? '华数' : p || '-');
+
+const formatTime = (iso: string) => {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+export default function ProviderTaskReconciliation() {
+  const { message, modal } = App.useApp();
+  const [items, setItems] = useState<ProviderTask[]>([]);
+  const [stats, setStats] = useState<ProviderTaskStats | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [loading, setLoading] = useState(true);
+  const [refunding, setRefunding] = useState<number | null>(null);
+  // 默认「全部状态」：一进来就看全貌（排序仍是待人工退费 → 已退费 → 时间倒序，
+  // 需要动手的那类依然排在最上面，想看单一状态再切下拉）
+  const [status, setStatus] = useState<string>('');
+  const [taskKind, setTaskKind] = useState<string>('');
+  const [taskIdInput, setTaskIdInput] = useState('');
+  const [taskId, setTaskId] = useState('');
+  const [projectIdInput, setProjectIdInput] = useState('');
+  const [projectId, setProjectId] = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    providerTaskApi
+      .list({ status, task_kind: taskKind, task_id: taskId, project_id: projectId, page, page_size: pageSize })
+      .then((res) => {
+        setItems(res.items || []);
+        setTotal(res.total || 0);
+        setStats(res.stats || null);
+      })
+      .catch(() => {
+        // HTTP 错误已由 api.ts 拦截器统一提示
+      })
+      .finally(() => setLoading(false));
+  }, [status, taskKind, taskId, projectId, page, pageSize]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 手动退费：先确认（金额、用户、任务号都摆出来），再调接口；成功后刷新列表
+  const refund = (row: ProviderTask) => {
+    modal.confirm({
+      title: '确认退费？',
+      content: (
+        <div className="text-[13px] leading-6">
+          <div>用户：{row.user_id || '-'}</div>
+          <div>
+            退还积分：<span className="text-red-600 font-medium">{row.charged_amount}</span>
+            {row.charge_resolution
+              ? `（${row.charge_resolution} / ${row.charge_seconds} 秒${
+                  row.charge_ref_seconds ? `，其中参考视频 ${row.charge_ref_seconds} 秒` : ''
+                }）`
+              : ''}
+          </div>
+          <div className="break-all">任务号：{row.task_id}</div>
+          <div className="text-gray-500 mt-1">
+            退费立即到账、会写进用户的费用明细；同一笔只能退一次（已交付/已退费会被拦住）
+          </div>
+        </div>
+      ),
+      okText: '确认退费',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setRefunding(row.id);
+        try {
+          await providerTaskApi.refund(row.id, '对账页手动退费');
+          message.success('已退费');
+          load();
+        } finally {
+          setRefunding(null);
+        }
+      },
+    });
+  };
+
+  const copyText = (text: string, tip: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => message.success(tip),
+      () => message.warning('复制失败，请手动选择复制')
+    );
+  };
+
+  /** 产物地址：优先交付地址（我们的存储），其次上游原始地址（转存失败时仍可打开） */
+  const artifactOf = (row: ProviderTask) => {
+    if (row.result_url) return { url: row.result_url, label: '交付产物', own: true };
+    if (row.provider_url) return { url: row.provider_url, label: '上游产物（未转存成功）', own: false };
+    return null;
+  };
+
+  /** 悬停/点击「已交付」时给出的产物面板：直接打开 + 一键复制 */
+  const artifactPanel = (row: ProviderTask) => {
+    const rows = [
+      row.result_url ? { label: '交付产物', url: row.result_url } : null,
+      row.provider_url ? { label: '上游原始产物', url: row.provider_url } : null,
+    ].filter(Boolean) as { label: string; url: string }[];
+    return (
+      <div className="max-w-[420px] text-[12px] leading-6">
+        {rows.map((r) => (
+          <div key={r.label} className="mb-1">
+            <div className="text-gray-500">{r.label}</div>
+            <div className="flex items-center gap-1">
+              <a href={r.url} target="_blank" rel="noreferrer" className="break-all text-blue-600">
+                {r.url}
+              </a>
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                title="复制地址"
+                onClick={() => copyText(r.url, '产物地址已复制')}
+              />
+            </div>
+          </div>
+        ))}
+        {!rows.length && <div className="text-gray-400">这条没有产物地址</div>}
+      </div>
+    );
+  };
+
+  /** 只有「待人工退费」且确实扣过钱的行才给退费按钮 */
+  const canRefund = (row: ProviderTask) =>
+    (row.status === 'pending_review' || row.status === 'failed') && row.charged_amount > 0;
+
+  const columns: ColumnsType<ProviderTask> = [
+    {
+      title: '时间 / 状态',
+      dataIndex: 'status',
+      width: 156,
+      render: (s: string, row: ProviderTask) => {
+        const meta = STATUS_META[s] || { text: s || '-', color: 'default' };
+        // 已退费要分清是谁退的：自动退 = 上游明确拒绝（上游不计费）；人工退 = 可能已计费
+        const auto = s === 'refunded' && row.refund_source === 'auto';
+        const manual = s === 'refunded' && row.refund_source === 'manual';
+        const tagText = auto ? '自动退费' : manual ? '人工退费' : meta.text;
+        const tag = <Tag color={auto ? 'blue' : manual ? 'red' : meta.color}>{tagText}</Tag>;
+        const artifact = artifactOf(row);
+        // 悬停解释「为什么这条要人工看」/「为什么这条的钱退不回来」
+        const tip =
+          auto
+            ? '上游明确拒绝了这次任务（参数不合法 / 不过审 / 任务被判失败），已自动退还用户扣费。上游不计费，我们没有成本'
+            : manual
+              ? '管理员判断后退还了用户扣费。上游当时没明确拒绝，很可能已经生成并计费 —— 这是真实成本'
+              : s === 'refunded'
+                ? '用户积分已退还（这次退费发生在上线「退费来源」之前，未能区分自动/人工）'
+                : s === 'pending_review' || s === 'failed'
+              ? '上游没有明确报错（超时 / 没拿到结果等），按规则不自动退费，需要人工判断'
+              : '';
+        // 有产物就做成可点开的面板：交付的看交付地址，没转存成功的看上游地址
+        const body = artifact ? (
+          <Popover
+            content={artifactPanel(row)}
+            title="产物地址"
+            trigger="click"
+            placement="bottomLeft"
+          >
+            <span className="cursor-pointer inline-flex items-center gap-0.5">
+              {tag}
+              <LinkOutlined className="text-[12px] text-blue-500" />
+            </span>
+          </Popover>
+        ) : (
+          <span className={tip ? 'cursor-help' : undefined}>{tag}</span>
+        );
+        const tagNode = tip ? (
+          <Tooltip title={tip}>
+            <span>{body}</span>
+          </Tooltip>
+        ) : (
+          body
+        );
+        return (
+          <div className="leading-5">
+            <div className="text-[12px] text-gray-600">{formatTime(row.created_at)}</div>
+            <div className="mt-0.5">{tagNode}</div>
+          </div>
+        );
+      },
+    },
+    {
+      title: '用户',
+      dataIndex: 'user_name',
+      width: 150,
+      render: (_: string, r) => (
+        <div className="text-[12px] leading-5">
+          <div className="text-gray-800 truncate" title={r.user_name || r.user_email || ''}>
+            {r.user_name || '（无昵称）'}
+          </div>
+          <div className="text-[11px] text-gray-400 truncate" title={r.user_email || ''}>
+            {r.user_email || '-'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: '项目',
+      dataIndex: 'project_name',
+      width: 150,
+      render: (_: string, r) => (
+        <div className="text-[12px] leading-5">
+          <div className="text-gray-800 truncate" title={r.project_name || r.project_id || ''}>
+            {/* 提示词/白模解析这类直连接口不一定带项目：完全没有项目时显示「-」，
+                只有「有 project_id 但名字查不到」才算项目已删除 */}
+            {r.project_name || (r.project_id ? '（项目已删除）' : '-')}
+          </div>
+          <div className="text-[10px] text-gray-400 truncate" title={r.project_id}>
+            {r.project_id || '-'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: '渠道 / 模型',
+      dataIndex: 'model',
+      width: 224,
+      render: (_: string, r) => (
+        <div className="text-[12px] leading-5">
+          {/* 口径（模型参数：分辨率 · 计费时长）跟在渠道名后面：模型名很长，跟在它后面会被挤掉 */}
+          {/* 第一行只放「渠道 + 口径」：口径就是这次调用用的模型参数，紧贴渠道名最省地方 */}
+          <div className="flex items-center gap-1 flex-nowrap overflow-hidden">
+            <span className="text-gray-800 whitespace-nowrap shrink-0">{providerText(r.provider)}</span>
+            {(r.charge_resolution || r.charge_seconds > 0) && (
+              <Tag
+                bordered={false}
+                className="!text-[9px] !px-1 !py-0 !mr-0 !leading-none shrink-0 text-gray-500 bg-gray-100"
+              >
+                {(r.charge_resolution || '').replace('x', '×')}
+                {r.charge_seconds > 0 ? `${r.charge_resolution ? ' · ' : ''}${r.charge_seconds}s` : ''}
+                {r.charge_ref_seconds > 0 ? ` · 参考${r.charge_ref_seconds}s` : ''}
+              </Tag>
+            )}
+          </div>
+          {/* 第二行放「类型 + 模型名」：模型名最长，单独一行折行显示，不跟口径抢宽度 */}
+          <div className="text-[11px] text-gray-500 break-all" title={r.model}>
+            {r.task_kind && (
+              <span className="text-[10px] text-gray-400 mr-1">{KIND_LABEL[r.task_kind] || r.task_kind}</span>
+            )}
+            {r.model || '-'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: '积分',
+      dataIndex: 'charged_amount',
+      width: 96,
+      render: (_: number, r) => (
+        <div className="text-[12px] leading-5">
+          <div className="text-gray-800">-{r.charged_amount}</div>
+          {r.refunded_amount > 0 && <div className="text-green-600">+{r.refunded_amount}</div>}
+        </div>
+      ),
+    },
+    {
+      title: '执行 / 节点',
+      dataIndex: 'exec_id',
+      width: 176,
+      render: (_: number, r) =>
+        r.exec_id > 0 ? (
+          <div className="text-[11px] leading-5 text-gray-500">
+            <div className="text-gray-700">exec {r.exec_id}</div>
+            {/* 节点 ID 常常很长（节点名 + 时间戳），放宽这一列并允许折行，别截断 */}
+            <div className="break-all" title={r.node_id || ''}>
+              {r.node_id || '-'}
+            </div>
+          </div>
+        ) : (
+          // 提示词生成、白模解析这类前端直连接口不跑工作流，没有执行号也没有节点 ——
+          // 显示「-」，不要显示 "exec 0"（那不是执行号，看着像数据错了）
+          <span className="text-[11px] text-gray-300">-</span>
+        ),
+    },
+    {
+      title: '上游任务号',
+      dataIndex: 'upstream_task_id',
+      width: 150,
+      render: (v: string) =>
+        v ? (
+          <span className="text-[11px] text-gray-700 break-all">{v}</span>
+        ) : (
+          // 同步调用（图片/故事/剧本/音频/白模解析）没有上游任务号，
+          // 创建阶段就失败、还没拿到号的视频也没有 —— 一律留「-」，
+          // 不拿我们自己造的编号冒充（那种编号拿到渠道后台查不到）
+          <span className="text-[11px] text-gray-300">-</span>
+        ),
+    },
+    {
+      title: '备注',
+      dataIndex: 'note',
+      width: 160,
+      render: (v: string) =>
+        v ? (
+          // 备注常常很长（上游原始报错），这里只留一行摘要，全文放气泡里看
+          <Tooltip title={<span className="text-[12px] leading-5 break-all">{v}</span>}>
+            <span className="block text-[11px] text-gray-500 truncate cursor-help">{v}</span>
+          </Tooltip>
+        ) : (
+          <span className="text-[11px] text-gray-300">-</span>
+        ),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 84,
+      fixed: 'right',
+      render: (_: unknown, row) =>
+        canRefund(row) ? (
+          <Button size="small" danger loading={refunding === row.id} onClick={() => refund(row)}>
+            退费
+          </Button>
+        ) : (
+          <span className="text-[12px] text-gray-300">—</span>
+        ),
+    },
+  ];
+
+  return (
+    <div className="flex-1 overflow-auto p-6">
+      {/* 汇总条：一眼看清「要动手的有几条」和「白付上游多少钱」 */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
+          共 <span className="text-gray-900 font-medium">{stats?.total ?? 0}</span> 条
+        </div>
+        <div className="px-3 py-2 rounded bg-green-50 border border-green-100 text-[12px] text-green-700">
+          已交付 {stats?.delivered ?? 0}
+        </div>
+        <div className="px-3 py-2 rounded bg-orange-50 border border-orange-200 text-[12px] text-orange-800 flex items-center gap-1">
+          <WarningOutlined />
+          待人工决定 {stats?.pending_review ?? 0} 条（上游没返回，退不退你定）
+        </div>
+        <div className="px-3 py-2 rounded bg-red-50 border border-red-100 text-[12px] text-red-700">
+          已退费 {stats?.refunded ?? 0} 条
+          <span className="text-gray-500">
+            （自动 {stats?.auto_refunded ?? 0} · 人工 {stats?.manual_refunded ?? 0}；
+            人工那部分上游很可能已计费 = 真成本 {stats?.refunded_credits ?? 0} 积分）
+          </span>
+        </div>
+        <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
+          扣费合计 {stats?.charged_credits ?? 0}
+        </div>
+      </div>
+
+      {/* 筛选 */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <Select
+          value={status}
+          onChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+          style={{ width: 150 }}
+          options={[
+            { value: '', label: '全部状态' },
+            { value: 'pending_review', label: '待人工决定' },
+            { value: 'delivered', label: '已交付' },
+            { value: 'submitted', label: '进行中' },
+            { value: 'refunded', label: '已退费' },
+          ]}
+        />
+        <Select
+          value={taskKind}
+          onChange={(v) => {
+            setTaskKind(v);
+            setPage(1);
+          }}
+          style={{ width: 130 }}
+          options={[
+            { value: '', label: '全部类型' },
+            { value: 'ai.video', label: '视频' },
+            { value: 'ai.image', label: '图片' },
+            { value: 'ai.story', label: '故事' },
+            { value: 'ai.script', label: '剧本' },
+            { value: 'ai.audio', label: '音频' },
+            { value: 'ai.previz_analyze', label: '白模解析' },
+          ]}
+        />
+        <Input
+          value={taskIdInput}
+          onChange={(e) => setTaskIdInput(e.target.value)}
+          onPressEnter={() => {
+            setTaskId(taskIdInput.trim());
+            setPage(1);
+          }}
+          placeholder="上游任务号（支持部分匹配）"
+          style={{ width: 260 }}
+          allowClear
+          onClear={() => {
+            setTaskId('');
+            setPage(1);
+          }}
+        />
+        <Input
+          value={projectIdInput}
+          onChange={(e) => setProjectIdInput(e.target.value)}
+          onPressEnter={() => {
+            setProjectId(projectIdInput.trim());
+            setPage(1);
+          }}
+          placeholder="项目名或项目 ID"
+          style={{ width: 300 }}
+          allowClear
+          onClear={() => {
+            setProjectId('');
+            setPage(1);
+          }}
+        />
+        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+          刷新
+        </Button>
+      </div>
+
+      <Table<ProviderTask>
+        rowKey="id"
+        size="small"
+        loading={loading}
+        columns={columns}
+        dataSource={items}
+        pagination={false}
+        scroll={{ x: 1228 }}
+        locale={{ emptyText: '暂无记录（对账表从本次上线开始记录）' }}
+      />
+
+      <div className="flex justify-end mt-4">
+        <Pagination
+          current={page}
+          pageSize={pageSize}
+          total={total}
+          showSizeChanger
+          pageSizeOptions={[20, 50, 100]}
+          onChange={(p, s) => {
+            setPage(p);
+            setPageSize(s);
+          }}
+          showTotal={(t) => `共 ${t} 条`}
+        />
+      </div>
+    </div>
+  );
+}

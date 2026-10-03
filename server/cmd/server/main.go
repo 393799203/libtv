@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"libtv/internal/billing"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"libtv/internal/config"
 	"libtv/internal/engine"
 	"libtv/internal/handler"
+	"libtv/internal/idem"
 	"libtv/internal/llm"
 	"libtv/internal/middleware"
 	"libtv/internal/model"
@@ -82,7 +84,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -109,6 +111,7 @@ func main() {
 	billingRepo := repository.NewBillingRepo(db)
 	modelPriceRepo := repository.NewModelPriceRepo(db)
 	generationHistoryRepo := repository.NewGenerationHistoryRepo(db)
+	providerTaskRepo := repository.NewProviderTaskRepo(db)
 	pointsPackageRepo := repository.NewPointsPackageRepo(db)
 	forumRepo := repository.NewForumRepo(db)
 
@@ -125,9 +128,9 @@ func main() {
 	bannerService := service.NewBannerService(bannerRepo, appStorage)
 	userAssetService := service.NewUserAssetService(userAssetRepo, appStorage)
 	// 模型价格配置服务（运营后台价格管理；模型清单来自 models.yaml，价格存 model_prices 表）
-	pricingService := service.NewPricingService(modelManager, modelPriceRepo)
+	pricingService := billing.NewPricingService(modelManager, modelPriceRepo)
 	// 积分扣费服务（AI 调用前置校验；真实单价来自 model_prices 表，运营后台价格管理维护）
-	billingService := service.NewBillingService(userRepo, billingRepo, modelPriceRepo, modelManager)
+	billingService := billing.NewService(userRepo, billingRepo, modelPriceRepo, modelManager)
 	// 积分套餐服务（积分超市卡片，运营后台「套餐管理」维护）
 	pointsPackageService := service.NewPointsPackageService(pointsPackageRepo)
 	// 首次启动时写入默认套餐
@@ -168,9 +171,11 @@ func main() {
 
 	// 生成历史记录
 	generationHistoryService := service.NewGenerationHistoryService(generationHistoryRepo)
+	providerTaskService := billing.NewLedger(providerTaskRepo)
+	providerTaskHandler := handler.NewProviderTaskHandler(providerTaskService)
 
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService, providerTaskService)
 	eng := engine.NewWorkflowEngine(registry)
 	// 执行时按全局策略 + 用户渠道解析最终 AI 渠道（wasu/dianxin）
 	eng.SetChannelResolver(func(ctx context.Context, userID string) string {
@@ -198,8 +203,11 @@ func main() {
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	modelHandler := handler.NewModelHandler(modelManager, channelService)
 	channelHandler := handler.NewChannelHandler(channelService, userService)
-	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService, channelService)
-	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService, channelService)
+	// 幂等存储的内容在 cache.Init 之后装配（见下方）：这里先给一个「延迟取 Redis」的实例，
+	// 它没有 Redis 时会自动降级为不拦截，不会因为顺序问题静默失效
+	idemStore := idem.New(nil, "idem:")
+	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService, providerTaskService, idemStore, channelService)
+	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService, providerTaskService, idemStore, channelService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService, channelService)
@@ -221,6 +229,9 @@ func main() {
 		log.Printf("✅ Redis 已连接: %s (db=%d)", config.C.Redis.Addr(), config.C.Redis.DB)
 		defer func() { _ = cache.Close() }()
 	}
+
+	// Redis 就绪后把客户端交给幂等存储（直连 AI 接口防双击/防重复扣费）
+	idemStore.SetClient(cache.Client())
 
 	// 生成任务队列：任务入 Redis Stream，由 worker 池消费。
 	// worker 数即全局并发闸门；未确认的消息在进程重启后由 XAUTOCLAIM 认领续跑。
@@ -323,12 +334,12 @@ func main() {
 
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
-		api.PUT("/auth/profile", userHandler.UpdateProfile)    // 更新当前用户个人资料（昵称/头像）
-		api.PUT("/auth/password", userHandler.ChangePassword)  // 修改当前用户密码
-		api.POST("/upload/avatar", uploadHandler.UploadAvatar) // 上传头像（存 users/<userID>/avatar/）
+		api.PUT("/auth/profile", userHandler.UpdateProfile)             // 更新当前用户个人资料（昵称/头像）
+		api.PUT("/auth/password", userHandler.ChangePassword)           // 修改当前用户密码
+		api.POST("/upload/avatar", uploadHandler.UploadAvatar)          // 上传头像（存 users/<userID>/avatar/）
 		api.POST("/upload/forum-image", uploadHandler.UploadForumImage) // 论坛图片（存 forum/<帖子id>/）
 		api.POST("/upload/forum-video", uploadHandler.UploadForumVideo) // 论坛视频（存 forum/<帖子id>/）
-		api.GET("/users", userHandler.List)                    // 管理员：获取所有用户
+		api.GET("/users", userHandler.List)                             // 管理员：获取所有用户
 
 		// 论坛：发帖/回复/删除（需登录；删帖删回复本人或管理员皆可）
 		api.POST("/forum/posts", forumHandler.CreatePost)
@@ -338,10 +349,10 @@ func main() {
 		api.DELETE("/forum/replies/:replyId", forumHandler.DeleteReply)
 		// 论坛置顶（仅管理员）
 		api.PUT("/forum/posts/:id/pin", middleware.RequireAdmin(userService), forumHandler.SetPinned)
-		api.PUT("/users/:id/role", userHandler.UpdateRole)     // 管理员：更新用户角色
-		api.DELETE("/users/:id", userHandler.Delete)           // 管理员：删除用户
-		api.POST("/users/:id/recharge", userHandler.Recharge)  // 管理员：为用户充值积分
-		api.GET("/models", modelHandler.ListModels)            // 模型清单（按登录用户渠道返回各自渠道模型）
+		api.PUT("/users/:id/role", userHandler.UpdateRole)    // 管理员：更新用户角色
+		api.DELETE("/users/:id", userHandler.Delete)          // 管理员：删除用户
+		api.POST("/users/:id/recharge", userHandler.Recharge) // 管理员：为用户充值积分
+		api.GET("/models", modelHandler.ListModels)           // 模型清单（按登录用户渠道返回各自渠道模型）
 
 		// AI 渠道管理（多渠道 token 路由：华数/电信）
 		api.GET("/channel/my", channelHandler.GetMyChannel)                                                   // 当前用户自己的渠道
@@ -367,7 +378,7 @@ func main() {
 			projects.GET("/:id/canvas", canvasHandler.Get)
 			projects.PUT("/:id/canvas", canvasHandler.Save)
 			// 工作流（路径对齐前端 api/services/workflowApi.ts）；AI 调用入口，先过扣费中间件
-			projects.POST("/:id/workflows/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
+			projects.POST("/:id/workflows/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, billing.ActionWorkflowExecute), workflowHandler.Execute)
 			projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)
 			// 项目进行中的执行（前端重进项目时恢复"生成中"状态用；路径挂在 workflows 之外避免与 :execId 冲突）
 			projects.GET("/:id/active-executions", workflowHandler.GetActiveExecutions)
@@ -382,7 +393,7 @@ func main() {
 		// 工作流（兼容旧路由 /api/workflow/*）；AI 调用入口，先过扣费中间件
 		workflow := api.Group("/workflow")
 		{
-			workflow.POST("/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, service.BillingActionWorkflowExecute), workflowHandler.Execute)
+			workflow.POST("/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, billing.ActionWorkflowExecute), workflowHandler.Execute)
 			workflow.GET("/executions/:id", workflowHandler.GetExecution)
 		}
 
@@ -449,13 +460,13 @@ func main() {
 		// 提示词生成（需登录）；AI 调用入口，先过扣费中间件
 		prompt := api.Group("/prompt")
 		{
-			prompt.POST("/generate", middleware.Billing(billingService, service.BillingActionPromptGenerate), promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
+			prompt.POST("/generate", middleware.Billing(billingService, billing.ActionPromptGenerate), promptHandler.GeneratePrompt) // 生成提示词（画面 + 运动）
 		}
 
 		// 白模预演（需登录）；AI 场景解析入口，先过扣费中间件
 		previz := api.Group("/previz")
 		{
-			previz.POST("/analyze-scene", middleware.Billing(billingService, service.BillingActionPrevizAnalyze), previzHandler.AnalyzeScene) // AI 建白模：参考图 → 几何体布局
+			previz.POST("/analyze-scene", middleware.Billing(billingService, billing.ActionPrevizAnalyze), previzHandler.AnalyzeScene) // AI 建白模：参考图 → 几何体布局
 		}
 
 		// 用户个人资产库（需登录）
@@ -475,6 +486,16 @@ func main() {
 		// 模型价格配置（查询需登录；保存仅管理员）
 		api.GET("/pricing", pricingHandler.List)
 		api.PUT("/pricing", middleware.RequireAdmin(userService), pricingHandler.Save)
+
+		// 上游任务对账（仅管理员）：每一次下发到上游的视频任务，含任务号与最终结局。
+		// 「已退费」的行 = 用户拿回了积分、但上游按生成后计费仍然收了我们钱 —— 成本留痕。
+		providerTasks := api.Group("/admin/provider-tasks", middleware.RequireAdmin(userService))
+		{
+			providerTasks.GET("", providerTaskHandler.List)
+			providerTasks.GET("/stats", providerTaskHandler.Stats)
+			// 手动退费：只有「上游明确报错」才自动退，其余失败一律在这里由管理员决定
+			providerTasks.POST("/:id/refund", providerTaskHandler.Refund)
+		}
 
 		// 媒体维护：给缺失缩略图的图片补图（仅管理员）
 		// 缩略图只在图片上传成功那一刻生成，漏了就没人补，这个接口用来扫一遍补齐
@@ -509,10 +530,12 @@ func main() {
 	// 扣掉的钱没人退。退出时随 ctx 一起停。
 	watchdogCtx, stopWatchdog := context.WithCancel(context.Background())
 	defer stopWatchdog()
-	workflowHandler.SetBillingService(billingService)
 	// 交付证据来源：节点产物上传成功后写入的生成历史，看门狗据此区分
 	//「结果已交付、只是状态没写」与「真失败」，避免误判已生成的视频
 	workflowHandler.SetGenerationHistoryService(generationHistoryService)
+	// 看门狗不再自动退费：把「已扣但没交付」的任务标成待人工退费（见 handler 说明）
+	providerTaskService.SetBillingService(billingService)
+	workflowHandler.SetProviderTaskService(providerTaskService)
 	workflowHandler.StartExecutionWatchdog(watchdogCtx, 0)
 
 	// 优雅退出：先停止接收新请求，再停止队列 worker。

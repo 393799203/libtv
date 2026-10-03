@@ -1,4 +1,4 @@
-package service
+package billing
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 // 账单展示口径：渠道独立成列（打标签），模型列只放纯模型 ID。
 // 历史账单把渠道拼进了模型名，必须在读取时拆开 —— 拆错等于把模型名改坏（对账看不了），
 // 所以边界要钉住：只有 wasu-/dianxin- 前缀才拆，纯模型 ID / 已带渠道列的记录不动。
-func TestNormalizeBillingChannel(t *testing.T) {
+func TestNormalizeChannel(t *testing.T) {
 	cases := []struct {
 		name        string
 		rec         model.BillingRecord
@@ -65,7 +65,7 @@ func TestNormalizeBillingChannel(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			NormalizeBillingChannel(&tc.rec)
+			NormalizeChannel(&tc.rec)
 			if tc.rec.Channel != tc.wantChannel {
 				t.Errorf("channel = %q, 期望 %q", tc.rec.Channel, tc.wantChannel)
 			}
@@ -76,5 +76,5 @@ func TestNormalizeBillingChannel(t *testing.T) {
 	}
 
 	// 空指针不该 panic（列表接口对每条记录都调一次）
-	NormalizeBillingChannel(nil)
+	NormalizeChannel(nil)
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"libtv/internal/billing"
 	"log"
 	"net/http"
 	"strconv"
@@ -17,10 +18,10 @@ import (
 // 仅做参数解析与协议转换，业务逻辑全部下放到 UserService
 type UserHandler struct {
 	userService    *service.UserService
-	billingService *service.BillingService
+	billingService *billing.Service
 }
 
-func NewUserHandler(userService *service.UserService, billingService *service.BillingService) *UserHandler {
+func NewUserHandler(userService *service.UserService, billingService *billing.Service) *UserHandler {
 	return &UserHandler{userService: userService, billingService: billingService}
 }
 
@@ -245,7 +246,7 @@ func (h *UserHandler) Recharge(c *gin.Context) {
 	}
 
 	// 后台手工充值没有支付宝订单，订单号传零值（真实充值走支付宝回调，那里会带上订单号）
-	if err := h.billingService.Recharge(c.Request.Context(), id, req.Amount, "后台充值", remark, service.RechargeOrder{}); err != nil {
+	if err := h.billingService.Recharge(c.Request.Context(), id, req.Amount, "后台充值", remark, billing.RechargeOrder{}); err != nil {
 		response.FailWith(c, err)
 		return
 	}

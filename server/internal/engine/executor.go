@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"libtv/internal/billing"
 	"log"
 	"math"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 
 	"libtv/internal/apperr"
 	"libtv/internal/llm"
+	"libtv/internal/model"
 	"libtv/internal/service"
 )
 
@@ -29,19 +31,151 @@ type NodeOutput struct {
 	Error  string                 `json:"error,omitempty"`
 }
 
-// refundWithFreshCtx 用独立 context 退费：
-// 生成失败时原 ctx 往往已超时/取消（如视频轮询 10 分钟超时），用死 ctx 退费会直接失败导致用户积分损失。
-// extra 为扣费时的计费口径，需原样传入（视频带分辨率/时长/参考视频时长；按次等无口径的传零值），
-// 退费账单才能与扣费账单口径一致。
-// ctx 传「扣费时那个 ctx」：新 ctx 里没有渠道信息，必须从原 ctx 带过去，
-// 否则退费账单的「渠道-模型」前缀会回退成默认渠道（线上实例：dianxin 扣费、退费却记成 wasu-xxx）
-func refundWithFreshCtx(ctx context.Context, biller *service.BillingService, userID string, amount int64, action, modelName, scene, reason string, extra service.ChargeExtra) error {
-	refundCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if ch := llm.ChannelFrom(ctx); ch != "" {
-		refundCtx = llm.WithChannel(refundCtx, ch)
+// ---------- 同步调用的对账（图片/文本/剧本/故事/音频）----------
+//
+// 为什么同步调用也要落对账：它们的失败形态和视频一样 —— 请求挂到超时、连接断掉、
+// 被中断，这时我们并不知道上游有没有生成、有没有计费。规则必须一致：
+// 上游明确报错 → 自动退费；其余（超时/拿不到结果）→ 不自动退，进「待人工决定」。
+// 区别只在编号：同步调用没有上游任务号，用「执行 + 节点」当 key（同一节点重试只更新同一行）。
+
+// syncTask 一次同步调用的对账现场
+type syncTask struct {
+	Ledger     *billing.Ledger
+	Action     string // billing.ActionX
+	Scene      string // 账单/退费场景名，如「图片生成」
+	Model      string
+	Provider   string // 渠道（账单口径）
+	Resolution string // 计费口径（图片=尺寸），无则空
+	Seconds    int    // 计费口径（音频=字数折算秒），无则 0
+	Charged    int64
+	ExecID     int64
+	NodeID     string
+}
+
+// newSyncTask 组装一次同步调用的对账现场（provider 从 ctx 的渠道取）
+func newSyncTask(ledger *billing.Ledger, ctx context.Context, execCtx *ExecutionContext, action, scene, model, resolution string, charged int64) syncTask {
+	t := syncTask{
+		Ledger:     ledger,
+		Action:     action,
+		Scene:      scene,
+		Model:      model,
+		Provider:   llm.ChannelFrom(ctx),
+		Resolution: resolution,
+		Charged:    charged,
 	}
-	return biller.Refund(refundCtx, userID, amount, action, modelName, scene, reason, extra)
+	if execCtx != nil {
+		t.ExecID = execCtx.GetExecutionID()
+	}
+	return t
+}
+
+// key 对账行编号：同步调用没有上游任务号，用执行+节点，天然按节点去重
+func (t syncTask) key(nodeID string) string {
+	return fmt.Sprintf("sync:%d:%s", t.ExecID, nodeID)
+}
+
+// write 落一行对账
+func (t syncTask) write(ctx context.Context, execCtx *ExecutionContext, nodeID, status, note string, refunded int64, resultURL string) {
+	if t.Ledger == nil {
+		return
+	}
+	note = billing.TruncateNote(note, 240)
+	row := &model.ProviderTask{
+		TaskID:           t.key(nodeID),
+		TaskKind:         t.Action,
+		Provider:         t.Provider,
+		Model:            t.Model,
+		ExecID:           t.ExecID,
+		NodeID:           nodeID,
+		Status:           status,
+		ChargedAmount:    t.Charged,
+		RefundedAmount:   refunded,
+		Note:             note,
+		ChargeResolution: t.Resolution,
+		ChargeSeconds:    t.Seconds,
+		ResultURL:        resultURL,
+	}
+	if status == billing.StatusRefunded {
+		row.RefundSource = billing.RefundSourceAuto
+	}
+	if execCtx != nil {
+		row.UserID = execCtx.GetUserID()
+		row.ProjectID = execCtx.GetProjectID()
+	}
+	_ = t.Ledger.Record(detachedCtx(ctx), row)
+}
+
+// settleFailure 同步调用失败的结算：唯一判定入口 billing.ShouldAutoRefund。
+//
+// 返回给用户的失败原因（文案必须与「钱退没退」一致）：
+//   - 上游明确报错 → 自动退费，文案说「已退还」
+//   - 其余（超时 / 连接断 / 没拿到结果）→ 不自动退，进「待人工决定」，文案说「未自动退还」
+//
+// 并在「不自动退」时把这个节点标成不可重试：否则队列重试会**再扣一次费**，
+// 用户就为一次失败付两遍钱（视频路径早有同样的处理，见 isNoRetryVideoFailure）。
+func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, execCtx *ExecutionContext, nodeID string, err error) error {
+	detail := err.Error()
+	if !billing.ShouldAutoRefund(err) {
+		if execCtx != nil {
+			execCtx.MarkNonRetryable()
+		}
+		msg := fmt.Errorf("%s；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还", detail)
+		t.write(ctx, execCtx, nodeID, billing.StatusPendingReview, msg.Error(), 0, "")
+		return msg
+	}
+	// 上游明确拒绝：任务没被受理/被判失败，上游不计费 → 立即退还
+	if biller == nil || t.Charged <= 0 {
+		msg := fmt.Errorf("%s；需人工核对（缺少可退金额）", detail)
+		t.write(ctx, execCtx, nodeID, billing.StatusPendingReview, msg.Error(), 0, "")
+		return msg
+	}
+	// 管理员可能刚刚在对账页手动退过这一笔 —— 再自动退一次就是同一笔钱退两遍
+	if t.Ledger != nil && t.Ledger.AlreadyRefunded(detachedCtx(ctx), t.key(nodeID)) {
+		log.Printf("[%s] 这一笔扣费已退过（人工或自动），跳过自动退费: node=%s", t.Scene, nodeID)
+		if execCtx != nil {
+			execCtx.MarkNonRetryable()
+		}
+		t.write(ctx, execCtx, nodeID, billing.StatusRefunded, detail+"；该笔扣费此前已退还", t.Charged, "")
+		return fmt.Errorf("%s（本次扣费此前已退还）", detail)
+	}
+	extra := billing.ChargeExtra{Resolution: t.Resolution, Seconds: t.Seconds}
+	reason := billing.AutoRefundReason(detail)
+	if refundErr := biller.RefundDetached(ctx, execCtx.GetUserID(), t.Charged, t.Action, t.Model, t.Scene, reason, extra); refundErr != nil {
+		log.Printf("[%s] 自动退费失败（转人工）: %v", t.Scene, refundErr)
+		if execCtx != nil {
+			execCtx.MarkNonRetryable()
+		}
+		msg := fmt.Errorf("%s；自动退费失败，已提交人工复核", detail)
+		t.write(ctx, execCtx, nodeID, billing.StatusPendingReview, msg.Error(), 0, "")
+		return msg
+	}
+	t.write(ctx, execCtx, nodeID, billing.StatusRefunded, reason, t.Charged, "")
+	// 钱退了也要标记「不自动重试」：队列重试会重新扣一次费，用户就为同一次点击付两遍
+	// （文案说「可直接重新生成」，那也该由用户自己决定要不要再来一次）
+	if execCtx != nil {
+		execCtx.MarkNonRetryable()
+	}
+	return fmt.Errorf("%s（本次扣费已退还，可直接重新生成）", detail)
+}
+
+// chargeAlreadyDone 这一笔（同一执行 + 同一节点）是不是已经扣过费了。
+//
+// 为什么必须有：队列重投、worker 被杀后锁过期重领、服务重启续跑，都会把**同一个节点**
+// 再跑一遍。执行器每次都无条件扣费 → 同一个点击被扣两遍（对账行还会被第二次覆盖，
+// 账面看着只有一笔）。扣费前先查一次，扣过就直接沿用那笔金额，本次不再扣。
+func chargeAlreadyDone(ledger *billing.Ledger, ctx context.Context, execID int64, nodeID string) (int64, bool) {
+	if ledger == nil || execID == 0 || nodeID == "" {
+		return 0, false
+	}
+	charged, _, status, ok := ledger.State(detachedCtx(ctx), fmt.Sprintf("sync:%d:%s", execID, nodeID))
+	if !ok || charged <= 0 {
+		return 0, false
+	}
+	// 已退费的记录不算「已经扣过」：钱已经还回去了，这次该正常扣
+	if status == billing.StatusRefunded {
+		return 0, false
+	}
+	return charged, true
 }
 
 // isNoRetryVideoFailure 判断视频节点的这次失败是否「重试有害」。
@@ -63,6 +197,36 @@ func isNoRetryVideoFailure(err error) bool {
 		errors.Is(err, context.Canceled)
 }
 
+// videoFailureMessage 把底层的超时/中断错误翻译成用户看得懂、也知道下一步怎么做的话。
+//
+// 原来的裸错误是 "context deadline exceeded" —— 用户既不知道是上游没响应、还是平台掐了任务，
+// 也不知道钱退没退。用 %w 保留原始错误链，isNoRetryVideoFailure / errors.Is 判断不受影响。
+// videoFailureMessage 把底层错误翻成能给人看的失败原因。
+//
+// 文案必须跟着退费规则走（退款规则：只有上游明确拒绝才自动退费，其余待人工复核）：
+// 说「已退还」的话就绝不能出现「其实没退」，否则用户按文案去查余额会觉得被骗。
+func videoFailureMessage(ctx context.Context, err error) error {
+	// 上游明确拒绝：这类才自动退费
+	if errors.Is(err, llm.ErrUpstreamRejected) {
+		return fmt.Errorf("%w（本次扣费已退还，可直接重新生成）", err)
+	}
+	switch {
+	case errors.Is(err, llm.ErrVideoPollTimeout):
+		// 轮询预算用尽 = 上游一直在生成中，钱不退（上游可能已经在计费），交人工复核
+		return fmt.Errorf("%w；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还", err)
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("生成被中断（服务重启或任务被取消）；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还（原始错误: %w）", err)
+	case errors.Is(err, context.DeadlineExceeded):
+		// 两种超时要分开说：执行预算（30 分钟）耗尽 vs 上游请求无响应
+		if ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("本次生成超过执行时限被终止；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还（原始错误: %w）", err)
+		}
+		return fmt.Errorf("上游视频服务无响应（创建任务请求超时 %s，已重试一次）；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还（原始错误: %w）",
+			llm.VideoCreateTimeout, err)
+	}
+	return err
+}
+
 // refundCharge 退还视频节点的一次扣费，并保证「同一个上游任务对应的那笔扣费」只退一次。
 //
 // taskID 为该次扣费对应的上游任务号（提交阶段就失败、还没拿到任务号时传空）。
@@ -70,17 +234,54 @@ func isNoRetryVideoFailure(err error) bool {
 //  1. 调用方先 TakeAsyncTaskRef（GETDEL）认领登记 —— 并发副本里只有一个拿得到；
 //  2. 这里以任务号为幂等键 SETNX —— 拦住「重试复用同一登记再退一次」这类顺序重复；
 //  3. 退费成功后由调用方消费掉登记 —— 登记只能对应一笔尚未退还的扣费。
-func (v *VideoExecutor) refundCharge(ctx context.Context, execCtx *ExecutionContext, taskID string, amount int64, model, reason string, extra service.ChargeExtra) error {
+func (v *VideoExecutor) refundCharge(ctx context.Context, execCtx *ExecutionContext, taskID string, amount int64, model, reason string, extra billing.ChargeExtra) error {
+	// 上游任务号随退费账单永久落库：任务登记（Redis，24h）在退费成功后就被消费掉了，
+	// 不留这一笔，事后就无法向渠道核对「这次失败到底有没有让上游接单并计费」，
+	// 也找不回上游可能已经产出的结果（线上实例：10-03 00:04 那次超时中断）。
+	extra.TaskID = taskID
 	if !llm.TryMarkRefunded(taskID) {
 		log.Printf("[VideoExecutor] 上游任务 %s 的扣费已退过，跳过重复退费（node 无关）", taskID)
 		return nil
 	}
-	if err := refundWithFreshCtx(ctx, v.biller, execCtx.GetUserID(), amount, service.BillingActionVideo, model, "视频生成", reason, extra); err != nil {
+	if err := v.biller.RefundDetached(ctx, execCtx.GetUserID(), amount, billing.ActionVideo, model, "视频生成", reason, extra); err != nil {
 		// 退费没成功 → 撤掉幂等标记，后续重试还能补退（否则这笔钱就永远退不掉了）
 		llm.UnmarkRefunded(taskID)
 		return err
 	}
 	return nil
+}
+
+// recordLocalCharge 写一行「没有上游任务号」的对账（视频创建阶段就失败的兜底）。
+//
+// 正常情况下对账按上游任务号 upsert；但创建请求超时/连接中断时我们手里根本没有任务号，
+// 这时候如果不写，用户被扣的那笔钱在对账页上就是隐形的 —— 管理员无从下手。
+// 用「执行+节点」当编号（与同步调用同一套约定），一次执行一行，状态取最新。
+func (v *VideoExecutor) recordLocalCharge(ctx context.Context, execCtx *ExecutionContext, nodeID, modelName string, charged int64, detail billing.ChargeExtra, status, note string, refunded int64) {
+	if v.providerTasks == nil {
+		return
+	}
+	note = billing.TruncateNote(note, 240)
+	row := &model.ProviderTask{
+		TaskID:           fmt.Sprintf("sync:video:%d:%s", execCtx.GetExecutionID(), nodeID),
+		TaskKind:         billing.ActionVideo,
+		Provider:         execCtx.GetChannel(),
+		Model:            modelName,
+		ExecID:           execCtx.GetExecutionID(),
+		NodeID:           nodeID,
+		UserID:           execCtx.GetUserID(),
+		ProjectID:        execCtx.GetProjectID(),
+		Status:           status,
+		ChargedAmount:    charged,
+		RefundedAmount:   refunded,
+		Note:             note,
+		ChargeResolution: detail.Resolution,
+		ChargeSeconds:    detail.Seconds,
+		ChargeRefSeconds: detail.RefVideoSeconds,
+	}
+	if status == billing.StatusRefunded {
+		row.RefundSource = billing.RefundSourceAuto
+	}
+	_ = v.providerTasks.Record(detachedCtx(ctx), row)
 }
 
 // handleDownloadFailure 处理「视频已生成、但转存到自有存储失败」。
@@ -89,9 +290,10 @@ func (v *VideoExecutor) refundCharge(ctx context.Context, execCtx *ExecutionCont
 // 策略按失败次数分档（计数存在任务登记里，跨队列重试累计）：
 //   - 第 1 次：保留任务登记直接失败 —— 队列重试会命中登记、复用这个**已完成的上游任务**
 //     重新转存（不重新下发、不重新扣费），这是最省用户钱又能真正交付的路径；
-//   - 达到上限（downloadFailureLimit）：退费 + 消费登记 + 标记不自动重试，
-//     把决定权交回用户（不再让这笔钱悬着，也不偷偷再扣一次）。
-func (v *VideoExecutor) handleDownloadFailure(ctx context.Context, execCtx *ExecutionContext, nodeID, model, upstreamURL string, dlErr error, taskRef *llm.AsyncTaskRef, chargeDetail service.ChargeExtra) (*NodeOutput, error) {
+//   - 达到上限（downloadFailureLimit）：消费登记 + 标记不自动重试，扣的费不自动退 ——
+//     上游明明出了片（钱也花了），只是我们没转存下来，按规则交人工复核（对账行里有任务号、
+//     金额、口径和上游原始产物地址）。
+func (v *VideoExecutor) handleDownloadFailure(ctx context.Context, execCtx *ExecutionContext, nodeID, model, upstreamURL string, dlErr error, taskRef *llm.AsyncTaskRef, chargeDetail billing.ChargeExtra) (*NodeOutput, error) {
 	const downloadFailureLimit = 2
 
 	failures := 0
@@ -104,33 +306,28 @@ func (v *VideoExecutor) handleDownloadFailure(ctx context.Context, execCtx *Exec
 	log.Printf("[VideoExecutor] ❌ 视频已生成但转存失败（累计第 %d/%d 次）: upstream=%s err=%v",
 		failures, downloadFailureLimit, upstreamURL, dlErr)
 
-	msg := fmt.Sprintf("视频已生成，但转存到自有存储失败（已自动重试 %d 次）：%v", downloadFailureLimit, dlErr)
+	msg := fmt.Sprintf("视频已生成，但转存到自有存储失败（第 %d/%d 次）：%v", failures, downloadFailureLimit, dlErr)
 	if failures < downloadFailureLimit {
 		// 交给队列重试：复用同一个上游任务重新转存，不重新扣费
 		msg += "；系统将自动重试转存（不会重复扣费）"
 		return &NodeOutput{NodeID: nodeID, Status: "failed", Error: msg}, nil
 	}
 
-	// 反复失败 → 退费收场，交给用户决定是否重新生成
-	msg += "；已退还本次积分，请稍后重试"
+	// 反复失败 → 交人工复核：上游已经出片（钱也花了），退不退不能由我们单方面决定
+	msg += "；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还"
 	execCtx.MarkNonRetryable()
 	// 退费金额优先用登记里记的那笔扣费；登记缺失（异常情况）时退不了就只报错，不猜金额
 	amount := taskRef.ChargedAmount
 	_ = chargeDetail
-	if amount > 0 && v.biller != nil {
-		extra := service.ChargeExtra{
-			Resolution:      taskRef.ChargeResolution,
-			Seconds:         taskRef.ChargeSeconds,
-			RefVideoSeconds: taskRef.ChargeRefSeconds,
+	if amount > 0 {
+		// 不自动退费：上游明明出了片（钱也花了），只是我们没转存下来 —— 这不是「上游拒绝」，
+		// 按规则交人工复核（对账表里已有任务号、金额与口径），避免白付上游一次。
+		if claimed := llm.TakeAsyncTaskRef(execCtx.GetExecutionID(), nodeID); claimed != nil {
+			log.Printf("[VideoExecutor] 已消费任务登记（转存失败收场，不自动退费）: taskID=%s amount=%d", claimed.TaskID, amount)
 		}
-		if err := v.refundCharge(ctx, execCtx, taskRef.TaskID, amount, model, msg, extra); err != nil {
-			log.Printf("[VideoExecutor] ⚠️ 转存失败收场的退费也失败了（需人工核对）: %v", err)
-			msg = fmt.Sprintf("视频转存失败且退费失败，请联系管理员（exec=%d node=%s）", execCtx.GetExecutionID(), nodeID)
-		} else {
-			// 钱退了 → 登记必须消费掉：否则重试会复用该任务不扣费出片（免费），
-			// 或者按已退金额再退一次（双退费）
-			llm.TakeAsyncTaskRef(execCtx.GetExecutionID(), nodeID)
-		}
+		// 转存失败了，但上游地址仍然有效 —— 记下来，人工复核时点得开
+		taskRef.ProviderURL = upstreamURL
+		v.recordProviderTask(ctx, execCtx, taskRef, billing.StatusPendingReview, msg, 0)
 	}
 	return &NodeOutput{NodeID: nodeID, Status: "failed", Error: msg}, nil
 }
@@ -768,18 +965,19 @@ func eventTypeToWSName(t EventType) string {
 
 // TextExecutor 文本节点执行器（调用 LLM 生成故事剧本文本）
 type TextExecutor struct {
-	llmClient    *llm.Client
-	biller       *service.BillingService
-	modelManager *llm.ModelManager
+	llmClient     *llm.Client
+	biller        *billing.Service
+	modelManager  *llm.ModelManager
+	providerTasks *billing.Ledger
 }
 
 // NewTextExecutor 创建文本执行器
-func NewTextExecutor(client *llm.Client, biller *service.BillingService, modelManager ...*llm.ModelManager) *TextExecutor {
+func NewTextExecutor(client *llm.Client, biller *billing.Service, ledger *billing.Ledger, modelManager ...*llm.ModelManager) *TextExecutor {
 	var mm *llm.ModelManager
 	if len(modelManager) > 0 {
 		mm = modelManager[0]
 	}
-	return &TextExecutor{llmClient: client, biller: biller, modelManager: mm}
+	return &TextExecutor{llmClient: client, biller: biller, modelManager: mm, providerTasks: ledger}
 }
 
 func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -811,20 +1009,34 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 
-	chargedAmount, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionStory, data.Model, "故事生成", 1)
+	chargedAmount, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionStory, data.Model, "故事生成", 1)
 	if err != nil {
 		return nil, err
 	}
+	if prev, done := chargeAlreadyDone(t.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+		log.Printf("[TextExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
+		chargedAmount = 0
+	}
 
 	// 调用 LLM 生成故事文本（模型 ID 由前端按用户渠道选择，直接使用）
+	// 对账：扣了费就先落一行「进行中」，收场时再更新（规则与视频一致）
+	task := newSyncTask(t.providerTasks, ctx, execCtx, billing.ActionStory, "故事生成", data.Model, "", chargedAmount)
+	task.NodeID = node.ID
+	task.write(ctx, execCtx, node.ID, billing.StatusSubmitted, "", 0, "")
+
 	storyContent, err := llm.GenerateStory(ctx, t.llmClient, userInput, data.Model)
 	if err != nil {
-		// LLM调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(ctx, t.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionStory, data.Model, "故事生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
-			log.Printf("[TextExecutor] 退费失败: %v", refundErr)
-		}
-		return nil, fmt.Errorf("generate story: %w", err)
+		// 上游明确报错→自动退费；超时/没拿到结果→不自动退，交人工（见 settleFailure）
+		return nil, task.settleFailure(ctx, t.biller, execCtx, node.ID, err)
 	}
+	if strings.TrimSpace(storyContent) == "" {
+		// 上游 200 但内容是空的：用户付了钱却什么都没拿到 —— 按「没拿到结果」处理，
+		// 不自动退费（上游并没有拒绝），写进对账表交人工
+		return nil, task.settleFailure(ctx, t.biller, execCtx, node.ID,
+			errors.New("上游返回内容为空（未拿到故事正文）"))
+	}
+
+	task.write(ctx, execCtx, node.ID, billing.StatusDelivered, "", 0, "")
 
 	return &NodeOutput{
 		NodeID: node.ID,
@@ -835,18 +1047,19 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 
 // ScriptExecutor 脚本节点执行器：用户输入 prompt + 上游文本 → LLM 生成分镜剧本
 type ScriptExecutor struct {
-	llmClient    *llm.Client
-	biller       *service.BillingService
-	modelManager *llm.ModelManager
+	llmClient     *llm.Client
+	biller        *billing.Service
+	modelManager  *llm.ModelManager
+	providerTasks *billing.Ledger
 }
 
 // NewScriptExecutor 创建脚本执行器
-func NewScriptExecutor(client *llm.Client, biller *service.BillingService, modelManager ...*llm.ModelManager) *ScriptExecutor {
+func NewScriptExecutor(client *llm.Client, biller *billing.Service, ledger *billing.Ledger, modelManager ...*llm.ModelManager) *ScriptExecutor {
 	var mm *llm.ModelManager
 	if len(modelManager) > 0 {
 		mm = modelManager[0]
 	}
-	return &ScriptExecutor{llmClient: client, biller: biller, modelManager: mm}
+	return &ScriptExecutor{llmClient: client, biller: biller, modelManager: mm, providerTasks: ledger}
 }
 
 func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -969,19 +1182,25 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；剧本使用文本模型按次计费）
-	chargedAmount, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionScript, data.Model, "分镜剧本生成", 1)
+	chargedAmount, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionScript, data.Model, "分镜剧本生成", 1)
 	if err != nil {
 		return nil, err
 	}
+	if prev, done := chargeAlreadyDone(s.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+		log.Printf("[ScriptExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
+		chargedAmount = 0
+	}
 	// 调用 LLM 生成分镜剧本（模型 ID 由前端按用户渠道选择，直接使用）
+	task := newSyncTask(s.providerTasks, ctx, execCtx, billing.ActionScript, "分镜剧本生成", data.Model, "", chargedAmount)
+	task.write(ctx, execCtx, node.ID, billing.StatusSubmitted, "", 0, "")
+
 	result, err := llm.GenerateScript(ctx, s.llmClient, fullInput, data.Model)
 	if err != nil {
-		// LLM调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(ctx, s.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionScript, data.Model, "分镜剧本生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
-			log.Printf("[ScriptExecutor] 退费失败: %v", refundErr)
-		}
-		return nil, fmt.Errorf("generate script: %w", err)
+		// 上游明确报错→自动退费；超时/没拿到结果→不自动退，交人工
+		return nil, task.settleFailure(ctx, s.biller, execCtx, node.ID, err)
 	}
+
+	task.write(ctx, execCtx, node.ID, billing.StatusDelivered, "", 0, "")
 
 	return &NodeOutput{
 		NodeID: node.ID,
@@ -1043,21 +1262,24 @@ func getAssetTypeFromNodeID(nodeID string) string {
 
 // ImageExecutor 图像节点执行器（调用图像生成API）
 type ImageExecutor struct {
-	imageClient              *llm.ImageClient
-	modelManager             *llm.ModelManager
-	fileUploadService        *service.FileUploadService
-	biller                   *service.BillingService
+	imageClient       *llm.ImageClient
+	modelManager      *llm.ModelManager
+	fileUploadService *service.FileUploadService
+	biller            *billing.Service
+	// providerTasks 对账账本：图片/音频是同步调用，没有上游任务号，用「执行+节点」当 key
+	providerTasks            *billing.Ledger
 	generationHistoryService *service.GenerationHistoryService
 }
 
 // NewImageExecutor 创建图像执行器
-func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ImageExecutor {
+func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, ledger *billing.Ledger) *ImageExecutor {
 	return &ImageExecutor{
 		imageClient:              client,
 		modelManager:             modelManager,
 		fileUploadService:        fileUploadService,
 		biller:                   biller,
 		generationHistoryService: generationHistoryService,
+		providerTasks:            ledger,
 	}
 }
 
@@ -1312,10 +1534,18 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景；图片模型按次计费，按生成张数计）
-	chargedAmount, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), service.BillingActionImage, apiModelID, "图片生成", count)
+	chargedAmount, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionImage, apiModelID, "图片生成", count)
 	if err != nil {
 		return nil, err
 	}
+	if prev, done := chargeAlreadyDone(i.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+		log.Printf("[ImageExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
+		chargedAmount = 0
+	}
+	// 对账：图片是同步调用（没有上游任务号），用「执行+节点」当 key，
+	// 口径记尺寸。扣了费先落「进行中」，收场时再更新。
+	imgTask := newSyncTask(i.providerTasks, ctx, execCtx, billing.ActionImage, "图片生成", apiModelID, size, chargedAmount)
+	imgTask.write(ctx, execCtx, node.ID, billing.StatusSubmitted, "", 0, "")
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
 	// 返回所有生成图片的 URL 列表（N>1 时有多个）
@@ -1337,21 +1567,14 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 使用图生图模式: styleCount=%d refCount=%d prompt=%s", len(styleImageURLs), len(referenceImageURLs), imageToImagePrompt)
 		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
 		if err != nil {
-			// API调用失败，退还已扣费用
-			if refundErr := refundWithFreshCtx(ctx, i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
-				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
-			}
-			return nil, fmt.Errorf("image-to-image generation failed: %w", err)
+			// 上游明确报错→自动退费；超时/没拿到结果→不自动退，交人工
+			return nil, imgTask.settleFailure(ctx, i.biller, execCtx, node.ID, err)
 		}
 	} else {
 		log.Printf("[ImageExecutor] 使用文生图模式")
 		generatedURLs, err = i.imageClient.GenerateImageWithModel(ctx, apiModelID, finalPrompt, size, count)
 		if err != nil {
-			// API调用失败，退还已扣费用
-			if refundErr := refundWithFreshCtx(ctx, i.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionImage, apiModelID, "图片生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
-				log.Printf("[ImageExecutor] 退费失败: %v", refundErr)
-			}
-			return nil, fmt.Errorf("generate image: %w", err)
+			return nil, imgTask.settleFailure(ctx, i.biller, execCtx, node.ID, err)
 		}
 	}
 
@@ -1401,6 +1624,25 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			firstThumbURL = thumbURLs[0]
 		}
 	}
+
+	if len(generatedURLs) < count {
+		// 要了 N 张只回来 M 张：上游没拒绝（也按张计费了），但结果是残缺的 ——
+		// 按「结果不完整」处理：不自动退费、不自动重试，写进对账表交人工
+		msg := fmt.Sprintf("上游只返回 %d/%d 张图片；本次扣费未自动退还，已提交人工复核，确认无效后会原路退还",
+			len(generatedURLs), count)
+		if execCtx != nil {
+			execCtx.MarkNonRetryable()
+		}
+		imgTask.write(ctx, execCtx, node.ID, billing.StatusPendingReview, msg, 0, firstURL)
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "failed",
+			Data:   map[string]interface{}{"error": msg},
+		}, nil
+	}
+
+	// 对账：交付（产物地址一并留痕，对账页点得开）
+	imgTask.write(ctx, execCtx, node.ID, billing.StatusDelivered, "", 0, firstURL)
 
 	// 记录生成历史
 	if firstURL != "" && i.generationHistoryService != nil {
@@ -1507,13 +1749,16 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 type VideoExecutor struct {
 	videoClient              *llm.VideoClient
 	fileUploadService        *service.FileUploadService
-	biller                   *service.BillingService
+	biller                   *billing.Service
 	generationHistoryService *service.GenerationHistoryService
-	modelManager             *llm.ModelManager
+	// providerTasks 上游任务对账表：任务号一旦拿到就落库（失败/退费/交付都补状态）。
+	// 没有它，失败之后连「上游有没有接单、有没有计费」都查不了（10-03 00:04 的教训）。
+	providerTasks *billing.Ledger
+	modelManager  *llm.ModelManager
 }
 
 // NewVideoExecutor 创建视频执行器
-func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService, modelManager ...*llm.ModelManager) *VideoExecutor {
+func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, providerTaskService *billing.Ledger, modelManager ...*llm.ModelManager) *VideoExecutor {
 	var mm *llm.ModelManager
 	if len(modelManager) > 0 {
 		mm = modelManager[0]
@@ -1523,8 +1768,48 @@ func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.F
 		fileUploadService:        fileUploadService,
 		biller:                   biller,
 		generationHistoryService: generationHistoryService,
+		providerTasks:            providerTaskService,
 		modelManager:             mm,
 	}
+}
+
+// recordProviderTask 把这次上游任务的结局写进对账表（按任务号 upsert，状态取最新）。
+//
+// 记的是「事实」而不是「推断」：只有真拿到了任务号才写 —— 创建请求连响应都没回来时
+// 我们手里没有任务号，也就没有可对账的凭据（那种情况下唯一能做的就是别让它发生，
+// 即创建阶段的重试，见 llm.doCreateWithRetry）。
+// detached ctx：执行 ctx 可能正随失败/关停被取消，而对账必须落下去。
+func (v *VideoExecutor) recordProviderTask(ctx context.Context, execCtx *ExecutionContext, ref *llm.AsyncTaskRef, status, note string, refunded int64) {
+	if v.providerTasks == nil || ref == nil || ref.TaskID == "" {
+		return
+	}
+	note = billing.TruncateNote(note, 240)
+	task := &model.ProviderTask{
+		TaskID:           ref.TaskID,
+		TaskKind:         billing.ActionVideo,
+		Provider:         ref.Provider,
+		Model:            ref.Model,
+		ExecID:           ref.ExecID,
+		NodeID:           ref.NodeID,
+		Status:           status,
+		ChargedAmount:    ref.ChargedAmount,
+		RefundedAmount:   refunded,
+		Note:             note,
+		ChargeResolution: ref.ChargeResolution,
+		ChargeSeconds:    ref.ChargeSeconds,
+		ChargeRefSeconds: ref.ChargeRefSeconds,
+		ResultURL:        ref.ResultURL,
+		ProviderURL:      ref.ProviderURL,
+		RefundSource:     ref.RefundSource,
+	}
+	if execCtx != nil {
+		task.UserID = execCtx.GetUserID()
+		task.ProjectID = execCtx.GetProjectID()
+	}
+	if task.ExecID == 0 && execCtx != nil {
+		task.ExecID = execCtx.GetExecutionID()
+	}
+	_ = v.providerTasks.Record(detachedCtx(ctx), task)
 }
 
 func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
@@ -1735,23 +2020,36 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var chargedAmount int64
 	// chargeDetail 本次扣费的计费口径（分辨率 / 计费时长 / 其中参考视频时长）：
 	// 调用失败退费时原样回传，退费账单与扣费账单口径完全一致
-	var chargeDetail service.ChargeExtra
+	var chargeDetail billing.ChargeExtra
 
 	if resumeRef != nil {
 		taskRef.Provider, taskRef.Model = resumeRef.Provider, resumeRef.Model
 		taskRef.TaskID, taskRef.ChargedAmount = resumeRef.TaskID, resumeRef.ChargedAmount
+		// 转存失败次数也要带回来（跨队列重试累计）：丢了它计数每次从 1 开始，
+		// 「达到上限→交人工复核」这条分支永远走不到 —— 钱扣着、片子拿不到、对账页也不提示
+		taskRef.DownloadFailures = resumeRef.DownloadFailures
 		// 复用失败要退当初那笔钱，口径也得跟着复用过来（改动前落盘的旧登记没有这三项，取出为零值）
 		taskRef.ChargeResolution, taskRef.ChargeSeconds, taskRef.ChargeRefSeconds =
 			resumeRef.ChargeResolution, resumeRef.ChargeSeconds, resumeRef.ChargeRefSeconds
 		log.Printf("[VideoExecutor] ♻ 命中已提交的上游任务: taskID=%s model=%s（%s）→ 续取结果，跳过重复下发与扣费",
 			resumeRef.TaskID, resumeRef.Model, resumeRef.CreateAt)
+	} else if prev, done := chargeAlreadyDone(v.providerTasks, ctx, execID, node.ID); done {
+		// 有本地对账行说明这一笔已经扣过费（进程在创建任务前后崩过、队列重投），
+		// 本次重跑不再扣费：宁可让这一次白送，也不能让用户为一次点击付两遍
+		log.Printf("[VideoExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
+		taskRef.ChargedAmount = prev
+		taskRef.Model = model
+		// 口径沿用本地那一行（金额已扣，口径要与它一致）
+		if _, _, _, ok := v.providerTasks.State(detachedCtx(ctx), fmt.Sprintf("sync:video:%d:%s", execID, node.ID)); ok {
+			chargeDetail = billing.ChargeExtra{Resolution: resolution, Seconds: data.Duration}
+		}
 	} else {
 		// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景）。
 		// 视频按秒计费：计费时长 = 输出视频时长 + 参考视频时长（见 ChargeVideoByDuration），
 		// 单价按分辨率档位；带参考视频输入时取「带参考视频」档（后台未配置则按无参考视频单价 6 折）
 		var chargeErr error
 		chargedAmount, chargeDetail, chargeErr = v.biller.ChargeVideoByDuration(
-			ctx, execCtx.GetUserID(), service.BillingActionVideo, model, "视频生成",
+			ctx, execCtx.GetUserID(), billing.ActionVideo, model, "视频生成",
 			resolution, data.Duration, refVideoSeconds)
 		if chargeErr != nil {
 			return nil, chargeErr
@@ -1765,6 +2063,22 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		taskRef.ChargeRefSeconds = chargeDetail.RefVideoSeconds
 	}
 	ctx = llm.WithAsyncTaskHolder(ctx, taskRef)
+	// 任务号一到手就写永久对账（状态 submitted=进行中）：等生成结束再写的话，
+	// 生成中的那几分钟（长视频十几分钟）运营在对账页上一片空白 —— 线上就踩了这个。
+	// 后续交付/失败/退费会更新到同一行（provider_tasks 按任务号 upsert）。
+	ctx = llm.WithTaskSubmittedHook(ctx, func(provider, model, taskID string) {
+		v.recordProviderTask(ctx, execCtx, &llm.AsyncTaskRef{
+			TaskID:           taskID,
+			Provider:         provider,
+			Model:            model,
+			ExecID:           execID,
+			NodeID:           node.ID,
+			ChargedAmount:    taskRef.ChargedAmount,
+			ChargeResolution: taskRef.ChargeResolution,
+			ChargeSeconds:    taskRef.ChargeSeconds,
+			ChargeRefSeconds: taskRef.ChargeRefSeconds,
+		}, billing.StatusSubmitted, "", 0)
+	})
 	// 把上游真实进度透出到节点进度：轮询每 5s 报一次「上游处理中 62%」，
 	// 引擎的 10s 心跳带上它 → 界面显示「已运行 3m20s · 上游处理中 62%」
 	// 只透出上游自己的状态（"上游生成中" / "上游生成中 62%"）：本地耗时由心跳统一带
@@ -1788,13 +2102,35 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generateAudio,
 	)
 	if err != nil {
+		err = videoFailureMessage(ctx, err)
 		log.Printf("[VideoExecutor] ❌ 视频生成失败: %v", err)
+		// 退款规则（产品口径）：只有「上游明确报错/拒绝」才自动退费。
+		// 其余（请求超时、没拿到任务号、连接中断、轮询预算耗尽、用户中断、转存失败）都属于
+		// 「我们不知道上游到底做了什么」——上游很可能已经受理并按生成后计费，
+		// 我们单方面退费就是白付上游一次（线上实例：10-03 00:04 创建超时后自动退款）。
+		// 这类不自动退，写进对账表交管理员手动处理。
+		autoRefund := billing.ShouldAutoRefund(err)
+		// 先落一行「待人工退费」（拿到任务号才写得进去）；若下面自动退费成功，
+		// 会再写一次升级成 refunded —— 对账表按任务号 upsert，终态不会被回写覆盖
+		v.recordProviderTask(ctx, execCtx, taskRef, billing.StatusPendingReview, err.Error(), 0)
+		// 创建阶段就失败（连任务号都没拿到）时，上面那句写不进去 —— 那笔扣费会在对账页上
+		// 完全看不见，管理员想手动退都找不到。这种情况用本地编号补一行（与同步调用同一套约定）。
+		if taskRef.TaskID == "" && chargedAmount > 0 {
+			v.recordLocalCharge(ctx, execCtx, node.ID, model, chargedAmount, chargeDetail,
+				billing.StatusPendingReview, err.Error(), 0)
+		}
+		if !autoRefund {
+			log.Printf("[VideoExecutor] 💤 本次失败不自动退费（待人工复核）: %v", err)
+		}
 		// 这类失败（轮询超时 / 执行预算耗尽 / 用户主动停止）：本次扣费马上要退给用户、
 		// 界面也会显示失败，自动重试只会「重复扣费」或「复用仍在跑的上游任务免费出片」
 		// → 标记不重试，交给用户自己决定
-		if isNoRetryVideoFailure(err) {
+		// 不自动退费的失败一律不重试：钱没退，重试就会「再扣一次费」，
+		// 用户为一次失败付两遍（创建阶段连接中断、没拿到任务号这类尤其危险 ——
+		// 重试时登记里没有任务号，会重新下发重新扣费）。决定权交回用户/管理员。
+		if !autoRefund || isNoRetryVideoFailure(err) {
 			execCtx.MarkNonRetryable()
-			log.Printf("[VideoExecutor] ⛔ 该失败不自动重试（本次扣费将退还，由用户决定是否重新生成）node=%s err=%v", node.ID, err)
+			log.Printf("[VideoExecutor] ⛔ 该失败不自动重试（不自动退费=%v）node=%s err=%v", !autoRefund, node.ID, err)
 		}
 		if resumeRef != nil {
 			// 复用失败：该上游任务已不可用（过期/已失败），退还当初下发它的那笔扣费 ——
@@ -1804,28 +2140,67 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			ref := llm.TakeAsyncTaskRef(execID, node.ID)
 			if ref == nil {
 				log.Printf("[VideoExecutor] 任务登记已被其它执行认领并处理，跳过重复退费（node=%s）", node.ID)
+			} else if ref.ChargedAmount > 0 && !autoRefund {
+				log.Printf("[VideoExecutor] 💤 复用失败但不自动退费（上游未明确拒绝，待人工复核）: taskID=%s amount=%d",
+					ref.TaskID, ref.ChargedAmount)
 			} else if ref.ChargedAmount > 0 {
-				reason := "上游任务已失效，退还该次扣费并稍后重新生成: " + err.Error()
+				reason := billing.AutoRefundReason("上游任务已失效，退还该次扣费并稍后重新生成: " + err.Error())
 				// 退费口径取自任务登记（当初扣费时落盘的那一份），与扣费账单一致
-				resumeExtra := service.ChargeExtra{
+				resumeExtra := billing.ChargeExtra{
 					Resolution:      ref.ChargeResolution,
 					Seconds:         ref.ChargeSeconds,
 					RefVideoSeconds: ref.ChargeRefSeconds,
 				}
 				if refundErr := v.refundCharge(ctx, execCtx, ref.TaskID, ref.ChargedAmount, model, reason, resumeExtra); refundErr != nil {
+					// 自动退费失败 → 落到待人工退费，管理员在对账页补退（不能显示成已退费）
+					v.recordProviderTask(ctx, execCtx, ref, billing.StatusPendingReview, "上游任务已失效且退费失败: "+err.Error(), 0)
 					log.Printf("[VideoExecutor] 复用失败退费失败: %v", refundErr)
 					// 放回登记：后续重试还能把这次扣费退掉，避免用户白付
 					llm.SaveAsyncTaskRef(ref)
 				} else {
 					log.Printf("[VideoExecutor] 复用失败，已退还上次扣费 %d 积分（口径 %s/%d秒，其中参考视频 %d 秒；重试时重新下发并扣费）",
 						ref.ChargedAmount, resumeExtra.Resolution, resumeExtra.Seconds, resumeExtra.RefVideoSeconds)
+					ref.RefundSource = billing.RefundSourceAuto
+					v.recordProviderTask(ctx, execCtx, ref, billing.StatusRefunded, reason, ref.ChargedAmount)
 				}
 			}
+		} else if chargedAmount > 0 && !autoRefund {
+			// 不自动退费：登记消费掉，避免后续重试命中复用路径免费出片；
+			// 扣的钱去哪退由管理员在对账页决定（对账表里已有任务号与金额）
+			if claimed := llm.TakeAsyncTaskRef(execID, node.ID); claimed != nil {
+				log.Printf("[VideoExecutor] 已消费任务登记（本次不自动退费，待人工复核）: taskID=%s amount=%d",
+					claimed.TaskID, claimed.ChargedAmount)
+			}
 		} else if chargedAmount > 0 {
-			// API调用失败，退还已扣费用（口径用本次扣费的那一份，退费账单与扣费账单一致）
-			if refundErr := v.refundCharge(ctx, execCtx, taskRef.TaskID, chargedAmount, model, err.Error(), chargeDetail); refundErr != nil {
+			// 上游明确拒绝 → 退还已扣费用（口径用本次扣费的那一份，退费账单与扣费账单一致）
+			ledgerKey := taskRef.TaskID
+			if ledgerKey == "" {
+				ledgerKey = fmt.Sprintf("sync:video:%d:%s", execCtx.GetExecutionID(), node.ID)
+			}
+			if v.providerTasks != nil && v.providerTasks.AlreadyRefunded(detachedCtx(ctx), ledgerKey) {
+				// 管理员可能已经在对账页手动退过这一笔 —— 再自动退一次就是同一笔钱退两遍
+				log.Printf("[VideoExecutor] 这一笔扣费已退过（人工或自动），跳过自动退费: key=%s", ledgerKey)
+				return &NodeOutput{NodeID: node.ID, Status: "failed", Data: map[string]interface{}{
+					"error": fmt.Sprintf("%s（本次扣费此前已退还）", err.Error()),
+				}}, nil
+			}
+			if refundErr := v.refundCharge(ctx, execCtx, taskRef.TaskID, chargedAmount, model, billing.AutoRefundReason(err.Error()), chargeDetail); refundErr != nil {
 				log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
+				// 文案不能与钱矛盾：videoFailureMessage 已经写了「本次扣费已退还」，
+				// 这里退费失败就必须改口（对账行留在待人工复核，管理员会补退）
+				err = errors.New(strings.Replace(err.Error(),
+					"（本次扣费已退还，可直接重新生成）",
+					"（自动退费失败，已提交人工复核，管理员会尽快补退）", 1))
 			} else {
+				taskRef.RefundSource = billing.RefundSourceAuto
+				v.recordProviderTask(ctx, execCtx, taskRef, billing.StatusRefunded, billing.AutoRefundReason(err.Error()), chargedAmount)
+				// 没有任务号的情况（创建阶段就被拒）走的是本地编号那一行：
+				// 上面这句会直接 return（TaskID 为空），必须把那一行也改成已退费 ——
+				// 否则它停在「待人工决定 / 未退金额 0」，管理员在对账页会把同一笔钱再退一次
+				if taskRef.TaskID == "" {
+					v.recordLocalCharge(ctx, execCtx, node.ID, model, chargedAmount, chargeDetail,
+						billing.StatusRefunded, billing.AutoRefundReason(err.Error()), chargedAmount)
+				}
 				// 退费成功 → 立刻消费掉这次的任务登记。
 				// 登记只能对应「一笔尚未退还的扣费」：留着它，队列重试会命中登记走复用路径 ——
 				// 复用成功即不扣费拿到视频（免费出片），复用失败则按已退金额再退一次（双退费）。
@@ -1886,6 +2261,13 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			}
 		}
 	}
+
+	// 上游任务的对账结局：已交付（钱扣了、片子也落库了）
+	// 产物地址一起留痕：对账页「状态」列上悬停就能看到并直接打开
+	taskRef.ResultURL = ownVideoURL
+	taskRef.ProviderURL = videoURL
+	taskRef.RefundSource = ""
+	v.recordProviderTask(ctx, execCtx, taskRef, billing.StatusDelivered, "", 0)
 
 	// 产物已落库（对象存储 + 生成历史），任务登记才真正不再需要。
 	// 放在这里而不是「拿到上游 URL 就清」：上传/落库期间进程若被杀，登记还在，
@@ -1958,14 +2340,15 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 
 // AudioExecutor 音频节点执行器
 type AudioExecutor struct {
+	providerTasks     *billing.Ledger
 	audioClient       *llm.AudioClient
 	fileUploadService *service.FileUploadService
-	biller            *service.BillingService
+	biller            *billing.Service
 	modelManager      *llm.ModelManager
 }
 
 // NewAudioExecutor 创建音频执行器
-func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService, biller *service.BillingService, modelManager ...*llm.ModelManager) *AudioExecutor {
+func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.FileUploadService, biller *billing.Service, ledger *billing.Ledger, modelManager ...*llm.ModelManager) *AudioExecutor {
 	var mm *llm.ModelManager
 	if len(modelManager) > 0 {
 		mm = modelManager[0]
@@ -1975,6 +2358,7 @@ func NewAudioExecutor(audioClient *llm.AudioClient, fileUploadService *service.F
 		fileUploadService: fileUploadService,
 		biller:            biller,
 		modelManager:      mm,
+		providerTasks:     ledger,
 	}
 }
 
@@ -2046,26 +2430,24 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：按输入字符数计费（每 100 字为单位），通过后才调用 TTS API
 	charCount := len([]rune(inputText))
-	chargedAmount, err := a.biller.ChargeByChars(ctx, execCtx.GetUserID(), service.BillingActionAudio, model, "音频生成", charCount)
+	chargedAmount, err := a.biller.ChargeByChars(ctx, execCtx.GetUserID(), billing.ActionAudio, model, "音频生成", charCount)
 	if err != nil {
 		return nil, err
 	}
+	if prev, done := chargeAlreadyDone(a.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+		log.Printf("[AudioExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
+		chargedAmount = 0
+	}
 
 	// 调用 TTS API
+	audioTask := newSyncTask(a.providerTasks, ctx, execCtx, billing.ActionAudio, "音频生成", model, "", chargedAmount)
+	audioTask.write(ctx, execCtx, node.ID, billing.StatusSubmitted, "", 0, "")
+
 	audioData, err := a.audioClient.GenerateSpeech(ctx, model, inputText, voice, data.Speed, data.Style, data.Tone)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ TTS生成失败: %v", err)
-		// API调用失败，退还已扣费用
-		if refundErr := refundWithFreshCtx(ctx, a.biller, execCtx.GetUserID(), chargedAmount, service.BillingActionAudio, model, "音频生成", err.Error(), service.ChargeExtra{}); refundErr != nil {
-			log.Printf("[AudioExecutor] 退费失败: %v", refundErr)
-		}
-		return &NodeOutput{
-			NodeID: node.ID,
-			Status: "failed",
-			Data: map[string]interface{}{
-				"error": err.Error(),
-			},
-		}, nil
+		// 上游明确报错→自动退费；超时/没拿到结果→不自动退，交人工
+		return nil, audioTask.settleFailure(ctx, a.biller, execCtx, node.ID, err)
 	}
 
 	log.Printf("[AudioExecutor] ✅ TTS生成成功: nodeId=%s audioBytes=%d", node.ID, len(audioData))
@@ -2091,16 +2473,26 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	)
 	if err != nil {
 		log.Printf("[AudioExecutor] ❌ 音频上传失败: %v", err)
+		// 与视频「转存失败」完全同性质：上游已经生成成功（钱花了），是我们没存下来。
+		// 不自动退费（上游没拒绝）、也不自动重试（重试会重新扣一次费）——
+		// 写进对账表交人工复核，管理员看到后决定退不退。
+		msg := fmt.Sprintf("音频已生成，但转存到自有存储失败：%v；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还", err)
+		if execCtx != nil {
+			execCtx.MarkNonRetryable()
+		}
+		audioTask.write(ctx, execCtx, node.ID, billing.StatusPendingReview, msg, 0, "")
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "failed",
 			Data: map[string]interface{}{
-				"error": fmt.Sprintf("上传音频失败: %v", err),
+				"error": msg,
 			},
 		}, nil
 	}
 
 	log.Printf("[AudioExecutor] ✅ 音频上传成功: objectName=%s url=%s cached=%v", result.ObjectName, result.URL, result.Cached)
+
+	audioTask.write(ctx, execCtx, node.ID, billing.StatusDelivered, "", 0, result.URL)
 
 	return &NodeOutput{
 		NodeID: node.ID,
@@ -2275,13 +2667,13 @@ func (p *PrevizExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 }
 
 // NewDefaultRegistry 创建默认执行器注册表（biller 为积分扣费服务，各执行器在真实 AI 调用前扣费并记账）
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *service.BillingService, generationHistoryService *service.GenerationHistoryService) *ExecutorRegistry {
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, providerTaskService *billing.Ledger) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
-	registry.Register("text", NewTextExecutor(llmClient, biller, modelManager))
-	registry.Register("script", NewScriptExecutor(llmClient, biller, modelManager))
-	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService))
-	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService, modelManager))
-	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller, modelManager))
+	registry.Register("text", NewTextExecutor(llmClient, biller, providerTaskService, modelManager))
+	registry.Register("script", NewScriptExecutor(llmClient, biller, providerTaskService, modelManager))
+	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService, providerTaskService))
+	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService, providerTaskService, modelManager))
+	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller, providerTaskService, modelManager))
 	// 白模预演：无模型调用，仅承认前端已导出的白片/静帧，避免节点被判为失败
 	registry.Register("previz", NewPrevizExecutor())
 	return registry

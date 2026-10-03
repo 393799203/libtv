@@ -117,6 +117,10 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		if UpstreamRejectedStatus(resp.StatusCode) {
+			return nil, fmt.Errorf("%w: TTS API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, string(body))
+		}
+		// 5xx / 408 / 429：上游可能已经受理，按「不确定」处理（不自动退费）
 		return nil, fmt.Errorf("TTS API error (status=%d): %s", resp.StatusCode, string(body))
 	}
 
@@ -125,6 +129,15 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 		return nil, fmt.Errorf("read tts audio data: %w", err)
 	}
 
+	// 200 但内容不是音频（网关把错误包在 200 里、返回 JSON 报错等）—— 不能当成成功，
+	// 否则会用「成功 + 坏文件」的形式交付并扣费。WAV 一定以 RIFF 开头。
+	if len(audioData) > 0 && !bytes.HasPrefix(audioData, []byte("RIFF")) {
+		snippet := string(audioData)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("TTS 返回内容不是音频（status=200，前 200 字节: %s）", snippet)
+	}
 	if len(audioData) == 0 {
 		return nil, fmt.Errorf("TTS API 返回空音频数据")
 	}

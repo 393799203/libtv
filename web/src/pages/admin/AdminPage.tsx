@@ -28,6 +28,7 @@ import AddShowDialog from '@/components/AddShowDialog';
 import PricingManagement from './PricingManagement';
 import PointsPackageManagement from './PointsPackageManagement';
 import ChannelManagement from './ChannelManagement';
+import ProviderTaskReconciliation from './ProviderTaskReconciliation';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
@@ -110,7 +111,9 @@ export default function AdminPage() {
 
   // ========== 系统设置状态 ==========
   // 系统设置页内子页签（价格管理 / 套餐管理 / 渠道管理）
-  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages' | 'channel'>('pricing');
+  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages' | 'channel' | 'reconcile'>(
+    'pricing'
+  );
 
   // 远程搜索作者（供风格弹窗使用）：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
   const fetchAuthors = (keyword?: string) => {
@@ -1423,6 +1426,16 @@ export default function AdminPage() {
               >
                 渠道管理
               </button>
+              <button
+                onClick={() => setSettingsSubTab('reconcile')}
+                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
+                  settingsSubTab === 'reconcile'
+                    ? 'border-blue-600 text-blue-700 font-medium'
+                    : 'border-transparent text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                上游对账
+              </button>
             </div>
 
             {/* 价格管理页签 */}
@@ -1433,6 +1446,9 @@ export default function AdminPage() {
 
             {/* 渠道管理页签 */}
             {settingsSubTab === 'channel' && <ChannelManagement />}
+
+            {/* 上游任务对账页签：任务号 / 渠道 / 结局 / 我们白付上游的成本 */}
+            {settingsSubTab === 'reconcile' && <ProviderTaskReconciliation />}
           </div>
         )}
       </main>

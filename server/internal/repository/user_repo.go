@@ -212,9 +212,18 @@ func (r *userRepo) DeductCredits(ctx context.Context, userID string, amount int6
 }
 
 func (r *userRepo) AddCredits(ctx context.Context, userID string, amount int64) error {
-	return r.db.WithContext(ctx).Model(&model.User{}).
+	res := r.db.WithContext(ctx).Model(&model.User{}).
 		Where("id = ?", userID).
-		UpdateColumn("credits", gorm.Expr("credits + ?", amount)).Error
+		UpdateColumn("credits", gorm.Expr("credits + ?", amount))
+	if res.Error != nil {
+		return res.Error
+	}
+	// 一行都没更新说明用户不存在：必须报错，否则退费会被记成「已退给用户」而钱根本没回去
+	// （退费是钱的事实，不能静默成功 —— 对账表会显示已退费，用户账上却没有）
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("用户不存在，无法退还积分: user=%s", userID)
+	}
+	return nil
 }
 
 // CascadeDelete 在一个事务内级联删除用户关联数据

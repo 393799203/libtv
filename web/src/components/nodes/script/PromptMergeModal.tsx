@@ -262,10 +262,15 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
           scenes: assetReferences.scenes,
           props: assetReferences.props,
           imageCount: refImageCount, // 首尾帧模式一次生成「起始画面 + 结束画面」两份提示词
+          projectId, // 带上项目：对账页要显示是哪个项目的提示词
         };
 
         // 调用后端 API 生成提示词（api 实例会自动注入 token）
         const result = await generatePrompt(request);
+        if (result.replayed) {
+          // 后端识别出这是同一镜头/同一模型在窗口内的重复点击：返回上一次结果、没有重新生成、没有扣费
+          message.info('这是刚刚生成的结果（重复点击不会重复扣费）；想重新生成请稍后再试');
+        }
 
         // 更新状态（多份时逐份落位）
         const generated = result.storyboardPrompts?.length ? result.storyboardPrompts : [result.storyboardPrompt];

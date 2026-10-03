@@ -281,13 +281,18 @@ func (q *Queue) handle(ctx context.Context, consumer, msgID string, values map[s
 	// 处理中互斥：防止 reclaim 与正常消费同时执行同一任务
 	lockKey := fmt.Sprintf("lock:exec:%d", task.ExecutionID)
 	locked, err := q.rdb.SetNX(ctx, lockKey, consumer, time.Duration(q.cfg.VisibilityTimeoutSec)*time.Second).Result()
-	if err == nil && !locked {
+	if err != nil {
+		// 锁本身出错（Redis 抖动）时**不要**继续往下跑：跳过这一轮，消息不 ACK，
+		// 由 reclaim 重投。继续跑的风险是两个 worker 同时执行同一份计划 →
+		// 同一个节点被扣两次费（拿不到锁就当成「可能有别人在跑」来对待）。
+		log.Printf("[Queue] 任务 %d 加锁失败，本轮跳过，稍后由 reclaim 重投: %v", task.ExecutionID, err)
+		return
+	}
+	if !locked {
 		log.Printf("[Queue] 任务 %d 正被其他 worker 处理，稍后由 reclaim 重投", task.ExecutionID)
 		return // 不 ACK，留待 reclaim
 	}
-	if err == nil {
-		defer q.rdb.Del(context.Background(), lockKey)
-	}
+	defer q.rdb.Del(context.Background(), lockKey)
 
 	// 长任务续租：视频类执行的单次 attempt 上限是 30 分钟（其中上游轮询可达 25 分钟），
 	// 而处理中锁的 TTL 与 reclaim 的 MinIdle 是同一个值 —— 不续租的话，执行跑到 TTL 就会被
