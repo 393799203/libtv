@@ -536,9 +536,23 @@ export default function ProviderTaskReconciliation() {
             {stats?.manual_refunded ?? 0} · 真成本 {stats?.manual_refunded_credits ?? 0} 积分）
           </div>
         </Tooltip>
-        <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
-          扣费合计 {stats?.charged_credits ?? 0}
-        </div>
+        {/* 扣费合计是**毛额**：所有行的扣费相加，包含后来退掉的那部分。
+            这里直接把「已退 → 净」写在旁边，免得再被问「这个数退了没退」。 */}
+        <Tooltip
+          title={`扣费合计是毛额：所有对账行的扣费相加，包含后来退掉的那部分（本次 ${
+            stats?.refunded_credits ?? 0
+          } 积分）。净 = 扣费合计 − 已退 = ${
+            (stats?.charged_credits ?? 0) - (stats?.refunded_credits ?? 0)
+          }。`}
+        >
+          <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600 cursor-help">
+            扣费合计 {stats?.charged_credits ?? 0}
+            <span className="text-gray-400">
+              （已退 {stats?.refunded_credits ?? 0} → 净{' '}
+              {(stats?.charged_credits ?? 0) - (stats?.refunded_credits ?? 0)}）
+            </span>
+          </div>
+        </Tooltip>
       </div>
 
       {/* 筛选 */}
