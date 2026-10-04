@@ -521,6 +521,31 @@ export default function ProviderTaskReconciliation() {
           <WarningOutlined />
           待人工决定 {stats?.pending_review ?? 0} 条（上游没返回，退不退你定）
         </div>
+        {/* 一行说完：真成本只算「人工退费」（上游可能已计费）；自动退费是上游明确拒绝、上游不计费。
+            理由收进浮层，不占版面。 */}
+        <Tooltip
+          title={`真成本只算「人工退费」那部分：上游当时没明确拒绝，很可能已经生成并计费。
+自动退费（本次 ${stats?.auto_refunded ?? 0} 条、${stats?.auto_refunded_credits ?? 0} 积分）是上游明确拒绝了本次任务，上游不计费，不是我们的成本。${
+            (stats?.unknown_refunded_credits ?? 0) > 0
+              ? `\n另有 ${stats?.unknown_refunded_credits} 积分是上线前退的、来源分不清，未计入。`
+              : ''
+          }`}
+        >
+          <div className="px-3 py-2 rounded bg-red-50 border border-red-100 text-[12px] text-red-700 cursor-help">
+            已退费 {stats?.refunded ?? 0} 条（自动 {stats?.auto_refunded ?? 0} · 人工{' '}
+            {stats?.manual_refunded ?? 0} · 真成本 {stats?.manual_refunded_credits ?? 0} 积分）
+          </div>
+        </Tooltip>
+        <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
+          共 <span className="text-gray-900 font-medium">{stats?.total ?? 0}</span> 条
+        </div>
+        <div className="px-3 py-2 rounded bg-green-50 border border-green-100 text-[12px] text-green-700">
+          已交付 {stats?.delivered ?? 0}
+        </div>
+        <div className="px-3 py-2 rounded bg-orange-50 border border-orange-200 text-[12px] text-orange-800 flex items-center gap-1">
+          <WarningOutlined />
+          待人工决定 {stats?.pending_review ?? 0} 条（上游没返回，退不退你定）
+        </div>
         <div className="px-3 py-2 rounded bg-red-50 border border-red-100 text-[12px] text-red-700">
           已退费 {stats?.refunded ?? 0} 条
           <span className="text-gray-500">
