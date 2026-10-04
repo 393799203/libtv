@@ -537,16 +537,6 @@ export default function ProviderTaskReconciliation() {
           </div>
         </Tooltip>
         <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
-          共 <span className="text-gray-900 font-medium">{stats?.total ?? 0}</span> 条
-        </div>
-        <div className="px-3 py-2 rounded bg-green-50 border border-green-100 text-[12px] text-green-700">
-          已交付 {stats?.delivered ?? 0}
-        </div>
-        <div className="px-3 py-2 rounded bg-orange-50 border border-orange-200 text-[12px] text-orange-800 flex items-center gap-1">
-          <WarningOutlined />
-          待人工决定 {stats?.pending_review ?? 0} 条（上游没返回，退不退你定）
-        </div>
-        <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
           扣费合计 {stats?.charged_credits ?? 0}
         </div>
       </div>
