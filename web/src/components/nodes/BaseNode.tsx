@@ -8,6 +8,16 @@ import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { NodeLoadingState } from './NodeLoadingState';
 
+/**
+ * 「生成中」的等待预期文案（按节点类型）。
+ *
+ * 只有视频写：它是分钟级等待（实测一条 9 秒 480p 跑了 182s，高清晰度/长镜头更久），
+ * 而图片、清晰化、分镜提取都是秒级 —— 给它们挂「十几分钟」只会让用户以为更慢。
+ */
+const WAIT_HINTS: Partial<Record<NodeType, string>> = {
+  video: '请耐心等待：通常需要 3–10 分钟，长镜头或高清晰度可能十几分钟\n可以先去做别的，页面开着就行，完成后会自动出现',
+};
+
 interface BaseNodeProps {
   id: string;
   data: LibTVNodeData;
@@ -55,6 +65,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         return Boolean(d.imageUrl);
       case 'video':
       case 'previz':
+      case 'enhance':
         return Boolean(d.videoUrl);
       case 'audio':
         return Boolean(d.audioUrl);
@@ -164,12 +175,18 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
                 {data.progressMessage ? (
                   <span className="text-[10px] text-gray-500">{data.progressMessage}</span>
                 ) : null}
+                {WAIT_HINTS[nodeType] ? (
+                  <span className="text-[10px] leading-snug text-gray-400 text-center max-w-[240px] whitespace-pre-line">
+                    {WAIT_HINTS[nodeType]}
+                  </span>
+                ) : null}
               </div>
             </div>
           ) : (
             /* 首次生成：没有旧结果可留，显示统一加载态 */
             <NodeLoadingState
               status={status}
+              hint={WAIT_HINTS[nodeType]}
               minHeight={loadingMinHeight}
               statusText={(data.progressMessage as string | undefined) || (status === 'pending' ? '等待生成中...' : `正在生成${config.label}...`)}
               iconBgColor={nodeType === 'text' ? 'bg-purple-100' : nodeType === 'image' ? 'bg-green-100' : nodeType === 'video' ? 'bg-red-100' : nodeType === 'audio' ? 'bg-emerald-100' : 'bg-blue-100'}

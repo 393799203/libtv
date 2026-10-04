@@ -32,7 +32,7 @@ export interface UseNodeGenerationResult {
  * 单节点生成 hook — 统一入口
  *
  * 行为：
- * - generate() 默认调后端 mode='single'，只跑当前节点
+ * - generate() 调后端执行接口（必须带 nodeId）：后端只支持单节点执行，只跑当前节点
  * - 调后端前先 saveCanvas
  * - 订阅 SSE 接收 node_completed 事件，由 useExecutionStream 自动写回画布
  */

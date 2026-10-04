@@ -132,6 +132,8 @@ func (t syncTask) write(ctx context.Context, execCtx *ExecutionContext, nodeID, 
 		row.UserID = execCtx.GetUserID()
 		row.ProjectID = execCtx.GetProjectID()
 	}
+	// 上游真实消耗（对账成本侧）：采集器挂在 ctx 上，谁拿到响应谁登记（见 llm/usage.go）
+	row.ProviderTokens, _, row.ProviderUsage, _ = llm.UsageFrom(ctx).Snapshot()
 	_ = t.Ledger.Record(detachedCtx(ctx), row)
 }
 
@@ -382,7 +384,7 @@ type ExecutionContext struct {
 	// 再配合 execCtx.GetNodeData(...) 拿到上游节点的原始 data。
 	upstreamByTarget map[string][]string
 	// nodeDataByID 全图所有节点的原始 data（来自 plan.Schema.Nodes），
-	// 即便是 single / downstream 模式被裁掉的节点，data 也保留在此供执行器参考。
+	// 即便是没被本次执行选中（不在 Levels 里）的节点，data 也保留在此供执行器参考。
 	nodeDataByID map[string]json.RawMessage
 	// projectID 项目ID，用于确定存储路径
 	projectID string
@@ -487,8 +489,9 @@ func (ec *ExecutionContext) SetNodeDataMap(m map[string]json.RawMessage) {
 	ec.nodeDataByID = m
 }
 
-// GetNodeData 拿指定节点的原始 data（json.RawMessage）。single / downstream 模式下，
-// 节点本身不一定被执行，但其 data 已保存在此，可供其他节点作为输入参考。
+// GetNodeData 拿指定节点的原始 data（json.RawMessage）。计划只跑目标节点，
+// 其余节点不会被执行，但其 data 已保存在此，可供执行器作为输入参考
+// （上游已生成的 videoUrl/imageUrl 就是从这里读到的）。
 func (ec *ExecutionContext) GetNodeData(nodeID string) (json.RawMessage, bool) {
 	ec.mu.RLock()
 	defer ec.mu.RUnlock()
@@ -712,7 +715,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 	}
 	execCtx.SetUpstreamMap(upstreamByTarget)
 
-	// 把全图所有节点的原始 data 写进 execCtx（即便被 single / downstream 模式裁掉）
+	// 把全图所有节点的原始 data 写进 execCtx（即便不在本次执行的 Levels 里）
 	// 让执行器可以读到上游节点的最新 data（来自画布，已包含上一次执行结果）
 	nodeDataByID := make(map[string]json.RawMessage, len(plan.Schema.Nodes))
 	for _, n := range plan.Schema.Nodes {
@@ -820,7 +823,10 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 					return
 				}
 
-				output, err := executor.Execute(ctx, n, execCtx)
+				// 每个节点一份独立的用量采集器：上游消耗是按节点记进对账行的，
+				// 若共用执行级 ctx，同一执行里多个节点的 token 会累加到同一行（对账就错了）
+				nodeCtx := llm.WithUsageRecorder(ctx)
+				output, err := executor.Execute(nodeCtx, n, execCtx)
 				if err != nil {
 					log.Printf("[Engine] executor error nodeID=%s type=%s err=%v", n.ID, n.Type, err)
 					// 失败节点同样要进 outputs：它才是 saveOutputs → LastOutputs →
@@ -1871,6 +1877,10 @@ func (v *VideoExecutor) recordProviderTask(ctx context.Context, execCtx *Executi
 	if task.ExecID == 0 && execCtx != nil {
 		task.ExecID = execCtx.GetExecutionID()
 	}
+	// 上游真实消耗（token 口径 + 其它口径原文快照）：
+	// 视频的用量在轮询结果里，由 llm 侧登记进 ctx 上的采集器，这里统一取一次。
+	// 注意 upsert 侧是「只增不减」（GREATEST），所以后续再写一次（如退费）不会把已记的用量抹掉。
+	task.ProviderTokens, _, task.ProviderUsage, _ = llm.UsageFrom(ctx).Snapshot()
 	_ = v.providerTasks.Record(detachedCtx(ctx), task)
 }
 
@@ -2314,9 +2324,10 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 那个 URL 有有效期，用户过一阵再看就是死链，而账单早就扣了（假成功）。
 	var ownVideoURL string
 	var dlErr error
+	var deliverW, deliverH int // 上游实际交付的尺寸（校验「设置的分辨率有没有被照办」）
 	const downloadAttempts = 3
 	for attempt := 1; attempt <= downloadAttempts; attempt++ {
-		ownVideoURL, dlErr = v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID())
+		ownVideoURL, deliverW, deliverH, dlErr = v.downloadAndUpload(ctx, videoURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID())
 		if dlErr == nil {
 			break
 		}
@@ -2334,6 +2345,29 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return v.handleDownloadFailure(ctx, execCtx, node.ID, model, videoURL, dlErr, taskRef, chargeDetail)
 	}
 	log.Printf("[VideoExecutor] ✅ 视频已保存: original=%s -> ownURL=%s", videoURL, ownVideoURL)
+
+	// 交付分辨率校验（只记录、不拦截）：交付尺寸与设置不符是真实发生过的工单 ——
+	// 电信 cdance 路径曾经漏传 resolution（2026-10-04 修复），设置 480p 却交付 1280x720，
+	// 而且是按 480p 收的费。片子已生成、钱已扣，这时报错只会让用户拿不到本该能用的片子，
+	// 所以只留痕：日志一行 + 节点数据一个字段，便于按模型/渠道统计规模与验证修复效果。
+	resolutionMismatch := ""
+	if deliverW > 0 && deliverH > 0 {
+		actualShort := deliverW
+		if deliverH < actualShort {
+			actualShort = deliverH
+		}
+		if want := service.NominalShortSide(resolution); want > 0 {
+			diff := actualShort - want
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 32 {
+				resolutionMismatch = fmt.Sprintf("设置 %s（短边 %d），实际交付 %dx%d", resolution, want, deliverW, deliverH)
+				log.Printf("[VideoExecutor] ⚠️ 交付分辨率与设置不符: nodeId=%s model=%s channel=%s %s url=%s",
+					node.ID, model, execCtx.GetChannel(), resolutionMismatch, videoURL)
+			}
+		}
+	}
 
 	// 记录生成历史。
 	// 这条记录不只是「历史」：它是流程之外唯一一份「该节点确实交付了」的凭据 ——
@@ -2362,19 +2396,29 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 而不是留下一笔「已扣费、产物却没落下来」的账。
 	llm.ClearAsyncTaskRef(execID, node.ID)
 
+	outData := map[string]interface{}{
+		"mode":     data.Mode,
+		"prompt":   data.Prompt,
+		"videoUrl": ownVideoURL,
+	}
+	if deliverW > 0 && deliverH > 0 {
+		// 交付尺寸留痕：前端可用于展示，对账/排障也可直接查（空 = 探测失败）
+		outData["deliveredWidth"] = deliverW
+		outData["deliveredHeight"] = deliverH
+	}
+	if resolutionMismatch != "" {
+		outData["resolutionMismatch"] = resolutionMismatch
+	}
+
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
-		Data: map[string]interface{}{
-			"mode":     data.Mode,
-			"prompt":   data.Prompt,
-			"videoUrl": ownVideoURL,
-		},
+		Data:   outData,
 	}, nil
 }
 
 // downloadAndUpload 下载视频并使用 FileUploadService 上传（复用哈希去重等逻辑）
-func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, nodeID string, canvasDir string, projectID string) (string, error) {
+func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, nodeID string, canvasDir string, projectID string) (string, int, int, error) {
 	log.Printf("[VideoExecutor] 开始下载视频: url=%s dir=%s projectID=%s nodeID=%s", videoURL, canvasDir, projectID, nodeID)
 
 	httpClient := &http.Client{
@@ -2383,21 +2427,21 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", 0, 0, fmt.Errorf("create request: %w", err)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("download video: %w", err)
+		return "", 0, 0, fmt.Errorf("download video: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download video failed: status=%d", resp.StatusCode)
+		return "", 0, 0, fmt.Errorf("download video failed: status=%d", resp.StatusCode)
 	}
 
 	videoData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read video data: %w", err)
+		return "", 0, 0, fmt.Errorf("read video data: %w", err)
 	}
 
 	log.Printf("[VideoExecutor] 视频下载成功: size=%d bytes", len(videoData))
@@ -2411,6 +2455,13 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 		ext = ".mov"
 	}
 
+	// 交付尺寸校验：顺手在内存里的这份字节上量一下（落临时文件探测，比再走一次网络便宜）。
+	// 量不到不算失败 —— 探测失败只影响「能不能发现交付不符」，不该影响出片。
+	deliverW, deliverH, probeErr := service.ProbeVideoDimensionsFromBytes(ctx, videoData, ext)
+	if probeErr != nil {
+		log.Printf("[VideoExecutor] ⚠️ 交付尺寸探测失败（不影响出片）: nodeId=%s err=%v", nodeID, probeErr)
+	}
+
 	result, err := v.fileUploadService.UploadFromReader(bytes.NewReader(videoData), int64(len(videoData)), "video"+ext, service.UploadOptions{
 		Dir:            canvasDir,
 		ProjectID:      projectID,
@@ -2418,11 +2469,11 @@ func (v *VideoExecutor) downloadAndUpload(ctx context.Context, videoURL string, 
 		ContentTypeFor: service.ContentTypeForVideo,
 	})
 	if err != nil {
-		return "", fmt.Errorf("upload video: %w", err)
+		return "", 0, 0, fmt.Errorf("upload video: %w", err)
 	}
 
-	log.Printf("[VideoExecutor] 视频上传成功: objectName=%s url=%s cached=%v", result.ObjectName, result.URL, result.Cached)
-	return result.URL, nil
+	log.Printf("[VideoExecutor] 视频上传成功: objectName=%s url=%s cached=%v 交付尺寸=%dx%d", result.ObjectName, result.URL, result.Cached, deliverW, deliverH)
+	return result.URL, deliverW, deliverH, nil
 }
 
 // AudioExecutor 音频节点执行器
@@ -2771,5 +2822,9 @@ func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, vid
 	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller, providerTaskService, modelManager))
 	// 白模预演：无模型调用，仅承认前端已导出的白片/静帧，避免节点被判为失败
 	registry.Register("previz", NewPrevizExecutor())
+	// 清晰化节点（P0 本地档）：本机 ffmpeg 去块/降噪/锐化（可放大到 720p），不调用外部服务、不扣积分。
+	// 做成独立节点而不是挂在视频节点上：可对已有素材重做（不重复生成）、可独立超时与并发，
+	// 也是 P1（腾讯云 MPS / 火山）云端超分与补帧的落点。
+	registry.Register("enhance", NewEnhanceExecutor(fileUploadService))
 	return registry
 }

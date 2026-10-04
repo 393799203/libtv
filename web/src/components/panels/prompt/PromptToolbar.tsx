@@ -1,10 +1,12 @@
 import { memo, useMemo, useState, useEffect } from 'react';
-import { SoundOutlined } from '@ant-design/icons';
+import { SoundOutlined, AudioMutedOutlined, InfoCircleOutlined, FormatPainterOutlined } from '@ant-design/icons';
 import type { ModelOption, ResolutionOption } from '@/types/prompt';
 import type { NodeType } from '@/types/canvas';
 import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS, buildDurationOptions, aspectRatioLabel } from '@/configs/promptConfig';
 import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
 import { useModelStore } from '@/stores/modelStore';
+import { message } from 'antd';
+import { addEnhanceNodeAfter } from '@/utils/enhanceNode';
 
 // 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；
 // 失败时清空缓存，允许下次挂载时重试
@@ -86,6 +88,8 @@ const RESOLUTION_META: Record<string, string> = {
 };
 
 interface PromptToolbarProps {
+  /** 当前节点 ID：用于「加清晰化节点」这类直接操作画布的快捷动作 */
+  nodeId?: string;
   models: ModelOption[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -353,6 +357,7 @@ function SectionHeader({ icon, title, chip }: { icon: React.ReactNode; title: st
 }
 
 const AspectRatioSelector = memo(function AspectRatioSelector({
+  nodeId,
   resolution,
   aspectRatio,
   selectedModelId,
@@ -365,6 +370,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
   hasRefVideo,
   refVideoSeconds,
 }: {
+  nodeId?: string;
   resolution: ResolutionOption;
   aspectRatio: string;
   selectedModelId?: string;
@@ -425,6 +431,29 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
     ? (resolutionOptions[0] ?? resolution)
     : null;
   const effectiveResolution: string = resolutionFallback ?? resolution;
+
+  // ---- 低清晰度引导（P0）----
+  // 只在「视频节点 + 当前生效清晰度偏低」时出现；差价完全来自真实定价表，
+  // 取不到价格就不显示数字（宁可少一句，也不编一个数给用户看）。
+  const canUpgradeResolution: string | null = (() => {
+    if (!isVideo) return null;
+    return resolutionOptions.find((r) => r === '720p')
+      ?? resolutionOptions.find((r) => r === '1080p')
+      ?? null;
+  })();
+  const upgradeDeltaText: string = (() => {
+    if (!isVideo || !canUpgradeResolution || !pricingNodes || !selectedModelId) return '';
+    const realModelId = models.find((m) => m.value === selectedModelId)?.modelId || selectedModelId;
+    const cur = findVideoPricing(pricingNodes, realModelId, effectiveResolution);
+    const up = findVideoPricing(pricingNodes, realModelId, canUpgradeResolution);
+    if (!cur || !up) return '';
+    const curCost = estimateVideoCost(cur, selectedDuration ?? 0, !!hasRefVideo, refVideoSeconds ?? 0);
+    const upCost = estimateVideoCost(up, selectedDuration ?? 0, !!hasRefVideo, refVideoSeconds ?? 0);
+    const delta = upCost - curCost;
+    return delta > 0 ? `，只多 ${delta} 积分` : '';
+  })();
+  // 只在低清晰度（480p）且确实存在更高档时提示：已经是 720p/1080p 的用户不需要这段噪音
+  const showLowResHint = isVideo && effectiveResolution === '480p' && !!canUpgradeResolution;
 
   // 回退值与父组件状态不一致时回写，保证生成时提交的分辨率与 UI 显示一致
   useEffect(() => {
@@ -512,6 +541,50 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
               {resolutionFallback && (
                 <div className="mt-2 text-[11px] text-amber-600">
                   当前模型不支持 {resolution} 清晰度，已自动切换至 {resolutionFallback}
+                </div>
+              )}
+
+              {/* 低清晰度引导：480p 直出画面偏软，给出两条真正可行的路（而不是只写一句「建议 720p」） */}
+              {showLowResHint && (
+                <div className="mt-2.5 rounded-xl border border-sky-100 bg-sky-50/60 px-2.5 py-2">
+                  <div className="flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-600">
+                    <InfoCircleOutlined className="mt-[2px] text-sky-500" />
+                    <div className="flex-1">
+                      <span className="font-medium text-slate-700">480p 直出画面偏软。</span>
+                      生成后接一个
+                      <span className="font-medium text-sky-700">「清晰化」节点</span>
+                      可到 720p 观感（本机处理，不额外扣积分）
+                      {upgradeDeltaText ? (
+                        <>；想真正清晰建议直接出 <span className="font-medium">720p</span>{upgradeDeltaText}，由模型原生生成、无放大损失</>
+                      ) : (
+                        <>；想真正清晰建议直接出更高清晰度，由模型原生生成、无放大损失</>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-end gap-1.5">
+                    {canUpgradeResolution && (
+                      <button
+                        className="rounded-lg border border-sky-200 bg-white px-2 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-50 cursor-pointer"
+                        onClick={() => onResolutionChange(canUpgradeResolution as ResolutionOption)}
+                      >
+                        切到 {canUpgradeResolution}
+                      </button>
+                    )}
+                    {nodeId && (
+                      <button
+                        className="flex items-center gap-1 rounded-lg bg-sky-500 px-2 py-1 text-[11px] font-medium text-white hover:bg-sky-600 cursor-pointer"
+                        onClick={() => {
+                          const created = addEnhanceNodeAfter(nodeId);
+                          if (created) {
+                            message.success('已添加「清晰化」节点：生成完成后点它上面的「开始清晰化」');
+                          }
+                        }}
+                      >
+                        <FormatPainterOutlined />
+                        加清晰化节点
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -704,6 +777,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   onToneChange,
   selectedDuration = 5,
   onDurationChange,
+  nodeId,
   generateAudio = true,
   onGenerateAudioChange,
   audioReferenced = false,
@@ -938,6 +1012,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       {/* 分辨率/比例（仅图片/视频节点） */}
       {(nodeType === 'image' || nodeType === 'video') && (
         <AspectRatioSelector
+          nodeId={nodeId}
           resolution={selectedResolution}
           aspectRatio={selectedAspectRatio}
           selectedModelId={selectedModel}

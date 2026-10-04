@@ -7,6 +7,7 @@ import {
   AudioOutlined,
   CodeOutlined,
   DeploymentUnitOutlined,
+  FormatPainterOutlined,
 } from '@ant-design/icons';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -68,6 +69,11 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
       key: 'previz',
       label: '白模预演',
       icon: <DeploymentUnitOutlined />,
+    },
+    {
+      key: 'enhance',
+      label: '清晰化',
+      icon: <FormatPainterOutlined />,
     },
   ];
 

@@ -9,6 +9,7 @@ const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
   audio: { width: 320 },
   script: { width: 320, minWidth: 320 },
   previz: { width: 480, minWidth: 480 },  // 与视频节点同宽（同为媒体类节点）
+  enhance: { width: 480, minWidth: 480 }, // 与视频节点同宽（同为媒体类节点）
 };
 
 /**
@@ -123,6 +124,17 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         scene: undefined,
         videoUrl: undefined,
         stillUrl: undefined,
+      };
+    case 'enhance':
+      return {
+        ...baseData,
+        type: 'enhance',
+        label: '清晰化',
+        provider: 'ffmpeg',     // 默认本机档；云端档接入后这里可改为跟随后端默认渠道
+        mode: 'hd',             // 默认档位（与 enhance.yaml 里标了 default 的档位一致）            // 默认「增强」：去块+降噪+锐化，并把短边不足 720p 的放大到 720p
+        targetShortSide: 720,
+        videoUrl: undefined,
+        sourceUrl: undefined,
       };
   }
 }

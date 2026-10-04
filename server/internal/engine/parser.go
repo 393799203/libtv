@@ -57,7 +57,9 @@ type Connection struct {
 	TargetHandle string `json:"targetHandle"`
 }
 
-// ExecutionPlan 执行计划（拓扑排序后分层）
+// ExecutionPlan 执行计划。
+// Levels = 本次要跑的节点，按层分组（当前只支持单节点执行 ⇒ 恒为 1 层 1 节点）；
+// Schema = 全图节点与连接，供执行器反查上游数据。
 type ExecutionPlan struct {
 	Levels [][]WorkflowNode // Level[i] = 可并行执行的节点列表
 	Schema WorkflowSchema

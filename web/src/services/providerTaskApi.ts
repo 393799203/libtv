@@ -22,6 +22,16 @@ export interface ProviderTask {
   charged_amount: number;
   /** 已退还给用户的积分 */
   refunded_amount: number;
+  /**
+   * 上游真实消耗（对账的**成本侧**，来自上游任务结果的 usage）。
+   * 0 = 上游没回带（华数这类网关不一定有）—— 界面显示占位符，绝不用估算值冒充。
+   */
+  provider_tokens: number;
+  /**
+   * 非 token 计费渠道的用量原文快照（如 DashScope 的 video_duration=9 video_count=1）。
+   * 有它才能人工核对「上游按什么口径计费」。
+   */
+  provider_usage: string;
   /** 当初扣费的计费口径（分辨率 / 计费总时长 / 其中参考视频时长） */
   charge_resolution: string;
   charge_seconds: number;

@@ -367,6 +367,21 @@ export function useExecutionStream(
             videoUrl?: string;
             audioUrl?: string;
             error?: string;
+            // 清晰化节点（enhance）的输出：原片地址 + 本次处理的档位/耗时/尺寸，
+            // 用于节点上的「已清晰化」徽标与「原片/增强后」对比
+            sourceUrl?: string;
+            enhanceLevel?: string;
+            enhanceElapsedMs?: number;
+            enhanceSourceSize?: string;
+            enhanceTargetSize?: string;
+            enhanceProvider?: string;
+            enhanceProviderLabel?: string;
+            enhanceChannel?: string;
+            enhanceChannelLabel?: string;
+            enhanceRequestedMode?: string;
+            enhanceModeLabel?: string;
+            enhanceNote?: string;
+            enhanceError?: string;
           };
           // ✅ executor 返回 Status=failed 但 err=nil 时，data 带 error 字段（图片/视频节点）
           if (data.error) {
@@ -398,6 +413,19 @@ export function useExecutionStream(
             updates.videoHeight = undefined;
           }
           if (data.audioUrl !== undefined) updates.audioUrl = data.audioUrl;
+          // 清晰化节点：把处理留痕一起写回节点，徽标与对比按钮全靠它们
+          if (data.sourceUrl !== undefined) updates.sourceUrl = data.sourceUrl;
+          if (data.enhanceLevel !== undefined) updates.enhanceLevel = data.enhanceLevel;
+          if (data.enhanceElapsedMs !== undefined) updates.enhanceElapsedMs = data.enhanceElapsedMs;
+          if (data.enhanceSourceSize !== undefined) updates.enhanceSourceSize = data.enhanceSourceSize;
+          if (data.enhanceTargetSize !== undefined) updates.enhanceTargetSize = data.enhanceTargetSize;
+          if (data.enhanceProvider !== undefined) updates.enhanceProvider = data.enhanceProvider;
+          if (data.enhanceProviderLabel !== undefined) updates.enhanceProviderLabel = data.enhanceProviderLabel;
+          if (data.enhanceNote !== undefined) updates.enhanceNote = data.enhanceNote;
+          if (data.enhanceChannel !== undefined) updates.enhanceChannel = data.enhanceChannel;
+          if (data.enhanceChannelLabel !== undefined) updates.enhanceChannelLabel = data.enhanceChannelLabel;
+          if (data.enhanceRequestedMode !== undefined) updates.enhanceRequestedMode = data.enhanceRequestedMode;
+          if (data.enhanceModeLabel !== undefined) updates.enhanceModeLabel = data.enhanceModeLabel;
           updates.stale = false;
           // ✅ 成功后必须清除残留的 error（先失败后重试成功时，旧报错会一直留在节点 data 里）
           updates.error = undefined;

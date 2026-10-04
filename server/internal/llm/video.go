@@ -274,6 +274,8 @@ type VideoTaskResponse struct {
 		Progress   string `json:"progress"`   // "100%"
 		ResultURL  string `json:"result_url"` // 视频 URL（SUCCESS 时有值）
 		FailReason string `json:"fail_reason"`
+		// Usage 部分网关会带用量（华数渠道不保证有；有就记，没有就留 0）
+		Usage json.RawMessage `json:"usage"`
 	} `json:"data"`
 }
 
@@ -295,6 +297,8 @@ type mediaItem struct {
 // videoMode 决定 role：first-last-frame=首尾帧(first_frame/last_frame)，其他模式=参考
 // generateAudio: 是否生成音频（true=生成声音，false=静音）
 func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
+	// 调用方原本想传的分辨率（下面会被兜底值覆盖，cdance 路径要用原始值，见分派处注释）
+	requestedResolution := resolution
 	if resolution == "" {
 		resolution = "1080p"
 	}
@@ -309,7 +313,10 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 		if strings.Contains(model, "wan3.0") {
 			return c.generateDianxinWanVideo(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 		}
-		return c.generateDianxinVideo(ctx, model, prompt, duration, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
+		// cdance（火山协议）：用调用方给的原始分辨率，空的就**不发这个字段**（走上游默认）。
+		// 上面那个 "1080p" 兜底是给华数/万相路径的：cdance2.0-fast/mini 只支持 480p/720p，
+		// 把空值兜成 1080p 会直接吃上游拒单。
+		return c.generateDianxinVideo(ctx, model, prompt, duration, requestedResolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 	}
 
 	// 华数渠道：复用已提交任务（重启续跑直接接着查结果，不重新下发）
@@ -355,18 +362,29 @@ type DianxinVideoItem struct {
 	Role     string             `json:"role,omitempty"`      // reference_image / reference_video / reference_audio
 }
 
-// DianxinVideoRequest 电信视频创建任务请求体
+// DianxinVideoRequest 电信视频创建任务请求体。
+//
+// 这是火山原生协议（天翼云边缘AI网关「完全兼容官方所有接口参数」）：
+// 分辨率、比例、时长、音频、水印都在**顶层平铺**，提示词作为 content 里的 text 项。
+//
+// ⚠️ resolution 曾经漏了 —— 结果是「设置 480p、交付 1280x720」：
+// 报文里没有这个字段，上游就按自己的默认值（720p）出片，
+// 而计费按用户选的 480p 收（provider_tasks.charge_resolution=480p），
+// 用户看到的画面与付的钱对不上，我们和渠道结算时也可能吃亏。
+// 传空值时用 omitempty 省略该字段（仍是上游默认），不要硬塞一个"1080p"：
+// 0807 系列的 fast/mini 只支持 480p/720p，硬塞 1080p 会被上游直接拒单。
 type DianxinVideoRequest struct {
 	Model         string             `json:"model"`
 	Content       []DianxinVideoItem `json:"content"`
 	GenerateAudio bool               `json:"generate_audio"`
 	Ratio         string             `json:"ratio"`
 	Duration      int                `json:"duration"`
+	Resolution    string             `json:"resolution,omitempty"`
 	Watermark     bool               `json:"watermark"`
 }
 
 // generateDianxinVideo 电信视频生成（POST /contents/generations/tasks → 轮询）
-func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, prompt string, duration int, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
+func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, prompt string, duration int, resolution string, ratio string, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, generateAudio bool) (string, error) {
 	// 复用已提交任务：重启续跑时直接接着查结果，不重新下发（避免重复生成与重复扣费）
 	if h := AsyncTaskHolder(ctx); h != nil && h.TaskID != "" {
 		log.Printf("[VideoGen] ♻ 复用已提交的电信 cdance 任务: taskID=%s（跳过重复下发）", h.TaskID)
@@ -400,14 +418,15 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 		GenerateAudio: generateAudio,
 		Ratio:         ratio,
 		Duration:      duration,
+		Resolution:    resolution,
 		Watermark:     false,
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal dianxin video request: %w", err)
 	}
 
-	log.Printf("[VideoGen] 电信视频任务创建: model=%s duration=%ds ratio=%s contentCount=%d",
-		model, duration, ratio, len(content))
+	log.Printf("[VideoGen] 电信视频任务创建: model=%s duration=%ds resolution=%s ratio=%s contentCount=%d",
+		model, duration, resolution, ratio, len(content))
 
 	// 创建任务
 	apiKey, baseURL := c.creds(ctx)
@@ -521,11 +540,16 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
+			// Usage 上游真实消耗（火山/网关在任务结果里回带）。
+			// 这是对账的成本侧唯一可信来源：跟渠道核账时，看的就是这个数。
+			Usage json.RawMessage `json:"usage"`
 		}
 		if err := json.Unmarshal(respBody, &task); err != nil {
 			log.Printf("[VideoGen] 电信轮询解析失败 (attempt %d): %v", i+1, err)
 			continue
 		}
+		// 用量在任务结果里，成功那一刻登记（轮询可能返回多次，累加也只是同一次调用）
+		recordUpstreamUsage(ctx, task.Usage)
 
 		if task.Error != nil && task.Error.Message != "" {
 			return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, task.Error.Message)
@@ -779,7 +803,10 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			VideoURL   string `json:"video_url"`
 			Code       string `json:"code"`
 			Message    string `json:"message"`
-			Error      *struct {
+			// Usage DashScope 的用量是时长/张数口径（video_duration/video_count），
+			// 记原文快照；不换算成 token（换算系数是我们猜的，猜出来的「真实消耗」比空着更有害）
+			Usage json.RawMessage `json:"usage"`
+			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
@@ -787,6 +814,8 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			log.Printf("[VideoGen] 电信 wan3.0 轮询解析失败 (attempt %d): %v", i+1, err)
 			continue
 		}
+		// 用量口径登记（wan3.0 是时长/张数，不是 token）
+		recordUpstreamUsage(ctx, task.Usage)
 
 		if task.Error != nil && task.Error.Message != "" {
 			return "", fmt.Errorf("%w: 电信 wan3.0 视频任务失败: %s", ErrUpstreamRejected, task.Error.Message)
@@ -1321,6 +1350,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 		}
 
 		log.Printf("[VideoGen] poll attempt %d: status=%s progress=%s", i+1, taskResp.Data.Status, taskResp.Data.Progress)
+		recordUpstreamUsage(ctx, taskResp.Data.Usage)
 
 		switch strings.ToUpper(taskResp.Data.Status) {
 		case "SUCCESS":

@@ -254,6 +254,8 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 	} else {
 		log.Printf("[LLM] ok: model=%s contentLen=%d usage.total=%d", chatResp.Model, len(chatResp.Choices[0].Message.Content), chatResp.Usage.TotalTokens)
 	}
+	// 文本用量登记（对账成本侧）：上游回带了就记，没回带就是 0
+	RecordUsage(ctx, int64(chatResp.Usage.TotalTokens), int64(chatResp.Usage.CompletionTokens), "")
 
 	return &chatResp, nil
 }

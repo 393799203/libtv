@@ -48,6 +48,35 @@ const ALERT_LABEL: Record<string, string> = {
 };
 
 /** 任务类型：视频是异步任务（有上游任务号），其余是同步调用（用本地编号记账） */
+/**
+ * token 数量展示：一万以下给原数（精确），一万以上折成「x.x万」——
+ * 对账页一屏几十行，6 位数全展开会把这一列撑爆，而万位精度已经够判断成本量级。
+ */
+function formatTokens(n: number): string {
+  if (!n || n <= 0) return '-';
+  if (n < 10000) return n.toLocaleString();
+  return `${(n / 10000).toFixed(1)}万`;
+}
+
+/** 非 token 口径的简短展示：video_duration=9 video_count=1 → 时长9 · 张数1 */
+function formatUsageBrief(usage: string): string {
+  const map: Record<string, string> = {
+    video_duration: '时长',
+    video_count: '张数',
+    duration: '时长',
+    generated_images: '张数',
+    image_count: '张数',
+  };
+  const parts = usage
+    .split(/\s+/)
+    .map((kv) => {
+      const [k, v] = kv.split('=');
+      return k && v ? `${map[k] ?? k}${v}` : kv;
+    })
+    .filter(Boolean);
+  return parts.length ? parts.join(' · ') : usage;
+}
+
 const KIND_LABEL: Record<string, string> = {
   'ai.video': '视频',
   'ai.image': '图片',
@@ -136,6 +165,18 @@ export default function ProviderTaskReconciliation() {
               : ''}
           </div>
           <div className="break-all">任务号：{row.task_id}</div>
+          {/* 上游真实消耗：人工退费最需要判断的就是「这笔上游到底消耗了没有」——
+              有消耗（token/时长）说明是真实成本，退了就是我们承担；上游拒绝的没有消耗。 */}
+          <div>
+            上游消耗：
+            {row.provider_tokens > 0 ? (
+              <span className="text-amber-700">{row.provider_tokens.toLocaleString()} tokens</span>
+            ) : row.provider_usage ? (
+              <span className="text-amber-700">{row.provider_usage}</span>
+            ) : (
+              <span className="text-gray-400">上游未回带用量（不代表一定没消耗）</span>
+            )}
+          </div>
           <div className="text-gray-500 mt-1">
             退费立即到账、会写进用户的费用明细；同一笔只能退一次（已交付/已退费会被拦住）
           </div>
@@ -423,12 +464,40 @@ export default function ProviderTaskReconciliation() {
       ),
     },
     {
-      title: '积分',
+      // 收入（扣用户积分）/ 成本（上游真实消耗）放在同一列对照着看：
+      // 只看「扣了多少积分」是对不出成本的 —— 上游按 token 计费、
+      // 我们按用户选的档位定价，两边口径不同，误差只会在这里暴露
+      // （实例：480p 少传分辨率参数，用户按 480p 付、上游按 720p 消耗，9 秒任务
+      //   token 从 90,814 变成 195,300，钱没变、成本翻倍）。
+      title: '积分 / 实际消耗',
       dataIndex: 'charged_amount',
-      width: 96,
+      width: 132,
       render: (_: number, r) => (
         <div className="text-[12px] leading-5">
-          <div className="text-gray-800">-{r.charged_amount}</div>
+          <div className="text-gray-800">
+            -{r.charged_amount}
+            <span className="text-gray-300 mx-1">/</span>
+            {r.provider_tokens > 0 ? (
+              <Tooltip
+                title={
+                  r.provider_usage
+                    ? `上游实际消耗 ${r.provider_tokens.toLocaleString()} tokens（上游口径：${r.provider_usage}）`
+                    : `上游实际消耗 ${r.provider_tokens.toLocaleString()} tokens`
+                }
+              >
+                <span className="text-sky-700 cursor-help">{formatTokens(r.provider_tokens)}</span>
+              </Tooltip>
+            ) : r.provider_usage ? (
+              // 有非 token 口径（如 wan3.0 的时长/张数）：能看口径，但不冒充 tokens
+              <Tooltip title={`上游用量口径：${r.provider_usage}`}>
+                <span className="text-gray-400 cursor-help">按{formatUsageBrief(r.provider_usage)}</span>
+              </Tooltip>
+            ) : (
+              <Tooltip title="上游结果里没有回带用量（部分渠道不回带）——留空而不是估算">
+                <span className="text-gray-300 cursor-help">-</span>
+              </Tooltip>
+            )}
+          </div>
           {r.refunded_amount > 0 && <div className="text-green-600">+{r.refunded_amount}</div>}
         </div>
       ),

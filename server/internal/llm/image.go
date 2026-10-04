@@ -72,7 +72,9 @@ type ImageRequest struct {
 // ImageGenerationResponse 图像生成响应
 type ImageGenerationResponse struct {
 	Created int64 `json:"created"`
-	Data    []struct {
+	// Usage 上游用量（有就记进对账的成本侧；没有就留空 —— 华数/部分网关不回带）
+	Usage json.RawMessage `json:"usage"`
+	Data  []struct {
 		URL string `json:"url"`
 	} `json:"data"`
 	Error *struct {
@@ -235,6 +237,9 @@ func (c *ImageClient) doRequest(ctx context.Context, payload []byte) ([]string, 
 		// 200 但体内带 error：同样是上游明确拒绝（网关把拒绝包在 200 里返回）
 		return nil, fmt.Errorf("%w: Image API error: %s", ErrUpstreamRejected, imgResp.Error.Message)
 	}
+
+	// 上游用量登记（对账成本侧；图片按张/按 token 的口径都原样落库）
+	recordUpstreamUsage(ctx, imgResp.Usage)
 
 	if len(imgResp.Data) == 0 {
 		return nil, fmt.Errorf("no image generated")

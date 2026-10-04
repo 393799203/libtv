@@ -685,6 +685,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
       {/* 第三层：底部工具栏 */}
       <PromptToolbar
+        nodeId={nodeId}
         models={availableModels}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}

@@ -114,7 +114,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 		return
 	}
 
-	// 加载画布 → 校验 → 拓扑排序 → 裁剪为「只跑这一个节点」
+	// 加载画布 → 校验 → 构造「只跑这一个节点」的计划
 	// （与队列 worker 共用 buildPlan，保证两条路径行为一致）
 	canvas, plan, ownerUserID, err := h.buildPlan(c.Request.Context(), projectID, startNodeID)
 	if err != nil {
@@ -195,7 +195,7 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 // ==================== 执行计划构建与执行（HTTP 入口与队列 worker 共用）====================
 
 // planNodeIDs 取出计划中实际要执行的节点 ID
-// （plan.Levels 是经 mode 裁剪后的真实执行集合，非全图）
+// （plan.Levels 就是真实执行集合 —— 只有目标节点一个，不是全图）
 func planNodeIDs(plan *engine.ExecutionPlan) []string {
 	if plan == nil {
 		return nil
@@ -237,8 +237,9 @@ func (h *WorkflowHandler) GetActiveExecutions(c *gin.Context) {
 	response.OK(c, gin.H{"executions": list})
 }
 
-// buildPlan 加载画布 → 校验 → 拓扑排序 → 按 mode 裁剪，产出可执行计划。
-// startNodeID 为空表示全图执行；mode=downstream 跑该节点及其所有后代，否则只跑该节点。
+// buildPlan 加载画布 → 解析 → 产出「只跑 startNodeID 这一个节点」的执行计划。
+//
+// 只有这一种计划：全图执行与「重新生成下游」都没有产品入口（见下方 Execute 的必填校验）。
 func (h *WorkflowHandler) buildPlan(ctx context.Context, projectID, startNodeID string) (*model.Canvas, *engine.ExecutionPlan, string, error) {
 	canvas, err := h.canvasRepo.FindByProjectID(ctx, projectID)
 	if err != nil || canvas == nil {
@@ -256,19 +257,12 @@ func (h *WorkflowHandler) buildPlan(ctx context.Context, projectID, startNodeID 
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("parse canvas failed: %w", err)
 	}
-	if err := engine.Validate(schema); err != nil {
-		return nil, nil, "", fmt.Errorf("validate failed: %w", err)
-	}
-	plan, err := engine.TopologicalSort(schema)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("topological sort failed: %w", err)
-	}
 
-	// 裁剪为「只跑 startNodeID 这一个节点」：保留全图 Schema（含上游 data 与连接），
-	// 让执行器仍能反查上游已保存的数据（这是节点生成本身的需要，不是"全图执行"）。
-	plan, err = engine.FilterSingle(plan, startNodeID)
+	// 校验（含环检测）+ 构造单节点计划：Levels 只含目标节点（不重跑上游、不重复扣费），
+	// Schema 保留全图 nodes/connections（执行器要反查上游已保存的数据）。
+	plan, err := engine.BuildNodePlan(schema, startNodeID)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("filter plan failed: %w", err)
+		return nil, nil, "", fmt.Errorf("build execution plan failed: %w", err)
 	}
 	return canvas, plan, ownerUserID, nil
 }

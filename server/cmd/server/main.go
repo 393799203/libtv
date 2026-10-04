@@ -248,7 +248,19 @@ func main() {
 	commentHandler := handler.NewCommentHandler(commentService)
 	forumHandler := handler.NewForumHandler(forumService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
+	// 清晰化渠道配置（configs/enhance.yaml）：渠道/档位/运维旋钮。
+	// 读不到或读坏了都**不阻塞启动** —— 退回内置默认配置（本机 FFmpeg 两档），
+	// 理由：清晰化是增强项，配置故障不该让整个服务起不来；但日志会明确喊出来
+	enhanceCfg, enhanceErr := service.LoadEnhanceConfig("configs/enhance.yaml")
+	if enhanceErr != nil {
+		log.Printf("⚠️  清晰化配置加载失败，使用内置默认配置: %v", enhanceErr)
+		enhanceCfg = engine.DefaultEnhanceConfig()
+	}
+	service.ApplyEnhanceLimits(enhanceCfg.Limits)
+	engine.ApplyEnhanceConfig(enhanceCfg)
+
 	modelHandler := handler.NewModelHandler(modelManager, channelService)
+	enhanceHandler := handler.NewEnhanceHandler()
 	channelHandler := handler.NewChannelHandler(channelService, userService)
 	// 幂等存储的内容在 cache.Init 之后装配（见下方）：这里先给一个「延迟取 Redis」的实例，
 	// 它没有 Redis 时会自动降级为不拦截，不会因为顺序问题静默失效
@@ -403,6 +415,9 @@ func main() {
 		api.DELETE("/users/:id", userHandler.Delete)          // 管理员：删除用户
 		api.POST("/users/:id/recharge", userHandler.Recharge) // 管理员：为用户充值积分
 		api.GET("/models", modelHandler.ListModels)           // 模型清单（按登录用户渠道返回各自渠道模型）
+		// 清晰化渠道 + 档位清单（配置 × 实现注册表驱动：改 enhance.yaml 重启即生效，前端不用发版）
+		// 路径沿用 providers（P0 首版就叫这个），少一次旧前端 404
+		api.GET("/enhance/providers", enhanceHandler.ListChannels)
 
 		// AI 渠道管理（多渠道 token 路由：华数/电信）
 		api.GET("/channel/my", channelHandler.GetMyChannel)                                                   // 当前用户自己的渠道

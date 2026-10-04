@@ -555,6 +555,21 @@ type ProviderTask struct {
 	// ProviderURL 上游返回的原始产物地址：转存失败时它仍然有效，
 	// 留着它才能证明「上游确实出了片」，也才有机会人工把片子捞回来
 	ProviderURL string `gorm:"size:1000;default:''" json:"provider_url"`
+	// ========== 上游真实消耗（对账的「成本侧」）==========
+	//
+	// 为什么要有：对账页原先只有「扣了用户多少积分」是**收入**口径，
+	// 而跟渠道对账要的是**成本**口径 —— 上游按什么计费？消耗了多少？
+	// 火山（cdance）在任务结果里直接给 usage.total_tokens，DashScope 给的是时长类口径，
+	// 采集到就落库，采不到就是 0（绝不用估算值冒充真实消耗：对账表上出现假数比空着更危险）。
+	//
+	// 线上实例：cdance2.0-fast-0807 设 480p 却交付 720p 时，
+	// 一笔 9 秒任务的 token 是 195,300（720p 档），修好后同样请求降到 90,814（480p 档）——
+	// 这种「钱没变、成本翻倍」的偏差，只有把上游消耗记下来才看得见。
+	ProviderTokens int64 `gorm:"default:0" json:"provider_tokens"`
+	// ProviderUsage 上游 usage 原文快照（按 token 计费之外的渠道口径，
+	// 如 DashScope 的 video_duration/video_count 就放在这里，不硬塞进 tokens）
+	ProviderUsage string `gorm:"size:255;default:''" json:"provider_usage"`
+
 	// Note 失败原因或处理说明（供人工核对时快速定位）。
 	// 1200 而不是 255：上游拒绝时会带一大段原始报错（例如「生成内容可能涉及版权限制…」后面
 	// 还有接口返回的原文），255 会让真正有用的后半句被切掉，管理员还得去翻服务器日志。

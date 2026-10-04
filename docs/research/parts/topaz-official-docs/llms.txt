@@ -1,0 +1,207 @@
+# Developer Documentation
+
+## Developer Guide
+
+- [Introduction](https://developer.topazlabs.com/getting-started/introduction.md)
+- [Overview](https://developer.topazlabs.com/getting-started/overview.md)
+- [Image Quickstart](https://developer.topazlabs.com/getting-started/quickstart.md): In this example, we’ll be using one of our most popular image models, Standard 2.
+- [Video Quickstart](https://developer.topazlabs.com/getting-started/video-quickstart.md): In this example, we’ll be using one of our popular video models, Apollo.
+- [New Models](https://developer.topazlabs.com/getting-started/new-models.md)
+- [Model Selection](https://developer.topazlabs.com/getting-started/model-selection.md)
+- [API Key Setup](https://developer.topazlabs.com/getting-started/api-key-setup.md)
+- [Model Pricing](https://developer.topazlabs.com/getting-started/model-pricing.md): Flexible, per-use pricing that scales with you
+- [Individual Model Pricing](https://developer.topazlabs.com/getting-started/individual-model-pricing.md)
+- [All Models](https://developer.topazlabs.com/getting-started/all-models.md)
+- [Legacy Models](https://developer.topazlabs.com/resources/legacy-models.md): Access previous versions of our newer models.
+- [API Limits](https://developer.topazlabs.com/resources/api-limits.md)
+- [FAQ](https://developer.topazlabs.com/resources/faq.md)
+- [Gigapixel](https://developer.topazlabs.com/image-models/gigapixel.md): Precision Upscaling for Images
+- [Standard 2](https://developer.topazlabs.com/image-models/gigapixel/standard-2.md): General-purpose model balancing detail, sharpness, and noise reduction
+- [High Fidelity 2](https://developer.topazlabs.com/image-models/gigapixel/high-fidelity-2.md): Fidelity upscaling for high-resolution images and professional photos
+- [High Fidelity 3](https://developer.topazlabs.com/image-models/gigapixel/high-fidelity-3.md): Improved fidelity upscaling for high-resolution images and professional photos
+- [Low Resolution 2](https://developer.topazlabs.com/image-models/gigapixel/low-resolution-2.md): Recovery-focused upscaling for low resolution or heavily compressed sources
+- [Art & CGI](https://developer.topazlabs.com/image-models/gigapixel/art-and-cgi.md): Precision upscaling for artwork, drawings, illustrations, and computer graphics
+- [Transparent Image Upscale](https://developer.topazlabs.com/image-models/gigapixel/transparent-image-upscale.md): Preserve Alpha Transparency
+- [Detail Faces](https://developer.topazlabs.com/image-models/gigapixel/detail-faces.md): Improve realism in AI-generated faces
+- [Recover Faces](https://developer.topazlabs.com/image-models/gigapixel/recover-faces.md): Intelligent facial Restoration for low-resolution images
+- [Face Recovery 3](https://developer.topazlabs.com/image-models/gigapixel/face-recovery-3.md): Improved face restoration for low-resolution images
+- [Text & Shapes](https://developer.topazlabs.com/image-models/gigapixel/text-and-shapes.md): Clean upscaling for graphics and typography
+- [Wonder](https://developer.topazlabs.com/image-models/wonder.md): Generative Upscaling for Images
+- [Redefine](https://developer.topazlabs.com/image-models/wonder/redefine.md): Generative diffusion model adds new detail with prompt-based enhancement
+- [Wonder](https://developer.topazlabs.com/image-models/wonder/wonder.md): A generative AI model designed for one-click repair and enhancement of low-to-medium resolution images
+- [Wonder 2](https://developer.topazlabs.com/image-models/wonder/wonder-2.md): The most advanced generative realism model for challenging images
+- [Wonder 3](https://developer.topazlabs.com/image-models/wonder/wonder-3.md): Most advanced generative realism model for upscaling images
+- [Wonder 3.5 — New!](https://developer.topazlabs.com/image-models/wonder/wonder-3.5-new.md): Highest-quality generative upscaling for images with greater detail, precision, and realism
+- [Standard Max](https://developer.topazlabs.com/image-models/wonder/standard-max.md): High-quality precision upscaling with broader accessibility
+- [Recover 3](https://developer.topazlabs.com/image-models/wonder/recover-3.md): Generative diffusion model that excels at recovering rich, natural detail
+- [Bloom](https://developer.topazlabs.com/image-models/bloom.md): Creative Upscaling for Images
+- [Bloom 2 — New & Improved!](https://developer.topazlabs.com/image-models/bloom/bloom-2-new-and-improved.md): Higher-quality creative upscaling for GenAI images with new, reimagined details
+- [Bloom 1 Creative](https://developer.topazlabs.com/image-models/bloom/bloom-1-creative.md): Creative upscaling for AI generated images and artwork
+- [Bloom 1 Realism](https://developer.topazlabs.com/image-models/bloom/bloom-1-realism.md): Realistic and natural detail enhancement for AI-generated images
+- [Denoise](https://developer.topazlabs.com/image-models/denoise.md): Reduce Noise and Grain in Images
+- [Normal](https://developer.topazlabs.com/image-models/denoise/normal.md): General-purpose noise reduction
+- [Strong](https://developer.topazlabs.com/image-models/denoise/strong.md): High-noise detail preservation
+- [Extreme](https://developer.topazlabs.com/image-models/denoise/extreme.md): Maximum noise removal
+- [Max](https://developer.topazlabs.com/image-models/denoise/max.md): Highest-quality denoising with intelligent detail recovery
+- [Removal & Cleanup](https://developer.topazlabs.com/image-models/removal-and-cleanup.md): Remove Unwanted Objects and Distractions
+- [Dust & Scratch 2](https://developer.topazlabs.com/image-models/removal-and-cleanup/dust-and-scratch-2.md): Automatic blemish cleanup
+- [Image Object Matting](https://developer.topazlabs.com/image-models/removal-and-cleanup/image-object-matting.md): Eliminate
+- [Background Removal](https://developer.topazlabs.com/image-models/removal-and-cleanup/background-removal.md): Remove backgrounds from images
+- [Sharpen](https://developer.topazlabs.com/image-models/sharpen.md): Specialized Sharpening for Images and Photos
+- [Standard](https://developer.topazlabs.com/image-models/sharpen/standard.md): General-purpose sharpening
+- [Strong](https://developer.topazlabs.com/image-models/sharpen/strong.md): Severe blur recovery
+- [Noise-Aware Sharpen](https://developer.topazlabs.com/image-models/sharpen/noise-aware-sharpen.md): One-click sharpening that separates detail from noise
+- [Portrait](https://developer.topazlabs.com/image-models/sharpen/portrait.md): Detail enhancement for people
+- [Wildlife](https://developer.topazlabs.com/image-models/sharpen/wildlife.md): Detail recovery for nature imagery
+- [Natural](https://developer.topazlabs.com/image-models/sharpen/natural.md): Texture-preserving sharpening
+- [Refocus](https://developer.topazlabs.com/image-models/sharpen/refocus.md): Micro-detail enhancement
+- [Motion Blur](https://developer.topazlabs.com/image-models/sharpen/motion-blur.md): Motion artifact correction
+- [Lens Blur 2](https://developer.topazlabs.com/image-models/sharpen/lens-blur-2.md): Defocus and lens blur correction
+- [Super Focus 2](https://developer.topazlabs.com/image-models/sharpen/super-focus-2.md): Generative blur recovery for severely blurred images
+- [Super Focus 3](https://developer.topazlabs.com/image-models/sharpen/super-focus-3.md): Generative blur recovery with selective refinement
+- [Color & Lighting](https://developer.topazlabs.com/image-models/color-and-lighting.md): Fix Exposure, Contrast, and Color Balance
+- [Relight Creative 1](https://developer.topazlabs.com/image-models/color-and-lighting/relight-creative-1.md): Intelligent exposure correction
+- [Adjust Lighting 2](https://developer.topazlabs.com/image-models/color-and-lighting/adjust-lighting-2.md): Intelligent exposure correction
+- [Balance Color](https://developer.topazlabs.com/image-models/color-and-lighting/balance-color.md): Automatic color correction
+- [Image Colorization](https://developer.topazlabs.com/image-models/color-and-lighting/image-colorization.md): Automatic colorization for black & white images
+- [Proteus](https://developer.topazlabs.com/video-models/proteus.md): Precision Video Upscale & Enhancement
+- [Proteus](https://developer.topazlabs.com/video-models/proteus/proteus.md): The default choice for video enhancement
+- [Proteus](https://developer.topazlabs.com/video-models/proteus/proteus-1.md): The default choice for video enhancement
+- [Proteus Natural](https://developer.topazlabs.com/video-models/proteus/proteus-natural.md): Next-generation natural enhancement
+- [Proteus Natural](https://developer.topazlabs.com/video-models/proteus/proteus-natural-1.md): Next-generation natural enhancement
+- [Rhea](https://developer.topazlabs.com/video-models/proteus/rhea.md): High-fidelity 4× upscaling for fine detail
+- [Rhea](https://developer.topazlabs.com/video-models/proteus/rhea-1.md): High-fidelity 4× upscaling for fine detail
+- [Theia](https://developer.topazlabs.com/video-models/proteus/theia.md): Manual clarity and detail control
+- [Theia](https://developer.topazlabs.com/video-models/proteus/theia-1.md): Manual clarity and detail control
+- [Theia Fine Tune Detail](https://developer.topazlabs.com/video-models/proteus/theia-fine-tune-detail.md)
+- [Theia Fine Tune Fidelity](https://developer.topazlabs.com/video-models/proteus/theia-fine-tune-fidelity.md)
+- [Artemis](https://developer.topazlabs.com/video-models/proteus/artemis.md): Balanced denoise and sharpening
+- [Artemis](https://developer.topazlabs.com/video-models/proteus/artemis-1.md): Balanced denoise and sharpening
+- [Artemis Aliasing / Moire](https://developer.topazlabs.com/video-models/proteus/artemis-aliasing-moire.md)
+- [Artemis Low Quality](https://developer.topazlabs.com/video-models/proteus/artemis-low-quality.md)
+- [Artemis Medium Quality](https://developer.topazlabs.com/video-models/proteus/artemis-medium-quality.md)
+- [Artemis High Quality](https://developer.topazlabs.com/video-models/proteus/artemis-high-quality.md)
+- [Artemis Medium Halo](https://developer.topazlabs.com/video-models/proteus/artemis-medium-halo.md)
+- [Artemis Strong Halo](https://developer.topazlabs.com/video-models/proteus/artemis-strong-halo.md)
+- [Dione](https://developer.topazlabs.com/video-models/proteus/dione.md): Deinterlacing and legacy video conversion
+- [Dione](https://developer.topazlabs.com/video-models/proteus/dione-1.md): Deinterlacing and legacy video conversion
+- [Dione DV](https://developer.topazlabs.com/video-models/proteus/dione-dv.md)
+- [Dione TV](https://developer.topazlabs.com/video-models/proteus/dione-tv.md)
+- [Dione Robust](https://developer.topazlabs.com/video-models/proteus/dione-robust.md)
+- [Dione Dehalo](https://developer.topazlabs.com/video-models/proteus/dione-dehalo.md)
+- [Dione Robust Dehalo](https://developer.topazlabs.com/video-models/proteus/dione-robust-dehalo.md)
+- [Gaia](https://developer.topazlabs.com/video-models/proteus/gaia.md): Refinement for high-quality CGI and animation
+- [Gaia](https://developer.topazlabs.com/video-models/proteus/gaia-1.md): Refinement for high-quality CGI and animation
+- [Gaia 2 (Animation)](https://developer.topazlabs.com/video-models/proteus/gaia-2-animation.md): Next-generation frame-by-frame 2× upscaling for animation
+- [Gaia 2 (Animation)](https://developer.topazlabs.com/video-models/proteus/gaia-2-animation-1.md): Next-generation frame-by-frame 2× upscaling for animation
+- [Gaia CG](https://developer.topazlabs.com/video-models/proteus/gaia-cg.md)
+- [Gaia High Quality](https://developer.topazlabs.com/video-models/proteus/gaia-high-quality.md)
+- [Iris](https://developer.topazlabs.com/video-models/proteus/iris.md): Face recovery for degraded footage
+- [Iris](https://developer.topazlabs.com/video-models/proteus/iris-1.md): Face recovery for degraded footage
+- [Iris Low Quality](https://developer.topazlabs.com/video-models/proteus/iris-low-quality.md)
+- [Iris Medium Quality](https://developer.topazlabs.com/video-models/proteus/iris-medium-quality.md)
+- [Starlight](https://developer.topazlabs.com/video-models/starlight.md): Generative Video Upscale & Enhancement
+- [Starlight Precise 2.6](https://developer.topazlabs.com/video-models/starlight/starlight-precise-2.6.md): High-quality upscaling and enhancement for GenAI and archival video with realistic faces, textures, text clarity, and temporal consistency
+- [Starlight Fast 3](https://developer.topazlabs.com/video-models/starlight/starlight-fast-3.md): Fastest Starlight model yet, accelerating precise diffusion upscaling without sacrificing quality.
+- [Starlight Fast 2](https://developer.topazlabs.com/video-models/starlight/starlight-fast-2.md): 2x faster diffusion upscaling with higher fidelity
+- [Starlight Mini](https://developer.topazlabs.com/video-models/starlight/starlight-mini.md): Powerful local diffusion restoration for archival and interlaced footage
+- [Starlight HQ](https://developer.topazlabs.com/video-models/starlight/starlight-hq.md): Maximum quality generative enhancement for modern high-resolution video
+- [Starlight Sharp (Deprecated)](https://developer.topazlabs.com/video-models/starlight/starlight-sharp-deprecated.md): Fast local restoration with sharper detail for clean, progressive video
+- [Starlight Precise 2.5 (Deprecated)](https://developer.topazlabs.com/video-models/starlight/starlight-precise-2.5-deprecated.md): Improved realism for AI-generated video with enhanced faces, texture detail, and text clarity
+- [Starlight Precise 2 (Deprecated)](https://developer.topazlabs.com/video-models/starlight/starlight-precise-2-deprecated.md): Bring realism to GenAI video with natural faces, skin tones, and stable motion
+- [Starlight Precise 1 (Deprecated)](https://developer.topazlabs.com/video-models/starlight/starlight-precise-1-deprecated.md): Restore footage once considered impossible with fully automatic diffusion enhancement
+- [Starlight Fast 1 (Deprecated)](https://developer.topazlabs.com/video-models/starlight/starlight-fast-1-deprecated.md): First generation generative upscaling for speed
+- [Astra](https://developer.topazlabs.com/video-models/astra.md): Creative Video Upscale & Enhancement
+- [Astra 1 (Deprecated)](https://developer.topazlabs.com/video-models/astra/astra-1-deprecated.md): Transform GenAI video to 4K with creative upscaling that generates dynamic new  texture and detail
+- [Astra 2](https://developer.topazlabs.com/video-models/astra/astra-2.md): Enhanced creative upscaling for GenAI video with advanced control over detail and style
+- [Denoise](https://developer.topazlabs.com/video-models/denoise.md): Remove Noise and Reduce Grain
+- [Nyx](https://developer.topazlabs.com/video-models/denoise/nyx.md): High-quality denoising with natural texture preservation
+- [Nyx High Fidelity](https://developer.topazlabs.com/video-models/denoise/nyx-high-fidelity.md): Precision denoising with pipeline-ready outputs
+- [Nyx XL](https://developer.topazlabs.com/video-models/denoise/nyx-xl.md): High-intensity denoising for extreme noise
+- [Nyx Fast](https://developer.topazlabs.com/video-models/denoise/nyx-fast.md): Fast denoising for high-volume workflows
+- [Frame Interpolation](https://developer.topazlabs.com/video-models/frame-interpolation.md): AI Powered Retiming and Frame Interpolation
+- [Aion](https://developer.topazlabs.com/video-models/frame-interpolation/aion.md): Extreme slow motion for complex, high-resolution motion
+- [Apollo](https://developer.topazlabs.com/video-models/frame-interpolation/apollo.md)
+- [Chronos](https://developer.topazlabs.com/video-models/frame-interpolation/chronos.md): Natural slow motion for real-world motion
+- [Video Utilities](https://developer.topazlabs.com/video-models/video-utilities.md): AI Powered Retiming and Frame Interpolation
+- [Hyperion 2.5 (SDR to HDR) — New!](https://developer.topazlabs.com/video-models/video-utilities/hyperion-2.5-sdr-to-hdr-new.md): Our highest-quality SDR-to-HDR conversion model, delivering improved fidelity, clarity, and dynamic range. Convert 8-bit GenAI video to professional 10-bit and 16-bit formats.
+- [Themis 2  (Motion Deblur)](https://developer.topazlabs.com/video-models/video-utilities/themis-2-motion-deblur.md): Restore clarity to fast-moving footage
+- [Video Colorization](https://developer.topazlabs.com/video-models/video-utilities/video-colorization.md): Bring black-and-white footage to life with stable, natural color
+- [Hyperion (SDR to HDR)](https://developer.topazlabs.com/video-models/video-utilities/hyperion-sdr-to-hdr.md): Unlock HDR depth from SDR footage
+- [Hyperion 2 (SDR to HDR)](https://developer.topazlabs.com/video-models/video-utilities/hyperion-2-sdr-to-hdr.md): Advanced SDR to HDR conversion for professional finishing workflows
+- [Video Foreground Object Removal](https://developer.topazlabs.com/video-models/video-utilities/video-foreground-object-removal.md): Remove unwanted objects from video
+
+## Reference
+
+- [OpenAPI Schema](https://developer.topazlabs.com/reference/openapi-specs/readme.md): Learn more about documenting APIs in GitBook.
+- [Enhance](https://developer.topazlabs.com/reference/image/enhance.md)
+- [Enhance](https://developer.topazlabs.com/reference/image/enhance/enhance.md)
+- [Enhance Generative](https://developer.topazlabs.com/reference/image/enhance/enhance-generative.md)
+- [Sharpen](https://developer.topazlabs.com/reference/image/sharpen.md)
+- [Sharpen](https://developer.topazlabs.com/reference/image/sharpen/sharpen.md)
+- [Sharpen Generative](https://developer.topazlabs.com/reference/image/sharpen/sharpen-generative.md)
+- [Denoise](https://developer.topazlabs.com/reference/image/denoise.md)
+- [Denoise](https://developer.topazlabs.com/reference/image/denoise/denoise.md)
+- [Restore](https://developer.topazlabs.com/reference/image/restore.md)
+- [Restore Generative](https://developer.topazlabs.com/reference/image/restore/restore-generative.md)
+- [Lighting](https://developer.topazlabs.com/reference/image/lighting.md)
+- [Lighting](https://developer.topazlabs.com/reference/image/lighting/lighting.md)
+- [Matting](https://developer.topazlabs.com/reference/image/matting.md)
+- [Matting](https://developer.topazlabs.com/reference/image/matting/matting.md)
+- [Tool](https://developer.topazlabs.com/reference/image/tool.md)
+- [Tool](https://developer.topazlabs.com/reference/image/tool/tool.md)
+- [Status](https://developer.topazlabs.com/reference/image/status.md)
+- [Get All Statuses](https://developer.topazlabs.com/reference/image/status/get-all-statuses.md)
+- [Delete All Statuses](https://developer.topazlabs.com/reference/image/status/delete-all-statuses.md)
+- [Get Status](https://developer.topazlabs.com/reference/image/status/get-status.md)
+- [Delete Status](https://developer.topazlabs.com/reference/image/status/delete-status.md)
+- [Download](https://developer.topazlabs.com/reference/image/download.md)
+- [Download Output](https://developer.topazlabs.com/reference/image/download/download-output.md)
+- [Download Input](https://developer.topazlabs.com/reference/image/download/download-input.md)
+- [Estimate](https://developer.topazlabs.com/reference/image/estimate.md)
+- [Estimate](https://developer.topazlabs.com/reference/image/estimate/estimate.md)
+- [Estimate Generative](https://developer.topazlabs.com/reference/image/estimate/estimate-generative.md)
+- [Estimate Bulk](https://developer.topazlabs.com/reference/image/estimate/estimate-bulk.md)
+- [Cancel](https://developer.topazlabs.com/reference/image/cancel.md)
+- [Cancel](https://developer.topazlabs.com/reference/image/cancel/cancel.md)
+- [Status](https://developer.topazlabs.com/reference/video/status.md)
+- [Get System Status](https://developer.topazlabs.com/reference/video/status/get-system-status.md)
+- [Create Request](https://developer.topazlabs.com/reference/video/create-request.md)
+- [Create Video Request](https://developer.topazlabs.com/reference/video/create-request/create-video-request.md)
+- [Create Express Request](https://developer.topazlabs.com/reference/video/create-express-request.md)
+- [Create Express Video Request](https://developer.topazlabs.com/reference/video/create-express-request/create-express-video-request.md)
+- [Accept Request](https://developer.topazlabs.com/reference/video/accept-request.md)
+- [Accept and Upload Video Request](https://developer.topazlabs.com/reference/video/accept-request/accept-and-upload-video-request.md)
+- [Complete Upload](https://developer.topazlabs.com/reference/video/complete-upload.md)
+- [Complete Video Upload](https://developer.topazlabs.com/reference/video/complete-upload/complete-video-upload.md)
+- [Cancel Request](https://developer.topazlabs.com/reference/video/cancel-request.md)
+- [Cancel Video Request](https://developer.topazlabs.com/reference/video/cancel-request/cancel-video-request.md)
+- [Cancel Estimate](https://developer.topazlabs.com/reference/video/cancel-estimate.md)
+- [Estimate Cancellation Outcome](https://developer.topazlabs.com/reference/video/cancel-estimate/estimate-cancellation-outcome.md)
+- [Delete Files](https://developer.topazlabs.com/reference/video/delete-files.md)
+- [Delete Video Files](https://developer.topazlabs.com/reference/video/delete-files/delete-video-files.md)
+- [Get Request](https://developer.topazlabs.com/reference/video/get-request.md)
+- [Get Video Request](https://developer.topazlabs.com/reference/video/get-request/get-video-request.md)
+- [Get Request Status](https://developer.topazlabs.com/reference/video/get-request-status.md)
+- [Get Video Request Status](https://developer.topazlabs.com/reference/video/get-request-status/get-video-request-status.md)
+- [Get Request Metrics](https://developer.topazlabs.com/reference/video/get-request-metrics.md)
+- [Get Video Request Metrics](https://developer.topazlabs.com/reference/video/get-request-metrics/get-video-request-metrics.md)
+- [Get Request History](https://developer.topazlabs.com/reference/video/get-request-history.md)
+- [Get My Request History](https://developer.topazlabs.com/reference/video/get-request-history/get-my-request-history.md)
+- [Credits](https://developer.topazlabs.com/reference/account/credits.md)
+
+
+---
+
+# Agent Instructions
+This documentation is published with GitBook. GitBook is the documentation platform designed so that both humans and AI agents can read, navigate, and reason over technical content effectively. Learn more at gitbook.com.
+
+## Querying This Documentation
+If you need additional information, you can query the documentation dynamically by asking a question.
+Perform an HTTP GET request on a page URL with the `ask` query parameter:
+```
+GET https://developer.topazlabs.com/getting-started/introduction.md?ask=<question>
+```
+The question should be specific, self-contained, and written in natural language.
+The response will contain a direct answer to the question and relevant excerpts and sources from the documentation.
+Use this mechanism when the answer is not explicitly present in the current page, you need clarification or additional context, or you want to retrieve related documentation sections.

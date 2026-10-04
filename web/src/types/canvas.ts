@@ -2,7 +2,7 @@ import type { Node, Edge } from '@xyflow/react';
 import type { MentionMarker } from './prompt';
 
 // 节点类型枚举
-export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script' | 'previz';
+export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script' | 'previz' | 'enhance';
 
 // 节点执行状态
 export type NodeExecutionStatus = 'idle' | 'pending' | 'running' | 'success' | 'failed';
@@ -174,6 +174,43 @@ export interface PrevizNodeData extends BaseNodeFields, Record<string, unknown> 
   stillUrl?: string;  // 导出的白模静帧 PNG URL（作为图生图/图生视频的构图参考）
 }
 
+// 清晰化节点数据（P0 本地档：本机 ffmpeg 去块/降噪/锐化，可放大到 720p）
+export interface EnhanceNodeData extends BaseNodeFields, Record<string, unknown> {
+  type: 'enhance';
+  label: string;
+  /** 清晰化渠道 ID（ffmpeg=本机档；渠道与档位都由后端 enhance.yaml 定义，见 /enhance/providers） */
+  provider?: string;
+  /** 档位 ID（clean/hd；将来云端档是 sr/interp 等）。空 = 用该渠道的默认档 */
+  mode?: string;
+  /** 旧字段：P0 首版把档位叫 level，老画布上还留着它，读时作为 mode 的兜底 */
+  level?: string;
+  /** hd 档目标短边，默认 720 */
+  targetShortSide?: number;
+  /** 显式指定源视频节点（不填则取上游连线） */
+  sourceNodeId?: string;
+  /** 清晰化结果 */
+  videoUrl?: string;
+  /** 原片地址（用于「原片/增强后」对比） */
+  sourceUrl?: string;
+  /** 实际生效的档位（后端回写，用于「已清晰化」徽标；用户改档位但没跑时以这个为准） */
+  enhanceLevel?: string;
+  /** 处理耗时（毫秒，后端回写） */
+  enhanceElapsedMs?: number;
+  /** 实际干活的渠道（后端回写，如 ffmpeg）与其展示名 */
+  enhanceProvider?: string;
+  enhanceProviderLabel?: string;
+  enhanceChannel?: string;
+  enhanceChannelLabel?: string;
+  /** 档位 ID 与展示名（后端回写） */
+  enhanceRequestedMode?: string;
+  enhanceModeLabel?: string;
+  /** 一句话结果说明，如「本机 FFmpeg · 1282x720 · 3.6s」 */
+  enhanceNote?: string;
+  /** 源尺寸/目标尺寸，如 854x480 → 1282x720（后端回写） */
+  enhanceSourceSize?: string;
+  enhanceTargetSize?: string;
+}
+
 // 节点数据联合类型
 export type LibTVNodeData =
   | TextNodeData
@@ -181,7 +218,8 @@ export type LibTVNodeData =
   | VideoNodeData
   | AudioNodeData
   | ScriptNodeData
-  | PrevizNodeData;
+  | PrevizNodeData
+  | EnhanceNodeData;
 
 // 画布节点类型
 export type LibTVNode = Node<LibTVNodeData, NodeType>;
@@ -220,4 +258,5 @@ export const NODE_TYPE_CONFIG: Record<NodeType, { label: string; color: string; 
   audio: { label: '音频', color: '#10b981', icon: 'AudioOutlined' },
   script: { label: '分镜', color: '#f59e0b', icon: 'CodeOutlined' },
   previz: { label: '白模预演', color: '#64748b', icon: 'DeploymentUnitOutlined' },
+  enhance: { label: '清晰化', color: '#0ea5e9', icon: 'FormatPainterOutlined' },
 };

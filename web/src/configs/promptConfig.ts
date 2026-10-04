@@ -163,4 +163,16 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     placeholder: '',
     maxLength: 0,
   },
+  // 清晰化节点不使用提示词面板（只吃上游视频 + 一个档位），仅占位满足 Record 穷尽检查。
+  // acceptedInputs 仍按真实语义写：它接受视频（含白模白片），供连线校验使用
+  enhance: {
+    acceptedInputs: ['video', 'previz'],
+    defaultModel: '',
+    defaultResolution: '1K',
+    defaultAspectRatio: 'adaptive',
+    availableModels: [],
+    toolbarControls: [],
+    placeholder: '',
+    maxLength: 0,
+  },
 };
