@@ -272,6 +272,41 @@ func (s *Service) ChargeByModel(ctx context.Context, userID, action, modelID, sc
 	return s.chargeCost(ctx, userID, action, modelID, scene, ChargeExtra{}, cost)
 }
 
+// callUnitPrice 按次单价（支持分辨率档位，图片节点用）：
+//
+//	精确档（如 2K / 4K）已配置 → 用它
+//	该档没配 → 退回「不带分辨率」的默认档，行为与「图片只有一行价」的时代一致
+//	两档都没有 → 0（沿用「未配置 = 暂不扣费」的既有惯例，但会打日志，不允许静默免费）
+//
+// 为什么要分档：上游图片按 token 计费，而 token ≈ 像素/256 ——
+// 4K（4096² = 65,536 tokens）正好是 2K（2048² = 16,384）的 4 倍。
+// 一口价卖 4K，等于每张 4K 都按 2K 的价格卖，成本缺口在账面上完全看不见。
+func (s *Service) callUnitPrice(ctx context.Context, nodeType, modelID, resolution string) float64 {
+	if resolution != "" {
+		if record, ok := s.lookupPrice(ctx, nodeType, modelID, resolution, false); ok {
+			return record.Price
+		}
+		log.Printf("[Billing] ⚠️ 该分辨率档未单独配置价格，退回默认档计费: nodeType=%s modelID=%s resolution=%s", nodeType, modelID, resolution)
+	}
+	unit := s.modelUnitPrice(ctx, nodeType, modelID)
+	if unit <= 0 {
+		log.Printf("[Billing] ⚠️ 模型价格未配置（两档都没有），本次不扣费: nodeType=%s modelID=%s resolution=%s", nodeType, modelID, resolution)
+	}
+	return unit
+}
+
+// ChargeByModelWithResolution 按次计费（带分辨率档位）：费用 = 该档单价 × 次数（四舍五入取整）。
+// 计费口径（档位）随扣费一起记进账单，退费时口径与扣费完全一致。
+// 返回本次实际扣减的积分（供调用失败时通过 Refund 退还）
+func (s *Service) ChargeByModelWithResolution(ctx context.Context, userID, action, modelID, resolution, scene string, count int) (int64, error) {
+	if count <= 0 {
+		count = 1
+	}
+	unit := s.callUnitPrice(ctx, actionNodeTypes[action], modelID, resolution)
+	cost := int64(math.Round(unit * float64(count)))
+	return s.chargeCost(ctx, userID, action, modelID, scene, ChargeExtra{Resolution: resolution}, cost)
+}
+
 // ChargeByDuration 按秒计费（语音等）：费用 = 单价 × 秒数（向上取整，不足 1 秒按 1 秒计）
 // 返回本次实际扣减的积分
 func (s *Service) ChargeByDuration(ctx context.Context, userID, action, modelID, scene string, seconds int) (int64, error) {
@@ -377,6 +412,20 @@ func WithChargeKey(ctx context.Context, key string) context.Context {
 func chargeKeyOf(ctx context.Context, extra ChargeExtra) string {
 	if extra.ChargeKey != "" {
 		return extra.ChargeKey
+	}
+	if v, ok := ctx.Value(chargeKeyCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// ChargeKeyFrom 读这次调用身上的扣费编号（没有则空串）。
+//
+// 给「写对账行」的一侧用：行身份必须与账单分录同一把编号，才能互相核对
+// （同步调用的对账行由 executor 写、账单分录由计费层写，两边都从 ctx 取同一把）。
+func ChargeKeyFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
 	}
 	if v, ok := ctx.Value(chargeKeyCtxKey{}).(string); ok {
 		return v

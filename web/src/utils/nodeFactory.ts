@@ -67,7 +67,7 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         prompt: '',
         negativePrompt: '',
         model: '',
-        resolution: '1K',
+        resolution: '2K',
         aspectRatio: '16:9',
         quality: '标准画质',
         // width和height不设置默认值，让系统从resolution和aspectRatio计算

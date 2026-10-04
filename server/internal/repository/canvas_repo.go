@@ -97,6 +97,20 @@ func (r *canvasRepo) Save(ctx context.Context, canvas *model.Canvas) error {
 // productFields 画布节点上「一旦有值就不该被抹掉」的产物字段。
 // 与前端 NodeData 的产物字段保持一致（文本/剧本走 content，图片走 imageUrl/imageUrls，
 // 视频走 videoUrl，缩略图走 thumbUrl）。
+// artFields 产物本体（图片/视频）字段：它们变了，派生字段（缩略图/静帧）就作废。
+var artFields = []string{
+	"imageUrl",
+	"imageUrls",
+	"videoUrl",
+}
+
+// isDerivedFromArt 由产物派生的字段（产物更换时必须跟着换，不能粘旧值）。
+var isDerivedFromArt = map[string]bool{
+	"thumbUrl":  true,
+	"thumbUrls": true,
+	"stillUrl":  true,
+}
+
 var productFields = []string{
 	"content",   // 文本/故事/剧本节点的正文
 	"imageUrl",  // 图片（首图）
@@ -149,8 +163,31 @@ func mergeStickyProducts(oldRaw, newRaw datatypes.JSON) datatypes.JSON {
 		if err := json.Unmarshal(n["data"], &newData); err != nil {
 			continue
 		}
+		// 产物（图片/视频）被显式换掉时，**旧缩略图不能再当"粘性产物"补回去**：
+		// 缩略图是跟着产物走的派生数据，产物一换它就是过期数据。若还粘回去，画布上
+		// 缩略图优先渲染（ImageNode 用 thumbUrl 而非 imageUrl），就会出现
+		// "在生成历史里换了一张图、保存后刷新又变回老图"。
+		artChanged := false
+		for _, field := range artFields {
+			newVal, hasNew := newData[field]
+			if !hasNew || isEmptyJSON(newVal) {
+				continue // 本次没提供 ≠ 换了（交给粘性逻辑保护）
+			}
+			oldVal, hasOld := oldData[field]
+			if !hasOld || isEmptyJSON(oldVal) {
+				continue // 之前本来就没有，不算"换"
+			}
+			if string(newVal) != string(oldVal) {
+				artChanged = true
+				break
+			}
+		}
+
 		nodeChanged := false
 		for _, field := range productFields {
+			if artChanged && isDerivedFromArt[field] {
+				continue
+			}
 			oldVal, hasOld := oldData[field]
 			if !hasOld || isEmptyJSON(oldVal) {
 				continue

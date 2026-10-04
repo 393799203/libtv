@@ -98,7 +98,7 @@ models:
         provider: wasu
         model_id: "qwen-image-3.0"
         usage: [image, character, scene, prop]
-        resolutions: ["1K", "2K", "4K"]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "通义千问图像3.0，适合角色/场景/道具图生成"
@@ -111,7 +111,7 @@ models:
         provider: wasu
         model_id: "qwen-image-3.0-pro"
         usage: [image, character, scene, prop]
-        resolutions: ["1K", "2K", "4K"]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "通义千问图像3.0专业版，画质更高"
@@ -121,7 +121,7 @@ models:
         provider: wasu
         model_id: "wan2.7-image"
         usage: [image, character, scene, prop]
-        resolutions: ["1K", "2K", "4K"]
+        resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
         description: "万象2.7图像生成，适合创意图像生成"
@@ -131,20 +131,10 @@ models:
         provider: wasu
         model_id: "wan2.7-image-pro"
         usage: [image, character, scene, prop]
-        resolutions: ["1K", "2K", "4K"]
-        max_tokens: 2048
-        temperature: 0.7
-        description: "万象2.7图像专业版，画质更高"
-
-      - id: doubao-seedream-4.5
-        name: "Seedream 4.5"
-        provider: wasu
-        model_id: "doubao-seedream-4.5"
-        usage: [image, character, scene, prop]
         resolutions: ["2K", "4K"]
         max_tokens: 2048
         temperature: 0.7
-        description: "字节Seedream 4.5，画质提升"
+        description: "万象2.7图像专业版，画质更高"
 
       - id: doubao-seedream-5.0-lite
         name: "Seedream 5.0 Lite"

@@ -65,11 +65,7 @@ export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ 
   return (
     <>
       <BaseNode id={id} data={data} selected={selected} noContentPadding>
-        <ScriptCard
-          data={cardData}
-          status={data.status}
-          onOpen={handleOpenDetail}
-        />
+        <ScriptCard data={cardData} onOpen={handleOpenDetail} />
       </BaseNode>
 
       {/* 条件渲染 Portal：关闭时不创建 DOM，减少节点数 */}

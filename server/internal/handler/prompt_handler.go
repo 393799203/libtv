@@ -151,7 +151,9 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	}
 
 	// 解析用户最终渠道（全局策略 + 用户渠道）：用于按渠道查找模型、计费账单带渠道前缀、调用走对应 token
-	billCtx := c.Request.Context()
+	// 这一层挂上「上游用量采集器」：提示词的 token 消耗就是对账表里的成本侧，
+	// 采集器挂在 ctx 上，下面调用上游和写对账行必须是**同一个 ctx**才拿得到
+	billCtx := llm.WithUsageRecorder(c.Request.Context())
 	channel := ""
 	if h.channelService != nil {
 		channel = h.channelService.ResolveUserChannel(billCtx, middleware.GetUserID(c))
@@ -211,7 +213,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		ProjectID: req.ProjectID,
 		Charged:   chargedAmount,
 	}
-	call.Write(c.Request.Context(), billing.StatusSubmitted, "", 0)
+	call.Write(billCtx, billing.StatusSubmitted, "", 0)
 
 	// 参考图张数：1=单张，2=起始画面+结束画面（多份提示词一次生成，只扣一次费）
 	imageCount := req.ImageCount
@@ -224,7 +226,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 
 	// 调用 LLM 生成提示词（画面 + 运动）
 	storyboardPrompts, motionPrompt, err := h.llmClient.GeneratePrompt(
-		c.Request.Context(),
+		billCtx,
 		modelConfig.ModelID, // 使用完整的 model_id
 		shotData,
 		characters,
@@ -236,7 +238,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		// 规则与视频/图片一致：上游明确报错才自动退；超时、被掐断、没拿到结果不自动退，
 		// 进对账表交人工复核（渠道随 ctx 带过去，不会记成默认 wasu）
 		h.idem.Release(c.Request.Context(), idemKey) // 失败 → 撤掉认领，用户重试仍然有效
-		settled := call.Settle(llm.WithChannel(context.WithoutCancel(c.Request.Context()), llm.ChannelFrom(billCtx)), err)
+		settled := call.Settle(llm.WithChannel(context.WithoutCancel(billCtx), llm.ChannelFrom(billCtx)), err)
 		response.Fail(c, 500, "生成提示词失败: "+settled.Error())
 		return
 	}
@@ -255,7 +257,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		// 上游正常返回了（也大概率按次计费了），只是内容不完整 —— 这不是「上游拒绝本次任务」，
 		// 按规则不自动退费：写进对账表，管理员看到「结果不完整」再决定退不退
 		reason := "生成结果不完整（画面或运动提示词缺失）；本次扣费未自动退还，已提交人工复核"
-		call.Write(c.Request.Context(), billing.StatusPendingReview, reason, 0)
+		call.Write(billCtx, billing.StatusPendingReview, reason, 0)
 		h.idem.Release(c.Request.Context(), idemKey)
 		response.Fail(c, 500, "生成结果不完整（画面或运动提示词缺失）；本次扣费未自动退还，已提交人工复核，确认无效后会原路退还")
 		return
@@ -267,7 +269,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 		normalized[i] = normalizeAssetRefs(normalizeAssetRefs(sp, characters, "角色"), scenes, "场景")
 	}
 
-	call.Write(c.Request.Context(), billing.StatusDelivered, "", 0)
+	call.Write(billCtx, billing.StatusDelivered, "", 0)
 
 	// 响应只构造一次，既用于返回也用于幂等缓存（避免两处写法漂移）
 	resp := GeneratePromptResponse{

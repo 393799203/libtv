@@ -44,18 +44,26 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 图片懒加载状态：loading（灰底+转圈）→ loaded / error
   const [imgStatus, setImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
-  // imageUrl 变化（含缩略图）时重置加载状态（换图后重新走一遍加载流程）
-  useEffect(() => {
-    setImgStatus('loading');
-    setThumbFailed(false);
-  }, [data.imageUrl, data.thumbUrl]);
-
   // 画布展示用小图：优先节点自带 thumbUrl → 按约定推导（存量图已回填）→ 回退原图
   const [thumbFailed, setThumbFailed] = useState(false);
   const displayImageUrl =
     thumbFailed || !data.thumbUrl && !deriveThumbUrl(data.imageUrl)
       ? data.imageUrl
       : data.thumbUrl || deriveThumbUrl(data.imageUrl) || data.imageUrl;
+
+  // 加载状态跟着**真正渲染的 src** 走：src 变了才重新走加载流程，没变就不重置。
+  // 只盯 data.imageUrl/thumbUrl 是不够的 —— 只要有调用方只改了其中一个（比如历史切换
+  // 只写 imageUrl，src 仍是旧的缩略图），<img> 不会重新加载，onLoad/onError 都不触发，
+  // 节点就永远停在 loading。以 src 为准就天然不会出现这种"没人来关的转圈"。
+  useEffect(() => {
+    setImgStatus('loading');
+  }, [displayImageUrl]);
+
+  // 换图时重置"缩略图加载失败"标记：否则上一张图缩略图 404 之后，
+  // 新图会直接跳过缩略图、去拉原图（慢且没必要）
+  useEffect(() => {
+    setThumbFailed(false);
+  }, [data.imageUrl, data.thumbUrl]);
 
   // 最终尺寸：后端回写的 data.width/height 优先，缺失时才回落到原图实测
   const imageWidth = data.width || originalSize?.width;
@@ -110,7 +118,8 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     (asset: UserAsset) => {
       useCanvasStore.getState().updateNodeData(id, {
         imageUrl: asset.url,
-        thumbUrl: undefined,
+        // 缩略图跟着新图走（不能只清空：后端粘性合并会把旧缩略图补回来，画布就仍显示老图）
+        thumbUrl: deriveThumbUrl(asset.url),
         width: undefined,
         height: undefined,
       } as Partial<ImageNodeData>);
@@ -218,7 +227,12 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
                 // 大图场景：onLoad 只表示下载完成，解码/上屏可能仍在进行——
                 // 等 decode() 真正可绘制后再收起 loading，避免"转圈没了图还没出来"
                 try {
-                  await el.decode();
+                  // decode() 在个别浏览器/超大图上可能长时间不 resolve，
+                  // 加个 3s 上限兜底：onLoad 已经说明下载完成，宁可先收起转圈
+                  await Promise.race([
+                    el.decode(),
+                    new Promise((resolve) => setTimeout(resolve, 3000)),
+                  ]);
                 } catch {
                   // 解码失败按已加载处理，避免无限转圈
                 }

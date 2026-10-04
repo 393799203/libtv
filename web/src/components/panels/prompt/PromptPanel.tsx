@@ -6,7 +6,7 @@ import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
 import { useModelStore } from '@/stores/modelStore';
 import { nodeRegistry } from '@/plugins/registry';
-import { VIDEO_RESOLUTION_OPTIONS, videoDurationRange } from '@/configs/promptConfig';
+import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, videoDurationRange } from '@/configs/promptConfig';
 import type {
   UpstreamInput,
   MentionMarker,
@@ -365,7 +365,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 图片/视频节点的分辨率、比例：onChange 已即时写回 data，直接从 data 派生，不再保留本地 state
   const selectedResolution: ResolutionOption = ('resolution' in data && (data as any).resolution)
     ? (data as any).resolution as ResolutionOption
-    : (config.defaultResolution as ResolutionOption) || '1K';
+    : (config.defaultResolution as ResolutionOption) || '2K';
   const selectedAspectRatio: string = normalizeAspectRatio(
     ('aspectRatio' in data && (data as any).aspectRatio) || config.defaultAspectRatio
   );
@@ -376,13 +376,16 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       : '标准画质'
   );
 
-  // 视频节点：模型切换后，若当前分辨率不在新模型支持的列表中，自动切换到第一个可用项
-  // 避免向后端发送模型不支持的分辨率（分辨率派生自 data，回退时直接写回 data）
+  // 图片/视频节点：模型切换后，若当前分辨率不在新模型支持的列表中，自动切换到第一个可用项
+  // 避免向后端发送模型不支持的分辨率（分辨率派生自 data，回退时直接写回 data）。
+  // 图片节点也要做（以前只处理视频）：1K 下线后，老画布里的 '1K' 必须自动校正成 2K，
+  // 否则界面没有选中项、计费也只能退回默认档
   useEffect(() => {
-    if (nodeType !== 'video') return;
+    if (nodeType !== 'video' && nodeType !== 'image') return;
     const currentModel = availableModels.find((m) => m.value === selectedModel);
     const supported = currentModel?.resolutions;
-    const opts = supported && supported.length > 0 ? supported : [...VIDEO_RESOLUTION_OPTIONS];
+    const fallback = nodeType === 'video' ? [...VIDEO_RESOLUTION_OPTIONS] : [...RESOLUTION_OPTIONS];
+    const opts = supported && supported.length > 0 ? supported : fallback;
     if (!opts.includes(selectedResolution)) {
       onUpdate({ resolution: opts[0] } as Partial<LibTVNodeData>);
     }

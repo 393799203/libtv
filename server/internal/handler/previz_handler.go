@@ -117,7 +117,8 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 	// 必须先注入用户渠道再扣费：定价按「渠道 + 节点 + 模型」查表，
 	// 不注入会回退 wasu，导致电信独有的视觉模型（如 glm-5.3-flash）在 wasu 价格表里查不到，
 	// cost=0 则既不扣费也不拦余额（余额不足直接放行），账单渠道前缀也会错写成 wasu
-	billCtx := llm.WithChannel(c.Request.Context(), channel)
+	// 同上：用量采集器随 ctx 一路走到上游调用与对账行写入
+	billCtx := llm.WithUsageRecorder(llm.WithChannel(c.Request.Context(), channel))
 	// 扣费编号先算出来：它同时写进扣费账单分录和对账行，是两边唯一的关联凭据
 	chargeKey := billing.NewChargeKey()
 	billCtx = billing.WithChargeKey(billCtx, chargeKey)
@@ -144,7 +145,7 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		ProjectID: req.ProjectID,
 		Charged:   chargedAmount,
 	}
-	call.Write(c.Request.Context(), billing.StatusSubmitted, "", 0)
+	call.Write(billCtx, billing.StatusSubmitted, "", 0)
 
 	// 本地相对路径图片（/ 开头）先转 base64，公网 URL 直接使用
 	imageURL := req.ImageURL
@@ -160,9 +161,9 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 				billing.ActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析",
 				"参考图读取失败（未调用上游）", billing.ChargeExtra{}); refundErr != nil {
 				log.Printf("[PrevizHandler] 退费失败（参考图读取失败）: %v", refundErr)
-				call.Write(c.Request.Context(), billing.StatusPendingReview, "参考图读取失败且退费失败，待人工处理", 0)
+				call.Write(billCtx, billing.StatusPendingReview, "参考图读取失败且退费失败，待人工处理", 0)
 			} else {
-				call.Write(c.Request.Context(), billing.StatusRefunded, "参考图读取失败（未调用上游），已退还本次扣费", chargedAmount)
+				call.Write(billCtx, billing.StatusRefunded, "参考图读取失败（未调用上游），已退还本次扣费", chargedAmount)
 			}
 			response.Fail(c, 500, "参考图读取失败，请重新上传")
 			return
@@ -184,7 +185,7 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 		return
 	}
 
-	call.Write(c.Request.Context(), billing.StatusDelivered, "", 0)
+	call.Write(billCtx, billing.StatusDelivered, "", 0)
 	// 幂等：结果存起来，窗口内同一请求再来直接回放（不再扣费）
 	// 响应只构造一次，既用于返回也用于幂等缓存
 	result := analyzeSceneResult{Objects: objects, Description: description}

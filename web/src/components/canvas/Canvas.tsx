@@ -45,6 +45,7 @@ import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
+import { deriveThumbUrl } from '@/utils/thumbUrl';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 import { canvasApi } from '@/services/canvasApi';
 
@@ -820,8 +821,29 @@ export const Canvas = memo(function Canvas() {
           nodeType={historyModal.nodeType}
           currentUrl={historyModal.currentUrl}
           onSelect={(selectedUrl) => {
-            const dataKey = historyModal.nodeType === 'image' ? 'imageUrl' : 'videoUrl';
-            updateNodeData(historyModal.nodeId, { [dataKey]: selectedUrl });
+            // ⚠️ 不能只改 imageUrl/videoUrl：节点渲染时**优先用随媒体派生的字段**，
+            // 图片节点的 <img src> 就是 `thumbUrl || 推导缩略图 || 原图`。
+            // 只换 imageUrl 会让 src 原地不动 → onLoad/onError 都不触发 →
+            // 节点永远停在 loading（而且画面还是旧图）。尺寸/时长同理，
+            // 留着就按上一张图的比例显示。清空后由节点各自的 fallback 重新推导/实测。
+            if (historyModal.nodeType === 'image') {
+              updateNodeData(historyModal.nodeId, {
+                imageUrl: selectedUrl,
+                // ⚠️ 缩略图必须**换成新图的**，不能只是清空：后端把 thumbUrl 当"粘性产物"
+                // （保存时发现缺这个字段就把旧画布的值补回来），清空反而会被粘回上一张图的
+                // 缩略图 → 画布上缩略图优先渲染 → 保存后刷新又显示回老图。
+                thumbUrl: deriveThumbUrl(selectedUrl),
+                width: undefined,
+                height: undefined,
+              });
+            } else {
+              updateNodeData(historyModal.nodeId, {
+                videoUrl: selectedUrl,
+                duration: undefined,
+                videoWidth: undefined,
+                videoHeight: undefined,
+              });
+            }
           }}
           onClose={() => setHistoryModal(null)}
         />

@@ -55,10 +55,12 @@ func (r *modelPriceRepo) ListAll(ctx context.Context, channel string) ([]model.M
 
 func (r *modelPriceRepo) GetByNodeModel(ctx context.Context, channel, nodeType, modelID string) (*model.ModelPrice, error) {
 	var price model.ModelPrice
-	// 非视频节点只有「无参考视频」一档，固定带 has_reference_video = false，
-	// 避免视频节点多出来的那一档被误查出来
+	// 「不带分辨率」的那一行 = 默认档：
+	//   - 固定 has_reference_video = false（视频节点多出来的「带参考视频」档不能被查出来）
+	//   - 固定 resolution = ''：图片节点也按分辨率档配置后，同一模型会有 2K/4K 多行，
+	//     不加这个条件 First() 会取到主键最小的一行 —— 到底按哪档收钱就说不清了
 	if err := r.db.WithContext(ctx).
-		Where("channel = ? AND node_type = ? AND model_id = ? AND has_reference_video = false", normalizePriceChannel(channel), nodeType, modelID).
+		Where("channel = ? AND node_type = ? AND model_id = ? AND resolution = '' AND has_reference_video = false", normalizePriceChannel(channel), nodeType, modelID).
 		First(&price).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, gorm.ErrRecordNotFound

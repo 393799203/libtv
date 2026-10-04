@@ -66,7 +66,9 @@ func newSyncTask(ledger *billing.Ledger, ctx context.Context, execCtx *Execution
 		Provider:   llm.ChannelFrom(ctx),
 		Resolution: resolution,
 		Charged:    charged,
-		ChargeKey:  billing.NewChargeKey(),
+		// 行身份 = 扣费编号，必须与账单分录同一把（从 ctx 取）。
+		// ctx 里没有才自己生成：保证老调用路径行为不变。
+		ChargeKey: chargeKeyForRow(ctx),
 	}
 	if execCtx != nil {
 		t.ExecID = execCtx.GetExecutionID()
@@ -197,12 +199,20 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 // 为什么必须有：队列重投、worker 被杀后锁过期重领、服务重启续跑，都会把**同一个节点**
 // 再跑一遍。执行器每次都无条件扣费 → 同一个点击被扣两遍（对账行还会被第二次覆盖，
 // 账面看着只有一笔）。扣费前先查一次，扣过就直接沿用那笔金额，本次不再扣。
-func chargeAlreadyDone(ledger *billing.Ledger, ctx context.Context, execID int64, nodeID string) (int64, bool) {
+func chargeAlreadyDone(ledger *billing.Ledger, ctx context.Context, execID int64, nodeID string) (int64, string, bool) {
 	row, ok := activeChargeByNode(ledger, ctx, execID, nodeID)
 	if !ok {
-		return 0, false
+		return 0, "", false
 	}
-	return row.ChargedAmount, true
+	return row.ChargedAmount, row.ChargeKey, true
+}
+
+// chargeKeyForRow 写对账行要用的扣费编号：优先 ctx（与账单分录同一把编号），没有才新生成。
+func chargeKeyForRow(ctx context.Context) string {
+	if key := billing.ChargeKeyFrom(ctx); key != "" {
+		return key
+	}
+	return billing.NewChargeKey()
 }
 
 // activeChargeByNode 同一执行 + 同一节点上「还没退费」的那一笔扣费（最新一条）。
@@ -1060,10 +1070,15 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
 	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
 	var chargedAmount int64
-	if prev, done := chargeAlreadyDone(t.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+	if prev, prevKey, done := chargeAlreadyDone(t.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[TextExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
 		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+		// 重跑复用当初那笔编号：对账行的身份就是它，换一把会把同一节点写成两行
+		ctx = billing.WithChargeKey(ctx, prevKey)
 	} else {
+		// 扣费编号在扣费前生成：账单分录与对账行靠它绑定（视频路径一直如此）。
+		// 同步路径曾漏注入 → 分录 charge_key 为空，自检按编号找不到分录，逐笔误报金额不符
+		ctx = billing.WithChargeKey(ctx, billing.NewChargeKey())
 		var err error
 		chargedAmount, err = t.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionStory, data.Model, "故事生成", 1)
 		if err != nil {
@@ -1239,10 +1254,15 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
 	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
 	var chargedAmount int64
-	if prev, done := chargeAlreadyDone(s.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+	if prev, prevKey, done := chargeAlreadyDone(s.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[ScriptExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
 		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+		// 重跑复用当初那笔编号：对账行的身份就是它，换一把会把同一节点写成两行
+		ctx = billing.WithChargeKey(ctx, prevKey)
 	} else {
+		// 扣费编号在扣费前生成：账单分录与对账行靠它绑定（视频路径一直如此）。
+		// 同步路径曾漏注入 → 分录 charge_key 为空，自检按编号找不到分录，逐笔误报金额不符
+		ctx = billing.WithChargeKey(ctx, billing.NewChargeKey())
 		var err error
 		chargedAmount, err = s.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionScript, data.Model, "分镜剧本生成", 1)
 		if err != nil {
@@ -1596,20 +1616,36 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
 	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
 	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
+	// 本次计费的档位（分辨率档）：价格按档查，账单也按档记
+	chargeTier := strings.TrimSpace(data.Resolution)
 	var chargedAmount int64
 	var err error
-	if prev, done := chargeAlreadyDone(i.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+	if prev, prevKey, done := chargeAlreadyDone(i.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[ImageExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
 		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+		// 重跑复用当初那笔编号：对账行的身份就是它，换一把会把同一节点写成两行
+		ctx = billing.WithChargeKey(ctx, prevKey)
 	} else {
-		chargedAmount, err = i.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionImage, apiModelID, "图片生成", count)
+		// 扣费编号在扣费前生成：账单分录与对账行靠它绑定（视频路径一直如此）。
+		// 图片这里曾漏注入 → 分录 charge_key 为空，自检按编号找不到分录
+		ctx = billing.WithChargeKey(ctx, billing.NewChargeKey())
+		// 计费档位 = 节点选的分辨率（2K/4K）。
+		// 图片上游按 token 计费，token ≈ 像素/256：4K 是 2K 的 4 倍成本，
+		// 不分档就会每卖一张 4K 都按 2K 收费，成本缺口在账上完全看不见。
+		// tier 为空（老画布没选过分辨率）时价格侧退回默认档，行为与改动前一致。
+		chargedAmount, err = i.biller.ChargeByModelWithResolution(ctx, execCtx.GetUserID(), billing.ActionImage, apiModelID, chargeTier, "图片生成", count)
 		if err != nil {
 			return nil, err
 		}
 	}
-	// 对账：图片是同步调用（没有上游任务号），用「执行+节点」当 key，
-	// 口径记尺寸。扣了费先落「进行中」，收场时再更新。
-	imgTask := newSyncTask(i.providerTasks, ctx, execCtx, billing.ActionImage, "图片生成", apiModelID, size, chargedAmount)
+	// 对账：图片是同步调用（没有上游任务号），用「执行+节点」当 key。
+	// 计费口径记「档位(实际尺寸)」两个信息都要：
+	// 只记尺寸看不出按哪一档收的钱，只记档位又核对不了实际交付像素。
+	chargeBasis := size
+	if chargeTier != "" {
+		chargeBasis = fmt.Sprintf("%s(%s)", chargeTier, size)
+	}
+	imgTask := newSyncTask(i.providerTasks, ctx, execCtx, billing.ActionImage, "图片生成", apiModelID, chargeBasis, chargedAmount)
 	imgTask.write(ctx, execCtx, node.ID, billing.StatusSubmitted, "", 0, "")
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）
@@ -2572,10 +2608,15 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
 	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
 	var chargedAmount int64
-	if prev, done := chargeAlreadyDone(a.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
+	if prev, prevKey, done := chargeAlreadyDone(a.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[AudioExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
 		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+		// 重跑复用当初那笔编号：对账行的身份就是它，换一把会把同一节点写成两行
+		ctx = billing.WithChargeKey(ctx, prevKey)
 	} else {
+		// 扣费编号在扣费前生成：账单分录与对账行靠它绑定（视频路径一直如此）。
+		// 同步路径曾漏注入 → 分录 charge_key 为空，自检按编号找不到分录，逐笔误报金额不符
+		ctx = billing.WithChargeKey(ctx, billing.NewChargeKey())
 		var err error
 		chargedAmount, err = a.biller.ChargeByChars(ctx, execCtx.GetUserID(), billing.ActionAudio, model, "音频生成", charCount)
 		if err != nil {

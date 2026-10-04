@@ -497,6 +497,8 @@ func main() {
 		{
 			shows.POST("", showHandler.CreateShow)
 			shows.POST("/:id/thumbnail", showHandler.UploadThumbnail)
+			// 服务端抽帧生成封面（对象存储无 CORS 时浏览器截不了帧，见 handler 注释）
+			shows.POST("/capture-cover", showHandler.CaptureCoverFromVideo)
 			shows.POST("/:id/video", showHandler.UploadVideo)
 			shows.PUT("/:id", showHandler.UpdateShow)
 			shows.PUT("/:id/approve", showHandler.ApproveShow)

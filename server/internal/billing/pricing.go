@@ -50,8 +50,12 @@ type PriceModelItem struct {
 	ModelID     string  `json:"model_id"`
 	ModelName   string  `json:"model_name"`
 	Description string  `json:"description"`
-	Resolution  string  `json:"resolution,omitempty"` // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
-	Price       float64 `json:"price"`                // 未配置时为 0
+	Resolution  string  `json:"resolution,omitempty"` // 分辨率档位（视频 480p/720p/1080p、图片 2K/4K；文本/剧本/语音等无档位，为空）
+	Price       float64 `json:"price"`                // 生效单价：本档单独配置过就是本档的价，没配过则继承默认档（都没有 = 0）
+	// PriceConfigured 该分辨率档是否已单独配置过。
+	// false = 这个价是从「默认档」继承来的 —— 界面要标出来，
+	// 否则运营会以为 4K 已经配了 60，其实只是继承了 2K 的价（真正的成本缺口就藏在这里）
+	PriceConfigured bool `json:"price_configured,omitempty"`
 	// RefVideoBilling 该模型是否支持「带参考视频输入」单独定价
 	// （models.yaml 的 ref_video_billing，目前仅 3 个 Seedance 模型为 true）。
 	// false 的模型参考视频不参与计费，页面不展示「带参考视频」输入框
@@ -170,8 +174,10 @@ func (s *PricingService) ListPrices(ctx context.Context, channel string) (*Price
 			if len(def.ModelIDs) > 0 && !containsString(def.ModelIDs, m.ID) {
 				continue
 			}
-			// 视频模型按分辨率拆分：每个分辨率一行
-			if def.NodeType == "video" && len(m.Resolutions) > 0 {
+			// 视频与图片模型按分辨率拆分：每个分辨率一行、各自定价。
+			// 图片的档位不是摆设：上游按 token 计费而 token ≈ 像素/256，
+			// 2K(16,384) 与 4K(65,536) 差 4 倍，必须能分开定价
+			if (def.NodeType == "video" || def.NodeType == "image") && len(m.Resolutions) > 0 {
 				for _, res := range m.Resolutions {
 					item := PriceModelItem{
 						ModelID:     m.ID,
@@ -179,7 +185,12 @@ func (s *PricingService) ListPrices(ctx context.Context, channel string) (*Price
 						Description: m.Description,
 						Resolution:  res,
 					}
-					item.Price, _ = priceOf(def.NodeType, m.ID, res, false)
+					// 本档自己的配置优先；没配过就继承默认档（与计费侧同一口径），
+					// 并用 PriceConfigured=false 让界面把它标成「继承默认」
+					item.Price, item.PriceConfigured = priceOf(def.NodeType, m.ID, res, false)
+					if !item.PriceConfigured {
+						item.Price, _ = priceOf(def.NodeType, m.ID, "", false)
+					}
 					if m.RefVideoBilling {
 						item.RefVideoBilling = true
 						refPrice, ok := priceOf(def.NodeType, m.ID, res, true)

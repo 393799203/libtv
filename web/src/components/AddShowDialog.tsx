@@ -43,12 +43,14 @@ export default function AddShowDialog({
   const currentUser = useAuthStore((s) => s.user); // 当前登录用户（作者默认选中自己）
   // 画布侧提交（status=pending）作者锁定为当前用户，不可更改；管理后台可自由选择
   const lockAuthor = status === 'pending';
-  const coverPickVideoRef = useRef<HTMLVideoElement>(null);
 
   const [addShowForm, setAddShowForm] = useState({ title: '', description: '', video_url: '', author_id: '', duration: 0, tags: '' });
   const [addShowFile, setAddShowFile] = useState<File | null>(null);
   const [addShowPreviewUrl, setAddShowPreviewUrl] = useState('');
   const [addShowVideoFile, setAddShowVideoFile] = useState<File | null>(null);
+  // 取封面阶段的播放器引用：只为读 currentTime（"截取当前帧"），不做 canvas 取帧，故不受跨域影响
+  const coverPickVideoRef = useRef<HTMLVideoElement>(null);
+  const [capturingCover, setCapturingCover] = useState<'current' | 'auto' | null>(null);
   const [addShowVideoName, setAddShowVideoName] = useState('');
   const [videoUploading, setVideoUploading] = useState(false);
   const [videoUploadProgress, setVideoUploadProgress] = useState(0);
@@ -71,7 +73,9 @@ export default function AddShowDialog({
     const video = document.createElement('video');
     video.preload = 'auto';
     video.muted = true;
-    video.crossOrigin = 'anonymous';
+    // 注意：这里**不设** crossOrigin。本函数只用于 blob URL（本地文件），同源媒体本来
+    // 就不会污染画布，加 crossOrigin 反而把请求变成 CORS 模式、徒增失败面；
+    // 远端地址（对象存储无 CORS 头）一律走服务端抽帧，见 captureFrameViaServer。
     video.src = videoUrl;
     await new Promise<void>((resolve, reject) => {
       video.onloadeddata = () => resolve();
@@ -91,6 +95,69 @@ export default function AddShowDialog({
     return { file, dataUrl };
   };
 
+  // 把 data URL 转成 File（服务端抽帧返回的就是 data URL）。
+  // 用 atob 直接解字节，**不要** fetch(dataUrl)：既不依赖网络层、也不受 CSP/隐私设置影响，
+  // 之前"点了截取但封面不换图"最可能就卡在这一步（fetch 失败被 catch 吞成一句错误提示）。
+  const dataUrlToFile = (dataUrl: string, filename: string): File => {
+    const comma = dataUrl.indexOf(',');
+    if (comma < 0) throw new Error('封面数据格式不对');
+    const mime = /data:([^;]+)/.exec(dataUrl.slice(0, comma))?.[1] || 'image/jpeg';
+    const bin = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new File([bytes], filename, { type: mime });
+  };
+
+  // 用**本地文件**截帧：blob URL 与页面同源，画布不会被污染，也不要求对象存储给 CORS 头。
+  // 上传场景优先走这条：不用把视频再从 CDN 拉一遍，画质也不打折。
+  const captureFrameFromFile = async (file: File, timeInSeconds?: number) => {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      return await captureVideoFrame(objectUrl, timeInSeconds);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  // 远端地址截帧：交给服务端 ffmpeg。
+  // 浏览器 canvas 取帧必须让视频以 crossOrigin=anonymous 加载（否则 toDataURL 直接抛
+  // SecurityError），而这要求对象存储返回 Access-Control-Allow-Origin —— 天翼云 ZOS
+  // 不返回任何 CORS 头，所以远端地址（粘贴的 URL、给老作品换封面）只能服务端抽帧。
+  const captureFrameViaServer = async (videoUrl: string, time?: number) => {
+    const res = (await showApi.captureCover(videoUrl, time)) as
+      | { data_url?: string; time?: number }
+      | undefined;
+    const dataUrl = res?.data_url;
+    if (!dataUrl) throw new Error('服务端没有返回封面数据');
+    return { file: dataUrlToFile(dataUrl, 'cover.jpg'), dataUrl, time: res?.time };
+  };
+
+  /**
+   * 截封面：**服务端优先**，本地文件兜底。
+   *
+   * 为什么服务端优先：选帧算法只有服务端这一份 —— 很多视频开头是黑场/淡入，固定取第 1 秒
+   * 会截出纯黑封面（线上实测某 208s 视频第 1 秒平均亮度只有 49/255，第 10 秒更黑）。
+   * 服务端按时长取多个候选点、按亮度+细节挑最好的一帧。本地兜底只在服务端不可用时用一下
+   * （比如域名不在白名单、网络抖动）。
+   *
+   * time：指定时间点（"截取当前帧"传播放头位置）；不传则由服务端自动挑帧。
+   */
+  const captureCoverSmart = async (
+    opts: { file?: File | null; url?: string; time?: number }
+  ): Promise<{ file: File; dataUrl: string; time?: number }> => {
+    if (opts.url) {
+      try {
+        return await captureFrameViaServer(opts.url, opts.time);
+      } catch (err) {
+        console.warn('服务端抽帧失败，尝试用本地文件兜底:', err);
+        if (!opts.file) throw err;
+      }
+    }
+    if (!opts.file) throw new Error('没有可用的视频来源');
+    const local = await captureFrameFromFile(opts.file, opts.time);
+    return { ...local, time: opts.time };
+  };
+
   const getVideoDuration = async (videoUrl: string): Promise<number> => {
     const video = document.createElement('video');
     video.preload = 'metadata';
@@ -100,17 +167,6 @@ export default function AddShowDialog({
       video.onloadeddata = () => resolve(Math.round(video.duration) || 0);
       video.onerror = () => resolve(0);
     });
-  };
-
-  const captureVideoElementFrame = async (video: HTMLVideoElement): Promise<{ file: File; dataUrl: string }> => {
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    const blob = await fetch(dataUrl).then(r => r.blob());
-    const file = new File([blob], 'thumbnail.jpg', { type: 'image/jpeg' });
-    return { file, dataUrl };
   };
 
   // 作者搜索：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
@@ -151,11 +207,12 @@ export default function AddShowDialog({
     try {
       const dur = await getVideoDuration(url);
       if (dur) setAddShowForm(prev => ({ ...prev, duration: dur }));
-      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(url);
+      // 这里拿到的是远端地址（对象存储无 CORS），只能服务端抽帧
+      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureFrameViaServer(url);
       setAddShowPreviewUrl(thumbDataUrl);
       setAddShowFile(thumbFile);
     } catch (err) {
-      console.error('预填视频加载失败:', err);
+      console.warn('预填封面/时长失败（不影响提交，可手动上传封面）:', err);
     }
   };
 
@@ -270,11 +327,20 @@ export default function AddShowDialog({
         message.success('视频上传完成');
       }
       setVideoUploadPhase('pickCover');
-      const dur = await getVideoDuration(result.url);
-      if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(result.url);
-      setAddShowPreviewUrl(thumbDataUrl);
-      setAddShowFile(thumbFile);
+      // 封面这一段与上传解耦：截不到封面不该显示成"上传失败"（视频其实已经传好了）
+      try {
+        const dur = await getVideoDuration(result.url);
+        if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
+        message.loading({ content: '正在自动截取封面…', key: 'cover-auto', duration: 0 });
+        const { file: thumbFile, dataUrl: thumbDataUrl } = await captureCoverSmart({ file, url: result.url });
+        message.destroy('cover-auto');
+        setAddShowPreviewUrl(thumbDataUrl);
+        setAddShowFile(thumbFile);
+      } catch (err) {
+        message.destroy('cover-auto');
+        console.warn('封面自动截取失败:', err);
+        message.warning('视频已上传，但封面自动截取失败：可点「截当前帧」重试，或直接上传封面图');
+      }
     } catch (err: any) {
       console.error('视频上传失败:', err);
       const msg = err?.response?.data?.msg || err?.message || '视频上传失败';
@@ -284,14 +350,46 @@ export default function AddShowDialog({
     }
   };
 
-  const handleCaptureCover = async () => {
-    const video = coverPickVideoRef.current;
-    if (!video) return;
-    const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoElementFrame(video);
-    setAddShowPreviewUrl(thumbDataUrl);
-    setAddShowFile(thumbFile);
-    setVideoUploadPhase('uploading');
-    message.success('封面已截取');
+  /** 取播放头位置（"截取当前帧"用）：播放器同源，读 currentTime 不涉及跨域 */
+  const currentVideoTime = (): number | undefined => {
+    const t = coverPickVideoRef.current?.currentTime;
+    return t && t > 0 ? t : undefined;
+  };
+
+  /** 截取封面，两种模式：
+   *  - 'current'：用播放器当前画面（用户自己拖到想要的画面，所见即所得；取不到播放头就退到第 1 秒）
+   *  - 'auto'   ：服务端自动挑一帧（按时长取多个候选点并行抽帧、按画面质量打分，避开片头黑场）
+   *  两种都带"进行中"提示：自动挑帧要起多次 ffmpeg，没有反馈会被误以为按钮没反应。 */
+  const handleCaptureCover = async (mode: 'current' | 'auto' = 'current') => {
+    const url = videoUploadedUrl || addShowForm.video_url;
+    const at = mode === 'auto' ? undefined : currentVideoTime() || 1;
+    setCapturingCover(mode);
+    message.loading({
+      content: mode === 'auto' ? '正在自动挑帧（约 2~3 秒）…' : '正在截取当前帧…',
+      key: 'cover-capture',
+      duration: 0,
+    });
+    try {
+      const { file: thumbFile, dataUrl: thumbDataUrl, time } = await captureCoverSmart({
+        file: addShowVideoFile,
+        url,
+        time: at,
+      });
+      setAddShowPreviewUrl(thumbDataUrl);
+      setAddShowFile(thumbFile);
+      setVideoUploadPhase('uploading');
+      message.success({
+        content: `封面已截取（第 ${(time ?? at ?? 0).toFixed(1)} 秒画面）`,
+        key: 'cover-capture',
+      });
+    } catch (err) {
+      console.error('截取封面失败:', err);
+      const msg = (err as { response?: { data?: { msg?: string } }; message?: string })?.response?.data?.msg
+        || (err as { message?: string })?.message;
+      message.error({ content: `截取封面失败：${msg || '请手动上传封面图'}`, key: 'cover-capture' });
+    } finally {
+      setCapturingCover(null);
+    }
   };
 
   const handleVideoUrlBlur = async (url: string) => {
@@ -302,12 +400,18 @@ export default function AddShowDialog({
       setVideoPreviewUrl(fullUrl);
       const dur = await getVideoDuration(fullUrl);
       if (dur) setAddShowForm(prev => ({ ...prev, duration: prev.duration || dur }));
-      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureVideoFrame(fullUrl);
+      message.loading({ content: '正在自动截取封面…', key: 'cover-auto', duration: 0 });
+      const { file: thumbFile, dataUrl: thumbDataUrl } = await captureFrameViaServer(fullUrl);
+      message.destroy('cover-auto');
       setAddShowPreviewUrl(thumbDataUrl);
       setAddShowFile(thumbFile);
     } catch (err) {
-      console.error('视频加载失败:', err);
-      message.error('视频加载失败，请检查URL是否正确');
+      message.destroy('cover-auto');
+      console.error('封面自动截取失败:', err);
+      const msg = (err as { response?: { data?: { msg?: string } }; message?: string })?.response?.data?.msg
+        || (err as { message?: string })?.message
+        || '封面自动截取失败，请手动上传封面图';
+      message.warning(msg);
     }
   };
 
@@ -448,13 +552,23 @@ export default function AddShowDialog({
                 <label className="text-[12px] text-gray-500">视频 {!editingShow && <span className="text-red-400">*</span>}</label>
                 {(!videoUploading && videoUploadPhase === 'pickCover' && videoUploadedUrl) || (editingShow && !videoUploading) ? (
                   <div className="flex gap-1.5">
-                    {videoUploadPhase === 'pickCover' ? (
+                    {videoUploadPhase === 'pickCover' ? (<>
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleCaptureCover(); }}
-                        className="px-2.5 py-0.5 bg-blue-500 hover:bg-blue-600 text-white text-[11px] rounded shadow transition-colors cursor-pointer"
+                        onClick={(e) => { e.stopPropagation(); handleCaptureCover('current'); }}
+                        disabled={capturingCover !== null}
+                        title="先把进度拖到想要的画面，再点这里截取当前帧做封面"
+                        className="px-2.5 py-0.5 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white text-[11px] rounded shadow transition-colors cursor-pointer"
                       >
-                        截取封面
+                        {capturingCover === 'current' ? '截取中…' : '截当前帧'}
                       </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCaptureCover('auto'); }}
+                        disabled={capturingCover !== null}
+                        title="服务端自动挑一帧画面清晰的做封面（避开片头黑场），约 2~3 秒"
+                        className="px-2.5 py-0.5 bg-blue-50 hover:bg-blue-100 disabled:opacity-60 text-blue-600 text-[11px] rounded border border-blue-200 transition-colors cursor-pointer"
+                      >
+                        {capturingCover === 'auto' ? '挑帧中…' : '自动挑帧'}
+                      </button></>
                     ) : (
                       <button
                         onClick={(e) => {
@@ -535,7 +649,6 @@ export default function AddShowDialog({
                     muted
                     playsInline
                     controls
-                    crossOrigin="anonymous"
                     onClick={e => e.stopPropagation()}
                   />
                 ) : editingShow && !videoUploading && addShowForm.video_url ? (
@@ -545,7 +658,6 @@ export default function AddShowDialog({
                     muted
                     playsInline
                     controls
-                    crossOrigin="anonymous"
                     onClick={e => e.stopPropagation()}
                   />
                 ) : videoUploadedUrl ? (

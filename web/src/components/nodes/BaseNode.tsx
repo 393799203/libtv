@@ -162,8 +162,11 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         {(status === 'running' || status === 'pending') ? (
           hasExistingOutput ? (
             /* 重新生成：保留上一次的产出做对照（半透明、不可交互），叠加遮罩说明正在重跑。
-               直接清空换成加载态会让用户以为结果丢了；跑完后由 SSE 回填替换。 */
-            <div className="relative">
+               直接清空换成加载态会让用户以为结果丢了；跑完后由 SSE 回填替换。
+               ⚠️ 这层壳不能再加 position（relative/absolute 都不行）：内容区里有节点
+               （如剧本/文本节点）用 absolute inset-0 撑满内容区，多一层定位壳会把它们的
+               基准换成这层高度为 0 的壳，旧内容会被压成一行并冒出滚动条。 */
+            <>
               <div className="opacity-40 pointer-events-none select-none" aria-hidden="true">
                 {children}
               </div>
@@ -181,7 +184,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
                   </span>
                 ) : null}
               </div>
-            </div>
+            </>
           ) : (
             /* 首次生成：没有旧结果可留，显示统一加载态 */
             <NodeLoadingState

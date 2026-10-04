@@ -1,9 +1,23 @@
 package handler
 
 import (
+	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"image/jpeg"
+	"math"
 	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"libtv/internal/model"
 	"libtv/internal/pkg/response"
@@ -496,4 +510,275 @@ func (h *ShowHandler) DeleteCategory(c *gin.Context) {
 		return
 	}
 	response.OKWithMsg(c, "deleted", nil)
+}
+
+// ========== 服务端抽帧生成封面 ==========
+
+// CaptureCoverRequest 抽帧请求
+type CaptureCoverRequest struct {
+	// VideoURL 视频地址（只接受本站存储域名，详见 CaptureCoverFromVideo 的安全说明）
+	VideoURL string `json:"video_url"`
+	// Time 抽帧时间点（秒），可选；默认取第 1 秒，取不到再退回第 0 帧
+	Time float64 `json:"time"`
+}
+
+// CaptureCoverFromVideo 从视频里抽一帧当封面：POST /api/shows/capture-cover
+//
+// 为什么需要服务端抽帧：浏览器 canvas 取帧必须让视频以 crossOrigin=anonymous 加载
+// （否则画布被"污染"，toDataURL 直接抛 SecurityError），而这要求对象存储返回
+// Access-Control-Allow-Origin。天翼云 ZOS 目前**不返回任何 CORS 头** → 浏览器判定视频
+// 加载失败，后台就报"视频加载失败"，封面自然也截不出来（视频本身是好的：200 + video/mp4）。
+// 所以改成服务端 ffmpeg 抽帧再传回存储，彻底绕开浏览器跨域限制：
+//   - 上传本地文件：前端优先用本地 File 截帧（不用下载、无跨域）；
+//   - 粘贴 URL / 给老作品换封面：走这个接口。
+//
+// 安全：**只接受本站存储域名**的地址。否则本接口就成了"让服务器替你抓任意 URL"的
+// SSRF 入口（能探内网服务、能打云元数据地址）。
+func (h *ShowHandler) CaptureCoverFromVideo(c *gin.Context) {
+	var req CaptureCoverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "请求参数不合法")
+		return
+	}
+	videoURL := strings.TrimSpace(req.VideoURL)
+	if videoURL == "" {
+		response.Fail(c, http.StatusBadRequest, "缺少视频地址")
+		return
+	}
+	u, err := url.Parse(videoURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		response.Fail(c, http.StatusBadRequest, "视频地址不合法")
+		return
+	}
+	if host := h.storageHost(); host != "" && !strings.EqualFold(u.Host, host) {
+		response.Fail(c, http.StatusBadRequest, "只支持本站存储的视频地址（其他来源请手动上传封面图）")
+		return
+	}
+
+	frame, usedTime, err := extractVideoFrame(c.Request.Context(), videoURL, req.Time)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// 直接把这一帧以 data URL 返回，由前端转成 File 走**既有的**封面上传流程。
+	// 为什么不在这里直接传存储：一是提交时前端本来就会上传封面（走 /shows/:id/thumbnail
+	// 与审核目录规则），服务端再传一次会多一份没人引用的孤儿对象；二是老作品换封面、
+	// 新作品提交的目录规则不同（待审核进画布目录、已发布进 shows/），放前端统一处理更稳。
+	// 同时回传实际使用的时间点：前端可以提示"用的是第几秒画面"，排查时也能对上账
+	response.OK(c, gin.H{
+		"data_url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(frame),
+		"time":     usedTime,
+	})
+}
+
+// storageHost 本站存储的公网域名（用于白名单校验），取不到时返回空串（不限制）
+func (h *ShowHandler) storageHost() string {
+	if h.fileUploadService == nil {
+		return ""
+	}
+	u, err := url.Parse(h.fileUploadService.ObjectURL("probe.jpg"))
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// extractVideoFrame 用 ffmpeg 从视频里抽一帧，返回 JPEG 字节。
+//
+// 两种模式：
+//   - at > 0：用户明确指定了时间点（前端"截取当前帧"），照办；抽不到再自动挑。
+//   - at <= 0：自动挑一帧"能用的画面"。
+//
+// 为什么要自动挑，而不是固定取第 1 秒：很多视频开头是黑场/淡入。实测线上一条 208 秒的视频
+// 第 1 秒的平均亮度只有 49/255（JPEG 28KB，几乎纯黑）、第 10 秒更黑（6.7KB）—— 用它当封面
+// 等于没有封面（用户反馈"截取了还是没用"就是这个）。所以按时长取多个候选点，按
+// "亮度是否正常 + 画面细节是否丰富"打分，选最好的一帧。
+func extractVideoFrame(ctx context.Context, videoURL string, at float64) ([]byte, float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	dir, err := os.MkdirTemp("", "show-cover")
+	if err != nil {
+		return nil, 0, errors.New("服务端抽帧不可用（临时目录创建失败）")
+	}
+	defer os.RemoveAll(dir)
+
+	// ① 用户指定的时间点
+	if at > 0 {
+		if b, err := extractFrameAt(ctx, dir, videoURL, at); err == nil && len(b) > 0 {
+			return b, at, nil
+		}
+	}
+
+	// ② 自动挑帧：候选点并行抽小图再按分数取胜者。
+	// 单次 ffmpeg 起进程 + HTTP Range 取帧要几百毫秒，串行 8 个候选要 4~6 秒，
+	// 用户点完按钮后界面迟迟没反馈，会以为"按钮没用"。并行后总耗时 ≈ 最慢的那个（约 2 秒）。
+	cands := candidateTimestamps(ctx, videoURL)
+	type candScore struct {
+		ts    float64
+		score float64
+	}
+	scored := make(chan candScore, len(cands))
+	sem := make(chan struct{}, 6) // 限制并发进程数，避免候选多时压垮小机器
+	var wg sync.WaitGroup
+	for _, ts := range cands {
+		wg.Add(1)
+		go func(ts float64) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			small, err := extractFrameSized(ctx, dir, videoURL, ts, 160)
+			if err != nil || len(small) == 0 {
+				return
+			}
+			scored <- candScore{ts: ts, score: scoreFrame(small)}
+		}(ts)
+	}
+	wg.Wait()
+	close(scored)
+
+	var bestTS float64
+	bestScore := math.Inf(-1)
+	for c := range scored {
+		if c.score > bestScore {
+			bestScore, bestTS = c.score, c.ts
+		}
+	}
+	if bestTS > 0 {
+		if b, err := extractFrameAt(ctx, dir, videoURL, bestTS); err == nil && len(b) > 0 {
+			return b, bestTS, nil
+		}
+	}
+
+	// ③ 兜底：第 1 秒 → 第 0 帧（短视频、直播切片用）
+	var lastErr string
+	for _, ts := range []float64{1, 0} {
+		b, err := extractFrameAt(ctx, dir, videoURL, ts)
+		if err == nil && len(b) > 0 {
+			return b, ts, nil
+		}
+		if err != nil {
+			lastErr = err.Error()
+		}
+	}
+	if lastErr == "" {
+		lastErr = "未取到画面"
+	}
+	return nil, 0, errors.New("从该视频抽帧失败（视频可能损坏或格式不支持）: " + truncateErr(lastErr))
+}
+
+// candidateTimestamps 候选抽帧时间点：按时长比例取，长短视频各自合理。
+// 跳过最开头几秒，专门躲开黑场/淡入/片头。
+func candidateTimestamps(ctx context.Context, videoURL string) []float64 {
+	d := probeDuration(ctx, videoURL)
+	if d <= 0 {
+		return []float64{1, 5, 10}
+	}
+	if d <= 5 {
+		// 很短的视频：只能在中段附近试
+		return []float64{d * 0.2, d * 0.5, 0, 1}
+	}
+	if d <= 15 {
+		return []float64{d * 0.2, d * 0.35, d * 0.5, d * 0.65, d * 0.8}
+	}
+	// 长视频多取几个点：黑场/淡入/转场可能在任意位置，采样越全越容易挑到好画面
+	return []float64{d * 0.05, d * 0.1, d * 0.2, d * 0.3, d * 0.45, d * 0.6, d * 0.75, d * 0.9}
+}
+
+// probeDuration 用 ffprobe 读时长（秒）；失败返回 0
+func probeDuration(ctx context.Context, videoURL string) float64 {
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(cctx, "ffprobe",
+		"-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", videoURL).Output()
+	if err != nil {
+		return 0
+	}
+	d, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
+}
+
+// extractFrameAt 在指定时间点抽一帧（原始分辨率）
+func extractFrameAt(ctx context.Context, dir, videoURL string, at float64) ([]byte, error) {
+	return extractFrame(ctx, dir, videoURL, at, 0)
+}
+
+// extractFrameSized 抽一小帧（width>0 时等比缩到该宽度），用于打分，省带宽省 CPU
+func extractFrameSized(ctx context.Context, dir, videoURL string, at float64, width int) ([]byte, error) {
+	return extractFrame(ctx, dir, videoURL, at, width)
+}
+
+func extractFrame(ctx context.Context, dir, videoURL string, at float64, width int) ([]byte, error) {
+	out := filepath.Join(dir, fmt.Sprintf("f_%.2f_%d.jpg", at, width))
+	args := []string{"-y", "-ss", fmt.Sprintf("%.2f", at), "-i", videoURL}
+	if width > 0 {
+		args = append(args, "-vf", fmt.Sprintf("scale=%d:-2", width))
+	}
+	// -ss 放在 -i 前：让 ffmpeg 用 HTTP Range 直接跳到目标位置，不用把整个视频拉下来
+	args = append(args, "-frames:v", "1", "-q:v", "3", "-f", "image2", "-update", "1", out)
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, errors.New(truncateErr(strings.TrimSpace(stderr.String())))
+	}
+	b, err := os.ReadFile(out)
+	if err != nil || len(b) == 0 {
+		return nil, errors.New("未取到画面")
+	}
+	return b, nil
+}
+
+// scoreFrame 给一帧打分：细节（亮度标准差）为主，亮度偏离正常范围时扣分。
+// 纯黑/纯白/大片纯色的帧标准差极低，会自然出局。
+func scoreFrame(raw []byte) float64 {
+	img, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return math.Inf(-1)
+	}
+	b := img.Bounds()
+	var sum, sum2 float64
+	var n float64
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			// Rec.601 亮度
+			l := 0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(bl>>8)
+			sum += l
+			sum2 += l * l
+			n++
+		}
+	}
+	if n == 0 {
+		return math.Inf(-1)
+	}
+	mean := sum / n
+	variance := sum2/n - mean*mean
+	if variance < 0 {
+		variance = 0
+	}
+	score := math.Sqrt(variance) // 细节/对比度
+
+	switch {
+	case mean < 25: // 近黑（黑场/淡入）
+		score *= 0.2
+	case mean > 235: // 过曝（白闪）
+		score *= 0.5
+	}
+	return score
+}
+
+// truncateErr 上游/ffmpeg 的报错可能很长，只留尾部关键信息给用户看
+func truncateErr(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	const max = 300
+	if len(s) <= max {
+		return s
+	}
+	return "..." + s[len(s)-max:]
 }

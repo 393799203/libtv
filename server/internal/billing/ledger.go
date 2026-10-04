@@ -44,11 +44,34 @@ func (s *Ledger) Record(ctx context.Context, task *model.ProviderTask) error {
 	if s == nil || s.repo == nil || task == nil || (task.TaskID == "" && task.ChargeKey == "") {
 		return nil
 	}
+	// 兜底截断：对账行的身份/金额才是关键，任何一个展示字段超长都不该让**整行**写不进去。
+	// 线上踩过（2026-10-04）：charge_resolution 列实际只 varchar(10)（模型声明 32，历史库漂移），
+	// 图片按档计费写的是 "2K(2560x1440)"（13 字符）→ 插入被 PG 拒绝，
+	// submitted/delivered 两次都写失败 → 账单有、对账没有，退费行同样会丢。
+	// 现在是「按列宽截断 + 留日志」，宁可这行少一截元信息，也不能丢一整行对账。
+	task.ChargeResolution = clampField("charge_resolution", task.ChargeResolution, maxChargeResolutionLen)
+	task.Note = TruncateNote(task.Note, maxNoteBytes)
 	if err := s.repo.Upsert(ctx, task); err != nil {
 		log.Printf("[ProviderTask] ⚠️ 写入上游任务对账失败: taskID=%s status=%s err=%v", task.TaskID, task.Status, err)
 		return err
 	}
 	return nil
+}
+
+// maxChargeResolutionLen 计费口径列宽（与 model.ProviderTask 的 size:32 对齐）
+const maxChargeResolutionLen = 32
+
+// maxNoteBytes 备注列宽上限（列 varchar(1200)，字节数永远小于字符数，留余量）
+const maxNoteBytes = 1000
+
+// clampField 按列宽截断（按字节且不切半个汉字），超长时留日志便于发现口径写太长。
+func clampField(name, v string, maxBytes int) string {
+	if len(v) <= maxBytes {
+		return v
+	}
+	out := textcut.NotLongerThan(v, maxBytes)
+	log.Printf("[ProviderTask] ⚠️ %s 超长已截断(%d→%d 字节): %q", name, len(v), len(out), v)
+	return out
 }
 
 // List 后台对账列表（筛选 + 分页）

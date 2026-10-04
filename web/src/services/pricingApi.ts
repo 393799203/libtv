@@ -8,8 +8,10 @@ export interface PriceModelItem {
   model_id: string;
   model_name: string;
   description?: string;
-  resolution?: string; // 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）
-  price: number; // 未配置时为 0
+  resolution?: string; // 分辨率档位（视频 480p/720p/1080p、图片 2K/4K；文本/剧本/语音等无档位）
+  price: number; // 生效单价：本档单独配过就是这个价，没配过则继承默认档（都没有 = 0）
+  /** 该档是否单独配置过：false = 现在的价是从默认档继承来的（界面要标出来，否则会误以为 4K 已单独定价） */
+  price_configured?: boolean;
   /** 该模型是否支持「带参考视频输入」单独定价（models.yaml 的 ref_video_billing，目前仅 3 个 Seedance 模型） */
   ref_video_billing?: boolean;
   /** 带参考视频输入的单价（积分/秒，仅视频节点）：未单独配置时为「无参考视频单价 6 折」的预设值 */
@@ -37,7 +39,7 @@ export interface PricingListResponse {
 export interface PriceSaveItem {
   node_type: string;
   model_id: string;
-  resolution?: string; // 分辨率（视频节点必填，其他节点留空）
+  resolution?: string; // 分辨率档位（视频/图片节点按各档保存，其他节点留空）
   price: number;
   /**
    * 带参考视频输入的单价（积分/秒，仅支持 ref_video_billing 的视频模型）。

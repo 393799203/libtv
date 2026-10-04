@@ -101,6 +101,20 @@ export const showApi = {
     });
   },
 
+  /**
+   * 服务端抽帧生成封面（需登录）。
+   *
+   * 浏览器 canvas 取帧要求视频能以 crossOrigin=anonymous 加载，即对象存储必须返回
+   * Access-Control-Allow-Origin；天翼云 ZOS 不返回任何 CORS 头 → 前端取帧必然失败
+   * （页面报"视频加载失败"，其实视频本身好好的）。所以远端地址（粘贴的 URL、
+   * 给老作品换封面）改走服务端 ffmpeg 抽帧。
+   */
+  captureCover: (videoUrl: string, time?: number) =>
+    api.post<{ data_url: string }>('/shows/capture-cover', {
+      video_url: videoUrl,
+      ...(time && time > 0 ? { time } : {}),
+    }),
+
   /** 上传视频文件（需登录） */
   uploadVideo: (showId: string, file: File, onProgress?: (percent: number) => void) => {
     const formData = new FormData();

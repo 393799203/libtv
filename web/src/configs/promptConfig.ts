@@ -6,7 +6,10 @@ import type { NodeType } from '@/types/canvas';
 
 // ==================== 分辨率选项 ====================
 
-export const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const;
+// 图片分辨率档位。'1K' 已下线（2026-10）：它在上游是按像素计费的廉价档，
+// 挂在同一个价上卖既拉低毛利、又让「标准/高清/极致」三档说不清贵在哪，
+// 因此统一收敛为 2K / 4K 两档（老画布里残留的 '1K' 仍能正常生成与计费，见 executor 的兼容分支）
+export const RESOLUTION_OPTIONS = ['2K', '4K'] as const;
 
 // 视频节点分辨率选项（值直接传给后端）
 export const VIDEO_RESOLUTION_OPTIONS = ['480p', '720p', '1080p', '4K'] as const;
@@ -125,7 +128,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   text: {
     acceptedInputs: ['text', 'script', 'image'],
     defaultModel: 'deepseek-v4-flash',
-    defaultResolution: '1K',
+    defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
@@ -135,7 +138,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   audio: {
     acceptedInputs: ['text', 'script'],
     defaultModel: 'audio-default',
-    defaultResolution: '1K',
+    defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: ['model', 'voice', 'speed'],
@@ -145,7 +148,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   script: {
     acceptedInputs: ['text'],
     defaultModel: 'script-default',
-    defaultResolution: '1K',
+    defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
@@ -156,7 +159,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   previz: {
     acceptedInputs: [],
     defaultModel: '',
-    defaultResolution: '1K',
+    defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: [],
@@ -168,7 +171,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   enhance: {
     acceptedInputs: ['video', 'previz'],
     defaultModel: '',
-    defaultResolution: '1K',
+    defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],
     toolbarControls: [],

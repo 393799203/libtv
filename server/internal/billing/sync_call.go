@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"libtv/internal/llm"
 	"libtv/internal/model"
 )
 
@@ -69,6 +70,10 @@ func (c SyncCall) Write(ctx context.Context, status, note string, refunded int64
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// 上游真实消耗（对账成本侧）：直连接口（提示词生成 / 白模解析）的 usage
+	// 就在同步响应里，由 llm 侧登记进 ctx 上的采集器，这里统一取一次。
+	// upsert 侧是「只增不减」，所以后续再写一次（如退费）不会把已记的用量抹掉。
+	row.ProviderTokens, _, row.ProviderUsage, _ = llm.UsageFrom(ctx).Snapshot()
 	_ = c.Ledger.Record(ctx, row)
 }
 

@@ -136,7 +136,7 @@ export default function PricingManagement() {
         {/* 说明文案：让它自己占满并换行，不许挤窄右边的渠道 Tab */}
         <div className="flex-1 min-w-0">
           <div className="text-[11px] text-gray-400 mt-0.5">
-            文本/图片按次、视频按秒、语音按字（每 100 字）计费，价格为 0 表示暂不扣费。
+            文本按次、图片按次（按 2K/4K 分辨率档分别定价）、视频按秒、语音按字（每 100 字）计费，价格为 0 表示暂不扣费。
             3 个 Seedance 模型带参考视频输入时按「有参」单价计费（默认取无参价 6 折），计费时长 = 输出 + 参考视频
           </div>
         </div>
@@ -242,6 +242,13 @@ export default function PricingManagement() {
                           <span className="text-[13px] text-gray-800 font-medium truncate">{m.model_name}</span>
                           {m.resolution && (
                             <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[11px] font-medium shrink-0">{m.resolution}</span>
+                          )}
+                          {/* 该档还没单独配过价：现在的数字是从默认档继承来的，
+                              必须标出来 —— 否则运营会以为 4K 已经定价，实际仍按 2K 的价在卖 */}
+                          {m.resolution && m.price_configured === false && (
+                            <Tooltip title="这一档还没单独配过价，当前按「默认档」的价计费。改成一个新数字并保存即可单独定价">
+                              <span className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-500 text-[11px] shrink-0 cursor-help">继承默认</span>
+                            </Tooltip>
                           )}
                         </div>
                         {m.description && (

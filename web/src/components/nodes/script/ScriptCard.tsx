@@ -5,15 +5,13 @@ import {
   FileTextOutlined,
   CodeOutlined,
 } from '@ant-design/icons';
-import type { NodeExecutionStatus, ScriptNodeData } from '@/types/canvas';
+import type { ScriptNodeData } from '@/types/canvas';
 import { ScriptSteps } from './ScriptSteps';
-import { NodeLoadingState } from '../NodeLoadingState';
 
 interface ScriptCardProps {
   data: Pick<ScriptNodeData, 'label' | 'currentStep' | 'shots' | 'scriptContent' | 'characters' | 'scenes' | 'props'> & {
     progressMessage?: string; // 进度消息（如"已运行 10s"）
   };
-  status: NodeExecutionStatus;
   onOpen: () => void;
 }
 
@@ -30,14 +28,8 @@ function hasContent(data: Pick<ScriptNodeData, 'scriptContent' | 'shots' | 'char
   return hasScriptContent || hasShots || hasCharacters || hasScenes || hasProps;
 }
 
-/** 是否正在生成中 */
-function isGenerating(status: NodeExecutionStatus): boolean {
-  return status === 'running' || status === 'pending';
-}
-
 export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
   data,
-  status,
   onOpen,
 }) {
   const handleOpenClick = useCallback(
@@ -49,19 +41,11 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
   );
 
   const isEmpty = !hasContent(data);
-  const generating = isGenerating(status);
 
-  // ========== 生成中状态 ==========
-  if (generating) {
-    return (
-      // ✅ 使用统一的loading组件
-      <NodeLoadingState
-        status={status}
-        statusText={data.progressMessage || (status === 'pending' ? '等待生成分镜...' : '正在生成分镜...')}
-        iconBgColor="bg-amber-100"
-        iconColor="text-amber-500"
-      />    );
-  }
+  // 注意：生成中的加载态由 BaseNode 统一负责，这里**不要**自己判断 status 换掉内容。
+  // 原因：重新生成时 BaseNode 要保留上一次的产出做对照（半透明 + 遮罩），
+  // 卡片要是自己换成加载框，就变成"旧结果看着像丢了"。
+  // 首次生成（无旧结果）时 BaseNode 根本不会渲染 children，这个分支也走不到。
 
   // ========== 空状态（无内容且不在生成中）==========
   if (isEmpty) {
@@ -97,7 +81,7 @@ export const ScriptCard = memo<ScriptCardProps>(function ScriptCard({
         <div className="flex flex-col items-center gap-2 p-3 w-full select-none">
           <MenuOutlined className="text-xl text-gray-300" />
           <span className="text-[10px] text-gray-400 text-center leading-relaxed">
-            共 {data.shots.length} 个分镜
+            共 {data.shots?.length ?? 0} 个分镜
           </span>
         </div>
       </div>

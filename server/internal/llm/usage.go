@@ -87,27 +87,39 @@ type upstreamUsage struct {
 
 // recordUpstreamUsage 从响应体的 usage 字段登记用量。
 //
-// 兼容两种形状：
-//   - {"usage":{"total_tokens":90814,"completion_tokens":90814}}  ← 火山 seedance / 天翼网关
-//   - {"usage":{"video_duration":9,"video_count":1}}              ← DashScope（无 token 口径）
+// 三种真实形状（都实测过）：
+//   - 视频（火山/天翼网关）: {"completion_tokens":90814,"total_tokens":90814}
+//   - 图片（seedream 2K）  : {"generated_images":1,"output_tokens":16384,"total_tokens":16384}
+//   - 文本（deepseek）     : {"prompt_tokens":32,"completion_tokens":2,"total_tokens":34}
 //
-// 第二种不带 total_tokens 时，把 usage 原文（截断）记进 rawUsage，供对账页人工核对。
+// 有 total_tokens 就记 token；顺手把 token 之外的字段（如图片的 generated_images=1）
+// 摘要进 rawUsage —— 图片的定价口径是「张」，只留 token 会让人对不上渠道账单。
+// 完全没有 token 口径时（如 DashScope 的 video_duration），只留摘要、tokens 记 0。
 func recordUpstreamUsage(ctx context.Context, raw json.RawMessage) {
 	if len(raw) == 0 {
 		return
 	}
-	var u upstreamUsage
-	if err := json.Unmarshal(raw, &u); err == nil && u.TotalTokens > 0 {
-		RecordUsage(ctx, u.TotalTokens, u.CompletionTokens, "")
-		return
-	}
-	// 没有 token 口径：保留字段摘要（不是完整 JSON —— 列宽 255，且只要能看出计费口径）
 	var m map[string]interface{}
 	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
 		return
 	}
+	var u upstreamUsage
+	_ = json.Unmarshal(raw, &u)
+	if u.TotalTokens > 0 {
+		RecordUsage(ctx, u.TotalTokens, u.CompletionTokens, summarizeUsage(m, true))
+		return
+	}
+	RecordUsage(ctx, 0, 0, summarizeUsage(m, false))
+}
+
+// summarizeUsage 把 usage 对象摊成 "k=v k=v" 的短摘要（键排序保证稳定，便于肉眼比对）。
+// skipTokenFields=true 时跳过 token 字段（它们已经单独记进 provider_tokens 列，重复显示没意义）。
+func summarizeUsage(m map[string]interface{}, skipTokenFields bool) string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
+		if skipTokenFields && (k == "total_tokens" || k == "completion_tokens" || k == "prompt_tokens") {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -115,7 +127,7 @@ func recordUpstreamUsage(ctx context.Context, raw json.RawMessage) {
 	for _, k := range keys {
 		parts = append(parts, k+"="+formatUsageValue(m[k]))
 	}
-	RecordUsage(ctx, 0, 0, strings.Join(parts, " "))
+	return strings.Join(parts, " ")
 }
 
 func formatUsageValue(v interface{}) string {

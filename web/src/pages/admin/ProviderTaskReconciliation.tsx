@@ -469,7 +469,7 @@ export default function ProviderTaskReconciliation() {
       // 我们按用户选的档位定价，两边口径不同，误差只会在这里暴露
       // （实例：480p 少传分辨率参数，用户按 480p 付、上游按 720p 消耗，9 秒任务
       //   token 从 90,814 变成 195,300，钱没变、成本翻倍）。
-      title: '积分 / 实际消耗',
+      title: '积分 / 消耗Token',
       dataIndex: 'charged_amount',
       width: 132,
       render: (_: number, r) => (
@@ -481,8 +481,8 @@ export default function ProviderTaskReconciliation() {
               <Tooltip
                 title={
                   r.provider_usage
-                    ? `上游实际消耗 ${r.provider_tokens.toLocaleString()} tokens（上游口径：${r.provider_usage}）`
-                    : `上游实际消耗 ${r.provider_tokens.toLocaleString()} tokens`
+                    ? `上游消耗Token ${r.provider_tokens.toLocaleString()}（上游口径：${r.provider_usage}）`
+                    : `上游消耗Token ${r.provider_tokens.toLocaleString()}`
                 }
               >
                 <span className="text-sky-700 cursor-help">{formatTokens(r.provider_tokens)}</span>
