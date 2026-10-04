@@ -222,8 +222,10 @@ func (r *providerTaskRepo) List(ctx context.Context, filter ProviderTaskFilter) 
 	}
 
 	var rows []model.ProviderTask
-	// 待人工退费排最前（这是唯一需要人动手的一类），其次是已退费（成本留痕），再按时间倒序
-	err := q.Order("(status = 'pending_review') DESC, (status = 'refunded') DESC, created_at DESC").
+	// 纯时间倒序：列表就是"最近发生了什么"的时间线，不再按状态插队。
+	// （原来把「待人工退费」「已退费」顶到最前，会让时间线错乱 —— 想只看需要动手的行，
+	//   用「只看异常」或状态筛选，不该由排序去替使用者做判断。）
+	err := q.Order("created_at DESC, id DESC").
 		Offset((page - 1) * size).Limit(size).Find(&rows).Error
 	if err != nil {
 		return nil, 0, err

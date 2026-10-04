@@ -17,6 +17,7 @@ import {
   LoadingOutlined,
   AccountBookOutlined,
   DollarOutlined,
+  FileSearchOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
@@ -31,7 +32,7 @@ import ChannelManagement from './ChannelManagement';
 import ProviderTaskReconciliation from './ProviderTaskReconciliation';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 
-type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'settings';
+type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'reconcile' | 'settings';
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -109,11 +110,10 @@ export default function AdminPage() {
   const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
   const [authorSearching, setAuthorSearching] = useState(false);
 
-  // ========== 系统设置状态 ==========
-  // 系统设置页内子页签（价格管理 / 套餐管理 / 渠道管理）
-  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages' | 'channel' | 'reconcile'>(
-    'pricing'
-  );
+  // ========== 商务配置状态 ==========
+  // 商务配置页内子页签（价格管理 / 套餐管理 / 渠道管理）
+  // 上游对账已独立成一级菜单，不再是这里的子页签
+  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages' | 'channel'>('pricing');
 
   // 远程搜索作者（供风格弹窗使用）：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
   const fetchAuthors = (keyword?: string) => {
@@ -619,7 +619,10 @@ export default function AdminPage() {
     { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
     { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
     { key: 'users', icon: <UserOutlined />, label: '用户管理' },
-    { key: 'settings', icon: <SettingOutlined />, label: '系统设置' },
+    // 上游对账：原来藏在「系统设置」的子页签里，且是唯一跟钱直接相关的页面 ——
+    // 独立成一级菜单并紧跟在用户管理下面，按用户/项目查账时不用再点两层。
+    { key: 'reconcile', icon: <FileSearchOutlined />, label: '上游对账' },
+    { key: 'settings', icon: <SettingOutlined />, label: '商务配置' }, // 路由 key 保持 settings，老链接不失效
   ];
 
   return (
@@ -1391,7 +1394,14 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* ========== 系统设置 Tab ========== */}
+        {/* ========== 上游对账 Tab（一级菜单，紧跟用户管理）========== */}
+        {activeTab === 'reconcile' && (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <ProviderTaskReconciliation />
+          </div>
+        )}
+
+        {/* ========== 商务配置 Tab ========== */}
         {activeTab === 'settings' && (
           <div className="flex-1 overflow-hidden flex flex-col">
             {/* 子页签栏 */}
@@ -1426,16 +1436,6 @@ export default function AdminPage() {
               >
                 渠道管理
               </button>
-              <button
-                onClick={() => setSettingsSubTab('reconcile')}
-                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
-                  settingsSubTab === 'reconcile'
-                    ? 'border-blue-600 text-blue-700 font-medium'
-                    : 'border-transparent text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                上游对账
-              </button>
             </div>
 
             {/* 价格管理页签 */}
@@ -1446,9 +1446,6 @@ export default function AdminPage() {
 
             {/* 渠道管理页签 */}
             {settingsSubTab === 'channel' && <ChannelManagement />}
-
-            {/* 上游任务对账页签：任务号 / 渠道 / 结局 / 我们白付上游的成本 */}
-            {settingsSubTab === 'reconcile' && <ProviderTaskReconciliation />}
           </div>
         )}
       </main>

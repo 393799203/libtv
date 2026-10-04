@@ -216,19 +216,32 @@ func (c *Checker) checkRefundDelivered(ctx context.Context, found map[int64]stri
 
 // checkAmountMismatch 对账行金额与账单流水对不上。
 //
-// 只在账单里能按任务号精确匹配时才判定（视频/退款流水带任务号；同步接口的账单不带，
-// 用时间窗猜金额只会制造误报，所以宁可漏报）。
+// 只在账单里能按任务号精确匹配时才判定（同步接口的账单不带任务号，用时间窗猜金额只会制造误报）。
+//
+// 两个方向**各自独立判定，且必须有对应类型的流水才比**：
+//
+//	扣费侧：只有存在带该任务号的 deduct 流水时才比金额；
+//	退款侧：只有存在带该任务号的 refund 流水时才比金额。
+//
+// 为什么必须加这个前提（线上踩过）：视频的**退款**流水带任务号（退费时已经拿到上游任务号），
+// 而**扣费**流水不带（扣费发生在上游创建任务之前，那时还没有任务号）。没有前提时会算出
+// 「扣费侧合计 = 0 ≠ charged_amount」，把每一条自动退费的视频都误标成"金额对不上"。
+// 实例：10-03 22:21 / 22:30 两条 dianxin 视频（上游因版权限制拒绝、已自动全额退 4530），
+// 金额两侧其实完全一致，却被标红。宁可漏报也不要误报 —— 误报会让真异常淹没在噪音里。
 func (c *Checker) checkAmountMismatch(ctx context.Context, found map[int64]string) error {
 	return c.collect(ctx, found, AlertAmountMismatch, `
 		select p.id from provider_tasks p
 		 where coalesce(p.task_id, '') <> ''
-		   and exists (select 1 from billing_records b where b.task_id = p.task_id)
 		   and (
-		     coalesce((select sum(b.amount) from billing_records b
-		                where b.task_id = p.task_id and b.type = 'deduct'), 0) <> p.charged_amount
+		     (exists (select 1 from billing_records b
+		               where b.task_id = p.task_id and b.type = 'deduct')
+		      and coalesce((select sum(b.amount) from billing_records b
+		                     where b.task_id = p.task_id and b.type = 'deduct'), 0) <> p.charged_amount)
 		     or
-		     coalesce((select sum(b.amount) from billing_records b
-		                where b.task_id = p.task_id and b.type = 'refund'), 0) <> p.refunded_amount
+		     (exists (select 1 from billing_records b
+		               where b.task_id = p.task_id and b.type = 'refund')
+		      and coalesce((select sum(b.amount) from billing_records b
+		                     where b.task_id = p.task_id and b.type = 'refund'), 0) <> p.refunded_amount)
 		   )`)
 }
 
