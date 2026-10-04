@@ -97,7 +97,20 @@ type ProviderTaskStats struct {
 	// Alerted 一致性自检标出来的异常行数（只提示，不代表钱的状态被改过）
 	Alerted        int64 `json:"alerted"`
 	ChargedCredits int64 `json:"charged_credits"`
-	RefundedCredit int64 `json:"refunded_credits"`
+	// RefundedCredits 退费积分合计（所有已退费行）
+	RefundedCredits int64 `json:"refunded_credits"`
+	// AutoRefundedCredits 自动退费的积分合计。
+	// 注意：这部分**不是成本** —— 自动退费的触发条件就是「上游明确拒绝了本次任务」，
+	// 上游不会为这次调用计费，我们没花钱。
+	AutoRefundedCredits int64 `json:"auto_refunded_credits"`
+	// ManualRefundedCredits 人工退费的积分合计 = 真成本。
+	// 上游当时没明确拒绝，很可能已经生成并计费，钱是真花出去的。
+	//
+	// 线上踩过：界面上的「真成本」原来直接用了 RefundedCredits（所有退费合计），
+	// 于是 2 条自动退费被算成「真成本 9060 积分」，与它自己那行说明（人工那部分）自相矛盾。
+	ManualRefundedCredits int64 `json:"manual_refunded_credits"`
+	// UnknownRefundedCredits 上线「退费来源」之前的老退费：分不清自动/人工，单列出来不计入成本
+	UnknownRefundedCredits int64 `json:"unknown_refunded_credits"`
 }
 
 type providerTaskRepo struct {
@@ -335,7 +348,10 @@ func (r *providerTaskRepo) Stats(ctx context.Context, filter ProviderTaskFilter)
 		count(*) filter (where status = 'submitted') as submitted,
 		count(*) filter (where coalesce(alert, '') <> '') as alerted,
 		coalesce(sum(charged_amount), 0) as charged_credits,
-		coalesce(sum(refunded_amount), 0) as refunded_credit`).Scan(&stats).Error
+		coalesce(sum(refunded_amount), 0) as refunded_credits,
+		coalesce(sum(refunded_amount) filter (where refund_source = 'auto'), 0) as auto_refunded_credits,
+		coalesce(sum(refunded_amount) filter (where refund_source = 'manual'), 0) as manual_refunded_credits,
+		coalesce(sum(refunded_amount) filter (where coalesce(refund_source, '') not in ('auto','manual')), 0) as unknown_refunded_credits`).Scan(&stats).Error
 	return stats, err
 }
 

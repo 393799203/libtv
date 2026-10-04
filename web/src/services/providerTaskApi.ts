@@ -65,7 +65,14 @@ export interface ProviderTaskStats {
   submitted: number;
   pending_review: number;
   charged_credits: number;
+  /** 退费积分合计（所有已退费行） */
   refunded_credits: number;
+  /** 自动退费积分合计 —— 上游明确拒绝、上游不计费，**不是成本** */
+  auto_refunded_credits: number;
+  /** 人工退费积分合计 —— 上游很可能已计费，这才叫真成本 */
+  manual_refunded_credits: number;
+  /** 上线「退费来源」之前的老退费，分不清自动/人工，不计入成本 */
+  unknown_refunded_credits: number;
   /** 一致性自检标记出来的异常行数 */
   alerted?: number;
 }
