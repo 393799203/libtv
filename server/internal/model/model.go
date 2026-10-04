@@ -404,8 +404,16 @@ type BillingRecord struct {
 	// 少了这一列，事后既无法向渠道核对「这笔失败有没有让上游真的接单并计费」，
 	// 也找不回上游可能已经产出的结果。线上实例：10-03 00:04 那次超时中断。
 	TaskID string `gorm:"size:64;default:''" json:"task_id"`
+	// ChargeKey 这一笔扣费的唯一编号，与 provider_tasks.charge_key **同一个值**。
+	//
+	// 扣费分录与它的退费分录带**同一把** charge_key（一笔生成可以有扣费+退费多条分录，
+	// 所以这一列在账单表里同一值可能出现在 1~2 行上，不能设唯一索引）。
+	// 有了它，「上游对账行 ↔ 账单流水」才能精确对上：金额对不对、有没有缺行、
+	// 是不是重复扣费，全部可判 —— 在此之前扣费分录不带任何编号，两边无法关联。
+	ChargeKey string `gorm:"size:128;default:'';index" json:"charge_key"`
 	// Remark 描述（展示给用户看的文案）
-	Remark string `gorm:"size:255" json:"remark"`
+	// Remark 展示给用户看的文案（失败退还原因也写在这里，同 note 一样要放开长度）
+	Remark string `gorm:"size:1000" json:"remark"`
 	// BalanceAfter 本次变动后的剩余积分
 	BalanceAfter int64     `gorm:"not null;default:0" json:"balance_after"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -477,8 +485,27 @@ func (PointsPackage) TableName() string { return "points_packages" }
 // 三方可以按 TaskID / (执行, 节点) 对齐。
 type ProviderTask struct {
 	ID int64 `gorm:"primaryKey;autoIncrement" json:"id"`
-	// TaskID 上游返回的任务号（对账主键）
-	TaskID string `gorm:"size:128;not null;uniqueIndex" json:"task_id"`
+	// ChargeKey 这一笔扣费的唯一编号（**行身份**，扣费那一刻生成，永不改变）。
+	//
+	// 为什么需要它（这是本表最重要的一列）：
+	//   - 扣费发生在「调上游创建任务」之前，那一刻还没有上游任务号 → 账单流水里根本
+	//     记不下任务号，扣费侧金额过去**永远无法核对**（只能靠同用户+同金额±3分钟猜）；
+	//   - 以前行的身份是 TaskID：同步调用用 `sync:执行:节点` 当编号，拿到上游任务号后
+	//     又把它改成任务号 —— 身份会「变身」。一旦同一个节点在同一次执行里被扣了两次费
+	//     （线上真的发生过：exec 1289 的 video-1791037098340，第一次上游拒绝退款后重试），
+	//     第一次还没改名时第二次写入就会**挤进同一行、金额互相覆盖**。
+	// 现在身份固定为 charge_key：扣费时同时写账单分录和本行，任务号到手后只是往这一行
+	// 补一个属性（task_id），行不再易主。唯一索引只对非空值生效（历史行留空，见 main.go）。
+	// 列宽 128（而不是 64）：编号由各调用方生成，宽一点是给自己留余量 ——
+	// 线上教训：提示词/白模解析那两个直连接口曾用过 72 字符的编号，写进 64 的列直接报
+	// "value too long"，导致**钱扣了、账单和对账行都没写进去**（余额少了 15 分，账上查无此事）。
+	ChargeKey string `gorm:"size:128;default:'';index" json:"charge_key"`
+	// TaskID 上游返回的任务号（视频等异步任务才有；同步调用永远为空）。
+	//
+	// 以前是 not null + 全量唯一，且被当成行身份 —— 现在只是行上一个属性：
+	// 唯一约束改成「仅非空唯一」（部分索引，见 main.go），因为多行可以同时处于
+	// 「已扣费、还没拿到任务号」的状态。
+	TaskID string `gorm:"size:128;default:'';index" json:"task_id"`
 	// Provider 渠道：wasu=华数 / dianxin=电信
 	Provider string `gorm:"size:20;default:'';index" json:"provider"`
 	Model    string `gorm:"size:100;default:''" json:"model"`
@@ -528,8 +555,11 @@ type ProviderTask struct {
 	// ProviderURL 上游返回的原始产物地址：转存失败时它仍然有效，
 	// 留着它才能证明「上游确实出了片」，也才有机会人工把片子捞回来
 	ProviderURL string `gorm:"size:1000;default:''" json:"provider_url"`
-	// Note 失败原因或处理说明（截断到 255，供人工核对时快速定位）
-	Note      string    `gorm:"size:255;default:''" json:"note"`
+	// Note 失败原因或处理说明（供人工核对时快速定位）。
+	// 1200 而不是 255：上游拒绝时会带一大段原始报错（例如「生成内容可能涉及版权限制…」后面
+	// 还有接口返回的原文），255 会让真正有用的后半句被切掉，管理员还得去翻服务器日志。
+	// 注意 Postgres 的 varchar(n) 按**字符**计，不是字节，所以这里留得比较宽裕。
+	Note      string    `gorm:"size:1200;default:''" json:"note"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

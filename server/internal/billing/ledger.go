@@ -37,7 +37,11 @@ func (s *Ledger) SetBillingService(b *Service) { s.biller = b }
 // 注意：任务号是跟渠道对账的唯一凭据，写失败必须留日志 —— 但只要写失败不影响
 // 用户看到的结果，就不该把执行带崩（对账表是旁路账，不是主流程）。
 func (s *Ledger) Record(ctx context.Context, task *model.ProviderTask) error {
-	if s == nil || s.repo == nil || task == nil || task.TaskID == "" {
+	// 有 charge_key 就能落账，**不要求**有任务号：同步调用（提示词/图片/剧本文本/音频）
+	// 本来就没有上游任务号，行的身份就是 charge_key。
+	// 线上踩过：这里曾只认 TaskID，改成 charge_key 身份后同步调用的对账行**静默没写**，
+	// 账单有、对账没有 —— 而这种缺行正是自检要抓的异常。
+	if s == nil || s.repo == nil || task == nil || (task.TaskID == "" && task.ChargeKey == "") {
 		return nil
 	}
 	if err := s.repo.Upsert(ctx, task); err != nil {
@@ -100,6 +104,9 @@ func (s *Ledger) RefundManually(ctx context.Context, id int64, operator, reason 
 		Seconds:         task.ChargeSeconds,
 		RefVideoSeconds: task.ChargeRefSeconds,
 		TaskID:          task.TaskID,
+		// 人工退费带**当初那把** charge_key（从这一行读出来，不重新生成）——
+		// 这样退费分录与扣费分录在对账里归到同一笔生成上
+		ChargeKey: task.ChargeKey,
 	}
 	// 动作与场景取这一行自己的（task_kind 就是当初扣费时的动作）：人工退费也必须与原扣费同口径，
 	// 否则退一张图片的费会被记成「视频生成失败退还」，按动作对账/统计全都对不上
@@ -163,21 +170,29 @@ var actionScenes = map[string]string{
 // State 读一行对账（按编号）。用于两个「钱」上的判断：
 //   - 扣费前：这一笔（同一执行+同一节点）是不是已经扣过了 → 重试/重投不再重复扣费；
 //   - 退费前：这一笔是不是已经退过了（人工退费也算）→ 自动退费不再重复打款。
-func (s *Ledger) State(ctx context.Context, taskID string) (charged, refunded int64, status string, ok bool) {
-	if s == nil || s.repo == nil || taskID == "" {
+func (s *Ledger) State(ctx context.Context, key string) (charged, refunded int64, status string, ok bool) {
+	row, err := s.FindByKey(ctx, key)
+	if err != nil || row == nil {
 		return 0, 0, "", false
 	}
-	items, _, err := s.repo.List(ctx, repository.ProviderTaskFilter{TaskID: taskID, Page: 1, PageSize: 5})
-	if err != nil || len(items) == 0 {
-		return 0, 0, "", false
+	return row.ChargedAmount, row.RefundedAmount, row.Status, true
+}
+
+// FindByKey 按 charge_key 或上游任务号精确读一行（两个键都认，命中即返回）
+func (s *Ledger) FindByKey(ctx context.Context, key string) (*model.ProviderTask, error) {
+	if s == nil || s.repo == nil || key == "" {
+		return nil, nil
 	}
-	for i := range items {
-		if items[i].TaskID != taskID {
-			continue // List 的 task_id 是模糊匹配，这里只认精确相等
-		}
-		return items[i].ChargedAmount, items[i].RefundedAmount, items[i].Status, true
+	return s.repo.FindByKey(ctx, key)
+}
+
+// ActiveChargeByNode 同一执行 + 同一节点上「还没退费」的那一笔扣费（最新一条）。
+// 扣费前必须问它一句：重复投递会把同一个节点再跑一遍，无脑扣费就是同一笔点击扣两遍钱。
+func (s *Ledger) ActiveChargeByNode(ctx context.Context, execID int64, nodeID string) (*model.ProviderTask, bool) {
+	if s == nil || s.repo == nil {
+		return nil, false
 	}
-	return 0, 0, "", false
+	return s.repo.ActiveChargeByNode(ctx, execID, nodeID)
 }
 
 // AlreadyRefunded 这笔扣费是不是已经退过了（人工或自动）。自动退费打款前必须问这一句 ——

@@ -51,7 +51,10 @@ type AsyncTaskRef struct {
 	// 视频已经生成但转存到自有存储失败时，不立即退费也不重新下发 —— 先靠队列重试复用
 	// 这个已完成的上游任务重新转存（不重新扣费）。只有转存反复失败（达到上限）才退费收场，
 	// 避免用户既拿不到视频又一直挂着这笔钱。
-	DownloadFailures int `json:"downloadFailures"`
+	DownloadFailures int `json:"downloadFailures"` // ChargeKey 这一笔扣费的唯一编号（与 provider_tasks.charge_key 同值）。
+	// 进程重启后续取结果时靠它把对账行认回来 —— 不能靠「执行+节点」推导：
+	// 同一节点在同一次执行里可能被扣多次费，推出来的编号会撞。
+	ChargeKey string `json:"charge_key,omitempty"`
 }
 
 // asyncTaskTTL 登记有效期，与上游任务的可查询保留期（约 24h）对齐

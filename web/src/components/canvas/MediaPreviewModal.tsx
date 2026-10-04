@@ -60,7 +60,13 @@ export const MediaPreviewModal = memo(function MediaPreviewModal({
     .filter(Boolean)
     .join('  ·  ');
 
+  // 固定占满预览区（而不是 maxWidth/maxHeight）：
+  // 只写 max-* 时，媒体在**元数据/图片加载完成前**没有固有尺寸 —— <video> 会先按默认的
+  // 300×150 渲染、<img> 则是 0×0，加载完成才撑大，于是"先小后大"跳一下。
+  // 这里让元素从第一帧就占满视口，画面用 object-fit: contain 等比放进去，尺寸恒定不跳变。
   const mediaStyle: CSSProperties = {
+    width: '100%',
+    height: '100%',
     maxWidth: '100%',
     maxHeight: '100%',
     objectFit: 'contain',

@@ -48,8 +48,12 @@ type syncTask struct {
 	Resolution string // 计费口径（图片=尺寸），无则空
 	Seconds    int    // 计费口径（音频=字数折算秒），无则 0
 	Charged    int64
-	ExecID     int64
-	NodeID     string
+	// ChargeKey 这一笔扣费的唯一编号 —— **对账行的身份**，扣费那一刻生成、此后永不改变。
+	// 没有它时行的身份是「sync:执行:节点」，拿到上游任务号后又被改写成任务号：
+	// 同一节点在同一次执行里被扣两次费时，第二次写入会挤进第一行并覆盖金额（线上出现过）。
+	ChargeKey string
+	ExecID    int64
+	NodeID    string
 }
 
 // newSyncTask 组装一次同步调用的对账现场（provider 从 ctx 的渠道取）
@@ -62,6 +66,7 @@ func newSyncTask(ledger *billing.Ledger, ctx context.Context, execCtx *Execution
 		Provider:   llm.ChannelFrom(ctx),
 		Resolution: resolution,
 		Charged:    charged,
+		ChargeKey:  billing.NewChargeKey(),
 	}
 	if execCtx != nil {
 		t.ExecID = execCtx.GetExecutionID()
@@ -69,19 +74,44 @@ func newSyncTask(ledger *billing.Ledger, ctx context.Context, execCtx *Execution
 	return t
 }
 
-// key 对账行编号：同步调用没有上游任务号，用执行+节点，天然按节点去重
+// key 历史对账行编号（sync:执行:节点）。
+// 仅用于兼容本次改动前写入的老行：新行的身份是 ChargeKey，不再用这个编号。
 func (t syncTask) key(nodeID string) string {
 	return fmt.Sprintf("sync:%d:%s", t.ExecID, nodeID)
 }
+
+// lookupKey 查询对账行时用的键：优先 charge_key，老行退回 sync 编号
+func (t syncTask) lookupKey(nodeID string) string {
+	if t.ChargeKey != "" {
+		return t.ChargeKey
+	}
+	return t.key(nodeID)
+}
+
+// noteMaxBytes 备注最终落库的长度上限（字节，且不切半个汉字）。
+//
+// 原先是 240 字节，中文一个字 3 字节 —— 相当于只留 80 个汉字，而「上游明确拒绝本次任务，
+// 自动退还本次扣费: 」这句前缀就占掉 28 个字，上游报错只剩几十个字，管理员看到的备注
+// 是被切掉的半句。现在放到 1000 字节（≈330 汉字 / 1000 英文），
+// 对应列宽 varchar(1200)，字节数永远小于字符数，不会写爆列。
+const noteMaxBytes = 1000
 
 // write 落一行对账
 func (t syncTask) write(ctx context.Context, execCtx *ExecutionContext, nodeID, status, note string, refunded int64, resultURL string) {
 	if t.Ledger == nil {
 		return
 	}
-	note = billing.TruncateNote(note, 240)
+	note = billing.TruncateNote(note, noteMaxBytes)
+	// 行身份 = charge_key；同步调用没有上游任务号，task_id 就一直是空。
+	// （以前这里塞的是自造的 sync:执行:节点，界面还得专门认出来别当任务号展示）
+	// t.ChargeKey 为空只可能是历史遗留调用路径 → 退回老的 sync 编号，行为不变。
+	taskID := ""
+	if t.ChargeKey == "" {
+		taskID = t.key(nodeID)
+	}
 	row := &model.ProviderTask{
-		TaskID:           t.key(nodeID),
+		TaskID:           taskID,
+		ChargeKey:        t.ChargeKey,
 		TaskKind:         t.Action,
 		Provider:         t.Provider,
 		Model:            t.Model,
@@ -130,7 +160,7 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 		return msg
 	}
 	// 管理员可能刚刚在对账页手动退过这一笔 —— 再自动退一次就是同一笔钱退两遍
-	if t.Ledger != nil && t.Ledger.AlreadyRefunded(detachedCtx(ctx), t.key(nodeID)) {
+	if t.Ledger != nil && t.Ledger.AlreadyRefunded(detachedCtx(ctx), t.lookupKey(nodeID)) {
 		log.Printf("[%s] 这一笔扣费已退过（人工或自动），跳过自动退费: node=%s", t.Scene, nodeID)
 		if execCtx != nil {
 			execCtx.MarkNonRetryable()
@@ -138,7 +168,9 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 		t.write(ctx, execCtx, nodeID, billing.StatusRefunded, detail+"；该笔扣费此前已退还", t.Charged, "")
 		return fmt.Errorf("%s（本次扣费此前已退还）", detail)
 	}
-	extra := billing.ChargeExtra{Resolution: t.Resolution, Seconds: t.Seconds}
+	// 退费与扣费必须带同一把 charge_key：这样「同一笔生成」的扣费/退费两条账单分录
+	// 才能在对账里被归到一起，金额也能精确核对
+	extra := billing.ChargeExtra{Resolution: t.Resolution, Seconds: t.Seconds, ChargeKey: t.ChargeKey}
 	reason := billing.AutoRefundReason(detail)
 	if refundErr := biller.RefundDetached(ctx, execCtx.GetUserID(), t.Charged, t.Action, t.Model, t.Scene, reason, extra); refundErr != nil {
 		log.Printf("[%s] 自动退费失败（转人工）: %v", t.Scene, refundErr)
@@ -164,18 +196,22 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 // 再跑一遍。执行器每次都无条件扣费 → 同一个点击被扣两遍（对账行还会被第二次覆盖，
 // 账面看着只有一笔）。扣费前先查一次，扣过就直接沿用那笔金额，本次不再扣。
 func chargeAlreadyDone(ledger *billing.Ledger, ctx context.Context, execID int64, nodeID string) (int64, bool) {
+	row, ok := activeChargeByNode(ledger, ctx, execID, nodeID)
+	if !ok {
+		return 0, false
+	}
+	return row.ChargedAmount, true
+}
+
+// activeChargeByNode 同一执行 + 同一节点上「还没退费」的那一笔扣费（最新一条）。
+//
+// 为什么按 exec+node 查而不是按编号查（这里踩过坑）：老行的编号在拿到上游任务号后
+// 被改写过，按老编号根本查不到那一行 —— 判断也就失效了。按执行+节点查，老行新行都认。
+func activeChargeByNode(ledger *billing.Ledger, ctx context.Context, execID int64, nodeID string) (*model.ProviderTask, bool) {
 	if ledger == nil || execID == 0 || nodeID == "" {
-		return 0, false
+		return nil, false
 	}
-	charged, _, status, ok := ledger.State(detachedCtx(ctx), fmt.Sprintf("sync:%d:%s", execID, nodeID))
-	if !ok || charged <= 0 {
-		return 0, false
-	}
-	// 已退费的记录不算「已经扣过」：钱已经还回去了，这次该正常扣
-	if status == billing.StatusRefunded {
-		return 0, false
-	}
-	return charged, true
+	return ledger.ActiveChargeByNode(detachedCtx(ctx), execID, nodeID)
 }
 
 // isNoRetryVideoFailure 判断视频节点的这次失败是否「重试有害」。
@@ -251,18 +287,23 @@ func (v *VideoExecutor) refundCharge(ctx context.Context, execCtx *ExecutionCont
 	return nil
 }
 
-// recordLocalCharge 写一行「没有上游任务号」的对账（视频创建阶段就失败的兜底）。
+// recordLocalCharge 按 charge_key 写/更新视频这一笔扣费的对账行。
 //
-// 正常情况下对账按上游任务号 upsert；但创建请求超时/连接中断时我们手里根本没有任务号，
-// 这时候如果不写，用户被扣的那笔钱在对账页上就是隐形的 —— 管理员无从下手。
-// 用「执行+节点」当编号（与同步调用同一套约定），一次执行一行，状态取最新。
+// 行的身份是扣费时生成的 charge_key（不可变），task_id 只是行上的一个属性：
+//   - 扣费后立刻调用一次：状态「进行中」—— 从这一刻起这笔钱在对账页上就是可见的，
+//     进程即使随后被杀，管理员也知道有这笔钱、能手动处理（以前是等到任务号到手才写，
+//     中间那段时间账上是空白）；
+//   - 创建请求超时/连接中断（压根没拿到任务号）时再调用一次，更新成失败/已退费；
+//   - 拿到任务号后由 recordProviderTask 往同一行补 task_id。
 func (v *VideoExecutor) recordLocalCharge(ctx context.Context, execCtx *ExecutionContext, nodeID, modelName string, charged int64, detail billing.ChargeExtra, status, note string, refunded int64) {
 	if v.providerTasks == nil {
 		return
 	}
-	note = billing.TruncateNote(note, 240)
+	note = billing.TruncateNote(note, noteMaxBytes)
+	// 行身份 = charge_key（不可变）；task_id 只在真拿到上游任务号时才有值
 	row := &model.ProviderTask{
-		TaskID:           fmt.Sprintf("sync:video:%d:%s", execCtx.GetExecutionID(), nodeID),
+		TaskID:           detail.TaskID,
+		ChargeKey:        detail.ChargeKey,
 		TaskKind:         billing.ActionVideo,
 		Provider:         execCtx.GetChannel(),
 		Model:            modelName,
@@ -1009,13 +1050,19 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 
-	chargedAmount, err := t.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionStory, data.Model, "故事生成", 1)
-	if err != nil {
-		return nil, err
-	}
+	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
+	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
+	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
+	var chargedAmount int64
 	if prev, done := chargeAlreadyDone(t.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[TextExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
-		chargedAmount = 0
+		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+	} else {
+		var err error
+		chargedAmount, err = t.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionStory, data.Model, "故事生成", 1)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 调用 LLM 生成故事文本（模型 ID 由前端按用户渠道选择，直接使用）
@@ -1182,13 +1229,19 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；剧本使用文本模型按次计费）
-	chargedAmount, err := s.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionScript, data.Model, "分镜剧本生成", 1)
-	if err != nil {
-		return nil, err
-	}
+	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
+	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
+	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
+	var chargedAmount int64
 	if prev, done := chargeAlreadyDone(s.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[ScriptExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
-		chargedAmount = 0
+		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+	} else {
+		var err error
+		chargedAmount, err = s.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionScript, data.Model, "分镜剧本生成", 1)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// 调用 LLM 生成分镜剧本（模型 ID 由前端按用户渠道选择，直接使用）
 	task := newSyncTask(s.providerTasks, ctx, execCtx, billing.ActionScript, "分镜剧本生成", data.Model, "", chargedAmount)
@@ -1534,13 +1587,19 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用图像生成 API（账单记录模型与场景；图片模型按次计费，按生成张数计）
-	chargedAmount, err := i.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionImage, apiModelID, "图片生成", count)
-	if err != nil {
-		return nil, err
-	}
+	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
+	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
+	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
+	var chargedAmount int64
+	var err error
 	if prev, done := chargeAlreadyDone(i.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[ImageExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
-		chargedAmount = 0
+		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+	} else {
+		chargedAmount, err = i.biller.ChargeByModel(ctx, execCtx.GetUserID(), billing.ActionImage, apiModelID, "图片生成", count)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// 对账：图片是同步调用（没有上游任务号），用「执行+节点」当 key，
 	// 口径记尺寸。扣了费先落「进行中」，收场时再更新。
@@ -1780,12 +1839,15 @@ func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.F
 // 即创建阶段的重试，见 llm.doCreateWithRetry）。
 // detached ctx：执行 ctx 可能正随失败/关停被取消，而对账必须落下去。
 func (v *VideoExecutor) recordProviderTask(ctx context.Context, execCtx *ExecutionContext, ref *llm.AsyncTaskRef, status, note string, refunded int64) {
-	if v.providerTasks == nil || ref == nil || ref.TaskID == "" {
+	// 有 charge_key 就能定位到行，**不要求**已经有任务号：创建阶段就被上游拒绝时
+	// 我们手里没有任务号，这一行同样必须能更新成「已退费」（否则管理员会对同一笔钱再退一次）
+	if v.providerTasks == nil || ref == nil || (ref.TaskID == "" && ref.ChargeKey == "") {
 		return
 	}
-	note = billing.TruncateNote(note, 240)
+	note = billing.TruncateNote(note, noteMaxBytes)
 	task := &model.ProviderTask{
 		TaskID:           ref.TaskID,
+		ChargeKey:        ref.ChargeKey,
 		TaskKind:         billing.ActionVideo,
 		Provider:         ref.Provider,
 		Model:            ref.Model,
@@ -2031,29 +2093,44 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		// 复用失败要退当初那笔钱，口径也得跟着复用过来（改动前落盘的旧登记没有这三项，取出为零值）
 		taskRef.ChargeResolution, taskRef.ChargeSeconds, taskRef.ChargeRefSeconds =
 			resumeRef.ChargeResolution, resumeRef.ChargeSeconds, resumeRef.ChargeRefSeconds
+		// 复用同一笔扣费 → 沿用原 charge_key，退费分录才能与扣费分录归到同一笔
+		taskRef.ChargeKey = resumeRef.ChargeKey
 		log.Printf("[VideoExecutor] ♻ 命中已提交的上游任务: taskID=%s model=%s（%s）→ 续取结果，跳过重复下发与扣费",
 			resumeRef.TaskID, resumeRef.Model, resumeRef.CreateAt)
-	} else if prev, done := chargeAlreadyDone(v.providerTasks, ctx, execID, node.ID); done {
+	} else if prev, done := activeChargeByNode(v.providerTasks, ctx, execID, node.ID); done {
 		// 有本地对账行说明这一笔已经扣过费（进程在创建任务前后崩过、队列重投），
 		// 本次重跑不再扣费：宁可让这一次白送，也不能让用户为一次点击付两遍
-		log.Printf("[VideoExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
-		taskRef.ChargedAmount = prev
+		log.Printf("[VideoExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev.ChargedAmount, node.ID)
+		taskRef.ChargedAmount = prev.ChargedAmount
 		taskRef.Model = model
-		// 口径沿用本地那一行（金额已扣，口径要与它一致）
-		if _, _, _, ok := v.providerTasks.State(detachedCtx(ctx), fmt.Sprintf("sync:video:%d:%s", execID, node.ID)); ok {
-			chargeDetail = billing.ChargeExtra{Resolution: resolution, Seconds: data.Duration}
+		// 金额与计费口径一律沿用原来那一行（退费要按同一口径写账单），
+		// charge_key 也沿用 —— 否则这张账单会和原扣费分录对不上
+		taskRef.ChargeKey = prev.ChargeKey
+		taskRef.ChargeResolution, taskRef.ChargeSeconds, taskRef.ChargeRefSeconds =
+			prev.ChargeResolution, prev.ChargeSeconds, prev.ChargeRefSeconds
+		chargeDetail = billing.ChargeExtra{
+			Resolution:      prev.ChargeResolution,
+			Seconds:         prev.ChargeSeconds,
+			RefVideoSeconds: prev.ChargeRefSeconds,
+			ChargeKey:       prev.ChargeKey,
 		}
 	} else {
 		// 扣费校验：通过后才调用视频生成 API（账单记录模型与场景）。
 		// 视频按秒计费：计费时长 = 输出视频时长 + 参考视频时长（见 ChargeVideoByDuration），
 		// 单价按分辨率档位；带参考视频输入时取「带参考视频」档（后台未配置则按无参考视频单价 6 折）
 		var chargeErr error
+		// 扣费编号在扣费前生成：账单分录和对账行靠它绑定，且**不可变**
+		//（不能拿「执行+节点」推导 —— 同一节点在同一次执行里可能被扣多次费，会撞）
+		chargeKey := billing.NewChargeKey()
+		ctx = billing.WithChargeKey(ctx, chargeKey)
 		chargedAmount, chargeDetail, chargeErr = v.biller.ChargeVideoByDuration(
 			ctx, execCtx.GetUserID(), billing.ActionVideo, model, "视频生成",
 			resolution, data.Duration, refVideoSeconds)
 		if chargeErr != nil {
 			return nil, chargeErr
 		}
+		chargeDetail.ChargeKey = chargeKey
+		taskRef.ChargeKey = chargeKey
 		taskRef.ChargedAmount = chargedAmount
 		// 模型名随登记落盘：看门狗退费按登记写账单（渠道由 client 侧登记真实调用渠道）
 		taskRef.Model = model
@@ -2061,6 +2138,10 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		taskRef.ChargeResolution = chargeDetail.Resolution
 		taskRef.ChargeSeconds = chargeDetail.Seconds
 		taskRef.ChargeRefSeconds = chargeDetail.RefVideoSeconds
+		// 钱一扣就落账：不等任务号。这一步堵住的是「扣了费但账上什么都没有」的窗口
+		// （进程在扣费后、拿到任务号前被杀 → 以前这笔钱在对账页上完全隐形）
+		v.recordLocalCharge(ctx, execCtx, node.ID, model, chargedAmount, chargeDetail,
+			billing.StatusSubmitted, "已扣费，正在下发上游任务", 0)
 	}
 	ctx = llm.WithAsyncTaskHolder(ctx, taskRef)
 	// 任务号一到手就写永久对账（状态 submitted=进行中）：等生成结束再写的话，
@@ -2068,7 +2149,9 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 后续交付/失败/退费会更新到同一行（provider_tasks 按任务号 upsert）。
 	ctx = llm.WithTaskSubmittedHook(ctx, func(provider, model, taskID string) {
 		v.recordProviderTask(ctx, execCtx, &llm.AsyncTaskRef{
-			TaskID:           taskID,
+			TaskID: taskID,
+			// charge_key 不变：任务号到手只是往**同一行**补一个属性，行不换身份
+			ChargeKey:        taskRef.ChargeKey,
 			Provider:         provider,
 			Model:            model,
 			ExecID:           execID,
@@ -2173,7 +2256,11 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			}
 		} else if chargedAmount > 0 {
 			// 上游明确拒绝 → 退还已扣费用（口径用本次扣费的那一份，退费账单与扣费账单一致）
-			ledgerKey := taskRef.TaskID
+			// 优先用 charge_key（同一笔扣费的唯一编号）；老登记没有它时退回任务号/老 sync 编号
+			ledgerKey := taskRef.ChargeKey
+			if ledgerKey == "" {
+				ledgerKey = taskRef.TaskID
+			}
 			if ledgerKey == "" {
 				ledgerKey = fmt.Sprintf("sync:video:%d:%s", execCtx.GetExecutionID(), node.ID)
 			}
@@ -2430,13 +2517,19 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：按输入字符数计费（每 100 字为单位），通过后才调用 TTS API
 	charCount := len([]rune(inputText))
-	chargedAmount, err := a.biller.ChargeByChars(ctx, execCtx.GetUserID(), billing.ActionAudio, model, "音频生成", charCount)
-	if err != nil {
-		return nil, err
-	}
+	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
+	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
+	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
+	var chargedAmount int64
 	if prev, done := chargeAlreadyDone(a.providerTasks, ctx, execCtx.GetExecutionID(), node.ID); done {
 		log.Printf("[AudioExecutor] ♻ 该节点本执行已扣过费(%d)，本次重跑不再扣费: node=%s", prev, node.ID)
-		chargedAmount = 0
+		chargedAmount = prev // 沿用当初那笔金额：对账行必须记真实扣了多少
+	} else {
+		var err error
+		chargedAmount, err = a.biller.ChargeByChars(ctx, execCtx.GetUserID(), billing.ActionAudio, model, "音频生成", charCount)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 调用 TTS API

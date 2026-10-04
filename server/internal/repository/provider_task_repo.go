@@ -18,7 +18,17 @@ import (
 // 但**同一任务号只留一行**，状态与退费金额取最新 —— 这样一次生成怎么走完的
 // 全部事实都在一行里，对账时不必再去拼日志。
 type ProviderTaskRepo interface {
+	// Upsert 按行的身份写入：有 charge_key 就按 charge_key（新口径），
+	// 没有则回落到按 task_id（历史行 / 老调用方）。
 	Upsert(ctx context.Context, task *model.ProviderTask) error
+	// FindByKey 按 charge_key 或 task_id 精确读一行（两个都查，命中即返回）。
+	// 用途都是跟钱有关的判断：扣费前「是不是已经扣过」、退费前「是不是已经退过」。
+	FindByKey(ctx context.Context, key string) (*model.ProviderTask, error)
+	// ActiveChargeByNode 同一执行 + 同一节点上「尚未退费」的那一笔扣费（最新一条）。
+	// 队列重投 / worker 被杀重领 / 服务重启续跑都会重跑同一个节点，扣费前必须问它一句。
+	// 之所以按 exec+node 而不是按编号查：老的 sync 编号在拿到上游任务号后被改写过，
+	// 按编号查会查不到（线上就是这样漏掉过「已扣过费」的判断）。
+	ActiveChargeByNode(ctx context.Context, execID int64, nodeID string) (*model.ProviderTask, bool)
 	ListByTaskID(ctx context.Context, taskID string) (*model.ProviderTask, error)
 	ListByProject(ctx context.Context, projectID string, limit int) ([]model.ProviderTask, error)
 	// List 后台对账列表：按状态/项目/用户/任务号筛选，分页返回。
@@ -99,8 +109,20 @@ func NewProviderTaskRepo(db *gorm.DB) ProviderTaskRepo {
 	return &providerTaskRepo{db: db}
 }
 
+// Upsert 写入一行对账。
+//
+// 身份优先级：charge_key（扣费唯一编号，不可变）> task_id（历史行）。
+// 以前只按 task_id —— 而扣费时还没有任务号，只能拿 sync:执行:节点 顶着，
+// 拿到任务号后再把它改掉：行的身份会「变身」，同一节点在同一次执行里被扣两次费时，
+// 第二次写入会挤进第一行并覆盖金额（线上出现过）。现在有了不可变的 charge_key，行不再易主。
 func (r *providerTaskRepo) Upsert(ctx context.Context, task *model.ProviderTask) error {
-	if task == nil || task.TaskID == "" {
+	if task == nil {
+		return nil
+	}
+	if task.ChargeKey != "" {
+		return r.upsertByChargeKey(ctx, task)
+	}
+	if task.TaskID == "" {
 		return nil
 	}
 	// 项目名快照：只在写入时补一次。项目以后被删掉，这行仍认得出来是哪个项目
@@ -122,6 +144,12 @@ func (r *providerTaskRepo) Upsert(ctx context.Context, task *model.ProviderTask)
 	refundSourceExpr := gorm.Expr("CASE WHEN EXCLUDED.refund_source <> '' THEN EXCLUDED.refund_source ELSE provider_tasks.refund_source END")
 	onConflict := clause.OnConflict{
 		Columns: []clause.Column{{Name: "task_id"}},
+		// 唯一索引是「部分索引」（WHERE task_id <> ''）：历史行允许空任务号并存。
+		// Postgres 要求 ON CONFLICT 的推断条件与索引谓词一致，否则报
+		// "no unique or exclusion constraint matching the ON CONFLICT specification"。
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "task_id <> ''"},
+		}},
 		// 每次写入都是一份「更完整/更新」的现场：只更新有值的字段会留下半截记录，
 		// 所以这里整体覆盖（退款两列例外，见上）；调用方必须传完整行。
 		DoUpdates: clause.Assignments(map[string]interface{}{
@@ -483,4 +511,100 @@ func (r *providerTaskRepo) AlertedRows(ctx context.Context) (map[int64]string, e
 		out[row.ID] = row.Alert
 	}
 	return out, nil
+}
+
+// upsertByChargeKey 按 charge_key 写入（新口径：行的身份 = 扣费唯一编号）。
+//
+// 与按 task_id 写入的关键差别（两处都跟钱有关）：
+//   - task_id 用「EXCLUDED 非空才覆盖」的写法：扣费时写入的那次还没有任务号，
+//     之后补写任务号，但**绝不能用空值把已有的任务号抹掉**（抹掉后渠道对账就断了）；
+//   - refunded_amount / refund_source 仍然只增不减（同一笔钱不能被后来的写入清成 0）。
+func (r *providerTaskRepo) upsertByChargeKey(ctx context.Context, task *model.ProviderTask) error {
+	if task.ProjectID != "" && task.ProjectName == "" {
+		var name string
+		if err := r.db.WithContext(ctx).Model(&model.Project{}).
+			Select("name").Where("id = ?", task.ProjectID).Scan(&name).Error; err == nil {
+			task.ProjectName = name
+		}
+	}
+	refundedAmountExpr := gorm.Expr("GREATEST(provider_tasks.refunded_amount, EXCLUDED.refunded_amount)")
+	refundSourceExpr := gorm.Expr("CASE WHEN EXCLUDED.refund_source <> '' THEN EXCLUDED.refund_source ELSE provider_tasks.refund_source END")
+	taskIDExpr := gorm.Expr("CASE WHEN EXCLUDED.task_id <> '' THEN EXCLUDED.task_id ELSE provider_tasks.task_id END")
+	onConflict := clause.OnConflict{
+		Columns: []clause.Column{{Name: "charge_key"}},
+		// 同上：charge_key 的唯一索引也是部分索引（历史行留空）
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "charge_key <> ''"},
+		}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"task_id":            taskIDExpr,
+			"task_kind":          gorm.Expr("EXCLUDED.task_kind"),
+			"provider":           gorm.Expr("EXCLUDED.provider"),
+			"model":              gorm.Expr("EXCLUDED.model"),
+			"exec_id":            gorm.Expr("EXCLUDED.exec_id"),
+			"node_id":            gorm.Expr("EXCLUDED.node_id"),
+			"user_id":            gorm.Expr("EXCLUDED.user_id"),
+			"project_id":         gorm.Expr("EXCLUDED.project_id"),
+			"status":             gorm.Expr("EXCLUDED.status"),
+			"charged_amount":     gorm.Expr("EXCLUDED.charged_amount"),
+			"note":               gorm.Expr("EXCLUDED.note"),
+			"charge_resolution":  gorm.Expr("EXCLUDED.charge_resolution"),
+			"charge_seconds":     gorm.Expr("EXCLUDED.charge_seconds"),
+			"charge_ref_seconds": gorm.Expr("EXCLUDED.charge_ref_seconds"),
+			"result_url":         gorm.Expr("EXCLUDED.result_url"),
+			"provider_url":       gorm.Expr("EXCLUDED.provider_url"),
+			"refunded_amount":    refundedAmountExpr,
+			"refund_source":      refundSourceExpr,
+			"updated_at":         gorm.Expr("EXCLUDED.updated_at"),
+		}),
+	}
+	// 终态保护与按 task_id 写入完全一致：交付/退费是既成事实，不能被随后补写的非终态抹回去
+	switch task.Status {
+	case "refunded":
+		onConflict.Where = clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "provider_tasks.status <> ?", Vars: []interface{}{"refunded"}},
+		}}
+	case "delivered":
+		onConflict.Where = clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "provider_tasks.status <> ?", Vars: []interface{}{"refunded"}},
+		}}
+	default:
+		onConflict.Where = clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "provider_tasks.status NOT IN ?", Vars: []interface{}{[]string{"delivered", "failed", "refunded"}}},
+		}}
+	}
+	return r.db.WithContext(ctx).Clauses(onConflict).Create(task).Error
+}
+
+// FindByKey 按 charge_key 或 task_id 精确读一行
+func (r *providerTaskRepo) FindByKey(ctx context.Context, key string) (*model.ProviderTask, error) {
+	if key == "" {
+		return nil, nil
+	}
+	var row model.ProviderTask
+	err := r.db.WithContext(ctx).
+		Where("charge_key = ? OR task_id = ?", key, key).
+		Order("id desc").Limit(1).First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &row, nil
+}
+
+// ActiveChargeByNode 同一执行 + 同一节点上尚未退费的那一笔扣费
+func (r *providerTaskRepo) ActiveChargeByNode(ctx context.Context, execID int64, nodeID string) (*model.ProviderTask, bool) {
+	if execID == 0 || nodeID == "" {
+		return nil, false
+	}
+	var row model.ProviderTask
+	err := r.db.WithContext(ctx).
+		Where("exec_id = ? AND node_id = ? AND status <> ? AND refunded_amount = 0", execID, nodeID, "refunded").
+		Order("id desc").Limit(1).First(&row).Error
+	if err != nil || row.ChargedAmount <= 0 {
+		return nil, false
+	}
+	return &row, true
 }

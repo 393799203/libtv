@@ -4,10 +4,11 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   ReloadOutlined,
   SafetyOutlined,
-  CopyOutlined,
   WarningOutlined,
   LinkOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
+import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import {
   providerTaskApi,
   type ProviderTask,
@@ -41,6 +42,7 @@ const ALERT_LABEL: Record<string, string> = {
   stuck: '卡在进行中',
   refund_delivered: '既退费又交付',
   amount_mismatch: '金额对不上',
+  dup_charge: '疑似重复扣费',
   no_user: '无归属用户',
   orphan_exec: '执行记录缺失',
 };
@@ -154,11 +156,55 @@ export default function ProviderTaskReconciliation() {
     });
   };
 
-  const copyText = (text: string, tip: string) => {
-    navigator.clipboard?.writeText(text).then(
-      () => message.success(tip),
-      () => message.warning('复制失败，请手动选择复制')
-    );
+  /**
+   * 在线预览：产物存在对象存储上，存储对 mp4 返回 Content-Disposition: attachment，
+   * 直接点链接只会下载。这里先向后台要一张 10 分钟票据，再用票据地址喂给播放器 ——
+   * 后台会把响应头改成 inline 并原样转发 Range，所以视频点开就能看、进度条也能拖。
+   */
+  const [preview, setPreview] = useState<{
+    url: string;
+    kind: 'video' | 'image';
+    title: string;
+    meta: string;
+  } | null>(null);
+  /**
+   * 「产物地址」气泡改成受控。
+   *
+   * 原因：antd 的气泡层级（1030）比 Modal（1000）高，所以点气泡里的「在线查看」打开全屏预览后，
+   * 气泡会**浮在预览遮罩之上**继续挡着画面。打开预览/下载时主动收起它。
+   */
+  const [artifactPopover, setArtifactPopover] = useState<number | null>(null);
+
+  const artifactKind = (row: ProviderTask, url: string): 'video' | 'image' | 'audio' | 'other' => {
+    const path = url.split('?')[0].toLowerCase();
+    if (row.task_kind === 'ai.video' || /\.(mp4|mov|webm|m4v)$/.test(path)) return 'video';
+    if (row.task_kind === 'ai.image' || /\.(png|jpe?g|webp|gif)$/.test(path)) return 'image';
+    if (row.task_kind === 'ai.audio' || /\.(mp3|wav|m4a)$/.test(path)) return 'audio';
+    return 'other';
+  };
+
+  const openPreview = (row: ProviderTask, source: 'result' | 'provider') => {
+    setArtifactPopover(null); // 先收起产物气泡，否则它会浮在全屏预览上面
+    const artifact = source === 'provider' ? row.provider_url : row.result_url || row.provider_url;
+    const url = (artifact || '').trim();
+    if (!url) {
+      message.error('这一行没有产物地址');
+      return;
+    }
+    // 播放地址就用存储上的原始视频地址（和首页视频、画布视频节点同一套）：
+    // <video> 取流不受 Content-Disposition: attachment 影响，能直接播；
+    // 绕后台代理转发反而把 4 核机器的带宽也搭进去，大视频容易卡。后台的代理接口留着做兜底。
+    const kind = artifactKind(row, url);
+    if (kind === 'video' || kind === 'image') {
+      setPreview({
+        url,
+        kind,
+        title: `${KIND_LABEL[row.task_kind] || row.task_kind || '产物'} · ${row.model || '-'}`,
+        meta: source === 'provider' ? '上游原始产物（未转存成功）' : '交付产物',
+      });
+    } else {
+      window.open(url, '_blank', 'noreferrer');
+    }
   };
 
   /** 产物地址：优先交付地址（我们的存储），其次上游原始地址（转存失败时仍可打开） */
@@ -168,29 +214,22 @@ export default function ProviderTaskReconciliation() {
     return null;
   };
 
-  /** 悬停/点击「已交付」时给出的产物面板：直接打开 + 一键复制 */
+  /** 悬停/点击「已交付」时给出的产物面板：地址 + 在线查看（这条路是唯一的产物入口） */
   const artifactPanel = (row: ProviderTask) => {
     const rows = [
       row.result_url ? { label: '交付产物', url: row.result_url } : null,
       row.provider_url ? { label: '上游原始产物', url: row.provider_url } : null,
     ].filter(Boolean) as { label: string; url: string }[];
     return (
+      // 气泡只负责「看地址」：标签 + 完整地址（break-all 换行，不截断，这是排查问题的凭据）。
+      // 「在线查看」已经挪到外面状态行的链接图标后面，这里不再重复放按钮。
       <div className="max-w-[420px] text-[12px] leading-6">
         {rows.map((r) => (
           <div key={r.label} className="mb-1">
             <div className="text-gray-500">{r.label}</div>
-            <div className="flex items-center gap-1">
-              <a href={r.url} target="_blank" rel="noreferrer" className="break-all text-blue-600">
-                {r.url}
-              </a>
-              <Button
-                type="text"
-                size="small"
-                icon={<CopyOutlined />}
-                title="复制地址"
-                onClick={() => copyText(r.url, '产物地址已复制')}
-              />
-            </div>
+            <a href={r.url} target="_blank" rel="noreferrer" className="break-all text-blue-600">
+              {r.url}
+            </a>
           </div>
         ))}
         {!rows.length && <div className="text-gray-400">这条没有产物地址</div>}
@@ -206,7 +245,8 @@ export default function ProviderTaskReconciliation() {
     {
       title: '时间 / 状态',
       dataIndex: 'status',
-      width: 156,
+      // 150：够放状态标签 + 产物链接图标 + 在线查看图标（退费按钮/异常标记长了会折到第二行，flex-wrap 已开）
+      width: 150,
       render: (s: string, row: ProviderTask) => {
         const meta = STATUS_META[s] || { text: s || '-', color: 'default' };
         // 已退费要分清是谁退的：自动退 = 上游明确拒绝（上游不计费）；人工退 = 可能已计费
@@ -233,6 +273,8 @@ export default function ProviderTaskReconciliation() {
             title="产物地址"
             trigger="click"
             placement="bottomLeft"
+            open={artifactPopover === row.id}
+            onOpenChange={(v) => setArtifactPopover(v ? row.id : null)}
           >
             <span className="cursor-pointer inline-flex items-center gap-0.5">
               {tag}
@@ -242,6 +284,31 @@ export default function ProviderTaskReconciliation() {
         ) : (
           <span className={tip ? 'cursor-help' : undefined}>{tag}</span>
         );
+        // 操作按钮跟在状态后面（有产物时就在那个链接图标后面）：行内一眼能对上，不用去最右边找。
+        // 注意按钮是 Popover 的**兄弟**而不是子节点 —— 放里面点一下会连带把产物气泡也切出来。
+        // artifact 在上面（body 那段）已经算过，这里复用，别重复声明
+        const artifactSource: 'result' | 'provider' = artifact?.own ? 'result' : 'provider';
+        const viewBtn = artifact ? (
+          <Tooltip
+            // 预览打开时强制收起：Tooltip 的层级（1070）比 Modal（1000）高，
+            // 鼠标停在图标上时它会一直浮在全屏播放器上面
+            open={preview ? false : undefined}
+            title={artifact.own ? '在线查看交付产物' : '在线查看上游原始产物（未转存成功）'}
+          >
+            <Button
+              type="text"
+              size="small"
+              className="!px-0"
+              icon={<PlayCircleOutlined />}
+              onClick={() => openPreview(row, artifactSource)}
+            />
+          </Tooltip>
+        ) : null;
+        const refundBtn = canRefund(row) ? (
+          <Button size="small" danger loading={refunding === row.id} onClick={() => refund(row)}>
+            退费
+          </Button>
+        ) : null;
         const tagNode = tip ? (
           <Tooltip title={tip}>
             <span>{body}</span>
@@ -262,8 +329,10 @@ export default function ProviderTaskReconciliation() {
         return (
           <div className="leading-5">
             <div className="text-[12px] text-gray-600">{formatTime(row.created_at)}</div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-y-0.5">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {tagNode}
+              {viewBtn}
+              {refundBtn}
               {alertNode}
             </div>
           </div>
@@ -276,10 +345,10 @@ export default function ProviderTaskReconciliation() {
       width: 150,
       render: (_: string, r) => (
         <div className="text-[12px] leading-5">
-          <div className="text-gray-800 truncate" title={r.user_name || r.user_email || ''}>
+          <div className="text-gray-800 line-clamp-1 break-all" title={r.user_name || r.user_email || ''}>
             {r.user_name || '（无昵称）'}
           </div>
-          <div className="text-[11px] text-gray-400 truncate" title={r.user_email || ''}>
+          <div className="text-[11px] text-gray-400 line-clamp-1 break-all" title={r.user_email || ''}>
             {r.user_email || '-'}
           </div>
         </div>
@@ -291,7 +360,7 @@ export default function ProviderTaskReconciliation() {
       width: 150,
       render: (_: string, r) => (
         <div className="text-[12px] leading-5">
-          <div className="text-gray-800 truncate" title={r.project_name || r.project_id || ''}>
+          <div className="text-gray-800 line-clamp-1 break-all" title={r.project_name || r.project_id || ''}>
             {/* 三种情况分清楚（对账行是永久记录，项目不是）：
                 · 实时查得到名字 → 直接显示（项目改名会跟着变）；
                 · 查不到但这一行写入了名称快照 → 显示「原名（项目已删除）」，
@@ -315,7 +384,7 @@ export default function ProviderTaskReconciliation() {
               '-'
             )}
           </div>
-          <div className="text-[10px] text-gray-400 truncate" title={r.project_id}>
+          <div className="text-[10px] text-gray-400 line-clamp-1 break-all" title={r.project_id}>
             {r.project_id || '-'}
           </div>
         </div>
@@ -324,7 +393,8 @@ export default function ProviderTaskReconciliation() {
     {
       title: '渠道 / 模型',
       dataIndex: 'model',
-      width: 224,
+      // 224 → 160：渠道名 + 口径标签一行、模型名折行，用不了那么宽；腾出来的给备注
+      width: 160,
       render: (_: string, r) => (
         <div className="text-[12px] leading-5">
           {/* 口径（模型参数：分辨率 · 计费时长）跟在渠道名后面：模型名很长，跟在它后面会被挤掉 */}
@@ -399,35 +469,46 @@ export default function ProviderTaskReconciliation() {
     {
       title: '备注',
       dataIndex: 'note',
-      width: 160,
+      // 160 → 224：自检写的原因+上游报错都在这列，两行装得下更多
+      width: 224,
       render: (v: string) =>
         v ? (
-          // 备注常常很长（上游原始报错），这里只留一行摘要，全文放气泡里看
-          <Tooltip title={<span className="text-[12px] leading-5 break-all">{v}</span>}>
-            <span className="block text-[11px] text-gray-500 truncate cursor-help">{v}</span>
+          // 备注常常很长（上游原始报错 + 自检写的原因），这里最多显示两行，超出部分放浮层看全文
+          <Tooltip
+            // 浮层限宽 + 超高可滚动：上游原始报错很长，默认的窄气泡会竖成一条
+            title={<div className="text-[12px] leading-5 break-all max-w-[520px] max-h-[320px] overflow-auto">{v}</div>}
+          >
+            {/* 用 line-clamp-2 + break-all 而不是 truncate：
+                truncate 是 white-space: nowrap，一旦表格不是固定布局（列宽之和 ≠ scroll.x 时
+                表体就会退回自动布局），不会换行的长文本会把整列顶宽、把表格挤乱。
+                line-clamp-2 自己内部允许换行，长任务号/长英文也不会撑开，视觉上「最多两行 + 省略号」。 */}
+            {/* 注意：这里**不能**再写 block —— line-clamp-2 靠 display:-webkit-box 生效，
+                而构建出来的 CSS 里 .block 排在 .line-clamp-2 后面，同权重下会把 -webkit-box
+                覆盖回 block，截断直接失效（表现为备注照样铺满好几行）。 */}
+            <span className="text-[11px] text-gray-500 line-clamp-2 break-all cursor-help leading-4">
+              {v}
+            </span>
           </Tooltip>
         ) : (
           <span className="text-[11px] text-gray-300">-</span>
-        ),
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 84,
-      fixed: 'right',
-      render: (_: unknown, row) =>
-        canRefund(row) ? (
-          <Button size="small" danger loading={refunding === row.id} onClick={() => refund(row)}>
-            退费
-          </Button>
-        ) : (
-          <span className="text-[12px] text-gray-300">—</span>
         ),
     },
   ];
 
   return (
     <div className="flex-1 overflow-auto p-6">
+      {/* 在线预览：产物地址带后台签发的短期票据，后台代理转发并把响应头改成 inline
+          （存储本身返回 attachment，直接点地址只能下载）；播放器复用画布那套沉浸式预览。
+          这里刻意是**单击**触发，画布上才是双击。 */}
+      <MediaPreviewModal
+        open={!!preview}
+        kind={preview?.kind || 'video'}
+        url={preview?.url}
+        title={preview?.title}
+        meta={preview?.meta}
+        onClose={() => setPreview(null)}
+      />
+
       {/* 汇总条：一眼看清「要动手的有几条」和「白付上游多少钱」 */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="px-3 py-2 rounded bg-gray-50 border border-gray-100 text-[12px] text-gray-600">
@@ -596,7 +677,9 @@ export default function ProviderTaskReconciliation() {
         columns={columns}
         dataSource={items}
         pagination={false}
-        scroll={{ x: 1228 }}
+        // 必须等于各列 width 之和（150+150+150+160+96+176+150+224=1256）：
+        // 不一致时 antd 的表头和表体宽度算法会对不上，列会错位
+        scroll={{ x: 1256 }}
         locale={{ emptyText: '暂无记录（对账表从本次上线开始记录）' }}
       />
 

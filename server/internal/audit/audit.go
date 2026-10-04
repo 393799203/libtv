@@ -28,6 +28,8 @@ import (
 	"gorm.io/gorm"
 
 	"libtv/internal/repository"
+
+	"libtv/internal/model"
 )
 
 // 异常代码（写进 provider_tasks.alert，界面上按它决定文案与颜色）
@@ -37,6 +39,7 @@ const (
 	AlertStuck           = "stuck"            // 卡在「进行中」超过阈值
 	AlertRefundDelivered = "refund_delivered" // 既退费又交付（自相矛盾）
 	AlertAmountMismatch  = "amount_mismatch"  // 与账单流水的金额对不上
+	AlertDupCharge       = "dup_charge"       // 同一节点上一笔没退费又扣了一笔（疑似重复扣费）
 	AlertNoUser          = "no_user"          // 没有归属用户（退费落不到人）
 	AlertOrphanExec      = "orphan_exec"      // 关联的执行记录不存在
 )
@@ -93,6 +96,7 @@ var alertReasons = map[string]string{
 	AlertStuck:           "长时间停留在「进行中」没有结算，请人工核查上游是否已完成、是否应退费",
 	AlertRefundDelivered: "既已退费又显示已交付（自相矛盾），请人工核查并按实际情况修正",
 	AlertAmountMismatch:  "与账单流水的金额对不上，请人工核查扣费/退费是否完整",
+	AlertDupCharge:       "同一节点上一笔扣费未退费又扣了一笔，疑似重复扣费，请人工核查",
 	AlertNoUser:          "没有归属用户，无法退费到人，请人工核查",
 	AlertOrphanExec:      "关联的执行记录不存在（项目仍在），请人工核查数据完整性",
 }
@@ -101,6 +105,14 @@ var alertReasons = map[string]string{
 func (c *Checker) RunOnce(ctx context.Context) (*Report, error) {
 	started := time.Now()
 	report := &Report{StartedAt: started}
+	// 本次扫了多少行对账（页面上的「扫描 N 行」）—— 这个字段以前一直没人填，永远显示 0。
+	// 数不出来不影响核对本身，留 0 即可。
+	var total int64
+	if err := c.db.WithContext(ctx).Model(&model.ProviderTask{}).Count(&total).Error; err != nil {
+		log.Printf("[Audit] 统计对账行数失败（不影响核对）: %v", err)
+	} else {
+		report.Scanned = int(total)
+	}
 
 	found := map[int64]string{} // rowID → alert code
 	if err := c.checkNoResult(ctx, found); err != nil {
@@ -116,6 +128,9 @@ func (c *Checker) RunOnce(ctx context.Context) (*Report, error) {
 		return nil, err
 	}
 	if err := c.checkAmountMismatch(ctx, found); err != nil {
+		return nil, err
+	}
+	if err := c.checkDuplicateCharge(ctx, found); err != nil {
 		return nil, err
 	}
 	if err := c.checkNoUser(ctx, found); err != nil {
@@ -231,8 +246,19 @@ func (c *Checker) checkRefundDelivered(ctx context.Context, found map[int64]stri
 func (c *Checker) checkAmountMismatch(ctx context.Context, found map[int64]string) error {
 	return c.collect(ctx, found, AlertAmountMismatch, `
 		select p.id from provider_tasks p
-		 where coalesce(p.task_id, '') <> ''
-		   and (
+		 where (
+		   -- 新口径（charge_key）：扣费分录与退费分录都带同一把编号 → 两侧都能精确核对，
+		   -- 而且「有没有分录」本身就是事实（少了=账单没写成，多了=重复扣费）
+		   (coalesce(p.charge_key, '') <> '' and (
+		      coalesce((select sum(b.amount) from billing_records b
+		                 where b.charge_key = p.charge_key and b.type = 'deduct'), 0) <> p.charged_amount
+		      or
+		      coalesce((select sum(b.amount) from billing_records b
+		                 where b.charge_key = p.charge_key and b.type = 'refund'), 0) <> p.refunded_amount
+		   ))
+		   or
+		   -- 历史行（没有 charge_key）：扣费分录不带任务号，只能沿用「有该类分录才比」的规则
+		   (coalesce(p.charge_key, '') = '' and coalesce(p.task_id, '') <> '' and (
 		     (exists (select 1 from billing_records b
 		               where b.task_id = p.task_id and b.type = 'deduct')
 		      and coalesce((select sum(b.amount) from billing_records b
@@ -242,6 +268,31 @@ func (c *Checker) checkAmountMismatch(ctx context.Context, found map[int64]strin
 		               where b.task_id = p.task_id and b.type = 'refund')
 		      and coalesce((select sum(b.amount) from billing_records b
 		                     where b.task_id = p.task_id and b.type = 'refund'), 0) <> p.refunded_amount)
+		   ))
+		 )`)
+}
+
+// checkDuplicateCharge 同一执行 + 同一节点上「上一笔没退费，后面又扣了一笔」。
+//
+// 为什么单独查这一条：正常重试的形态是「上一笔上游拒绝 → 已退费 → 用户重新生成」，
+// 那是合理的（钱退了，重新扣）。真正要命的是**上一笔没退**又扣了第二笔 ——
+// 用户为一次点击付了两遍钱，而现在账面看不出任何异常（两行各自都自洽）。
+// 线上真实形态参考：exec 1289 的 video-1791037098340 被扣两次（那两次都退了，属正常）。
+func (c *Checker) checkDuplicateCharge(ctx context.Context, found map[int64]string) error {
+	return c.collect(ctx, found, AlertDupCharge, `
+		select p.id from provider_tasks p
+		 where coalesce(p.charge_key, '') <> ''
+		   and p.charged_amount > 0
+		   and p.exec_id > 0
+		   and coalesce(p.node_id, '') <> ''
+		   and exists (
+		     select 1 from provider_tasks q
+		      where q.id < p.id
+		        and q.exec_id = p.exec_id
+		        and q.node_id = p.node_id
+		        and q.charged_amount > 0
+		        and q.refunded_amount = 0
+		        and coalesce(q.status, '') <> 'refunded'
 		   )`)
 }
 
@@ -313,6 +364,34 @@ func (c *Checker) checkChargedWithoutLedger(ctx context.Context, report *Report)
 		report.Orphans = append(report.Orphans, msg)
 		log.Printf("[Audit] ⚠️ %s", msg)
 	}
+
+	// 精确核对（新口径）：带 charge_key 的扣费分录，必须能找到同一把编号的对账行。
+	// 上面对老数据只能靠「同用户+同金额±3分钟」猜，这里没有猜测成分 ——
+	// 编号是扣费那一刻写进两张表的，找不到就是真缺行（比如扣费成功后写对账前进程中断）。
+	var exact []struct {
+		ID        int64
+		UserID    string
+		Amount    int64
+		Action    string
+		ChargeKey string
+		CreatedAt time.Time
+	}
+	if err := c.db.WithContext(ctx).Raw(`
+		select b.id, b.user_id, b.amount, b.action, b.charge_key, b.created_at
+		  from billing_records b
+		 where b.type = 'deduct'
+		   and coalesce(b.charge_key, '') <> ''
+		   and b.created_at > now() - interval '24 hours'
+		   and not exists (select 1 from provider_tasks p where p.charge_key = b.charge_key)`).
+		Scan(&exact).Error; err != nil {
+		return err
+	}
+	for _, row := range exact {
+		msg := fmt.Sprintf("扣费流水 #%d（用户 %s，%d 分，%s，%s，编号 %s）带扣费编号却找不到对应行 —— 扣费成功但对账行没写成，请人工核查",
+			row.ID, row.UserID, row.Amount, row.Action, row.CreatedAt.Format("01-02 15:04:05"), row.ChargeKey)
+		report.Orphans = append(report.Orphans, msg)
+		log.Printf("[Audit] ⚠️ %s", msg)
+	}
 	return nil
 }
 
@@ -342,6 +421,8 @@ func AlertLabel(code string) string {
 		return "卡在进行中"
 	case AlertRefundDelivered:
 		return "既退费又交付"
+	case AlertDupCharge:
+		return "疑似重复扣费"
 	case AlertAmountMismatch:
 		return "金额对不上"
 	case AlertNoUser:

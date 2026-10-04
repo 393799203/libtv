@@ -96,6 +96,50 @@ func main() {
 		}
 	}
 
+	// ========== 对账表：身份从「任务号」改为「charge_key」 ==========
+	//
+	// 背景：扣费发生在「调上游创建任务」之前，那一刻还没有上游任务号 —— 于是扣费账单
+	// 永远带不上任务号，扣费侧金额过去无法核对。现在给每次扣费生成一把唯一编号
+	// （charge_key），账单分录与对账行共用它，且**不可变**（以前行的身份是 task_id，
+	// 拿到任务号后会被改写：同一节点在同一次执行里被扣两次费时会挤进同一行、金额互相覆盖）。
+	//
+	// 两处索引必须改成「仅非空唯一」的部分索引：
+	//   1. task_id：扣费后、任务号到手前，多行可以同时没有任务号（空串）；
+	//      旧的 not null + 全量唯一约束会让第二行直接写不进去；
+	//   2. charge_key：历史行留空，同样只能对非空值唯一（否则历史行之间互相冲突）。
+	// AutoMigrate 只会新增索引、不会把已有同名唯一索引改成部分索引，所以在这里手工处理。
+	if db.Migrator().HasIndex(&model.ProviderTask{}, "idx_provider_tasks_task_id") {
+		var indexDef string
+		if err := db.Raw("SELECT indexdef FROM pg_indexes WHERE indexname = ?", "idx_provider_tasks_task_id").
+			Scan(&indexDef).Error; err == nil && strings.Contains(indexDef, "UNIQUE") {
+			log.Printf("对账表：把 task_id 的全量唯一索引换成「仅非空唯一」的部分索引（为 charge_key 身份让路）")
+			if err := db.Migrator().DropIndex(&model.ProviderTask{}, "idx_provider_tasks_task_id"); err != nil {
+				log.Printf("warning: drop old unique index idx_provider_tasks_task_id failed: %v", err)
+			}
+		}
+	}
+	for _, stmt := range []string{
+		// 任务号只对非空值唯一（同一个任务号仍然不许出现两行）
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_tasks_task_id_alive ON provider_tasks (task_id) WHERE task_id <> ''`,
+		// 扣费编号只对非空值唯一：一次扣费只能有一行对账（重复登记从此在数据库层面被挡住）
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_tasks_charge_key_alive ON provider_tasks (charge_key) WHERE charge_key <> ''`,
+		// 两个键都要能当查询条件（对账行 ↔ 账单流水的精确认领）
+		`CREATE INDEX IF NOT EXISTS idx_provider_tasks_task_id ON provider_tasks (task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_billing_records_charge_key ON billing_records (charge_key)`,
+		// 列宽 64 → 128：GORM AutoMigrate 不会替我们放大 varchar（实测：模型改成 size:128 后
+		// 线上列宽仍是 64），而编号长度由调用方决定 —— 曾经因为 72 字符的编号写不进 64 的列，
+		// 出现「钱扣了、账单和对账行都没写进去」。这里显式放大，纯为防再犯。
+		`ALTER TABLE provider_tasks ALTER COLUMN charge_key TYPE varchar(128)`,
+		`ALTER TABLE billing_records ALTER COLUMN charge_key TYPE varchar(128)`,
+		// 备注放大：上游拒绝的原始报错很长，255 会切掉真正有用的后半句
+		`ALTER TABLE provider_tasks ALTER COLUMN note TYPE varchar(1200)`,
+		`ALTER TABLE billing_records ALTER COLUMN remark TYPE varchar(1000)`,
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			log.Printf("warning: migrate index failed (%s): %v", stmt, err)
+		}
+	}
+
 	// 初始化 Repository
 	userRepo := repository.NewUserRepo(db)
 	projectRepo := repository.NewProjectRepo(db)
@@ -502,6 +546,8 @@ func main() {
 			// 手动退费：只有「上游明确报错」才自动退，其余失败一律在这里由管理员决定
 			providerTasks.POST("/:id/refund", providerTaskHandler.Refund)
 			providerTasks.POST("/audit", providerTaskHandler.RunAudit) // 立即跑一次一致性自检
+			// 交付产物在线查看/下载：存储对 mp4 返回 attachment（点链接只能下载），
+			// 这里代理转发并改成 inline，视频可以直接看、进度条能拖；下载功能保留（?dl=1）
 		}
 
 		// 媒体维护：给缺失缩略图的图片补图（仅管理员）

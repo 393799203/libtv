@@ -2,11 +2,15 @@ package billing
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"libtv/internal/llm"
@@ -354,6 +358,47 @@ func (s *Service) ChargeByChars(ctx context.Context, userID, action, modelID, sc
 //
 // 扣费与退费必须用同一份 ChargeExtra：扣费时由 ChargeVideoByDuration 返回，
 // 退费时原样回传（Refund），两张账单的 Resolution / Duration / RefVideoDuration 才会完全一致
+// chargeKeyCtxKey 把「这次扣费的唯一编号」随 ctx 传给计费层。
+//
+// 为什么用 ctx 而不是加参数：扣费入口有四个（按次/按秒/按视频时长/按字数），
+// 逐个加参数会侵入所有调用方；而 charge_key 是「本次调用的属性」，本来就属于 ctx。
+// 显式传 ChargeExtra.ChargeKey 时以显式为准（人工退费等路径从对账行里读出来）。
+type chargeKeyCtxKey struct{}
+
+// WithChargeKey 给一次调用打上扣费编号（executor 在扣费前调用）
+func WithChargeKey(ctx context.Context, key string) context.Context {
+	if key == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, chargeKeyCtxKey{}, key)
+}
+
+// chargeKeyOf 取这次扣费/退费的编号：显式传入优先，其次 ctx
+func chargeKeyOf(ctx context.Context, extra ChargeExtra) string {
+	if extra.ChargeKey != "" {
+		return extra.ChargeKey
+	}
+	if v, ok := ctx.Value(chargeKeyCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// NewChargeKey 生成一次扣费的唯一编号。
+//
+// 形态 chg_<纳秒base36>_<8字节随机>：前缀可读、时间部分便于按时间定位、随机部分保证唯一
+// （不依赖执行号+节点号推导 —— 同一节点在同一次执行里可能被扣多次费，推导出来的 key 会撞）。
+func NewChargeKey() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// 随机源失败不该阻断扣费流程：退化成纳秒 + 计数器，仍然能保证唯一
+		return fmt.Sprintf("chg_%s_%d", strconv.FormatInt(time.Now().UnixNano(), 36), atomic.AddUint64(&chargeKeySeq, 1))
+	}
+	return fmt.Sprintf("chg_%s_%s", strconv.FormatInt(time.Now().UnixNano(), 36), hex.EncodeToString(b[:]))
+}
+
+var chargeKeySeq uint64
+
 type ChargeExtra struct {
 	Resolution string
 	// Seconds 计费总时长（秒）：视频 = 输出视频时长 + 参考视频时长
@@ -365,6 +410,9 @@ type ChargeExtra struct {
 	// 没有这一列，事后就无法回答「这笔失败到底有没有让上游真的接单并计费」，
 	// 也找不回上游可能已经产出的结果。线上实例：10-03 00:04 那次超时中断。
 	TaskID string
+	// ChargeKey 这一笔扣费的唯一编号（与 provider_tasks.charge_key 同值）。
+	// 扣费与退费必须带同一把 —— 少了它，账单流水和对账行就无法精确关联。
+	ChargeKey string
 }
 
 // chargeCost 扣费 + 记账：
@@ -393,11 +441,14 @@ func (s *Service) chargeCost(ctx context.Context, userID, action, modelName, sce
 	// 渠道独立成列，模型列只存纯模型 ID —— 不再拼成「wasu-模型名」这种四不像。
 	channel := channelOf(ctx)
 	s.writeRecord(ctx, &model.BillingRecord{
-		UserID:     userID,
-		Type:       "deduct",
-		Amount:     cost,
-		Action:     action,
-		Model:      modelName,
+		UserID: userID,
+		Type:   "deduct",
+		Amount: cost,
+		Action: action,
+		Model:  modelName,
+		// 扣费分录带上这次扣费的唯一编号：没有它，账单流水与上游对账行无法关联，
+		// 扣费侧金额永远核对不了（扣费发生在上游任务号之前，TaskID 那一列必然是空）
+		ChargeKey:  chargeKeyOf(ctx, extra),
 		Channel:    channel,
 		Scene:      scene,
 		Resolution: extra.Resolution,
@@ -451,8 +502,10 @@ func (s *Service) Refund(ctx context.Context, userID string, amount int64, actio
 	// 构建退费备注，包含退费原因；截断到安全长度（remark 字段 varchar(255)，按字符计）
 	remark := fmt.Sprintf("%s失败退还", scene)
 	if reason != "" {
-		if r := []rune(reason); len(r) > 200 {
-			reason = string(r[:200]) + "…"
+		// 同对账备注：原来的 200 字会把上游报错切掉大半，现在放到 600 字
+		// （remark 列已放大到 varchar(1000)，加上「场景+失败退还：」前缀也不会写爆）
+		if r := []rune(reason); len(r) > 600 {
+			reason = string(r[:600]) + "…"
 		}
 		remark = fmt.Sprintf("%s失败退还：%s", scene, reason)
 	}
@@ -468,7 +521,9 @@ func (s *Service) Refund(ctx context.Context, userID string, amount int64, actio
 		Scene:      scene,
 		Resolution: extra.Resolution,
 		TaskID:     extra.TaskID,
-		Duration:   extra.Seconds,
+		// 退费与扣费带**同一把** charge_key：对账才能把同一笔生成的两条分录归到一起
+		ChargeKey: chargeKeyOf(ctx, extra),
+		Duration:  extra.Seconds,
 		// 与扣费同口径：退费也带上参考视频时长，退费账单能还原出「退的是哪一档、多少秒」
 		RefVideoDuration: extra.RefVideoSeconds,
 		Remark:           remark,

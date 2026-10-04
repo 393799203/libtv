@@ -22,14 +22,16 @@ import (
 // 注意：这里不做「重试」相关的事 —— 接口层的一次调用就是一次点击，失败即返回给用户，
 // 不存在队列重试重复扣费的问题（工作流内的同步节点走 engine.syncTask，那条路径要考虑重试）。
 type SyncCall struct {
-	Ledger   *Ledger
-	Biller   *Service
-	Key      string // 对账行编号，由调用方生成（没有上游任务号，只能用本地编号）
-	Kind     string // 计费动作，如 ActionPromptGenerate（同时作为对账页的任务类型）
-	Scene    string // 账单/退费场景名，如「提示词生成」
-	Model    string
-	Provider string // 渠道（账单口径）
-	UserID   string
+	Ledger *Ledger
+	Biller *Service
+	// ChargeKey 这一笔扣费的唯一编号，由调用方生成并在扣费前注入 ctx ——
+	// 扣费分录和对账行靠它绑定（直连接口没有上游任务号，也不该把内部编号当任务号写）
+	ChargeKey string
+	Kind      string // 计费动作，如 ActionPromptGenerate（同时作为对账页的任务类型）
+	Scene     string // 账单/退费场景名，如「提示词生成」
+	Model     string
+	Provider  string // 渠道（账单口径）
+	UserID    string
 	// ProjectID 可选：直连接口（提示词/白模解析）由前端带上项目，对账页才能显示项目名。
 	// 不带也能跑，只是对账行里项目为空（界面显示「-」）。
 	ProjectID string
@@ -41,12 +43,14 @@ type SyncCall struct {
 
 // Write 落一行对账（状态取最新，按 Key upsert）
 func (c SyncCall) Write(ctx context.Context, status, note string, refunded int64) {
-	if c.Ledger == nil || c.Key == "" {
+	if c.Ledger == nil || c.ChargeKey == "" {
 		return
 	}
 	note = TruncateNote(note, 240)
 	row := &model.ProviderTask{
-		TaskID:           c.Key,
+		// 身份是 charge_key；直连接口本来就没有上游任务号，task_id 留空
+		// （以前这里塞的是自造的 sync:xxx 编号，界面还得专门认出来别当任务号展示）
+		ChargeKey:        c.ChargeKey,
 		TaskKind:         c.Kind,
 		Provider:         c.Provider,
 		Model:            c.Model,
@@ -73,7 +77,8 @@ func (c SyncCall) Write(ctx context.Context, status, note string, refunded int64
 // 文案必须与「钱退没退」一致：退了就说已退还，没退就说未自动退还、待人工复核。
 func (c SyncCall) Settle(ctx context.Context, err error) error {
 	detail := err.Error()
-	extra := ChargeExtra{Resolution: c.Resolution, Seconds: c.Seconds}
+	// 退费与扣费同一把 charge_key：对账时两条分录才归得到同一笔
+	extra := ChargeExtra{Resolution: c.Resolution, Seconds: c.Seconds, ChargeKey: c.ChargeKey}
 
 	if !ShouldAutoRefund(err) {
 		msg := fmt.Errorf("%s；本次扣费未自动退还，已提交人工复核，确认失败后会原路退还", detail)

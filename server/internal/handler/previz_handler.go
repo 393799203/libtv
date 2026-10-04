@@ -118,6 +118,9 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 	// 不注入会回退 wasu，导致电信独有的视觉模型（如 glm-5.3-flash）在 wasu 价格表里查不到，
 	// cost=0 则既不扣费也不拦余额（余额不足直接放行），账单渠道前缀也会错写成 wasu
 	billCtx := llm.WithChannel(c.Request.Context(), channel)
+	// 扣费编号先算出来：它同时写进扣费账单分录和对账行，是两边唯一的关联凭据
+	chargeKey := billing.NewChargeKey()
+	billCtx = billing.WithChargeKey(billCtx, chargeKey)
 	chargedAmount, err := h.biller.ChargeByModel(billCtx, userID, billing.ActionPrevizAnalyze, modelConfig.ModelID, "白模场景解析", 1)
 	if err != nil {
 		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
@@ -132,7 +135,7 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 	call := billing.SyncCall{
 		Ledger:    h.providerTasks,
 		Biller:    h.biller,
-		Key:       billing.NewSyncKey("sync:previz", userID),
+		ChargeKey: chargeKey,
 		Kind:      billing.ActionPrevizAnalyze,
 		Scene:     "白模场景解析",
 		Model:     modelConfig.ModelID,

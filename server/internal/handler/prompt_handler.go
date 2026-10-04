@@ -185,6 +185,9 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	}
 
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
+	// 扣费编号先算出来：它同时写进扣费账单分录和对账行，是两边唯一的关联凭据
+	chargeKey := billing.NewChargeKey()
+	billCtx = billing.WithChargeKey(billCtx, chargeKey)
 	chargedAmount, err := h.biller.ChargeByModel(billCtx, middleware.GetUserID(c), billing.ActionPromptGenerate, modelConfig.ModelID, "提示词生成", 1)
 	if err != nil {
 		c.JSON(apperror.HTTPStatusFromError(err), gin.H{
@@ -199,7 +202,7 @@ func (h *PromptHandler) GeneratePrompt(c *gin.Context) {
 	call := billing.SyncCall{
 		Ledger:    h.providerTasks,
 		Biller:    h.biller,
-		Key:       billing.NewSyncKey("sync:prompt", middleware.GetUserID(c)),
+		ChargeKey: chargeKey,
 		Kind:      billing.ActionPromptGenerate,
 		Scene:     "提示词生成",
 		Model:     modelConfig.ModelID,
