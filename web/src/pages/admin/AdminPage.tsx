@@ -1043,7 +1043,7 @@ export default function AdminPage() {
                         <th className="px-4 py-3 text-left font-medium text-gray-600">昵称</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
-                        <th className="px-4 py-3 text-left font-medium text-gray-600">AI渠道</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">渠道商</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">剩余积分</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">最后登录</th>

@@ -76,7 +76,7 @@ ratelimit:
 
 jwt:
   secret: "libtv-mvp-secret-change-in-production"
-  expire_hours: 72
+  expire_hours: 24
 
 storage:
   type: fallback  # fallback / minio / local / zos (fallback=MinIO优先，失败降级local；zos=天翼云对象存储)

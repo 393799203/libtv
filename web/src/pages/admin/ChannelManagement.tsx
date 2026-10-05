@@ -94,7 +94,7 @@ export default function ChannelManagement() {
           <div className="font-medium text-gray-700 mb-1.5">说明</div>
           <ul className="list-disc pl-4 space-y-1">
             <li>「按各自渠道」为默认策略：用户注册/后台标记的渠道决定其 AI 请求走向</li>
-            <li>单个用户的渠道可在「用户管理」页签的 <b>AI渠道</b> 列调整（华数/电信）</li>
+            <li>单个用户的渠道可在「用户管理」页签的 <b>渠道商</b> 列调整（华数/电信）</li>
             <li>全局切换用于临时分流/故障切换：如某渠道 Token 额度耗尽，可一键切到另一渠道</li>
           </ul>
         </div>

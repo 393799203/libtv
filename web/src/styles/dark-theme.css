@@ -214,6 +214,31 @@ html.theme-dark-root #root {
   border-color: #22d3ee;
 }
 
+/* ========== 悬浮底色：把剩余未映射的浅色/彩色 hover 全部收口 ==========
+   全库统计里还有 hover:bg-blue-50（25 处）、hover:bg-blue-700（16 处）、
+   hover:bg-red-50/100、hover:bg-sky-600 这几类没覆盖 —— 漏一处就是"hover 上去发白/发蓝"。 */
+.theme-dark :is(.hover\:bg-blue-50:hover, .hover\:bg-sky-50:hover) {
+  background-color: rgba(34, 211, 238, 0.16);
+}
+.theme-dark :is(.hover\:bg-blue-700:hover, .hover\:bg-sky-600:hover) {
+  background-color: #0891b2;
+}
+.theme-dark :is(.hover\:bg-red-50:hover, .hover\:bg-red-100:hover) {
+  background-color: rgba(244, 63, 94, 0.2);
+}
+.theme-dark :is(.hover\:bg-green-50:hover, .hover\:bg-green-100:hover) {
+  background-color: rgba(34, 197, 94, 0.2);
+}
+.theme-dark :is(.hover\:bg-amber-50:hover, .hover\:bg-amber-100:hover) {
+  background-color: rgba(245, 158, 11, 0.2);
+}
+.theme-dark :is(.hover\:bg-purple-50:hover, .hover\:bg-violet-50:hover) {
+  background-color: rgba(139, 92, 246, 0.2);
+}
+.theme-dark :is(.hover\:bg-gray-200\/50:hover, .hover\:bg-gray-100\/50:hover, .hover\:bg-gray-50\/50:hover, .hover\:bg-white\/50:hover, .hover\:bg-white\/60:hover) {
+  background-color: rgba(34, 211, 238, 0.12);
+}
+
 /* ========== 文字：深色字 → 冷白字 ========== */
 .theme-dark :is(.text-gray-900, .text-gray-800, .text-black, .text-slate-800, .text-slate-900) {
   color: var(--dv-text-1);

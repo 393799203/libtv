@@ -88,6 +88,18 @@ func (h *UserHandler) Login(c *gin.Context) {
 	response.OK(c, AuthResponse{Token: token, User: *user})
 }
 
+// Refresh 会话滑动续期：前端在 token 剩余寿命不足时调用，换回一个新的完整有效期 token。
+// 挂在鉴权中间件之后，所以"能续期"本身就意味着原 token 仍然有效（过期后调用会直接 401）。
+func (h *UserHandler) Refresh(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	token, user, err := h.userService.RenewToken(c.Request.Context(), userID)
+	if err != nil {
+		response.Fail(c, http.StatusUnauthorized, "session expired, please login again")
+		return
+	}
+	response.OK(c, AuthResponse{Token: token, User: *user})
+}
+
 func (h *UserHandler) Me(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	user, err := h.userService.GetByID(c.Request.Context(), userID)

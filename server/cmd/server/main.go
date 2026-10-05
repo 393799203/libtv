@@ -412,6 +412,7 @@ func main() {
 
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
+		api.POST("/auth/refresh", userHandler.Refresh) // 滑动续期：剩余寿命不足时换新 token
 		api.PUT("/auth/profile", userHandler.UpdateProfile)             // 更新当前用户个人资料（昵称/头像）
 		api.PUT("/auth/password", userHandler.ChangePassword)           // 修改当前用户密码
 		api.POST("/upload/avatar", uploadHandler.UploadAvatar)          // 上传头像（存 users/<userID>/avatar/）

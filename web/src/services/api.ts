@@ -31,9 +31,65 @@ const api = axios.create({
   },
 });
 
-// 请求拦截器：注入 token
-api.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token;
+// ========== 会话滑动续期 ==========
+// 后端 token 有效期 24 小时且不会自动延长，用户干着活被静默登出会丢未保存内容。
+// 这里在"剩余寿命不足一半（12 小时）"时，请求前静默换一个新 token：
+//   · 阈值取一半而不是每次请求都续签 —— 活跃用户大约 12 小时才续一次，开销可忽略
+//   · 续签接口本身受鉴权保护，token 已过期时它会 401，交给下面的统一登出逻辑兜底
+const RENEW_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+let renewing: Promise<string | null> | null = null;
+
+/** 解析 JWT 的 exp（毫秒）；解析不出来返回 null，表示"不主动续签"，让 401 兜底 */
+function tokenExpiresAt(token: string): number | null {
+  try {
+    const payload = JSON.parse(
+      decodeURIComponent(
+        atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))
+          .split('')
+          .map((ch) => '%' + ('00' + ch.charCodeAt(0).toString(16)).slice(-2))
+          .join(''),
+      ),
+    );
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRenew(token: string): boolean {
+  const exp = tokenExpiresAt(token);
+  return exp !== null && exp - Date.now() < RENEW_THRESHOLD_MS;
+}
+
+async function renewSession(currentToken: string): Promise<string | null> {
+  // 并发去重：同一时刻可能有多个请求同时判定需要续期，共用一个在途 Promise，只发一次请求
+  if (!renewing) {
+    renewing = axios
+      .post('/api/auth/refresh', {}, { headers: { Authorization: `Bearer ${currentToken}` } })
+      .then((res) => {
+        const payload = (res as any)?.data?.data ?? (res as any)?.data;
+        const newToken: string | undefined = payload?.token;
+        if (!newToken) return null;
+        // 复用 setAuth 落盘：它本来就负责写 localStorage，续签后刷新页面不会退回旧 token
+        const user = payload?.user ?? useAuthStore.getState().user;
+        if (user) useAuthStore.getState().setAuth({ token: newToken, user });
+        else useAuthStore.setState({ token: newToken });
+        return newToken;
+      })
+      .catch(() => null) // 续签失败不阻断本次请求（旧 token 通常仍可用），401 逻辑会兜底
+      .finally(() => { renewing = null; });
+  }
+  return renewing;
+}
+
+// 请求拦截器：注入 token（并在临近过期时先静默续签）
+api.interceptors.request.use(async (config) => {
+  let token = useAuthStore.getState().token;
+  // 续签接口自己不带"先续签"逻辑，否则会递归
+  if (token && !String(config.url || '').includes('/auth/refresh') && shouldRenew(token)) {
+    const renewed = await renewSession(token);
+    if (renewed) token = renewed;
+  }
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

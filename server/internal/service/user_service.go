@@ -314,6 +314,21 @@ func (s *UserService) generateToken(user *model.User) (string, error) {
 	return token.SignedString([]byte(config.C.JWT.Secret))
 }
 
+// RenewToken 会话滑动续期：为已登录用户重新签发一个完整有效期的 token。
+// 只做"延长"，不改变身份信息 —— claims 完全复用 generateToken（含 pwd_ver），
+// 所以改密码后旧 token 依然会失效，续期不会成为绕过密码版本的漏洞。
+func (s *UserService) RenewToken(ctx context.Context, userID string) (string, *model.User, error) {
+	user, err := s.GetByID(ctx, userID)
+	if err != nil {
+		return "", nil, err
+	}
+	token, err := s.generateToken(user)
+	if err != nil {
+		return "", nil, err
+	}
+	return token, user, nil
+}
+
 // GetUserChannel 查询用户 AI 渠道（管理员修改/渠道路由用）
 func (s *UserService) GetUserChannel(ctx context.Context, userID string) (string, error) {
 	if userID == "" {

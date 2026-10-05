@@ -52,6 +52,14 @@ function App() {
           colorPrimaryBgHover: 'rgba(34, 211, 238, 0.2)',
           colorPrimaryBorder: '#22d3ee',
           controlItemBgActive: 'rgba(34, 211, 238, 0.16)',
+          // ---- 悬浮/填充色：antd 暗色算法把"填充"定义成半透明白（rgba(255,255,255,.08)），
+          // 在近黑底上就会"发白"（文字按钮、标签、图标按钮的 hover 底都是它）。
+          // 这里改成冷色暗面/青色淡染，与整体色调一致，也不会亮得刺眼。
+          controlItemBgHover: 'rgba(34, 211, 238, 0.10)',
+          colorFillTertiary: '#16202f',
+          colorFillSecondary: '#1c2638',
+          colorFill: '#22304a',
+          colorFillQuaternary: '#131b2b',
           controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)', 
         },
         components: {
