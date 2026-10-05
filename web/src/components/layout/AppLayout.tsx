@@ -109,13 +109,12 @@ export function AppLayout() {
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
           <button
             onClick={() => navigate('/forum')}
-            className={`flex flex-row md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${
+            className={`flex flex-row items-center justify-center gap-0.5 md:gap-1.5 w-auto h-10 md:h-auto rounded-lg px-2.5 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${
               location.pathname.startsWith('/forum')
                 ? 'bg-blue-50 text-blue-600'
                 : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
             }`}
           >
-            {/* 移动端不显示图标：头部空间紧张，只留文字更清爽（桌面端保留图标） */}
             {/* 移动端不显示图标。这里必须用外层 span 控制显隐：
                 antd 图标自带 .anticon{display:inline-flex}，与 Tailwind 的 display 工具类同特异度，
                 而 antd 样式是运行时注入的（在静态样式表之后），所以给图标加 hidden 永远赢不了。 */}
