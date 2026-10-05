@@ -1,23 +1,29 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { App, Select, Pagination } from 'antd';
 import {
-  TagOutlined,
-  SettingOutlined,
-  FolderAddOutlined,
-  PlusOutlined,
+  App,
+  Select,
+  Pagination,
+  Button,
+} from 'antd';
+import {
+  AccountBookOutlined,
+  CaretRightOutlined,
   DeleteOutlined,
+  DollarOutlined,
   EditOutlined,
-  UploadOutlined,
+  FileSearchOutlined,
+  FolderAddOutlined,
   HeartFilled,
   HeartOutlined,
+  LoadingOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SettingOutlined,
+  TagOutlined,
+  UploadOutlined,
   UserOutlined,
   VideoCameraOutlined,
-  CaretRightOutlined,
-  LoadingOutlined,
-  AccountBookOutlined,
-  DollarOutlined,
-  FileSearchOutlined,
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
@@ -1034,6 +1040,9 @@ export default function AdminPage() {
               <>
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-[13px] text-gray-500">共 {userTotal} 个用户</span>
+                  <Button size="small" icon={<ReloadOutlined />} onClick={() => loadUsers(userPage)}>
+                    刷新
+                  </Button>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <table className="w-full text-[13px]">
