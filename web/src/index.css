@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* 平台暗色主题（高饱和冷色：黑/青/蓝/紫）：语义变量 + 浅色工具类的暗色映射 */
+@import "./styles/dark-theme.css";
 
 /* 防止 Tooltip 弹出时触发滚动条闪动 */
 @layer base {
@@ -215,7 +217,8 @@
 .forum-content {
   font-size: 15px;
   line-height: 1.85;
-  color: #374151;
+  /* 正文颜色走主题变量：暗色下写死的 #374151 会「偏暗看不清」 */
+  color: var(--dv-text-body, #374151);
   word-break: break-word;
 }
 
@@ -231,7 +234,7 @@
   margin: 1.3em 0 0.6em;
   font-weight: 600;
   line-height: 1.4;
-  color: #111827;
+  color: var(--dv-text-1, #111827);
 }
 
 .forum-content h1 { font-size: 24px; }
@@ -253,16 +256,16 @@
 .forum-content blockquote {
   margin: 0.85em 0;
   padding: 0.6em 1em;
-  border-left: 3px solid #d1d5db;
-  background: #f9fafb;
-  color: #4b5563;
+  border-left: 3px solid var(--dv-border-2, #d1d5db);
+  background: var(--dv-surface-2, #f9fafb);
+  color: var(--dv-text-2, #4b5563);
 }
 
 .forum-content pre {
   margin: 0.85em 0;
   padding: 12px 14px;
   overflow-x: auto;
-  background: #1f2937;
+  background: var(--dv-surface-3, #1f2937);
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.6;
@@ -276,15 +279,15 @@
 
 .forum-content code {
   padding: 1px 5px;
-  background: #f3f4f6;
+  background: var(--dv-surface-3, #f3f4f6);
   border-radius: 4px;
   font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #db2777;
+  color: var(--dv-code, #db2777);
 }
 
 .forum-content a {
-  color: #2563eb;
+  color: var(--dv-link, #2563eb);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -328,13 +331,13 @@
   height: auto;
   margin: 0.6em 0;
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--dv-border-1, #e5e7eb);
 }
 
 .forum-content hr {
   margin: 1.2em 0;
   border: none;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--dv-border-1, #e5e7eb);
 }
 
 .forum-content table {
@@ -347,11 +350,11 @@
 .forum-content th,
 .forum-content td {
   padding: 6px 10px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--dv-border-1, #e5e7eb);
 }
 
 .forum-content th {
-  background: #f9fafb;
+  background: var(--dv-surface-2, #f9fafb);
   font-weight: 600;
 }
 

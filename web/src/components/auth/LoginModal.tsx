@@ -80,7 +80,7 @@ export function LoginModal() {
       <div
         className="relative w-full max-w-[400px] mx-4"
         style={{
-          background: '#fff',
+          background: 'var(--dv-surface-1, #fff)',
           borderRadius: 16,
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}

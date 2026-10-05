@@ -767,7 +767,8 @@ export default function VideoListPage() {
               </>
             )}
 
-            {/* 指示器 */}
+            {/* 指示器：叠在彩色 banner 上，必须保持浅色（用任意值写法绕开暗色主题对
+                bg-white 的"面板化"映射，否则会被映射成近黑底而看不见） */}
             {banners.length > 1 && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
                 {banners.map((_, index) => (
@@ -775,8 +776,8 @@ export default function VideoListPage() {
                     key={index}
                     className={`rounded-full transition-all ${
                       index === currentBannerIndex
-                        ? 'w-2 h-2 bg-white'
-                        : 'w-1.5 h-1.5 bg-white/50 hover:bg-white/70'
+                        ? 'w-2 h-2 bg-[#ffffff]'
+                        : 'w-1.5 h-1.5 bg-[#ffffff8c] hover:bg-[#ffffffcc]'
                     }`}
                     onClick={() => setCurrentBannerIndex(index)}
                     style={{ minWidth: '12px', minHeight: '12px' }}

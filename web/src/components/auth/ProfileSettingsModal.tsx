@@ -117,7 +117,7 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
     >
       <div
         className="relative w-full max-w-[420px] mx-4 max-h-[85vh] overflow-auto"
-        style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}
+        style={{ background: 'var(--dv-surface-1, #fff)', borderRadius: 16, boxShadow: '0 20px 60px var(--dv-modal-shadow, rgba(0,0,0,0.15))' }}
       >
         <button
           onClick={(e) => { e.stopPropagation(); if (!saving) onClose(); }}

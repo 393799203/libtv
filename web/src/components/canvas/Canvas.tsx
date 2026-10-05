@@ -789,7 +789,8 @@ export const Canvas = memo(function Canvas() {
         multiSelectionKeyCode="Shift"
         className="react-flow-cursor-default"
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        {/* 点阵颜色跟随暗色主题（React Flow 默认是浅灰点，暗底上会看不见/刺眼） */}
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#243352" />
 
       </ReactFlow>
       </div>

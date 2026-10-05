@@ -199,7 +199,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                 key={pkg.id}
                 className={`relative flex flex-col rounded-2xl p-4 md:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
                   pkg.recommended
-                    ? 'bg-gradient-to-b from-amber-50 to-orange-50 shadow-lg ring-2 ring-amber-400'
+                    ? 'bg-gradient-to-b from-cyan-500/15 via-blue-500/10 to-violet-500/15 shadow-lg ring-2 ring-cyan-400/60'
                     : 'bg-gray-50 ring-1 ring-gray-200 hover:ring-gray-300'
                 }`}
               >
@@ -208,7 +208,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                   <span
                     className={`absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-3 py-0.5 text-[12px] font-medium text-white shadow ${
                       pkg.recommended
-                        ? 'bg-gradient-to-r from-amber-500 to-orange-500'
+                        ? 'bg-gradient-to-r from-cyan-500 to-violet-600'
                         : 'bg-gradient-to-r from-violet-500 to-purple-500'
                     }`}
                   >
@@ -218,13 +218,13 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                 )}
 
                 {/* 套餐名 */}
-                <div className={`text-center text-[15px] font-semibold ${pkg.recommended ? 'text-amber-700' : 'text-gray-700'}`}>
+                <div className={`text-center text-[15px] font-semibold ${pkg.recommended ? 'text-cyan-200' : 'text-gray-700'}`}>
                   {pkg.name}
                 </div>
 
                 {/* 积分数量 */}
                 <div className="mt-3 text-center">
-                  <span className={`text-[32px] md:text-[28px] font-bold leading-none ${pkg.recommended ? 'text-amber-600' : 'text-gray-800'}`}>
+                  <span className={`text-[32px] md:text-[28px] font-bold leading-none ${pkg.recommended ? 'text-cyan-200' : 'text-gray-800'}`}>
                     {pkg.points.toLocaleString()}
                   </span>
                   <span className="ml-1 text-[13px] text-gray-500">积分</span>
@@ -239,7 +239,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                 <ul className="mt-4 flex-1 space-y-2 border-t border-gray-200/70 pt-4">
                   {features.map((f) => (
                     <li key={f} className="flex items-start gap-1.5 text-[13px] md:text-[12px] leading-5 text-gray-600">
-                      <CheckCircleFilled className={`mt-0.5 shrink-0 text-[12px] ${pkg.recommended ? 'text-amber-500' : 'text-green-500'}`} />
+                      <CheckCircleFilled className={`mt-0.5 shrink-0 text-[12px] ${pkg.recommended ? 'text-cyan-400' : 'text-green-500'}`} />
                       {f}
                     </li>
                   ))}
@@ -255,7 +255,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                       : 'cursor-pointer'
                   } ${
                     pkg.recommended
-                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
+                      ? 'bg-gradient-to-r from-cyan-500 to-violet-600 hover:from-cyan-400 hover:to-violet-500'
                       : 'bg-gradient-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black'
                   }`}
                 >

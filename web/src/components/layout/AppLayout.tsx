@@ -92,7 +92,9 @@ export function AppLayout() {
 
   return (
     <Layout className="h-screen">
-      <AntHeader className="!bg-white !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-gray-200 shadow-sm !leading-none">
+      {/* 底色不再写死 !bg-white（Tailwind 的 ! 强制类会绕过主题映射，导致"白底白字"），
+            改由 ConfigProvider 的暗色 headerBg 提供；再压深一档，让导航文字对比更强 */}
+        <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#1a2438] !leading-none">
         <div className="flex items-center gap-1.5 md:gap-3">
           <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity cursor-pointer">
             <VideoCameraOutlined className="text-lg text-blue-500" />

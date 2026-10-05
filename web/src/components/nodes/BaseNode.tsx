@@ -100,7 +100,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
       className={`
         min-w-[200px] w-full rounded-[0.5rem] bg-white shadow-md border-gray-200 overflow-visible
         transition-all duration-150 relative flex flex-col pt-8 group
-        ${selected ? 'shadow-lg ring-2 border-blue-300' : 'hover:shadow-lg'}
+        ${selected ? 'shadow-lg ring-2 border-cyan-400' : 'hover:shadow-lg'}
         ${status === 'failed' ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
         ${className || ''}
       `}

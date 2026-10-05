@@ -145,7 +145,9 @@ const TDROP = 'absolute bottom-full left-0 mb-1.5 bg-white rounded-xl shadow-lg 
 // 下拉项：紧凑
 const TITEM = 'w-full px-3 py-1.5 text-left text-[12px] text-gray-600 hover:bg-gray-50 transition-colors';
 // 下拉项选中态
-const TITEM_ACTIVE = 'bg-blue-50 text-blue-700 font-medium';
+// 下拉列表项选中态：与「模型选中」同一种弱选中（半透明青底 + 浅青字）。
+// 这个常量被时长/音色/语速/风格/语调六个列表共用，改这里就是全对齐。
+const TITEM_ACTIVE = 'bg-cyan-500/15 text-cyan-200 font-medium';
 // 下拉分组头
 const TGP = 'px-3 py-1 text-[10px] text-gray-400 bg-gray-50 sticky top-0 font-medium tracking-wide';
 
@@ -229,7 +231,7 @@ const ModelSelector = memo(function ModelSelector({
                     key={model.value}
                     className={`${TITEM} group/item border-l-2 transition-all ${
                       active
-                        ? 'border-blue-500 bg-blue-50/70'
+                        ? 'border-cyan-400 bg-cyan-500/15'
                         : 'border-transparent hover:bg-gray-50'
                     }`}
                     onClick={() => {
@@ -239,7 +241,7 @@ const ModelSelector = memo(function ModelSelector({
                   >
                     {/* 名称 + tag + 对勾 */}
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`text-[12px] truncate ${active ? 'text-blue-700 font-medium' : 'text-gray-700'}`}>
+                      <span className={`text-[12px] truncate ${active ? 'text-cyan-300 font-medium' : 'text-gray-700'}`}>
                         {model.label}
                       </span>
                       {model.tag && (
@@ -285,14 +287,14 @@ const ModelSelector = memo(function ModelSelector({
 // 极端比例（1:2 / 2:1）保底最小厚度，避免退化成一条线。
 // active：选中态（深色实心）；size：卡片内更大、触发按钮上更小
 function RatioIcon({ value, active, size = 22 }: { value: string; active: boolean; size?: number }) {
-  // 自适应：虚线框 + 淡填充
+  // 自适应：虚线空框（各比例示例统一为空心，只靠描边表达形状）
   if (value === 'adaptive' || value === 'free') { // free 为历史值
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none">
         <rect x="3.4" y="3.4" width={size - 6.8} height={size - 6.8} rx="2.6"
-          stroke={active ? '#111827' : '#CBD5E1'} strokeWidth={active ? 1.7 : 1.3}
+          stroke="currentColor" strokeWidth={active ? 1.7 : 1.2}
           strokeDasharray="4 2.6"
-          fill={active ? 'rgba(17,24,39,0.07)' : 'none'} />
+          fill="none" />
       </svg>
     );
   }
@@ -318,9 +320,9 @@ function RatioIcon({ value, active, size = 22 }: { value: string; active: boolea
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none">
       <rect x={ox} y={oy} width={iw} height={ih} rx={Math.min(iw, ih) * 0.18}
-        fill={active ? '#111827' : '#F1F5F9'}
-        stroke={active ? '#111827' : '#CBD5E1'}
-        strokeWidth={active ? 1.5 : 1}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={active ? 1.7 : 1.2}
       />
     </svg>
   );
@@ -521,7 +523,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                       key={res}
                       className={`relative flex-1 rounded-xl border px-1 py-2.5 text-center transition-all duration-150 ${
                         isActive
-                          ? 'border-gray-900 bg-gradient-to-b from-gray-800 to-gray-950 text-white shadow-md'
+                          ? 'border-cyan-400 bg-cyan-500/15 text-cyan-200 shadow-sm'
                           : 'border-gray-200/90 bg-white text-gray-700 hover:-translate-y-px hover:border-gray-300 hover:bg-gray-50/70 hover:shadow-sm'
                       }`}
                       onClick={() => { onResolutionChange(res as ResolutionOption); setOpen(false); }}
@@ -529,7 +531,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                       <div className="text-[13px] font-semibold leading-none tracking-tight">{res}</div>
                       <div className={`mt-1.5 text-[10px] leading-none tabular-nums ${
                         isActive
-                          ? (isPrice ? 'text-amber-300' : 'text-gray-400')
+                          ? (isPrice ? 'text-amber-200' : 'text-gray-400')
                           : (isPrice ? 'font-medium text-amber-600' : 'text-gray-400')
                       }`}>
                         {subText}
@@ -552,7 +554,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                     <div className="flex-1">
                       <span className="font-medium text-slate-700">480p 直出画面偏软。</span>
                       生成后接一个
-                      <span className="font-medium text-sky-700">「清晰化」节点</span>
+                      <span className="font-medium text-cyan-300">「清晰化」节点</span>
                       可到 720p 观感（本机处理，不额外扣积分）
                       {upgradeDeltaText ? (
                         <>；想真正清晰建议直接出 <span className="font-medium">720p</span>{upgradeDeltaText}，由模型原生生成、无放大损失</>
@@ -564,7 +566,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                   <div className="mt-1.5 flex items-center justify-end gap-1.5">
                     {canUpgradeResolution && (
                       <button
-                        className="rounded-lg border border-sky-200 bg-white px-2 py-1 text-[11px] font-medium text-sky-700 hover:bg-sky-50 cursor-pointer"
+                        className="rounded-lg border border-sky-200 bg-white px-2 py-1 text-[11px] font-medium text-cyan-300 hover:bg-sky-50 cursor-pointer"
                         onClick={() => onResolutionChange(canUpgradeResolution as ResolutionOption)}
                       >
                         切到 {canUpgradeResolution}
@@ -616,7 +618,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                       title={item.label}
                       className={`group relative flex flex-col items-center justify-center gap-1.5 rounded-xl border py-2.5 transition-all duration-150 ${
                         isActive
-                          ? 'border-gray-900/85 bg-gray-900/[0.06] shadow-[inset_0_0_0_1px_rgba(17,24,39,0.04)]'
+                          ? 'border-cyan-400 bg-cyan-500/15 text-cyan-200 shadow-sm'
                           : 'border-gray-200/90 bg-white hover:-translate-y-px hover:border-gray-300 hover:bg-gray-50/70 hover:shadow-sm'
                       }`}
                       onClick={() => { onAspectRatioChange(item.value); setOpen(false); }}
@@ -624,7 +626,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
                       <RatioIcon value={item.value} active={isActive} size={24} />
                       <span
                         className={`text-[11px] leading-none tracking-tight transition-colors ${
-                          isActive ? 'font-semibold text-gray-900' : 'text-gray-500 group-hover:text-gray-700'
+                          isActive ? 'font-semibold text-cyan-200' : 'text-gray-500 group-hover:text-gray-700'
                         }`}
                       >
                         {item.label}
@@ -1110,7 +1112,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
 
         {/* 生成按钮：模型因渠道变更不可用时拦截，必须先重新选择模型 */}
         <button
-          className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-gray-800 to-gray-950 text-white flex items-center justify-center hover:from-gray-700 hover:to-gray-900 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm text-[13px] font-medium tracking-wide"
+          className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center hover:from-cyan-400 hover:to-blue-500 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-cyan-500/25 text-[13px] font-medium tracking-wide"
           onClick={() => onGenerate?.(1)}
           disabled={isGenerating || modelUnavailable}
           title={modelUnavailable ? '模型在当前渠道不可用，请先重新选择模型' : undefined}

@@ -511,10 +511,10 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     // 前缀标签（如 720全景）：即使内容为空也要渲染，不能因提前返回而跳过
     if (prefixTag) {
       const iconHtml = prefixTag.icon
-        ? `<span class="libtv-mention-thumb" style="background:#bfdbfe;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#2563eb;">${prefixTag.icon}</span>`
+        ? `<span class="libtv-mention-thumb" style="background:var(--dv-mention-chip-bg,#bfdbfe);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:var(--dv-mention-chip-fg,#2563eb);">${prefixTag.icon}</span>`
         : '';
       html =
-        `<span class="libtv-mention libtv-prefix-tag" contenteditable="false" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;">` +
+        `<span class="libtv-mention libtv-prefix-tag" contenteditable="false" style="background:var(--dv-mention-bg,#eff6ff);color:var(--dv-mention-fg,#2563eb);border-color:var(--dv-mention-bd,#bfdbfe);">` +
         iconHtml +
         `<span>${escapeHtml(prefixTag.label)}</span>` +
         `</span>` +
@@ -883,12 +883,12 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     // 需要新增前缀标签
     if (prefixTag) {
       const iconHtml = prefixTag.icon
-        ? `<span class="libtv-mention-thumb" style="background:#bfdbfe;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:#2563eb;">${prefixTag.icon}</span>`
+        ? `<span class="libtv-mention-thumb" style="background:var(--dv-mention-chip-bg,#bfdbfe);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:var(--dv-mention-chip-fg,#2563eb);">${prefixTag.icon}</span>`
         : '';
       const span = document.createElement('span');
       span.className = 'libtv-mention libtv-prefix-tag';
       span.contentEditable = 'false';
-      span.style.cssText = 'background:#eff6ff;color:#2563eb;border-color:#bfdbfe;';
+      span.style.cssText = 'background:var(--dv-mention-bg,#eff6ff);color:var(--dv-mention-fg,#2563eb);border-color:var(--dv-mention-bd,#bfdbfe);';
       span.setAttribute('data-label', prefixTag.label);
       span.innerHTML = iconHtml + `<span>${escapeHtml(prefixTag.label)}</span>`;
 
@@ -967,8 +967,8 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
           gap: 2px;
           padding: 1px 6px;
           margin: 0 2px;
-          background: #f3f4f6;
-          color: #374151;
+          background: var(--dv-mention-bg, #f3f4f6);
+          color: var(--dv-mention-fg, #374151);
           border-radius: 6px;
           font-size: 12px;
           line-height: 20px;
@@ -1001,9 +1001,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
           user-select: none;
         }
         .libtv-audio-pause {
-          background: #ecfeff;
-          color: #0891b2;
-          border: 1px solid #a5f3fc;
+          background: var(--dv-audio-pause-bg, #ecfeff);
+          color: var(--dv-audio-pause-fg, #0891b2);
+          border: 1px solid var(--dv-audio-pause-bd, #a5f3fc);
         }
         .libtv-audio-pause .libtv-audio-tag-icon {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1011,9 +1011,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
           font-weight: 600;
         }
         .libtv-audio-tone {
-          background: #fff7ed;
-          color: #c2410c;
-          border: 1px solid #fed7aa;
+          background: var(--dv-audio-tone-bg, #fff7ed);
+          color: var(--dv-audio-tone-fg, #c2410c);
+          border: 1px solid var(--dv-audio-tone-bd, #fed7aa);
         }
         .libtv-audio-tone .libtv-audio-tag-icon {
           font-size: 11px;
@@ -1021,7 +1021,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         }
         [contenteditable]:empty::before {
           content: "${escapeCssString(placeholder)}";
-          color: #9ca3af;
+          color: var(--dv-text-3, #9ca3af);
           pointer-events: none;
         }
       `}</style>

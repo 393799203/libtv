@@ -1,0 +1,309 @@
+/**
+ * 平台暗色主题（高饱和冷色：黑 / 青 / 蓝 / 紫）
+ *
+ * 设计动机：用户在这个平台上高强度连续作业（分镜、生图、剪片往往一坐几小时），
+ * 大面积白底造成的眩光和眼疲劳是真实成本；冷色暗底能显著降低亮度对比冲击，
+ * 同时冷色系（青/蓝/紫）本身就更贴合"科技/工具"的调性。
+ *
+ * 落地方式（为什么不逐个组件改）：
+ *   1) antd 走 darkAlgorithm —— 所有 antd 组件（表格/弹窗/下拉/输入/日期…）自动变暗；
+ *   2) 这里定义一套语义变量，并把历史代码里写死的浅色工具类（bg-white / text-gray-800 …）
+ *      在 `.theme-dark` 作用域内统一映射到语义变量。
+ *   3) 选择器权重比 Tailwind 的 `.bg-white` 高一档（多一个 .theme-dark 祖先），所以能稳定覆盖，
+ *      且不需要动几百处 className。
+ *
+ * 后续若要做成可切换主题：把 `.theme-dark` 换成 `[data-theme="dark"]`，再补一套亮色变量即可。
+ */
+
+.theme-dark {
+  color-scheme: dark;
+
+  /* 底色：近黑 + 冷蓝偏移，避免纯黑发灰 */
+  --dv-bg: #070a12;
+  --dv-surface-1: #0d1320; /* 卡片 / 面板 */
+  --dv-surface-2: #131b2b; /* 次级区块 */
+  --dv-surface-3: #1a2438; /* hover / 选中底色 */
+  --dv-surface-4: #223049; /* 更高一档的 hover */
+
+  /* 描边：冷色偏蓝，不用中性灰 */
+  --dv-border-1: #1e2942;
+  --dv-border-2: #2a3853;
+
+  /* 文字：三级层次，全部带冷色偏移 */
+  --dv-text-1: #f2f6ff; /* 主文字：近白（暗底上对比最足） */
+  --dv-text-2: #c2cfe4; /* 次级文字：导航/标签，提亮一档保证在深底上清楚 */
+  --dv-text-3: #8a9cb8; /* 弱化文字：说明/占位 */
+
+  /* 提示词编辑器里的 @ 引用标签 / 音频标签：跟主色同族（青色），别再是浅蓝浅灰 */
+  --dv-mention-bg: rgba(34, 211, 238, 0.16);
+  --dv-mention-fg: #67e8f9;
+  --dv-mention-bd: rgba(34, 211, 238, 0.35);
+  --dv-mention-chip-bg: rgba(34, 211, 238, 0.28);
+  --dv-mention-chip-fg: #a5f3fc;
+  --dv-audio-pause-bg: rgba(34, 211, 238, 0.14);
+  --dv-audio-pause-fg: #67e8f9;
+  --dv-audio-pause-bd: rgba(34, 211, 238, 0.3);
+  --dv-audio-tone-bg: rgba(249, 115, 22, 0.16);
+  --dv-audio-tone-fg: #fdba74;
+  --dv-audio-tone-bd: rgba(249, 115, 22, 0.35);
+
+  /* 长文正文（论坛/帖子）：比主文字略柔一档，长时间阅读不刺眼 */
+  --dv-text-body: #dbe4f2;
+  --dv-link: #38bdf8; /* 链接：天蓝，暗底上足够亮 */
+  --dv-code: #f9a8d4; /* 行内代码：浅粉，暗底上保住"代码"的色相语义 */
+
+  /* 自定义（非 antd）弹窗的阴影：暗底上 rgba(0,0,0,.15) 基本看不见 */
+  --dv-modal-shadow: rgba(0, 0, 0, 0.68);
+
+  /* 高饱和强调色 */
+  --dv-cyan: #22d3ee;
+  --dv-blue: #3b82f6;
+  --dv-violet: #8b5cf6;
+  --dv-danger: #f43f5e;
+
+  background-color: var(--dv-bg);
+  color: var(--dv-text-1);
+}
+
+/* 根节点/body 也一起暗掉（否则滚动到边缘会露出白底） */
+html.theme-dark-root,
+html.theme-dark-root body,
+html.theme-dark-root #root {
+  background-color: #070a12;
+}
+
+/* ========== 背景：白底/浅灰底 → 暗面 ========== */
+.theme-dark .bg-white {
+  background-color: var(--dv-surface-1);
+}
+.theme-dark :is(.bg-gray-50, .bg-slate-50, .bg-gray-100, .bg-slate-100) {
+  background-color: var(--dv-surface-2);
+}
+.theme-dark :is(.bg-gray-200, .bg-slate-200, .bg-gray-300) {
+  background-color: var(--dv-surface-3);
+}
+
+/* 彩底浅色调（提示条/标签）→ 同色系暗色调，保住"色相语义" */
+.theme-dark .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.14);
+}
+/* 半透明彩底（bg-blue-50/70 这种"浅底加透明度"的写法）：同一色系的低透明度版本。
+   这类变体不带透明度时能命中上面的规则，带了透明度就会漏 —— 一漏就是"选中了还是浅灰"。 */
+.theme-dark :is(.bg-blue-50\/60, .bg-blue-50\/70, .bg-blue-50\/80) {
+  background-color: rgba(34, 211, 238, 0.16);
+}
+.theme-dark :is(.bg-sky-50\/60, .bg-sky-50\/70, .bg-sky-50\/80) {
+  background-color: rgba(56, 189, 248, 0.14);
+}
+.theme-dark :is(.bg-amber-50\/50, .bg-amber-50\/60, .bg-amber-50\/70) {
+  background-color: rgba(245, 158, 11, 0.14);
+}
+.theme-dark :is(.bg-red-50\/50, .bg-red-50\/60) {
+  background-color: rgba(244, 63, 94, 0.14);
+}
+.theme-dark :is(.bg-green-50\/50, .bg-green-50\/60, .bg-emerald-50\/60) {
+  background-color: rgba(34, 197, 94, 0.14);
+}
+.theme-dark .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.14);
+}
+.theme-dark .bg-orange-50 {
+  background-color: rgba(249, 115, 22, 0.14);
+}
+.theme-dark .bg-red-50 {
+  background-color: rgba(244, 63, 94, 0.14);
+}
+.theme-dark .bg-green-50 {
+  background-color: rgba(34, 197, 94, 0.14);
+}
+.theme-dark .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.14);
+}
+.theme-dark .bg-purple-50 {
+  background-color: rgba(139, 92, 246, 0.14);
+}
+
+/* ========== 渐变色标：Tailwind 渐变是 CSS 变量拼出来的，光映射 bg-* 不够 ==========
+   浅色渐变（如积分超市推荐卡的 from-amber-50 to-orange-50）必须逐档映射，
+   否则整块会在暗色主题里"亮着"，还会和文字撞色。 */
+.theme-dark :is(.from-amber-50, .from-orange-50) {
+  --tw-gradient-from: rgba(245, 158, 11, 0.16);
+  --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from), var(--tw-gradient-to));
+}
+.theme-dark :is(.to-orange-50, .to-amber-50) {
+  --tw-gradient-to: rgba(249, 115, 22, 0.14);
+}
+.theme-dark :is(.from-blue-50, .from-sky-50) {
+  --tw-gradient-from: rgba(59, 130, 246, 0.14);
+  --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from), var(--tw-gradient-to));
+}
+.theme-dark :is(.to-purple-50, .to-violet-50) {
+  --tw-gradient-to: rgba(139, 92, 246, 0.14);
+}
+
+/* ========== 浅色底上的深色文字：色相保留、亮度提上来 ==========
+   这类写法极多（bg-blue-50 + text-blue-700 这种"浅底深字"组合），
+   暗色下浅底变半透明暗色后，深字会糊在底上，必须换成同色系的亮字。 */
+.theme-dark :is(.text-blue-600, .text-blue-700, .text-blue-800) {
+  color: #7dd3fc;
+}
+.theme-dark :is(.text-sky-600, .text-sky-700, .text-sky-800) {
+  color: #7dd3fc;
+}
+.theme-dark :is(.text-red-600, .text-red-700, .text-red-800) {
+  color: #fda4af;
+}
+.theme-dark :is(.text-green-600, .text-green-700, .text-green-800, .text-emerald-600, .text-emerald-700) {
+  color: #6ee7b7;
+}
+.theme-dark :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-orange-600, .text-orange-700) {
+  color: #fcd34d;
+}
+.theme-dark :is(.text-purple-600, .text-purple-700, .text-violet-600, .text-violet-700) {
+  color: #c4b5fd;
+}
+.theme-dark :is(.text-cyan-600, .text-cyan-700, .text-teal-600, .text-teal-700) {
+  color: #67e8f9;
+}
+
+/* ========== 选中态统一：全站"被选中"一律青色 ==========
+   历史代码里选中态用的是写死的蓝色（border-blue-400/500、ring-blue-*、bg-blue-500/600、
+   text-blue-500），与主题主色（青）不同族，导致同一个页面上出现"两种选中色"。
+   这里按"选中语义"统一到青色家族，不区分具体组件，所以下拉、列表、卡片、开关一处改全站都一致。
+   约定：具体见 docs/theme-selection.md —— 弱选中=半透明青底，强选中=青→蓝渐变，描边=青。 */
+.theme-dark :is(.border-blue-300, .border-blue-400, .border-blue-500, .border-blue-600) {
+  border-color: #22d3ee;
+}
+.theme-dark :is(.ring-blue-100, .ring-blue-200, .ring-blue-300, .ring-blue-400, .ring-blue-500) {
+  --tw-ring-color: #22d3ee;
+}
+.theme-dark :is(.text-blue-500, .text-blue-600) {
+  color: #67e8f9;
+}
+.theme-dark :is(.bg-blue-500, .bg-blue-600) {
+  background-color: #06b6d4;
+}
+.theme-dark :is(.bg-blue-700) {
+  background-color: #0891b2;
+}
+.theme-dark :is(.hover\:bg-blue-500:hover, .hover\:bg-blue-600:hover) {
+  background-color: #0ea5b7;
+}
+.theme-dark :is(.hover\:border-blue-400:hover, .hover\:border-blue-500:hover) {
+  border-color: #22d3ee;
+}
+
+/* ========== 文字：深色字 → 冷白字 ========== */
+.theme-dark :is(.text-gray-900, .text-gray-800, .text-black, .text-slate-800, .text-slate-900) {
+  color: var(--dv-text-1);
+}
+.theme-dark :is(.text-gray-700, .text-gray-600, .text-slate-700, .text-slate-600) {
+  color: var(--dv-text-2);
+}
+.theme-dark :is(.text-gray-500, .text-gray-400, .text-slate-500, .text-slate-400) {
+  color: var(--dv-text-3);
+}
+/* text-gray-300/slate-300 在浅色主题里是"极浅的灰"，实际几乎都用在**彩色/图片底之上**
+   （首页轮播描述、海报副标题、深色卡片里的弱化文字）——所以暗色下必须映射成"偏亮的弱化色"，
+   之前映射成了暗色（#4d5d78），结果这些文字在 banner 上直接看不见了。 */
+.theme-dark :is(.text-gray-300, .text-slate-300) {
+  color: #b6c4da;
+}
+
+/* ========== 描边 / 分隔线 ========== */
+.theme-dark :is(.border-gray-100, .border-gray-200, .border-slate-100, .border-slate-200) {
+  border-color: var(--dv-border-1);
+}
+/* 表格行分隔线常用 border-gray-50（最浅一档）：暗色下必须是"冷色暗线"，
+   否则近黑底上会出现刺眼白线。 */
+.theme-dark :is(.border-gray-50, .border-slate-50) {
+  border-color: #172234;
+}
+.theme-dark :is(.border-gray-300, .border-slate-300) {
+  border-color: var(--dv-border-2);
+}
+.theme-dark .border-white {
+  border-color: var(--dv-border-2);
+}
+.theme-dark :is(.divide-gray-100, .divide-gray-200) > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--dv-border-1);
+}
+
+/* 带透明度的浅灰底：这类变体最容易被漏掉（后台主区域就是 bg-gray-50/50），
+   漏一处就会出现"整块还是浅灰、文字已经变白"的割裂。按相近透明度映射到暗面。 */
+.theme-dark :is(.bg-gray-50\/50, .bg-gray-50\/60, .bg-gray-50\/70) {
+  background-color: rgba(19, 27, 43, 0.6);
+}
+.theme-dark :is(.bg-gray-100\/80, .bg-gray-100\/90, .bg-gray-200\/70) {
+  background-color: rgba(26, 36, 56, 0.8);
+}
+
+/* 半透明白底（浮层/把手/悬浮卡）：映射成半透明暗面，保住"浮在内容之上"的层次。
+   注意：bg-white/15 ~ /50 一律不映射 —— 它们几乎都用在"叠在彩色渐变/海报上的浅色元素"
+   （轮播指示点、进度条、标签），映射成暗色会直接看不见。 */
+.theme-dark :is(.bg-white\/70, .bg-white\/80, .bg-white\/90, .bg-white\/95) {
+  background-color: rgba(13, 19, 32, 0.94);
+}
+.theme-dark :is(.border-gray-200\/60, .border-gray-200\/50, .border-gray-200\/90, .border-white\/50) {
+  border-color: var(--dv-border-2);
+}
+
+/* ========== hover 态：别把卡片"提亮成白块" ========== */
+.theme-dark :is(.hover\:bg-white:hover, .hover\:bg-gray-50:hover, .hover\:bg-gray-100:hover, .hover\:bg-slate-50:hover) {
+  background-color: var(--dv-surface-3);
+}
+.theme-dark :is(.hover\:bg-gray-200:hover, .hover\:bg-gray-300:hover) {
+  background-color: var(--dv-surface-4);
+}
+.theme-dark .hover\:bg-blue-50:hover {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+.theme-dark .hover\:bg-amber-50:hover {
+  background-color: rgba(245, 158, 11, 0.2);
+}
+.theme-dark :is(.hover\:text-gray-900:hover, .hover\:text-gray-800:hover, .hover\:text-gray-700:hover) {
+  color: var(--dv-text-1);
+}
+
+/* 阴影：暗底上需要更重的阴影才有层次 */
+.theme-dark :is(.shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
+/* 表单占位符 */
+.theme-dark ::placeholder {
+  color: #55647f;
+}
+
+/* 滚动条：暗色细条，避免白色滚动条割裂界面 */
+.theme-dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.theme-dark ::-webkit-scrollbar-thumb {
+  background: #26334c;
+  border-radius: 4px;
+}
+.theme-dark ::-webkit-scrollbar-thumb:hover {
+  background: #33425f;
+}
+.theme-dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* React Flow：画布底色与点阵 */
+.theme-dark .react-flow {
+  background-color: var(--dv-bg);
+}
+.theme-dark .react-flow__handle {
+  border-color: var(--dv-bg);
+}
+.theme-dark .react-flow__attribution {
+  background: transparent;
+  color: #3d4a63;
+}
+
+/* 空状态/骨架屏：默认是浅灰块，暗色下要把降级色一起换掉 */
+.theme-dark :is(.bg-gray-100.animate-pulse, .animate-pulse.bg-gray-100) {
+  background-color: var(--dv-surface-3);
+}
