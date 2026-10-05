@@ -101,21 +101,27 @@ export function AppLayout() {
             <span className="font-semibold text-base text-gray-800">漫蛙AI</span>
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
-          <span className="hidden md:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
+          <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
           <span className="hidden md:inline text-sm text-gray-400">AI 视频创作工作台</span>
           {/* 论坛入口：放在登录态判断之外——论坛是公开可读的，
               未登录访客（含从 banner 活动落地进来的）也要能看到这个入口
-              移动端同样要显示（原本是 hidden sm:flex，手机上看不到） */}
+              移动端保留入口但不显示图标（只留文字） */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
           <button
             onClick={() => navigate('/forum')}
-            className={`flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${
+            className={`flex flex-row md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${
               location.pathname.startsWith('/forum')
                 ? 'bg-blue-50 text-blue-600'
                 : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
             }`}
           >
-            <CommentOutlined className="text-[18px] md:text-[14px]" />
+            {/* 移动端不显示图标：头部空间紧张，只留文字更清爽（桌面端保留图标） */}
+            {/* 移动端不显示图标。这里必须用外层 span 控制显隐：
+                antd 图标自带 .anticon{display:inline-flex}，与 Tailwind 的 display 工具类同特异度，
+                而 antd 样式是运行时注入的（在静态样式表之后），所以给图标加 hidden 永远赢不了。 */}
+            <span className="hidden md:inline-flex">
+              <CommentOutlined className="text-[18px] md:text-[14px]" />
+            </span>
             漫蛙社区
           </button>
         </div>
@@ -153,7 +159,7 @@ export function AppLayout() {
             {/* 积分超市入口（移动端也要显示，内边距收窄以便和社区入口并排） */}
             <button
               onClick={() => setShowPointsMall(true)}
-              className="flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none text-gray-600 transition-colors cursor-pointer hover:text-amber-600 hover:bg-amber-50"
+              className="hidden md:flex md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none text-gray-600 transition-colors cursor-pointer hover:text-amber-600 hover:bg-amber-50"
             >
               <ShopOutlined className="text-[18px] md:text-[14px]" />
               积分超市

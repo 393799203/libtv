@@ -142,7 +142,7 @@ const VideoCard = memo(function VideoCard({
       {/* 标题/作者/时长压在缩略图上：不再单独占一栏高度，卡片仍是纯 16:9 缩略图。
           底部加一层由下往上的渐变遮罩，否则浅色缩略图上白字读不出来。 */}
       <div className="absolute bottom-0 left-0 right-0 z-20 rounded-b-lg bg-gradient-to-t from-black/75 via-black/45 to-transparent px-2 pb-2 pt-8">
-        <p className="truncate text-[13px] font-medium text-white">
+        <p className="truncate text-[12px] md:text-[13px] font-medium text-white">
           {item.title}
         </p>
         <div className="mt-1 flex items-center justify-between gap-2">
@@ -835,7 +835,7 @@ export default function VideoListPage() {
       </div>
 
       <section ref={tvSectionRef} className="max-w-7xl mx-auto px-3 md:px-6 scroll-mt-4">
-        <Text className="text-gray-600 font-medium text-base md:text-lg mb-3 block">TV Show</Text>
+        <Text className="text-gray-600 font-medium text-[13px] md:text-lg mb-3 block">TV Show</Text>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4">
           <div className="flex items-center gap-2 flex-wrap flex-1">
             {showCategories.map((cat) => (
