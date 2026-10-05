@@ -169,12 +169,6 @@
   }
 }
 
-/* MiniMap 样式 */
-.react-flow__minimap {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
 /* 控制栏样式 */
 .react-flow__controls {
   border-radius: 8px;

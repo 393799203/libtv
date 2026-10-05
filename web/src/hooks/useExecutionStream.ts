@@ -8,6 +8,7 @@ import { workflowApi } from '@/services/workflowApi';
 import { reconcileNodesOnTerminal, pendingNodeIdsOf } from '@/utils/executionTerminal';
 import { canvasApi } from '@/services/canvasApi';
 import { createNode } from '@/utils/nodeFactory';
+import { mediaFieldsFor } from '@/utils/mediaNode';
 import type { WSEvent } from '@/types/workflow';
 import type { ImageNodeData, LibTVEdge } from '@/types/canvas';
 
@@ -58,9 +59,7 @@ function createSiblingImageNodes(
     // 如果节点已存在（重复执行场景），只更新 imageUrl
     if (store.nodes.some((n) => n.id === newNodeId)) {
       store.updateNodeData(newNodeId, {
-        imageUrl: url,
-        width,
-        height,
+        ...mediaFieldsFor('image', { url, width, height }),
         status: 'success' as const,
         stale: false,
         error: undefined,
@@ -80,10 +79,8 @@ function createSiblingImageNodes(
       id: newNodeId,
       data: {
         ...originalData,
+        ...mediaFieldsFor('image', { url, width, height }),
         label: newLabel,
-        imageUrl: url,
-        width,
-        height,
         status: 'success' as const,
         stale: false,
         error: undefined,

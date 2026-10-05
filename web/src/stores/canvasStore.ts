@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
-import type { CanvasData, LibTVNode, LibTVEdge, NodeExecutionStatus, ScriptAssetItem } from '@/types/canvas';
+import { createNode } from '@/utils/nodeFactory';
+import { mediaFieldsFor, type MediaPayload } from '@/utils/mediaNode';
+import type { CanvasData, LibTVNode, LibTVEdge, NodeExecutionStatus, ScriptAssetItem, NodeType } from '@/types/canvas';
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -11,6 +13,7 @@ import {
   type NodeChange,
   type EdgeChange,
   type Viewport,
+  type XYPosition,
 } from '@xyflow/react';
 
 const MAX_HISTORY = 50;
@@ -54,14 +57,12 @@ interface WorkspaceUIState {
   projectId: string | null;
   isDirty: boolean;
   isSaving: boolean;
-  showMiniMap: boolean;
   /** 是否正在从服务端加载数据（true 时组件显示 loading） */
   isLoading: boolean;
 
   setProjectId: (id: string) => void;
   setDirty: (dirty: boolean) => void;
   setSaving: (saving: boolean) => void;
-  toggleMiniMap: () => void;
 }
 
 // ========== 合并后的完整 Store 接口 ==========
@@ -85,6 +86,12 @@ interface CanvasState extends WorkspaceUIState {
 
   // 节点操作
   addNode: (node: LibTVNode) => void;
+  /**
+   * 在指定坐标创建一个媒体节点（图片/视频/音频）并自动选中。
+   * 「把一份媒体放到画布上」的所有拖放类入口都走这里：字段由 mediaFieldsFor 统一产出，
+   * 避免各处手拼导致派生缩略图漏写（历史 bug：节点显示上一版小图）。
+   */
+  createMediaNodeAt: (nodeType: NodeType, position: XYPosition, payload: MediaPayload) => LibTVNode;
   removeNodes: (ids: string[]) => void;
   updateNodeData: (id: string, data: Partial<LibTVNode['data']>) => void;
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
@@ -302,7 +309,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   projectId: null,
   isDirty: false,
   isSaving: false,
-  showMiniMap: false,
   isLoading: false,
 
   // --- 项目画布缓存 ---
@@ -363,7 +369,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   setDirty: (dirty: boolean) => set({ isDirty: dirty }),
   setSaving: (saving: boolean) => set({ isSaving: saving }),
-  toggleMiniMap: () => set((s) => ({ showMiniMap: !s.showMiniMap })),
 
   // --- React Flow 回调 ---
   onNodesChange: (changes: NodeChange<LibTVNode>[]) => {
@@ -490,6 +495,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   // --- 节点操作 ---
+  createMediaNodeAt: (nodeType, position, payload) => {
+    const node = createNode(nodeType, position, {
+      data: mediaFieldsFor(nodeType, payload) as never,
+    });
+    get().addNode(node);
+    get().onNodesChange([{ type: 'select', id: node.id, selected: true }]);
+    return node;
+  },
+
   addNode: (node: LibTVNode) => {
     set((state) => {
       const pid = state.projectId;

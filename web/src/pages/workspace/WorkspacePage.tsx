@@ -5,10 +5,10 @@ import { Button, Tooltip, App } from 'antd';
 import {
   ArrowLeftOutlined,
   SaveOutlined,
-  GlobalOutlined,
   VideoCameraOutlined,
   FolderOutlined,
   GoldOutlined,
+  ShopOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
 import { CanvasToolbar } from '@/components/canvas/CanvasToolbar';
@@ -20,7 +20,8 @@ import { useResumeActiveExecution } from '@/hooks/useResumeActiveExecution';
 import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 import AddShowDialog from '@/components/AddShowDialog';
-import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
+import { AssetPanel } from '@/components/canvas/AssetPanel';
+import { PointsMallModal } from '@/components/auth/PointsMallModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { useAuthStore } from '@/stores/authStore';
 import { showApi, type ShowCategoryItem } from '@/services/showApi';
@@ -84,7 +85,6 @@ function WorkspaceInner() {
   const setProjectId = useCanvasStore((s) => s.setProjectId);
   const isDirty = useCanvasStore((s) => s.isDirty);
   const isSaving = useCanvasStore((s) => s.isSaving);
-  const showMiniMap = useCanvasStore((s) => s.showMiniMap);
   // 剩余积分：执行完成后 useExecutionStream 会重新拉 /auth/me 同步余额，这里直接读即可保持实时
   const user = useAuthStore((s) => s.user);
 
@@ -102,8 +102,10 @@ function WorkspaceInner() {
   const [showPublishDialog, setShowPublishDialog] = useState(false);
   const [publishCategories, setPublishCategories] = useState<ShowCategoryItem[]>([]);
   const [prefillVideoUrl, setPrefillVideoUrl] = useState('');
-  // 个人资产库弹窗
-  const [showAssetLibrary, setShowAssetLibrary] = useState(false);
+  // 个人资产库（画布左侧停靠面板，不是弹窗：选图时不该把画布挡掉）
+  const [showAssetPanel, setShowAssetPanel] = useState(false);
+  // 积分超市（充值入口）：挂在余额左边，看完余额顺手就能充
+  const [showPointsMall, setShowPointsMall] = useState(false);
   // 积分明细（扣费/退款/充值）弹窗
   const [showBillingRecords, setShowBillingRecords] = useState(false);
 
@@ -235,12 +237,38 @@ function WorkspaceInner() {
           </span>
         )}
         <div className="flex-1" />
-        {/* 画布工具条（撤销/重做 + 放大缩小/适应/100%）：原先是浮在画布右上角的悬浮条，现融入顶栏中间 */}
-        <CanvasToolbar />
+        {/* 顶栏中间：[未保存状态 + 保存] ｜ [撤销/重做 + 放大缩小/适应/100%]
+            保存属于"改动画布"的动作，跟撤销/重做放一起才顺手；竖线把两者分开。 */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* 未保存改动：保存按钮右上角的红点（原先是一整行"未保存"文字，太占地方） */}
+          <Tooltip title={isDirty ? '保存 (Ctrl+S) · 有未保存的改动' : '保存 (Ctrl+S)'}>
+            <span className="relative inline-flex">
+              <Button
+                type="text"
+                size="small"
+                icon={<SaveOutlined />}
+                loading={isSaving}
+                onClick={handleSave}
+              />
+              {isDirty && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white pointer-events-none" />
+              )}
+            </span>
+          </Tooltip>
+          {/* 竖线分隔：与全局头部同款 */}
+          <span className="text-gray-300 select-none">|</span>
+          <CanvasToolbar />
+        </div>
         <div className="flex-1" />
-        {isDirty && (
-          <span className="text-xs text-orange-500">未保存</span>
-        )}
+        <Tooltip title="积分超市（充值）">
+          <Button
+            type="text"
+            size="small"
+            icon={<ShopOutlined />}
+            onClick={() => setShowPointsMall(true)}
+            className="!text-amber-600"
+          />
+        </Tooltip>
         <Tooltip title="查看积分明细（扣费 / 退款 / 充值）">
           <button
             onClick={() => setShowBillingRecords(true)}
@@ -273,47 +301,37 @@ function WorkspaceInner() {
             }}
           />
         </Tooltip>
-        <Tooltip title={showMiniMap ? '关闭小地图' : '打开小地图'}>
-          <Button
-            type={showMiniMap ? 'primary' : 'text'}
-            size="small"
-            icon={<GlobalOutlined />}
-            onClick={() => useCanvasStore.getState().toggleMiniMap()}
-          />
-        </Tooltip>
-        <Tooltip title="个人资产库">
-          <Button
-            type="text"
-            size="small"
-            icon={<FolderOutlined />}
-            onClick={() => setShowAssetLibrary(true)}
-          />
-        </Tooltip>
-        <Tooltip title="保存 (Ctrl+S)">
-          <Button
-            type="text"
-            size="small"
-            icon={<SaveOutlined />}
-            loading={isSaving}
-            onClick={handleSave}
-          />
-        </Tooltip>
       </div>
 
-      {/* 画布区域 */}
-      <div className="flex-1">
-        <CanvasWithDrop urlProjectId={urlProjectId} />
-      </div>
+      {/* 画布区域：左侧停靠个人资产库（与右侧提示词面板对称，不遮挡画布） */}
+      <div className="flex-1 flex min-h-0">
+        {showAssetPanel && <AssetPanel onClose={() => setShowAssetPanel(false)} />}
+        <div className="flex-1 relative min-w-0">
+          <CanvasWithDrop urlProjectId={urlProjectId} />
 
-      {/* 个人资产库弹窗 */}
-      {showAssetLibrary && (
-        <AssetLibraryModal onClose={() => setShowAssetLibrary(false)} />
-      )}
+          {/* 资产库开关：贴在画布左边缘的悬浮把手（打开后面板自带收起按钮，这里就隐藏）。
+              素材是"取材"动作，跟画布贴着更顺手，也就不占头部的位置了。 */}
+          {!showAssetPanel && (
+            <Tooltip title="个人资产库：点一下从左侧展开" placement="right">
+              <button
+                onClick={() => setShowAssetPanel(true)}
+                className="absolute left-0 top-1/3 -translate-y-1/2 z-20 flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-r-lg bg-white/95 border border-l-0 border-gray-200 shadow-md text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors cursor-pointer"
+              >
+                <FolderOutlined className="text-[14px]" />
+                <span className="text-[11px] tracking-wider [writing-mode:vertical-rl]">资产库</span>
+              </button>
+            </Tooltip>
+          )}
+        </div>
+      </div>
 
       {/* 积分明细弹窗（与头部「费用明细」同一个组件） */}
       {showBillingRecords && (
         <BillingRecordsModal onClose={() => setShowBillingRecords(false)} />
       )}
+
+      {/* 积分超市（充值）：与全局头部同一个组件 */}
+      {showPointsMall && <PointsMallModal onClose={() => setShowPointsMall(false)} />}
 
       {/* 提交视频发布弹窗 */}
       <AddShowDialog

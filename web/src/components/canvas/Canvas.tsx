@@ -3,7 +3,6 @@ import {
   ReactFlow,
   Background,
   BackgroundVariant,
-  MiniMap,
   Panel,
   useReactFlow,
   type OnNodesChange,
@@ -38,7 +37,10 @@ import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
+import { setAssetDropHandler } from '@/components/canvas/assetDnd';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
+import { mediaKindOfFile } from '@/utils/mediaNode';
+import type { UserAsset } from '@/services/assetApi';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 import { canvasApi } from '@/services/canvasApi';
 
@@ -61,15 +63,18 @@ const defaultEdgeOptions: DefaultEdgeOptions = {
   type: 'dataFlow',
 };
 
-const miniMapNodeColor = (node: LibTVNode) => {
-  const config = NODE_TYPE_CONFIG[node.data.type as keyof typeof NODE_TYPE_CONFIG];
-  return config?.color ?? '#999';
-};
-
 const VIEWPORT_CHANGE_THROTTLE = 100;
 
 /** 提示词面板顶端与节点底边的固定间距（屏幕像素，各缩放档位一致） */
 const PROMPT_PANEL_GAP_PX = 10;
+
+/**
+ * 画布落点载荷：两种来源的唯一差异就是 source，
+ * 拿到「坐标 + 内容」之后走同一条创建路径。
+ */
+type CanvasDrop =
+  | { source: 'files'; x: number; y: number; files: File[] }
+  | { source: 'asset'; x: number; y: number; asset: UserAsset };
 
 export const Canvas = memo(function Canvas() {
   const viewportRef = useRef<Viewport | null>(null);
@@ -87,6 +92,8 @@ export const Canvas = memo(function Canvas() {
     name: string;
     nodeId: string;
   } | null>(null);
+  /** 画布容器（用于判断拖放落点是否在画布内） */
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
   // 节点剪贴板：右键「复制节点」后「粘贴节点」克隆出一个全新 id 的节点
   const [clipboardNode, setClipboardNode] = useState<LibTVNode | null>(null);
   // 生成历史弹窗状态
@@ -125,7 +132,7 @@ export const Canvas = memo(function Canvas() {
   const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, removeNodes, projectId } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, removeNodes, projectId, createMediaNodeAt } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -137,6 +144,7 @@ export const Canvas = memo(function Canvas() {
       addNode: s.addNode,
       addEdge: s.addEdge,
       removeNodes: s.removeNodes,
+      createMediaNodeAt: s.createMediaNodeAt,
       projectId: s.projectId,
     }))
   );
@@ -159,7 +167,6 @@ export const Canvas = memo(function Canvas() {
     }
     prevSelectedIdsRef.current = selectedNodeIds;
   }, [selectedNodeIds, nodes, updateNodeData]);
-  const showMiniMap = useCanvasStore((s) => s.showMiniMap);
   const isLoading = useCanvasStore((s) => s.isLoading);
   const saveViewport = useCanvasStore((s) => s.saveViewport);
   const savedViewport = useCanvasStore((s) => {
@@ -409,51 +416,56 @@ export const Canvas = memo(function Canvas() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedNodeIds, clipboardNode, handleCopyNode, handlePasteNode]);
 
-  // 拖拽本地/微信图片到画布：识别文件拖入并允许放置
-  const handleDragOverCanvas = useCallback((e: React.DragEvent) => {
-    try {
-      if (Array.from(e.dataTransfer.types).includes('Files')) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
+  /**
+   * 接收「左侧资产库拖出来的资产」：面板松手时把 (资产, 屏幕坐标) 投递过来，
+   * 这里判断坐标是否落在画布区域内，是就在该点建节点。
+   *
+   * 为什么不用 HTML5 拖放的 dragover/drop：实测拖出来松手毫无反应（事件是否算作
+   * "可放置的拖拽"由浏览器决定，还受内部组件处理影响）。指针拖拽由两边自己的代码闭环，
+   * 判定只看坐标，所以一定会生效。
+   */
+  /**
+   * 画布的**唯一落点分发器**：画布上"外部内容进入画布"的所有来源都汇到这里，
+   * 之后只有一条创建路径（createMediaNodeAt）。
+   *
+   * 为什么要分两个适配器：系统文件拖入只能通过 HTML5 的 dragover/drop 感知
+   * （指针事件看不到来自操作系统的拖拽，这是浏览器的物理边界）；资产库的资产是页面内部
+   * 元素，走指针拖拽最可靠（HTML5 draggable 在本项目里实测无效）。
+   * 但两者的差别只停留在"怎么感知"，一旦拿到「坐标 + 内容」，后面的类型判定、
+   * 坐标换算、建节点、选中、提示全部共用。
+   */
+  const handleCanvasDrop = useCallback(
+    async (drop: CanvasDrop) => {
+      const pos = screenToFlowPosition({ x: drop.x, y: drop.y });
+
+      // —— 来源：左侧资产库（已经是可用的 URL，不需要上传）——
+      if (drop.source === 'asset') {
+        const { asset } = drop;
+        const nodeType: NodeType = asset.type === 'video' ? 'video' : 'image';
+        createMediaNodeAt(nodeType, pos, { url: asset.url, name: asset.name });
+        message.success({ content: `已放入画布：${asset.name || '未命名'}`, key: 'asset-insert' });
+        return;
       }
-    } catch {
-      // 忽略（个别浏览器 types 实现不同）
-    }
-  }, []);
 
-  // 释放文件：按类型上传（图片/视频/音频）→ 在释放位置生成对应节点，多文件错开排列
-  const handleDropFiles = useCallback(
-    async (e: React.DragEvent) => {
-      const files = Array.from(e.dataTransfer.files || []);
-      if (files.length === 0) return;
-
-      const classify = (f: File): 'image' | 'video' | 'audio' | null => {
-        if (f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(f.name)) return 'image';
-        if (f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v)$/i.test(f.name)) return 'video';
-        if (f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name)) return 'audio';
-        return null;
-      };
-      const items = files
-        .map((f) => ({ f, kind: classify(f) }))
+      // —— 来源：系统文件（先上传拿 URL，再落到画布；多文件按 80px 错开）——
+      const items = drop.files
+        .map((f) => ({ f, kind: mediaKindOfFile(f) }))
         .filter((x): x is { f: File; kind: 'image' | 'video' | 'audio' } => x.kind !== null);
       if (items.length === 0) return;
-      e.preventDefault();
 
-      const base = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       let idx = 0;
       for (const { f, kind } of items) {
         const key = `canvas-drop-${f.name}-${Date.now()}-${idx}`;
+        const at = { x: pos.x + idx * 80, y: pos.y + idx * 80 };
         try {
           if (kind === 'image') {
             const res = await uploadImage(f, projectId || undefined);
-            const node = createNode('image', { x: base.x + idx * 80, y: base.y + idx * 80 });
-            addNode(node);
-            updateNodeData(node.id, {
-              imageUrl: res.url,
+            createMediaNodeAt('image', at, {
+              url: res.url,
               thumbUrl: res.thumbUrl,
               width: res.width,
               height: res.height,
-            } as Partial<ImageNodeData>);
+            });
           } else if (kind === 'video') {
             message.loading({ content: `上传中「${f.name}」0%`, key, duration: 0 });
             const res = await uploadVideo(
@@ -467,9 +479,7 @@ export const Canvas = memo(function Canvas() {
               },
               projectId || undefined
             );
-            const node = createNode('video', { x: base.x + idx * 80, y: base.y + idx * 80 });
-            addNode(node);
-            updateNodeData(node.id, { videoUrl: res.url } as Partial<VideoNodeData>);
+            createMediaNodeAt('video', at, { url: res.url });
             message.success({ content: `「${f.name}」上传完成`, key, duration: 2 });
           } else {
             message.loading({ content: `上传中「${f.name}」0%`, key, duration: 0 });
@@ -478,9 +488,7 @@ export const Canvas = memo(function Canvas() {
               (pct) => message.loading({ content: `上传中「${f.name}」${pct}%`, key, duration: 0 }),
               projectId || undefined
             );
-            const node = createNode('audio', { x: base.x + idx * 80, y: base.y + idx * 80 });
-            addNode(node);
-            updateNodeData(node.id, { audioUrl: url } as Partial<AudioNodeData>);
+            createMediaNodeAt('audio', at, { url });
             message.success({ content: `「${f.name}」上传完成`, key, duration: 2 });
           }
           idx++;
@@ -504,7 +512,44 @@ export const Canvas = memo(function Canvas() {
         }
       }
     },
-    [screenToFlowPosition, addNode, updateNodeData, projectId]
+    [screenToFlowPosition, createMediaNodeAt, projectId]
+  );
+
+  // 适配器一（资产库资产）：面板松手时投递「资产 + 屏幕坐标」，坐标不在画布内则放弃
+  useEffect(() => {
+    setAssetDropHandler(({ asset, x, y }) => {
+      const wrap = canvasWrapRef.current;
+      if (!wrap) return;
+      const el = document.elementFromPoint(x, y);
+      if (!el || !wrap.contains(el)) {
+        message.info('请把资产拖到画布区域内');
+        return;
+      }
+      void handleCanvasDrop({ source: 'asset', x, y, asset });
+    });
+    return () => setAssetDropHandler(null);
+  }, [handleCanvasDrop, message]);
+
+  // 适配器二（系统文件）：只有 types 含 Files 时才允许放置
+  const handleDragOverCanvas = useCallback((e: React.DragEvent) => {
+    try {
+      if (Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    } catch {
+      // 忽略（个别浏览器 types 实现不同）
+    }
+  }, []);
+
+  const handleDropFiles = useCallback(
+    (e: React.DragEvent) => {
+      const files = Array.from(e.dataTransfer.files || []);
+      if (files.length === 0) return;
+      e.preventDefault();
+      void handleCanvasDrop({ source: 'files', x: e.clientX, y: e.clientY, files });
+    },
+    [handleCanvasDrop]
   );
 
     // 在画布中心添加节点并自动选中（空画布引导卡 / FAB 共用）
@@ -667,7 +712,12 @@ export const Canvas = memo(function Canvas() {
           </div>
         </div>
       ) : (
-      <div className="w-full h-full" onDragOver={handleDragOverCanvas} onDrop={handleDropFiles}>
+      <div
+        ref={canvasWrapRef}
+        className="w-full h-full"
+        onDragOver={handleDragOverCanvas}
+        onDrop={handleDropFiles}
+      >
         <ReactFlow
         nodes={displayNodes}
         edges={edges}
@@ -740,20 +790,6 @@ export const Canvas = memo(function Canvas() {
         className="react-flow-cursor-default"
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-
-        {showMiniMap && (
-          <MiniMap
-            nodeColor={miniMapNodeColor}
-            maskColor="rgba(100,116,139,0.15)"
-            style={{
-              background: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-            }}
-            pannable
-            zoomable
-          />
-        )}
 
       </ReactFlow>
       </div>
