@@ -101,12 +101,12 @@ export function AppLayout() {
             <span className="font-semibold text-base text-gray-800">漫蛙AI</span>
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
-          <span className="hidden md:inline text-gray-300">|</span>
+          <span className="hidden md:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
           <span className="hidden md:inline text-sm text-gray-400">AI 视频创作工作台</span>
           {/* 论坛入口：放在登录态判断之外——论坛是公开可读的，
               未登录访客（含从 banner 活动落地进来的）也要能看到这个入口
               移动端同样要显示（原本是 hidden sm:flex，手机上看不到） */}
-          <span className="hidden text-gray-300 sm:inline">|</span>
+          <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
           <button
             onClick={() => navigate('/forum')}
             className={`flex flex-col md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${

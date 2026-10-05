@@ -841,8 +841,13 @@ export default function VideoListPage() {
             {showCategories.map((cat) => (
               <Tag
                 key={cat.key}
-                color={activeCategory === cat.key ? 'blue' : undefined}
-                className={`cursor-pointer text-xs`}
+                // 选中态不再用 antd 预设色板（color="blue" 不走主题主色，会跟全站青色选中态不一致），
+                // 改用统一约定：半透明青底 + 浅青字 + 青描边
+                className={`cursor-pointer text-xs ${
+                  activeCategory === cat.key
+                    ? '!bg-cyan-500/15 !text-cyan-200 !border-cyan-400 font-medium'
+                    : ''
+                }`}
                 onClick={() => handleCategoryChange(cat.key)}
               >
                 {cat.label}

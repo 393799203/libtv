@@ -256,7 +256,7 @@ function WorkspaceInner() {
             </span>
           </Tooltip>
           {/* 竖线分隔：与全局头部同款 */}
-          <span className="text-gray-300 select-none">|</span>
+          <span className="inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" /> {/* 与画布工具栏内部的竖线同一种元素（1px 细线），不再用 "|" 文字 */}
           <CanvasToolbar />
         </div>
         <div className="flex-1" />

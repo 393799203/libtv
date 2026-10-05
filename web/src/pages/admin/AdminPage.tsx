@@ -1057,7 +1057,7 @@ export default function AdminPage() {
                             <td className="px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
                             <td className="px-4 py-3 text-gray-500 text-[12px]">
                               <span>项目 {user.project_count || 0}</span>
-                              <span className="text-gray-300 mx-1.5">|</span>
+                              <span className="inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
                               <span>图片 {user.asset_image_count || 0}</span>
                               <span className="text-gray-300 mx-1.5">·</span>
                               <span>视频 {user.asset_video_count || 0}</span>
