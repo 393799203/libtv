@@ -17,7 +17,13 @@ type UserTokenChecker interface {
 	CheckTokenValid(ctx context.Context, userID string, claims jwt.MapClaims) bool
 }
 
-func Auth(checker UserTokenChecker) gin.HandlerFunc {
+// UserActivityTracker 记录"最后操作时间"。放在接口里而不是直接依赖 service，
+// 保持中间件只依赖抽象（同 UserTokenChecker 的理由）。
+type UserActivityTracker interface {
+	TouchActivity(userID string)
+}
+
+func Auth(checker UserTokenChecker, tracker UserActivityTracker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -64,6 +70,11 @@ func Auth(checker UserTokenChecker) gin.HandlerFunc {
 		}
 
 		c.Set("user_id", userID)
+
+		// 打"最后操作"点（内部节流 + 异步，不影响本次请求耗时）
+		if tracker != nil {
+			tracker.TouchActivity(userID)
+		}
 		c.Set("email", claims["email"])
 		c.Next()
 	}

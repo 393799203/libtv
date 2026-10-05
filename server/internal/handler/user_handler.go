@@ -59,7 +59,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 
 	// 注册即登录：前端注册成功后直接 setAuth(响应)，期望的就是登录接口那套
 	// {token, user} 结构（见 web/src/components/auth/LoginModal.tsx 的 handleRegister）。
-	// 顺带把 last_login_at 填上——新用户不该在后台列表里显示「从未登录」。
+	// 顺带把 last_active_at 填上——新用户不该在后台列表里显示「从未使用」。
 	token, loggedIn, err := h.userService.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		// 账号已经建好了，不能因为签发 token 失败就让注册白做：

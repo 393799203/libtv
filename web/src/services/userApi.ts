@@ -9,7 +9,8 @@ export interface UserItem {
   channel?: string;
   created_at: string;
   /** 最后一次登录成功时间；为空=从未登录过（改版前的历史用户不回填） */
-  last_login_at?: string | null;
+  /** 最后一次操作时间（带 token 调任意接口）；与"最后登录"不同，天天在用的用户也可能几天才登录一次 */
+  last_active_at?: string | null;
   /** 剩余积分（AI 调用扣费用） */
   credits?: number;
   /** 项目数（管理员列表接口返回） */

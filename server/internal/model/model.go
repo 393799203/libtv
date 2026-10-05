@@ -24,10 +24,13 @@ type User struct {
 	Credits   int64     `gorm:"not null;default:0" json:"credits"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	// LastLoginAt 最后一次登录成功的时间（后台用户列表展示）。
 	// 指针类型：为空表示改版前注册、或注册后从未登录过，前端显示「—」；
 	// 该列由 AutoMigrate 自动添加，历史用户不回填（无历史登录记录可查）。
-	LastLoginAt *time.Time `json:"last_login_at"`
+
+	// LastActiveAt 最后一次"操作"（带 token 调任意接口）的时间，后台用户列表展示用。
+	// 可能几天才登录一次 —— "最后登录"反映不出是否还在用，"最后操作"才能。
+	// 写入在鉴权中间件里做，并做了节流（同一用户最少间隔 5 分钟才写一次库），不会放大写压力。
+	LastActiveAt *time.Time `json:"last_active_at"`
 }
 
 func (User) TableName() string { return "users" }

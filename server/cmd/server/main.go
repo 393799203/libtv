@@ -402,7 +402,7 @@ func main() {
 
 	// 需要认证的路由（Auth 传入 userService 校验密码版本号，改密码后旧 token 失效）
 	api := r.Group("/api")
-	api.Use(middleware.Auth(userService))
+	api.Use(middleware.Auth(userService, userService))
 	{
 		// 删除项目 canvas 文件夹（需认证）
 		api.DELETE("/upload/canvas/:projectId", uploadHandler.DeleteCanvasDir)

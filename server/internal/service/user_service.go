@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"libtv/internal/config"
@@ -97,14 +98,9 @@ func (s *UserService) Login(ctx context.Context, email, password string) (string
 		return "", nil, errors.New("invalid email or password")
 	}
 
-	// 记录最后登录时间（后台用户列表展示用）。写失败不影响这次登录本身，
-	// 只记 warn —— 免得因为一个统计字段让用户登不进来。
-	now := time.Now()
-	if err := s.userRepo.UpdateProfile(ctx, user.ID, map[string]interface{}{"last_login_at": now}); err != nil {
-		log.Printf("warning: update last_login_at failed userID=%s: %v", user.ID, err)
-	} else {
-		user.LastLoginAt = &now
-	}
+	// 不再单独记录"最后登录"：后台只关心"最后操作"（last_active_at）。
+	// 登录本身也是一次操作，这里打一个点即可（内部节流 + 异步，不影响登录耗时）。
+	s.TouchActivity(user.ID)
 
 	token, err := s.generateToken(user)
 	if err != nil {
@@ -312,6 +308,42 @@ func (s *UserService) generateToken(user *model.User) (string, error) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(config.C.JWT.Secret))
+}
+
+// activityTouchTTL 同一用户两次"最后操作"落库的最小间隔。
+// 取 5 分钟：既能把"最后操作"精确到可用的粒度，又保证写压力有上限（一个用户 5 分钟最多一次 UPDATE）。
+const activityTouchTTL = 5 * time.Minute
+
+var (
+	activityMu    sync.Mutex
+	activityTouched = map[string]time.Time{}
+)
+
+// TouchActivity 记录用户"最后操作时间"（鉴权中间件在每个已认证请求里调用）。
+// 三重保护，确保它绝不影响接口性能：
+//  1. 进程内节流：同一用户在 activityTouchTTL 内直接返回，不查库不写库；
+//  2. 异步执行：写库放到 goroutine，请求不等待；
+//  3. 失败只记 warn：这是统计字段，不该影响业务。
+func (s *UserService) TouchActivity(userID string) {
+	if userID == "" {
+		return
+	}
+	activityMu.Lock()
+	last, ok := activityTouched[userID]
+	if ok && time.Since(last) < activityTouchTTL {
+		activityMu.Unlock()
+		return
+	}
+	activityTouched[userID] = time.Now()
+	activityMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.userRepo.UpdateProfile(ctx, userID, map[string]interface{}{"last_active_at": time.Now()}); err != nil {
+			log.Printf("warning: update last_active_at failed userID=%s: %v", userID, err)
+		}
+	}()
 }
 
 // RenewToken 会话滑动续期：为已登录用户重新签发一个完整有效期的 token。
