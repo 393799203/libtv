@@ -32,7 +32,9 @@ export type WSEventType =
   | 'node_completed'
   | 'node_failed'
   | 'execution_completed'
-  | 'execution_failed';
+  | 'execution_failed'
+  // 余额变动（后端扣费/退费那一刻推过来）：不属于节点生命周期，但是画布右上角要立刻反应的
+  | 'credits_changed';
 
 // WebSocket 事件
 export interface WSEvent {

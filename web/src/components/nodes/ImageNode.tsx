@@ -44,12 +44,16 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 图片懒加载状态：loading（灰底+转圈）→ loaded / error
   const [imgStatus, setImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
 
-  // 画布展示用小图：优先节点自带 thumbUrl → 按约定推导（存量图已回填）→ 回退原图
+  // 画布展示用小图：节点自带的 thumbUrl **只有与当前 imageUrl 对得上时才可信**。
+  // 存量数据里存在「imageUrl 已换成新图、thumbUrl 还是上一版」的脏值
+  //（表现就是：重新生成成功后，节点上的缩略图还是老的）。这种情况一律按当前
+  // imageUrl 推导，节点自己就修好了，不依赖事后清理历史数据。
   const [thumbFailed, setThumbFailed] = useState(false);
-  const displayImageUrl =
-    thumbFailed || !data.thumbUrl && !deriveThumbUrl(data.imageUrl)
-      ? data.imageUrl
-      : data.thumbUrl || deriveThumbUrl(data.imageUrl) || data.imageUrl;
+  const derivedThumb = deriveThumbUrl(data.imageUrl);
+  const storedThumb = data.thumbUrl && data.thumbUrl === derivedThumb ? data.thumbUrl : undefined;
+  const displayImageUrl = thumbFailed
+    ? data.imageUrl
+    : storedThumb || derivedThumb || data.imageUrl;
 
   // 加载状态跟着**真正渲染的 src** 走：src 变了才重新走加载流程，没变就不重置。
   // 只盯 data.imageUrl/thumbUrl 是不够的 —— 只要有调用方只改了其中一个（比如历史切换

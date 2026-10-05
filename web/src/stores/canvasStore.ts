@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { deriveThumbUrl } from '@/utils/thumbUrl';
 import type { CanvasData, LibTVNode, LibTVEdge, NodeExecutionStatus, ScriptAssetItem } from '@/types/canvas';
 import {
   applyNodeChanges,
@@ -89,6 +90,8 @@ interface CanvasState extends WorkspaceUIState {
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
   /** 只更新执行进度文案（SSE 高频回调专用）：不进历史、不置 isDirty */
   updateNodeProgress: (id: string, progressMessage: string | undefined) => void;
+  /** 回写节点的派生元数据（媒体尺寸/时长等由文件本身测出来的值）：不进历史、不置 isDirty */
+  updateNodeMeta: (id: string, data: Partial<LibTVNode['data']>) => void;
 
   // 视口持久化
   saveViewport: (viewport: Viewport) => void;
@@ -530,9 +533,27 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
-      data.nodes = data.nodes.map((node) =>
-        node.id === id ? { ...node, data: { ...node.data, ...upd } as LibTVNode['data'] } : node,
-      );
+      data.nodes = data.nodes.map((node) => {
+        if (node.id !== id) return node;
+        const next = { ...upd } as Record<string, unknown>;
+        const cur = node.data as Record<string, unknown>;
+
+        // 产物换了就同步派生字段（画布展示优先用 thumbUrl / stillUrl）：
+        // 只写 imageUrl / videoUrl 会让节点继续显示上一版的小图 —— 表现就是
+        // 「重新生成成功后，节点上的缩略图还是老的」。调用方显式给了新值就尊重调用方。
+        if (typeof next.imageUrl === 'string' && next.imageUrl && next.imageUrl !== cur.imageUrl) {
+          if (next.thumbUrl === undefined) next.thumbUrl = deriveThumbUrl(next.imageUrl as string);
+          // 旧图的尺寸不能沿用到新图上：调用方没给就让节点重新测
+          if (next.width === undefined) next.width = undefined;
+          if (next.height === undefined) next.height = undefined;
+        }
+        if (typeof next.videoUrl === 'string' && next.videoUrl && next.videoUrl !== cur.videoUrl) {
+          // 视频换了：旧封面（stillUrl）画的是上一版视频，必须一并清掉，否则封面还是老的
+          if (next.stillUrl === undefined) next.stillUrl = undefined;
+        }
+
+        return { ...node, data: { ...node.data, ...next } as LibTVNode['data'] };
+      });
       const hist = saveHistory(data);
       Object.assign(data, hist);
       cache.set(pid, data);
@@ -584,6 +605,30 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       data.skipHistory = true;
       data.nodes = data.nodes.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, progressMessage } as LibTVNode['data'] } : node,
+      );
+      cache.set(pid, data);
+
+      return { _cache: cache, ...syncFromCache(pid, cache) };
+    });
+  },
+
+  /**
+   * 回写派生元数据（视频尺寸/时长这类由媒体文件测出来的值）。
+   * 与 updateNodeData 的唯一区别：**不置 isDirty、不进撤销历史**。
+   * 这些值不是用户编辑：若按编辑论处，页面一加载 VideoNode 重新测一遍尺寸
+   * 就会把画布标脏，出现"刚刷新进来、什么都没动却显示未保存"。
+   * 回写前调用方应先比对，值没变就别写（省掉无意义的节点重渲染）。
+   */
+  updateNodeMeta: (id: string, upd: Partial<LibTVNode['data']>) => {
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid || state.isLoading) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid) || createEmptyProjectData();
+
+      data.skipHistory = true;
+      data.nodes = data.nodes.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, ...upd } as LibTVNode['data'] } : node,
       );
       cache.set(pid, data);
 

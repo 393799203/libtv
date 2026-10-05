@@ -4,8 +4,7 @@ import { GoldOutlined, CheckCircleFilled, CrownFilled } from '@ant-design/icons'
 import { pointsPackageApi, type PointsPackage } from '@/services/pointsPackageApi';
 import { pricingApi } from '@/services/pricingApi';
 import { paymentApi } from '@/services/paymentApi';
-import api from '@/services/api';
-import { useAuthStore } from '@/stores/authStore';
+import { refreshCredits as refreshCreditsGlobal } from '@/utils/refreshCredits';
 
 /** 参考单价估算：视频取当前渠道第一个 480p 已配价模型，图片取第一个已配价模型 */
 const REF_VIDEO_RESOLUTION = '480p';
@@ -95,17 +94,8 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  /** 刷新用户积分（拉取 /auth/me 后同步 store 与顶栏） */
-  const refreshCredits = async () => {
-    try {
-      const me = (await api.get('/auth/me')) as { credits?: number; [k: string]: unknown };
-      if (typeof me.credits === 'number') {
-        useAuthStore.getState().setUser({ credits: me.credits });
-      }
-    } catch {
-      // 刷新失败不阻塞（下次进入页面/刷新会同步）
-    }
-  };
+  // 余额刷新统一走公共实现（节流 + 并发合并 + 失败静默）
+  const refreshCredits = () => refreshCreditsGlobal(true);
 
   /** 轮询订单直到支付成功（最多 5 分钟） */
   const startPolling = (orderNo: string, points: number) => {

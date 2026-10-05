@@ -15,15 +15,8 @@ import {
   type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Button, Tooltip, message } from 'antd';
+import { Button, message } from 'antd';
 import {
-  FullscreenOutlined,
-  ZoomInOutlined,
-  ZoomOutOutlined,
-  UndoOutlined,
-  RedoOutlined,
-  AimOutlined,
-  PlusOutlined,
   FileTextOutlined,
   SnippetsOutlined,
   PictureOutlined,
@@ -85,15 +78,17 @@ export const Canvas = memo(function Canvas() {
   const pendingViewportRef = useRef<Viewport | null>(null);
   const viewportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // 图片/视频节点右键菜单状态（下载 / 存到个人资产库 / 查看生成历史）
+  // 节点右键菜单状态（复制/粘贴/删除；图片·视频额外有下载 / 存到个人资产库 / 查看生成历史）
   const [nodeMenu, setNodeMenu] = useState<{
     x: number;
     y: number;
-    nodeType: 'image' | 'video';
+    nodeType: NodeType;
     url: string;
     name: string;
     nodeId: string;
   } | null>(null);
+  // 节点剪贴板：右键「复制节点」后「粘贴节点」克隆出一个全新 id 的节点
+  const [clipboardNode, setClipboardNode] = useState<LibTVNode | null>(null);
   // 生成历史弹窗状态
   const [historyModal, setHistoryModal] = useState<{
     nodeId: string;
@@ -127,10 +122,10 @@ export const Canvas = memo(function Canvas() {
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   // 空画布引导卡片：手动关闭后本次会话不再弹出
   const [dismissedEmptyGuide, setDismissedEmptyGuide] = useState(false);
-  const { fitView, zoomIn, zoomOut, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
+  const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, projectId } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, removeNodes, projectId } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -141,6 +136,7 @@ export const Canvas = memo(function Canvas() {
       updateNodeData: s.updateNodeData,
       addNode: s.addNode,
       addEdge: s.addEdge,
+      removeNodes: s.removeNodes,
       projectId: s.projectId,
     }))
   );
@@ -217,22 +213,22 @@ export const Canvas = memo(function Canvas() {
     });
   }, []);
 
-  // 节点右键：一律阻止冒泡到容器的空白区右键菜单（所有节点类型）；
-  // 图片/视频节点有媒体内容时额外弹出下载 / 存到个人资产库菜单
+  // 节点右键：一律阻止冒泡到容器的空白区右键菜单（所有节点类型）。
+  // 任何节点都给「复制/粘贴/删除」；图片·视频且有媒体地址时，菜单里再补下载 / 存资产 / 看历史。
   const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: LibTVNode) => {
     event.preventDefault();
     event.stopPropagation();
     setNodeSelectPopup(null);
-    if (node.type !== 'image' && node.type !== 'video') return;
     const url = node.type === 'image'
       ? (node.data.imageUrl as string)
-      : (node.data.videoUrl as string);
-    if (!url) return;
+      : node.type === 'video'
+        ? (node.data.videoUrl as string)
+        : '';
     setNodeMenu({
       x: event.clientX,
       y: event.clientY,
-      nodeType: node.type,
-      url,
+      nodeType: (node.type || node.data.type) as NodeType,
+      url: url || '',
       name: (node.data.label as string) || '',
       nodeId: node.id,
     });
@@ -314,6 +310,104 @@ export const Canvas = memo(function Canvas() {
     },
     [nodeSelectPopup, screenToFlowPosition, addNode, addEdge]
   );
+
+  /** 节点显示名：label 优先，否则用类型名 */
+  const nodeLabelOf = useCallback((node?: LibTVNode | null) => {
+    if (!node) return '';
+    const label = (node.data as { label?: string }).label;
+    return label || NODE_TYPE_CONFIG[node.data.type as NodeType]?.label || '节点';
+  }, []);
+
+  /**
+   * 克隆出一个新节点（粘贴用）。
+   * - id 必须与源节点不同：`<类型>-copy-<时间戳>-<随机>`。
+   *   刻意避开分镜节点的命名规则（shot-image-<shotId>-<scriptNodeId> 精确匹配）——
+   *   克隆出来的节点是普通节点，不该被当成某个分镜的官方节点；
+   *   同时保留类型前缀（如 style-），依赖前缀的类型判断（样式节点等）才不会丢。
+   * - data 深拷贝（图上/文案/Prompt 全部带走），但清掉运行态字段：
+   *   克隆节点没在跑，不该继承「生成中/失败/已过期」。
+   */
+  const buildClonedNode = useCallback((source: LibTVNode, position: { x: number; y: number }): LibTVNode => {
+    const nodeType = (source.type || source.data.type) as NodeType;
+    const data = JSON.parse(JSON.stringify(source.data ?? {})) as LibTVNode['data'];
+    const mutable = data as Record<string, unknown>;
+    mutable.status = 'idle';
+    mutable.progressMessage = undefined;
+    mutable.error = undefined;
+    mutable.stale = false;
+    if ('isEditing' in mutable) mutable.isEditing = false;
+    return createNode(nodeType, position, {
+      id: `${nodeType}-copy-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      data,
+      style: { ...(source.style ?? {}) },
+    });
+  }, []);
+
+  /** 复制节点（不传 id 时用当前选中的节点） */
+  const handleCopyNode = useCallback((nodeId?: string) => {
+    const id = nodeId || selectedNodeIds[0];
+    const node = id ? nodes.find((n) => n.id === id) : undefined;
+    if (!node) {
+      message.warning('请先选中一个节点再复制');
+      return;
+    }
+    setClipboardNode(node);
+    message.success({ content: `已复制节点「${nodeLabelOf(node)}」`, key: 'node-clip' });
+  }, [nodes, selectedNodeIds, nodeLabelOf]);
+
+  /**
+   * 粘贴节点（克隆）。
+   * @param at 画布坐标落点（右键空白处粘贴时为鼠标位置）
+   * @param sourceNodeId 在某个节点上右键粘贴时，落点贴着该节点的右下角
+   */
+  const handlePasteNode = useCallback((at?: { x: number; y: number }, sourceNodeId?: string) => {
+    if (!clipboardNode) {
+      message.warning('剪贴板里还没有节点，先「复制节点」');
+      return;
+    }
+    const from = (sourceNodeId ? nodes.find((n) => n.id === sourceNodeId) : undefined) ?? clipboardNode;
+    const position = at ?? { x: from.position.x + 40, y: from.position.y + 40 };
+    const clone = buildClonedNode(clipboardNode, position);
+    addNode(clone);
+    // 选中新节点：提示词面板会直接跟着它打开，便于继续改
+    onNodesChange([{ type: 'select', id: clone.id, selected: true }]);
+    message.success({ content: '已粘贴节点', key: 'node-clip' });
+  }, [clipboardNode, nodes, buildClonedNode, addNode, onNodesChange]);
+
+  /** 删除节点：不传 id 时删除当前所有选中的节点（可用 Ctrl/Cmd+Z 撤销） */
+  const handleDeleteNodes = useCallback((nodeId?: string) => {
+    const ids = nodeId ? [nodeId] : selectedNodeIds;
+    if (ids.length === 0) {
+      message.warning('请先选中一个节点再删除');
+      return;
+    }
+    removeNodes(ids);
+    message.success(`已删除 ${ids.length} 个节点（Ctrl/Cmd+Z 可撤销）`);
+  }, [selectedNodeIds, removeNodes]);
+
+  // Ctrl/Cmd+C / Ctrl/Cmd+V：画布上快速克隆节点。
+  // 输入场景一律交回浏览器默认行为（焦点在输入框/可编辑区，或页面里有文本被选中）。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'c' && key !== 'v') return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (window.getSelection()?.toString()) return;
+      if (key === 'c') {
+        if (selectedNodeIds.length === 0) return; // 没选中就别抢浏览器默认行为
+        e.preventDefault();
+        handleCopyNode();
+      } else {
+        if (!clipboardNode) return;
+        e.preventDefault();
+        handlePasteNode();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedNodeIds, clipboardNode, handleCopyNode, handlePasteNode]);
 
   // 拖拽本地/微信图片到画布：识别文件拖入并允许放置
   const handleDragOverCanvas = useCallback((e: React.DragEvent) => {
@@ -459,50 +553,6 @@ export const Canvas = memo(function Canvas() {
       viewportTimerRef.current = null;
     }
   }, []);
-
-  const handleFitView = useCallback(() => {
-    fitView({ duration: 300, padding: 0.2 });
-  }, [fitView]);
-
-  const handleZoomIn = useCallback(() => {
-    zoomIn({ duration: 200 });
-  }, [zoomIn]);
-
-  const handleZoomOut = useCallback(() => {
-    zoomOut({ duration: 200 });
-  }, [zoomOut]);
-
-  const handleZoomReset = useCallback(() => {
-    const nodes = getNodes();
-    if (nodes.length === 0) {
-      rfSetViewport({ x: 0, y: 0, zoom: 1 }, { duration: 200 });
-      return;
-    }
-    // 计算所有节点的边界中心（flow 坐标）
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const node of nodes) {
-      const w = node.measured?.width ?? (node.style?.width as number ?? 320);
-      const h = node.measured?.height ?? (node.style?.height as number ?? 200);
-      // nodeOrigin [0.5, 0.5] → position 是节点中心
-      minX = Math.min(minX, node.position.x - w / 2);
-      minY = Math.min(minY, node.position.y - h / 2);
-      maxX = Math.max(maxX, node.position.x + w / 2);
-      maxY = Math.max(maxY, node.position.y + h / 2);
-    }
-    const contentCenterX = (minX + maxX) / 2;
-    const contentCenterY = (minY + maxY) / 2;
-
-    // 获取容器尺寸，将内容中心对齐到容器屏幕中心
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (rect) {
-      rfSetViewport(
-        { x: rect.width / 2 - contentCenterX, y: rect.height / 2 - contentCenterY, zoom: 1 },
-        { duration: 200 },
-      );
-    } else {
-      rfSetViewport({ x: -contentCenterX, y: -contentCenterY, zoom: 1 }, { duration: 200 });
-    }
-  }, [rfSetViewport, getNodes]);
 
   const proOptions = useMemo(
     () => ({
@@ -705,55 +755,6 @@ export const Canvas = memo(function Canvas() {
           />
         )}
 
-        <Panel position="top-right">
-          <div className="bg-white/90 backdrop-blur-sm rounded-lg shadow-md px-3 py-1.5 flex items-center gap-1">
-            <Tooltip title="撤销">
-              <Button type="text" size="small" icon={<UndoOutlined />} disabled={!canUndo} onClick={undo} />
-            </Tooltip>
-            <Tooltip title="重做">
-              <Button type="text" size="small" icon={<RedoOutlined />} disabled={!canRedo} onClick={redo} />
-            </Tooltip>
-            <div className="w-px h-4 bg-gray-200 mx-1" />
-            <Tooltip title="放大">
-              <Button type="text" size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn} />
-            </Tooltip>
-            <div className="w-16 text-center text-xs text-gray-600 select-none">
-              {Math.round(viewport.zoom * 100)}%
-            </div>
-            <Tooltip title="缩小">
-              <Button type="text" size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut} />
-            </Tooltip>
-            <Tooltip title="适应画布">
-              <Button type="text" size="small" icon={<AimOutlined />} onClick={handleFitView} />
-            </Tooltip>
-            <Tooltip title="100%">
-              <Button type="text" size="small" icon={<FullscreenOutlined />} onClick={handleZoomReset} />
-            </Tooltip>
-          </div>
-        </Panel>
-
-        {/* 常驻添加节点按钮（右下角；空画布由引导卡承担，不显示） */}
-        {nodes.length > 0 && (
-        <Panel position="bottom-right">
-          <Tooltip title="添加节点">
-            <Button
-              type="primary"
-              shape="circle"
-              size="large"
-              icon={<PlusOutlined />}
-              onClick={(e) => {
-                // 弹窗出现在 + 按钮的左上方，右缘紧贴按钮（更贴合 +）
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setNodeSelectPopup({
-                  position: { x: r.left - 186, y: r.top - 272 },
-                  sourceNodeId: null,
-                  sourceHandle: null,
-                });
-              }}
-            />
-          </Tooltip>
-        </Panel>
-        )}
       </ReactFlow>
       </div>
       )}
@@ -794,7 +795,7 @@ export const Canvas = memo(function Canvas() {
               ))}
             </div>
             <div className="text-[11px] text-gray-400 mt-6 text-center">
-              右键画布或右下角 + 亦可随时添加节点
+              右键画布即可随时添加节点
             </div>
           </div>
         </div>
@@ -805,11 +806,15 @@ export const Canvas = memo(function Canvas() {
         <NodeContextMenu
           position={{ x: nodeMenu.x, y: nodeMenu.y }}
           nodeType={nodeMenu.nodeType}
-          url={nodeMenu.url}
+          url={nodeMenu.url || undefined}
           name={nodeMenu.name}
           nodeId={nodeMenu.nodeId}
           onUpdateNode={updateNodeData}
           onShowHistory={(nid, nt, curUrl) => setHistoryModal({ nodeId: nid, nodeType: nt, currentUrl: curUrl })}
+          canPaste={!!clipboardNode}
+          onCopy={() => handleCopyNode(nodeMenu.nodeId)}
+          onPaste={() => handlePasteNode(undefined, nodeMenu.nodeId)}
+          onDelete={() => handleDeleteNodes(nodeMenu.nodeId)}
           onClose={() => setNodeMenu(null)}
         />
       )}
@@ -854,6 +859,15 @@ export const Canvas = memo(function Canvas() {
           position={nodeSelectPopup.position}
           onSelect={handleNodeSelect}
           onClose={() => setNodeSelectPopup(null)}
+          selectedLabel={selectedNode ? nodeLabelOf(selectedNode) : null}
+          canCopy={selectedNodeIds.length > 0}
+          canPaste={!!clipboardNode}
+          onCopy={() => handleCopyNode()}
+          onPaste={() => handlePasteNode(
+            screenToFlowPosition(nodeSelectPopup.position),
+            nodeSelectPopup.sourceNodeId ?? undefined,
+          )}
+          onDelete={() => handleDeleteNodes()}
         />
       )}
 

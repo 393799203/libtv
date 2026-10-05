@@ -62,7 +62,8 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
             updates.duration = Math.round(video.duration);
           }
           if (Object.keys(updates).length > 0) {
-            useCanvasStore.getState().updateNodeData(id, updates);
+            // 尺寸/时长是测量出来的派生值，不算用户编辑（videoUrl 那次已经置脏）
+            useCanvasStore.getState().updateNodeMeta(id, updates);
           }
         };
         video.src = res.url;
@@ -223,7 +224,12 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     video.preload = 'metadata';
     video.onloadedmetadata = () => {
       const updates: Partial<VideoNodeData> = {};
-      if (video.videoWidth && video.videoHeight) {
+      const storedW = (data as { videoWidth?: number }).videoWidth;
+      const storedH = (data as { videoHeight?: number }).videoHeight;
+      // 只在"与已存的值不同"时才回写：每次加载都原值回写会把画布标脏，
+      // 用户一刷新进来什么都没动就显示"未保存"
+      if (video.videoWidth && video.videoHeight &&
+          (video.videoWidth !== storedW || video.videoHeight !== storedH)) {
         (updates as any).videoWidth = video.videoWidth;
         (updates as any).videoHeight = video.videoHeight;
       }
@@ -231,7 +237,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         updates.duration = Math.round(video.duration);
       }
       if (Object.keys(updates).length > 0) {
-        useCanvasStore.getState().updateNodeData(id, updates);
+        useCanvasStore.getState().updateNodeMeta(id, updates);
       }
     };
     video.src = data.videoUrl;

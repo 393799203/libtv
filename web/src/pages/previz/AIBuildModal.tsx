@@ -7,6 +7,7 @@ import { pricingApi } from '@/services/pricingApi';
 import { channelApi } from '@/services/channelApi';
 import { previzApi, type AnalyzedSceneObject } from '@/services/previzApi';
 import { usePrevizStore } from './previzStore';
+import { refreshCredits } from '@/utils/refreshCredits';
 
 // 图片来源 tab
 type SourceTab = 'upload' | 'image' | 'video';
@@ -181,6 +182,8 @@ export function AIBuildModal({
     message.loading({ content: 'AI 正在解析场景（约 1-2 分钟）…', key: hintKey, duration: 0 });
     try {
       const res = await previzApi.analyzeScene(imageUrl, model, projectId);
+      // 白模场景解析同样是计费接口：成功且非重复点击（replayed=没扣费）时同步余额
+      if (!res.replayed) void refreshCredits();
       message.destroy(hintKey);
       if (res.replayed) {
         // 同一张参考图在窗口内重复解析：返回上一次结果、没有重新调用、没有扣费

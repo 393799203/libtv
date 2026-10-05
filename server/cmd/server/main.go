@@ -224,6 +224,22 @@ func main() {
 	// 初始化工作流引擎
 	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService, providerTaskService)
 	eng := engine.NewWorkflowEngine(registry)
+
+	// 余额变动 → 顺着正在执行的那条事件流实时推给前端：
+	// 后端一扣费，画布右上角立刻变（不用等生成结束，更不用刷新页面）。
+	// 分工：计费层只负责通知「钱变了」，引擎只负责转发，都不关心对方的存在。
+	billingService.SetBalanceListener(func(ev billing.BalanceEvent) {
+		if ev.ExecutionID <= 0 {
+			return // 前端直连的计费接口（提示词/白模）没有执行流，由前端在响应返回后自行同步
+		}
+		eng.Publish(ev.ExecutionID, "credits_changed", map[string]interface{}{
+			"kind":    ev.Kind,   // deduct / refund / recharge
+			"action":  ev.Action, // 计费动作（如 ai.image）
+			"scene":   ev.Scene,  // 场景文案（如「图片生成」）
+			"amount":  ev.Amount, // 本次变动金额（正数）
+			"balance": ev.Balance, // 变动后的余额快照（同一个扣费流程里读到的值）
+		})
+	})
 	// 执行时按全局策略 + 用户渠道解析最终 AI 渠道（wasu/dianxin）
 	eng.SetChannelResolver(func(ctx context.Context, userID string) string {
 		return channelService.ResolveUserChannel(ctx, userID)

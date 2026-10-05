@@ -1,30 +1,42 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Menu, App, type MenuProps } from 'antd';
-import { DownloadOutlined, FolderAddOutlined, HistoryOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  FolderAddOutlined,
+  HistoryOutlined,
+  CopyOutlined,
+  SnippetsOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
 import { assetApi } from '@/services/assetApi';
 import { downloadFile } from '@/utils/download';
+import type { NodeType } from '@/types/canvas';
 
 interface NodeContextMenuProps {
   position: { x: number; y: number };
-  nodeType: 'image' | 'video';
-  /** 节点的媒体 URL（imageUrl / videoUrl） */
-  url: string;
+  nodeType: NodeType;
+  /** 节点的媒体 URL（imageUrl / videoUrl）；非媒体节点为空 */
+  url?: string;
   /** 节点名称（作为资产名） */
   name: string;
   /** 节点 ID */
   nodeId: string;
   /** 更新节点数据的回调 */
   onUpdateNode?: (nodeId: string, data: Record<string, any>) => void;
-  /** 点击“查看生成历史”回调 */
+  /** 点击“查看生成历史”回调（仅图片/视频节点） */
   onShowHistory?: (nodeId: string, nodeType: 'image' | 'video', currentUrl: string) => void;
+  /** 剪贴板里是否已有节点 */
+  canPaste?: boolean;
+  onCopy?: () => void;
+  onPaste?: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 }
 
 /**
- * 图片/视频节点右键菜单
- * - 下载图片 / 下载视频
- * - 存到个人资产库
- * - 查看生成历史
+ * 节点右键菜单
+ * - 通用：复制节点 / 粘贴节点 / 删除节点（任何节点类型都有）
+ * - 图片·视频：下载、存到个人资产库、查看生成历史
  */
 export const NodeContextMenu = memo(function NodeContextMenu({
   position,
@@ -32,8 +44,12 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   url,
   name,
   nodeId,
-  onUpdateNode,
+  onUpdateNode: _onUpdateNode,
   onShowHistory,
+  canPaste = false,
+  onCopy,
+  onPaste,
+  onDelete,
   onClose,
 }: NodeContextMenuProps) {
   const { message } = App.useApp();
@@ -41,9 +57,13 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   const [downloading, setDownloading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  /** 只有带媒体地址的图片/视频节点才有下载、存资产、看历史这些项 */
+  const isMedia = (nodeType === 'image' || nodeType === 'video') && !!url;
+  const mediaType = nodeType === 'image' ? 'image' : 'video';
   const typeLabel = nodeType === 'image' ? '图片' : '视频';
 
   const handleDownload = useCallback(async () => {
+    if (!url) return;
     onClose();
     setDownloading(true);
     try {
@@ -57,10 +77,10 @@ export const NodeContextMenu = memo(function NodeContextMenu({
   }, [url, typeLabel, onClose, message]);
 
   const handleSaveToLibrary = useCallback(async () => {
-    if (saving) return;
+    if (!url || saving) return;
     setSaving(true);
     try {
-      await assetApi.create({ type: nodeType, url, name }, { silentError: true });
+      await assetApi.create({ type: mediaType, url, name }, { silentError: true });
       message.success(`已存入个人资产库`);
       onClose();
     } catch (err) {
@@ -74,36 +94,73 @@ export const NodeContextMenu = memo(function NodeContextMenu({
     } finally {
       setSaving(false);
     }
-  }, [nodeType, url, name, saving, onClose, message]);
+  }, [mediaType, url, name, saving, onClose, message]);
 
   const handleShowHistory = useCallback(() => {
+    if (!url) return;
     onClose();
-    onShowHistory?.(nodeId, nodeType, url);
-  }, [onClose, onShowHistory, nodeId, nodeType, url]);
+    onShowHistory?.(nodeId, mediaType, url);
+  }, [onClose, onShowHistory, nodeId, mediaType, url]);
 
-  const menuItems: MenuProps['items'] = [
+  /** 通用节点操作：执行后关闭菜单 */
+  const runAction = useCallback(
+    (fn?: () => void) => {
+      if (!fn) return;
+      fn();
+      onClose();
+    },
+    [onClose]
+  );
+
+  const actionItems: MenuProps['items'] = [
     {
-      key: 'download',
-      label: downloading ? `下载${typeLabel}中...` : `下载${typeLabel}`,
-      icon: <DownloadOutlined />,
-      onClick: handleDownload,
+      key: 'copy',
+      label: '复制节点',
+      icon: <CopyOutlined />,
+      onClick: () => runAction(onCopy),
     },
     {
-      key: 'save',
-      label: saving ? '保存中...' : '存到个人资产库',
-      icon: <FolderAddOutlined />,
-      onClick: handleSaveToLibrary,
+      key: 'paste',
+      label: '粘贴节点',
+      icon: <SnippetsOutlined />,
+      disabled: !canPaste,
+      onClick: () => runAction(onPaste),
     },
     {
-      type: 'divider',
-    },
-    {
-      key: 'history',
-      label: '查看生成历史',
-      icon: <HistoryOutlined />,
-      onClick: handleShowHistory,
+      key: 'delete',
+      label: '删除节点',
+      icon: <DeleteOutlined />,
+      danger: true,
+      onClick: () => runAction(onDelete),
     },
   ];
+
+  const mediaItems: MenuProps['items'] = isMedia
+    ? [
+        { type: 'divider' },
+        {
+          key: 'download',
+          label: downloading ? `下载${typeLabel}中...` : `下载${typeLabel}`,
+          icon: <DownloadOutlined />,
+          onClick: handleDownload,
+        },
+        {
+          key: 'save',
+          label: saving ? '保存中...' : '存到个人资产库',
+          icon: <FolderAddOutlined />,
+          onClick: handleSaveToLibrary,
+        },
+        { type: 'divider' },
+        {
+          key: 'history',
+          label: '查看生成历史',
+          icon: <HistoryOutlined />,
+          onClick: handleShowHistory,
+        },
+      ]
+    : [];
+
+  const menuItems: MenuProps['items'] = [...actionItems, ...mediaItems];
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

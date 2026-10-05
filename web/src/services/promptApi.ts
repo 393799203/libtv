@@ -33,6 +33,7 @@ interface GeneratePromptData {
   storyboardPrompt: string;      // 生成的画面提示词（含 @ 引用）；多份时等于第 1 份
   storyboardPrompts?: string[];  // 多份画面提示词（与参考图一一对应）
   motionPrompt: string;          // 生成的运动提示词
+  replayed?: boolean;            // true=窗口内重复点击，返回上一次结果（未重新生成、未再扣费）
 }
 
 /**

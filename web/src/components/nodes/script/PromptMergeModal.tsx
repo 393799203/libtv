@@ -7,6 +7,7 @@ import { useModels } from '@/hooks/useModels';
 import { generatePrompt } from '@/services/promptApi';
 import { canvasApi } from '@/services/canvasApi';
 import { PromptReferenceTags } from './PromptReferenceTags';
+import { refreshCredits } from '@/utils/refreshCredits';
 import {
   createShotImageNode,
   createShotVideoNode,
@@ -267,6 +268,9 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
 
         // 调用后端 API 生成提示词（api 实例会自动注入 token）
         const result = await generatePrompt(request);
+        // 提示词生成是前端直连的计费接口（扣费在 /prompt/generate 里完成）：
+        // 这里不刷新的话，用户花了积分却看不到余额变化
+        if (!result.replayed) void refreshCredits();
         if (result.replayed) {
           // 后端识别出这是同一镜头/同一模型在窗口内的重复点击：返回上一次结果、没有重新生成、没有扣费
           message.info('这是刚刚生成的结果（重复点击不会重复扣费）；想重新生成请稍后再试');

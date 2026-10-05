@@ -92,6 +92,62 @@ type Service struct {
 	priceRepo    repository.ModelPriceRepo // 模型价格配置（nil 时全部按 0 处理）
 	modelManager *llm.ModelManager         // 用于把调用方传入的 model_id 归一到配置 ID（nil 时按原值查）
 	prices       map[string]int64
+	// balanceListener 余额变动监听（启动时由 main 注入）：扣费/退款那一刻把新余额推给在线执行流，
+	// 前端才能"后端一扣、界面立刻变"，而不用等到生成结束。
+	balanceListener func(BalanceEvent)
+}
+
+// BalanceEvent 一次余额变动（扣费 / 退款 / 充值）。
+type BalanceEvent struct {
+	UserID      string
+	ExecutionID int64  // 归属的执行（<0 表示不来自工作流执行，比如前端直连的计费接口）
+	Kind        string // deduct / refund / recharge
+	Action      string
+	Scene       string
+	Amount      int64 // 本次变动金额（正数）
+	Balance     int64 // 变动后的余额快照
+}
+
+// SetBalanceListener 注册余额变动监听。监听方必须自己保证「不阻塞、不 panic」——
+// 它在扣费成功之后同步调用，绝不能因为推送失败影响收费链路。
+func (s *Service) SetBalanceListener(fn func(BalanceEvent)) {
+	s.balanceListener = fn
+}
+
+// notifyBalance 通知余额变动：监听为空直接返回；监听里 panic 也只记日志，绝不影响扣费结果。
+func (s *Service) notifyBalance(ev BalanceEvent) {
+	if s.balanceListener == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Billing] ⚠️ 余额变动监听 panic（已忽略）: user=%s kind=%s err=%v", ev.UserID, ev.Kind, r)
+		}
+	}()
+	s.balanceListener(ev)
+}
+
+// executionIDCtxKey 把「这次扣费属于哪个执行」随 ctx 传给计费层（与 chargeKey 同款做法）：
+// 扣费发生时要能顺着这条执行的事件流把新余额推给正在看画布的用户。
+type executionIDCtxKey struct{}
+
+// WithExecutionID 给一次调用打上执行号（引擎在跑节点前注入）。
+func WithExecutionID(ctx context.Context, id int64) context.Context {
+	if id <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, executionIDCtxKey{}, id)
+}
+
+// ExecutionIDFrom 读这次调用身上的执行号（没有则 0）。
+func ExecutionIDFrom(ctx context.Context) int64 {
+	if ctx == nil {
+		return 0
+	}
+	if v, ok := ctx.Value(executionIDCtxKey{}).(int64); ok {
+		return v
+	}
+	return 0
 }
 
 func NewService(userRepo repository.UserRepo, billingRepo repository.BillingRepo, priceRepo repository.ModelPriceRepo, modelManager *llm.ModelManager) *Service {
@@ -509,6 +565,16 @@ func (s *Service) chargeCost(ctx context.Context, userID, action, modelName, sce
 		Remark:           s.remarkOf(action, scene),
 		BalanceAfter:     balance,
 	})
+	// 扣费那一刻就把新余额推给在线执行流：前端余额显示跟账本走，不用等生成结束
+	s.notifyBalance(BalanceEvent{
+		UserID:      userID,
+		ExecutionID: ExecutionIDFrom(ctx),
+		Kind:        "deduct",
+		Action:      action,
+		Scene:       scene,
+		Amount:      cost,
+		Balance:     balance,
+	})
 	return cost, nil
 }
 
@@ -578,6 +644,16 @@ func (s *Service) Refund(ctx context.Context, userID string, amount int64, actio
 		Remark:           remark,
 		BalanceAfter:     balance,
 	})
+	// 退款同样即时推送：失败退费时界面余额立刻回弹，而不是等下一次刷新
+	s.notifyBalance(BalanceEvent{
+		UserID:      userID,
+		ExecutionID: ExecutionIDFrom(ctx),
+		Kind:        "refund",
+		Action:      action,
+		Scene:       scene,
+		Amount:      amount,
+		Balance:     balance,
+	})
 	return nil
 }
 
@@ -615,6 +691,13 @@ func (s *Service) Recharge(ctx context.Context, userID string, amount int64, sce
 		BalanceAfter:  balance,
 		OrderNo:       order.OrderNo,
 		AlipayTradeNo: order.AlipayTradeNo,
+	})
+	s.notifyBalance(BalanceEvent{
+		UserID:  userID,
+		Kind:    "recharge",
+		Scene:   scene,
+		Amount:  amount,
+		Balance: balance,
 	})
 	return nil
 }

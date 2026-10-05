@@ -21,6 +21,7 @@ import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { PointsMallModal } from '@/components/auth/PointsMallModal';
 import { getUserAvatarSrc } from '@/utils/avatar';
+import { useCreditsSync } from '@/hooks/useCreditsSync';
 
 const { Header: AntHeader, Content } = Layout;
 
@@ -30,6 +31,9 @@ const { Header: AntHeader, Content } = Layout;
 const GUIDE_POST_ID = 'ff69a939-9e29-427c-bc86-4478869bf36a';
 
 export function AppLayout() {
+  // 全局头部显示余额：进页面拉一次 + 窗口聚焦再拉（余额可能在别处被扣/被退/被充）
+  useCreditsSync();
+
   const { message } = App.useApp();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isInitialized = useAuthStore((s) => s.isInitialized);

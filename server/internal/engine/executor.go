@@ -619,12 +619,19 @@ type WorkflowEngine struct {
 	channelResolver func(ctx context.Context, userID string) string
 	// nodeOutputHook 单个节点一有结果就落库的钩子（由 handler 注入，见 SetNodeOutputHook）
 	nodeOutputHook func(ctx context.Context, projectID string, out *NodeOutput)
+	// creditsReplay 每条执行「最后一条余额变动事件」。
+	// 为什么需要：扣费发生在引擎开始跑节点的那一刻，而前端要等 execute 响应回来才建立 SSE 流 ——
+	// 扣费早于建流时那条事件没有订阅者、按设计被丢弃，前端界面就停在旧余额上。
+	// 缓存一条，谁建流就补发给谁：这样「点生成 → 扣费 → 余额立刻变」不依赖时间窗口，
+	// 前端也不需要另外去查一次余额。
+	creditsReplay map[int64]creditsReplayItem
 }
 
 func NewWorkflowEngine(registry *ExecutorRegistry) *WorkflowEngine {
 	return &WorkflowEngine{
-		registry:    registry,
-		subscribers: make(map[int64]map[chan WorkflowEvent]struct{}),
+		registry:      registry,
+		subscribers:   make(map[int64]map[chan WorkflowEvent]struct{}),
+		creditsReplay: make(map[int64]creditsReplayItem),
 	}
 }
 
@@ -664,6 +671,16 @@ func (e *WorkflowEngine) Subscribe(executionID int64) <-chan WorkflowEvent {
 		e.subscribers[executionID] = make(map[chan WorkflowEvent]struct{})
 	}
 	e.subscribers[executionID][ch] = struct{}{}
+	e.pruneCreditsReplayLocked()
+	// 补发最后一条余额变动：扣费早于建流时，那条事件当时没人接收，这里补上
+	if item, ok := e.creditsReplay[executionID]; ok {
+		select {
+		case ch <- item.event: // 通道容量 64，非阻塞发送
+			// 留下证据：说明这次余额是「建流晚于扣费」时由补发送到的
+			log.Printf("[Engine] 补发余额变动: exec=%d（扣费早于建流）", executionID)
+		default:
+		}
+	}
 	e.mu.Unlock()
 	return ch
 }
@@ -836,6 +853,9 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 				// 每个节点一份独立的用量采集器：上游消耗是按节点记进对账行的，
 				// 若共用执行级 ctx，同一执行里多个节点的 token 会累加到同一行（对账就错了）
 				nodeCtx := llm.WithUsageRecorder(ctx)
+				// 把执行号带进计费层：扣费那一刻要顺着这条执行的事件流把新余额推给前端
+				// （前端余额显示跟账本走，后端一扣、画布右上角立刻变，不用等生成结束）
+				nodeCtx = billing.WithExecutionID(nodeCtx, execCtx.GetExecutionID())
 				output, err := executor.Execute(nodeCtx, n, execCtx)
 				if err != nil {
 					log.Printf("[Engine] executor error nodeID=%s type=%s err=%v", n.ID, n.Type, err)
@@ -968,6 +988,63 @@ func (e *WorkflowEngine) emit(event WorkflowEvent) {
 		}
 	}
 	e.mu.Unlock()
+}
+
+// Publish 向某条执行的事件流推送一个自定义事件（订阅了该执行的 SSE 连接都会收到）。
+// 用途：余额变动这类不属于节点生命周期、但前端要立刻知道的事件。
+// 与 emit 一样是**非阻塞**的：没有订阅者就直接丢弃，慢消费者满了也丢，绝不拖住调用方。
+func (e *WorkflowEngine) Publish(executionID int64, eventType string, data interface{}) {
+	if executionID <= 0 || eventType == "" {
+		return
+	}
+	event := WorkflowEvent{
+		Type:        eventType,
+		ExecutionID: executionID,
+		Data:        data,
+		Timestamp:   time.Now().UnixMilli(),
+	}
+
+	// 余额变动额外缓存一份：建流晚于扣费时靠它补发，前端不必再单独查余额
+	if eventType == creditsEventType {
+		e.mu.Lock()
+		e.pruneCreditsReplayLocked()
+		e.creditsReplay[executionID] = creditsReplayItem{event: event, at: time.Now()}
+		e.mu.Unlock()
+	}
+
+	e.mu.Lock()
+	subs := len(e.subscribers[executionID])
+	e.mu.Unlock()
+	// 订阅者为 0 时这条事件会被丢弃（正常行为：余额变动这类事件已缓存，建流时会补发）。
+	// 记一行日志是为了能事后判断「前端到底有没有收到」。
+	log.Printf("[Engine] 推送自定义事件: exec=%d type=%s 当前订阅者=%d", executionID, eventType, subs)
+
+	e.emit(event)
+}
+
+// creditsEventType 余额变动事件名（与 main 注入的监听器、前端监听的名字一致）
+const creditsEventType = "credits_changed"
+
+// creditsReplayItem 缓存的一条余额变动事件 + 写入时间（用于过期清理）
+type creditsReplayItem struct {
+	event WorkflowEvent
+	at    time.Time
+}
+
+// creditsReplayTTL 缓存存活时长：执行早已结束时还留着没有意义
+const creditsReplayTTL = 30 * time.Minute
+
+// pruneCreditsReplayLocked 清掉过期缓存（调用方必须已持锁）
+func (e *WorkflowEngine) pruneCreditsReplayLocked() {
+	if len(e.creditsReplay) == 0 {
+		return
+	}
+	now := time.Now()
+	for id, item := range e.creditsReplay {
+		if now.Sub(item.at) > creditsReplayTTL {
+			delete(e.creditsReplay, id)
+		}
+	}
 }
 
 // --- 事件系统 ---

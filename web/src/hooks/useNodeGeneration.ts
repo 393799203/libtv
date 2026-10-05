@@ -122,6 +122,7 @@ export function useNodeGeneration(
             nodes: [{ nodeId, status: 'running', progress: 0 }],
           } as never);
           addActiveStream({ projectId, executionId: resp.executionId, nodeId });
+
         } else {
           updateNodeStatus(nodeId, 'failed');
           setGeneratingNodeId(null);

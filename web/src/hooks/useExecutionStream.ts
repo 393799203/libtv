@@ -3,10 +3,10 @@ import { message } from 'antd';
 import { useExecutionStore } from '@/stores/executionStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useAuthStore } from '@/stores/authStore';
+import { refreshCredits } from '@/utils/refreshCredits';
 import { workflowApi } from '@/services/workflowApi';
 import { reconcileNodesOnTerminal, pendingNodeIdsOf } from '@/utils/executionTerminal';
 import { canvasApi } from '@/services/canvasApi';
-import api from '@/services/api';
 import { createNode } from '@/utils/nodeFactory';
 import type { WSEvent } from '@/types/workflow';
 import type { ImageNodeData, LibTVEdge } from '@/types/canvas';
@@ -152,6 +152,7 @@ export function useExecutionStream(
     const url = `/api/projects/${projectId}/workflows/${executionId}/stream?t=${encodeURIComponent(token)}`;
 
     const es = new EventSource(url);
+
     esRef.current = es;
 
     console.log('[SSE] connecting:', { projectId, executionId });
@@ -286,6 +287,10 @@ export function useExecutionStream(
             // 与 SSE 的 execution_completed 共用同一份收口实现：轮询兜底路径原来只写画布、
             // 不写 executionStore，于是 generatingNodeId 永不清除 —— 生成按钮永久停在
             // 「生成中…」且重试被拦（必须刷新页面）。
+            // 轮询兜底这条路径原来只收节点状态、不刷新积分：
+            // SSE 断线后走这里收尾，余额会一直停在旧值（刷新页面才更新）
+            void refreshCredits();
+
             const pending = pendingNodeIdsOf(seenNodeIds);
             if (pending.length > 0) {
               await reconcileNodesOnTerminal(
@@ -349,6 +354,17 @@ export function useExecutionStream(
       try {
         const event: WSEvent = JSON.parse(raw.data);
         useExecutionStore.getState().handleWSEvent(event);
+
+        // 余额变动：直接把服务端给的余额快照写进登录态（同一个扣费流程里读到的值，就是准的）。
+        // 这是"后端一扣费、界面立刻变"的那一步 —— 不再等生成结束，也不用前端自己算加减。
+        if (event.type === 'credits_changed') {
+          const d = (event.data || {}) as { balance?: number };
+          if (typeof d.balance === 'number') {
+            useAuthStore.getState().setUser({ credits: d.balance });
+          } else {
+            void refreshCredits(true); // 兜底：没带余额快照就自己去拉一次
+          }
+        }
 
         if (event.nodeId) seenNodeIds.add(event.nodeId);
 
@@ -508,6 +524,7 @@ export function useExecutionStream(
       'execution_completed',
       'execution_failed',
       'heartbeat', // 后端 15s 心跳事件，用于刷新前端超时熔断器
+      'credits_changed', // 后端扣费/退费那一刻推送的余额变动
     ];
     eventTypes.forEach((t) => es.addEventListener(t, handleEvent as EventListener));
 
@@ -518,12 +535,8 @@ export function useExecutionStream(
       // 从 activeStreams 中移除本执行（让下次同节点再生成能重新订阅）
       useExecutionStore.getState().removeActiveStream(executionId);
 
-      // 执行完成后刷新右上角积分（扣费后同步余额）
-      api.get('/auth/me').then((me: any) => {
-        if (me?.credits != null) {
-          useAuthStore.getState().setUser({ credits: me.credits });
-        }
-      }).catch(() => { /* 静默失败，下次页面加载会重新同步 */ });
+      // 执行完成后刷新积分（扣费后同步余额）
+      void refreshCredits();
 
       // 执行完成后自动保存画布。
       // 必须等 reconcilePromise（漏掉的节点回查补齐）结束：先把状态修正到终态再存盘，

@@ -8,8 +8,10 @@ import {
   GlobalOutlined,
   VideoCameraOutlined,
   FolderOutlined,
+  GoldOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
+import { CanvasToolbar } from '@/components/canvas/CanvasToolbar';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore, type ActiveStream } from '@/stores/executionStore';
@@ -19,7 +21,11 @@ import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 import AddShowDialog from '@/components/AddShowDialog';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
+import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
+import { useAuthStore } from '@/stores/authStore';
 import { showApi, type ShowCategoryItem } from '@/services/showApi';
+import { refreshCredits } from '@/utils/refreshCredits';
+import { useCreditsSync } from '@/hooks/useCreditsSync';
 
 /** 画布是否"效果为空"：无节点，或所有节点都是空内容（未填输入、无产出） */
 function isEffectivelyEmptyCanvas(nodes: { data?: Record<string, unknown> }[]): boolean {
@@ -79,6 +85,8 @@ function WorkspaceInner() {
   const isDirty = useCanvasStore((s) => s.isDirty);
   const isSaving = useCanvasStore((s) => s.isSaving);
   const showMiniMap = useCanvasStore((s) => s.showMiniMap);
+  // 剩余积分：执行完成后 useExecutionStream 会重新拉 /auth/me 同步余额，这里直接读即可保持实时
+  const user = useAuthStore((s) => s.user);
 
   // SSE 订阅提升到 WorkspacePage 顶层：与节点选中状态解耦
   // 节点失焦/切换面板不会卸载 SSE，避免运行中被关闭
@@ -96,6 +104,8 @@ function WorkspaceInner() {
   const [prefillVideoUrl, setPrefillVideoUrl] = useState('');
   // 个人资产库弹窗
   const [showAssetLibrary, setShowAssetLibrary] = useState(false);
+  // 积分明细（扣费/退款/充值）弹窗
+  const [showBillingRecords, setShowBillingRecords] = useState(false);
 
   // 同步设置 store 中的 projectId，避免竞态条件
   if (urlProjectId && useCanvasStore.getState().projectId !== urlProjectId) {
@@ -139,6 +149,9 @@ function WorkspaceInner() {
     }
   }, []);
 
+  // 余额同步：进画布拉一次 + 窗口聚焦再拉一次（扣费/退费的实时推送在 useExecutionStream 里）
+  useCreditsSync();
+
   // 保存画布
   const handleSave = useCallback(async () => {
     const { projectId, exportCanvas, setSaving, setDirty } = useCanvasStore.getState();
@@ -173,6 +186,7 @@ function WorkspaceInner() {
   }, [handleSave]);
 
   return (
+    <ReactFlowProvider>
     <div className="w-full h-full flex flex-col overflow-hidden">
       {/* SSE 订阅实例：每个 activeStream 一个独立 EventSource */}
       {activeStreams.map((s) => (
@@ -221,9 +235,22 @@ function WorkspaceInner() {
           </span>
         )}
         <div className="flex-1" />
+        {/* 画布工具条（撤销/重做 + 放大缩小/适应/100%）：原先是浮在画布右上角的悬浮条，现融入顶栏中间 */}
+        <CanvasToolbar />
+        <div className="flex-1" />
         {isDirty && (
           <span className="text-xs text-orange-500">未保存</span>
         )}
+        <Tooltip title="查看积分明细（扣费 / 退款 / 充值）">
+          <button
+            onClick={() => setShowBillingRecords(true)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-medium text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer shrink-0"
+          >
+            <GoldOutlined />
+            <span>{user?.credits ?? 0}</span>
+            <span className="hidden sm:inline">积分</span>
+          </button>
+        </Tooltip>
         <Tooltip title="提交视频发布">
           <Button
             type="text"
@@ -275,14 +302,17 @@ function WorkspaceInner() {
 
       {/* 画布区域 */}
       <div className="flex-1">
-        <ReactFlowProvider>
-          <CanvasWithDrop urlProjectId={urlProjectId} />
-        </ReactFlowProvider>
+        <CanvasWithDrop urlProjectId={urlProjectId} />
       </div>
 
       {/* 个人资产库弹窗 */}
       {showAssetLibrary && (
         <AssetLibraryModal onClose={() => setShowAssetLibrary(false)} />
+      )}
+
+      {/* 积分明细弹窗（与头部「费用明细」同一个组件） */}
+      {showBillingRecords && (
+        <BillingRecordsModal onClose={() => setShowBillingRecords(false)} />
       )}
 
       {/* 提交视频发布弹窗 */}
@@ -300,6 +330,7 @@ function WorkspaceInner() {
         projectName={projectName}
       />
     </div>
+    </ReactFlowProvider>
   );
 }
 
