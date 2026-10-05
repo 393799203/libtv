@@ -89,6 +89,27 @@ html.theme-dark-root #root {
 }
 /* 半透明彩底（bg-blue-50/70 这种"浅底加透明度"的写法）：同一色系的低透明度版本。
    这类变体不带透明度时能命中上面的规则，带了透明度就会漏 —— 一漏就是"选中了还是浅灰"。 */
+/* 100 档浅色底：比 50 档更深一档的"浅色块"（后台分类 tab、计数胶囊这类）。
+   之前只映射了 50 档，所以 100 档会整块亮着 —— 这是"浅色背景很难看"的直接原因。 */
+.theme-dark :is(.bg-blue-100, .bg-sky-100, .bg-cyan-100) {
+  background-color: rgba(34, 211, 238, 0.2);
+}
+.theme-dark :is(.bg-blue-100\/60, .bg-blue-100\/70, .bg-blue-100\/80, .bg-blue-200\/60, .bg-cyan-500\/25) {
+  background-color: rgba(34, 211, 238, 0.28);
+}
+.theme-dark :is(.bg-red-100) {
+  background-color: rgba(244, 63, 94, 0.2);
+}
+.theme-dark :is(.bg-green-100, .bg-emerald-100) {
+  background-color: rgba(34, 197, 94, 0.2);
+}
+.theme-dark :is(.bg-amber-100, .bg-orange-100) {
+  background-color: rgba(245, 158, 11, 0.2);
+}
+.theme-dark :is(.bg-purple-100, .bg-violet-100) {
+  background-color: rgba(139, 92, 246, 0.2);
+}
+
 .theme-dark :is(.bg-blue-50\/60, .bg-blue-50\/70, .bg-blue-50\/80) {
   background-color: rgba(34, 211, 238, 0.16);
 }

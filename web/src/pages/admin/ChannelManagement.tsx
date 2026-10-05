@@ -64,7 +64,7 @@ export default function ChannelManagement() {
                   onClick={() => !saving && !active && handleSwitch(opt.value)}
                   className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer transition-all ${
                     active
-                      ? 'border-blue-500 bg-blue-50/60 shadow-sm'
+                      ? 'border-cyan-400 bg-cyan-500/15 shadow-sm'
                       : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm'
                   } ${saving ? 'opacity-60 pointer-events-none' : ''}`}
                 >

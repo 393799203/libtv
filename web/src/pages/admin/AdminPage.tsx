@@ -638,13 +638,18 @@ export default function AdminPage() {
             <button
               key={item.key}
               onClick={() => navigate(`/admin/${item.key}`)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
+              className={`relative w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
                 activeTab === item.key
-                  ? 'bg-blue-50 text-blue-700 font-medium'
+                  ? 'text-cyan-200 font-medium'
                   : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
               }`}
             >
-              <span className={activeTab === item.key ? 'text-blue-600' : 'text-gray-400'}>{item.icon}</span>
+              {/* 选中态：不再铺一层浅色底（暗色侧栏上那块亮底很扎眼），
+                  改用左侧青色强调条 + 青色文字，视觉更干净也更省地方 */}
+              {activeTab === item.key && (
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full bg-cyan-400" />
+              )}
+              <span className={activeTab === item.key ? 'text-cyan-300' : 'text-gray-400'}>{item.icon}</span>
               {item.label}
             </button>
           ))}
@@ -677,11 +682,11 @@ export default function AdminPage() {
                           key={cat.id}
                           onClick={() => { setActiveShowCategory(cat.id); setPlayingShowId(null); }}
                           className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
-                            activeShowCategory === cat.id ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+                            activeShowCategory === cat.id ? 'bg-cyan-500/15 text-cyan-200 font-medium' : 'text-gray-500 hover:bg-gray-100'
                           }`}
                         >
                           {cat.name}
-                          <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                          <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
                             {cat.show_count}
                           </span>
                         </button>
@@ -911,11 +916,11 @@ export default function AdminPage() {
                       key={cat.id}
                       onClick={() => setActiveCategory(cat.id)}
                       className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
-                        activeCategory === cat.id ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+                        activeCategory === cat.id ? 'bg-cyan-500/15 text-cyan-200 font-medium' : 'text-gray-500 hover:bg-gray-100'
                       }`}
                     >
                       {cat.name}
-                      <span className={`text-[10px] ${activeCategory === cat.id ? 'bg-blue-200/60 text-blue-600' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                      <span className={`text-[10px] ${activeCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
                         {cat.style_count}
                       </span>
                     </button>
