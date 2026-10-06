@@ -150,29 +150,13 @@ func (z *ZOSStorage) GetType() string {
 }
 
 // PutObject 上传文件
-// zosUploadTimeout 按对象大小给出上传超时。
-//
-// 原来写死 30 秒：本机到 ZOS 的实测写入速度约 0.5MB/s（10MB 用 22 秒、60MB 用 117 秒），
-// 也就是说超过 ~15MB 的文件本该在上传途中被判超时——只是 minio 的分片重试把它掩盖了，
-// 表现成「传很久最后莫名其妙失败」。这里按 5 分钟起步 + 每 MB 给 3 秒（约为实测速度的 6 倍余量），
-// 上限 60 分钟，既能容纳管理员上传 1GB 素材，也不会让真卡死的请求挂上一整天。
-func zosUploadTimeout(objectSize int64) time.Duration {
-	if objectSize <= 0 {
-		return 5 * time.Minute // 大小未知（流式）时给保守值
-	}
-	timeout := 5*time.Minute + time.Duration(objectSize>>20)*3*time.Second
-	if timeout > 60*time.Minute {
-		timeout = 60 * time.Minute
-	}
-	return timeout
-}
-
 func (z *ZOSStorage) PutObject(objectName string, reader io.Reader, objectSize int64, contentType string) error {
 	if !z.IsAvailable() {
 		return fmt.Errorf("ZOS不可用")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), zosUploadTimeout(objectSize))
+	// 超时按体积算，见 uploadTimeoutForSize（共用实现，MinIO 侧同样用它）
+	ctx, cancel := context.WithTimeout(context.Background(), uploadTimeoutForSize(objectSize))
 	defer cancel()
 
 	if contentType == "" {

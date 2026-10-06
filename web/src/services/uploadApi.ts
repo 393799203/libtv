@@ -89,7 +89,13 @@ export async function uploadVideo(
     cached: boolean;
   }>('/upload/video', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 300000, // 5分钟超时（大文件上传需要足够时间）
+    // 不设超时：这里计的是整个 POST 的往返（浏览器→nginx→后端→对象存储），
+    // 耗时完全由文件大小和用户带宽决定，写死任何固定值都会在慢带宽下先于服务端断掉。
+    // 曾经写死 5 分钟——1GB 素材在 2MB/s 上传下约 8.5 分钟，前端会先自己掐断并报
+    // "timeout of 300000ms exceeded"，可服务端（ZOS 超时按体积给到 60 分钟）其实还来得及。
+    // 服务端侧仍有真实上限兜底：ZOS/MinIO 按体积计算的写入超时、nginx client_max_body_size 2G；
+    // 真正的"网络断了"由下面的进度回调/失败提示暴露，不靠 axios 计时器。
+    timeout: 0,
     onUploadProgress: (e) => {
       if (e.total && onProgress) {
         const pct = Math.round((e.loaded / e.total) * 100);

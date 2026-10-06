@@ -15,6 +15,23 @@ import (
 // 行为因浏览器而异，也不保证二次访问不再发请求。
 const cacheControlImmutable = "public, max-age=31536000, immutable"
 
+// uploadTimeoutForSize 按对象体积给出「写入对象存储」的超时（ZOS / MinIO 共用）。
+//
+// 写死 30 秒是不行的：实测本机到 ZOS 的写入速度约 0.5MB/s（10MB 用 22 秒、60MB 用 117 秒），
+// 也就是超过 ~15MB 的文件会在上传途中被判超时——只是 minio-go 的分片重试把它掩盖了，
+// 表现成「传很久最后莫名其妙失败」。按 5 分钟起步 + 每 MB 给 3 秒（约为实测速度的 6 倍余量），
+// 上限 60 分钟：既容得下管理员上传 1GB 素材，也不会让真卡死的请求挂上一整天。
+func uploadTimeoutForSize(objectSize int64) time.Duration {
+	if objectSize <= 0 {
+		return 5 * time.Minute // 大小未知（流式）时给保守值
+	}
+	timeout := 5*time.Minute + time.Duration(objectSize>>20)*3*time.Second
+	if timeout > 60*time.Minute {
+		timeout = 60 * time.Minute
+	}
+	return timeout
+}
+
 type Storage interface {
 	// PutObject 上传文件
 	PutObject(objectName string, reader io.Reader, objectSize int64, contentType string) error

@@ -149,7 +149,8 @@ func (m *MinIOStorage) PutObject(objectName string, reader io.Reader, objectSize
 		return fmt.Errorf("MinIO不可用")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 超时按体积算，见 uploadTimeoutForSize（原来写死 30 秒，大文件/慢链路会被中途掐断）
+	ctx, cancel := context.WithTimeout(context.Background(), uploadTimeoutForSize(objectSize))
 	defer cancel()
 
 	if contentType == "" {
