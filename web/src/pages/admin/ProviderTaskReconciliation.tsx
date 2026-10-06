@@ -26,6 +26,133 @@ import {
  * 列表按时间倒序（最近发生的在最上面），不按状态插队 —— 需要对账的具体某类行，
  * 用状态筛选或「只看异常」去收窄，排序本身只负责时间线。
  */
+/**
+ * 顶部汇总：五个数，一眼看清「要动手的有几条」和「白付上游多少钱」。
+ *
+ * 设计取舍：
+ * - 数字是主角（22px + tabular-nums，等宽对齐、扫一眼比大小），口径说明退到 11px 副注；
+ *   「自动/人工/真成本」「已退→净」这类明细原来挤在一个胶囊里，现在放副注，能换行、不挤。
+ * - 「待人工决定」只在 >0 时才亮橙。0 条还亮着警示色等于天天报警，报到最后就没人看了 ——
+ *   0 条时它是中性卡 + 「没有需要人工处理的」，>0 才换成橙底 + 警示图标 + 橙色数字。
+ * - 「真成本」是唯一真金白银亏掉的部分（自动退费上游不计费），>0 时同样用红色提出来。
+ * - 口径理由（为什么真成本只算人工退费、扣费合计为什么是毛额）保持原来的浮层文案，不占版面。
+ */
+function StatCard({
+  label,
+  value,
+  sub,
+  tone = 'neutral',
+  icon,
+  tooltip,
+  className,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: 'neutral' | 'green' | 'orange' | 'red';
+  icon?: React.ReactNode;
+  tooltip?: React.ReactNode;
+  className?: string;
+}) {
+  // 底色/字色都用主题里已映射好的语义档（bg-green-50 → rgba(34,197,94,.14) 等），
+  // 不新造色，保证和后台其它页面的绿/橙/红是同一套。
+  const bg = {
+    neutral: 'bg-[var(--dv-surface-2)]',
+    green: 'bg-green-50',
+    orange: 'bg-orange-50',
+    red: 'bg-red-50',
+  }[tone];
+  const valueColor = {
+    neutral: 'text-[var(--dv-text-1)]',
+    green: 'text-green-700',
+    orange: 'text-orange-700',
+    red: 'text-red-700',
+  }[tone];
+
+  const card = (
+    <div
+      className={`rounded-lg border border-[var(--dv-border-1)] px-3.5 py-3 ${bg} ${className || ''} ${
+        tooltip ? 'cursor-help' : ''
+      }`}
+    >
+      <div className="flex items-center gap-1 text-[11px] leading-4 text-[var(--dv-text-3)]">
+        {icon}
+        {label}
+      </div>
+      <div className={`mt-1 text-[22px] font-semibold leading-7 tabular-nums ${valueColor}`}>
+        {value}
+      </div>
+      {sub && <div className="mt-0.5 text-[11px] leading-4 text-[var(--dv-text-3)]">{sub}</div>}
+    </div>
+  );
+
+  return tooltip ? (
+    <Tooltip title={tooltip}>
+      {/* Tooltip 需要一个能吃事件的子元素，卡片本身即可 */}
+      {card}
+    </Tooltip>
+  ) : (
+    card
+  );
+}
+
+/** 顶部汇总条本体 */
+export function ReconciliationSummary({ stats }: { stats?: ProviderTaskStats }) {
+  const pending = stats?.pending_review ?? 0;
+  const manualCredits = stats?.manual_refunded_credits ?? 0;
+  const charged = stats?.charged_credits ?? 0;
+  const refundedCredits = stats?.refunded_credits ?? 0;
+
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      <StatCard label="对账总条数" value={stats?.total ?? 0} sub="当前筛选范围" />
+      <StatCard label="已交付" value={stats?.delivered ?? 0} sub="已拿到上游产物" tone="green" />
+      <StatCard
+        label="待人工决定"
+        value={pending}
+        tone={pending > 0 ? 'orange' : 'neutral'}
+        icon={<WarningOutlined className={pending > 0 ? 'text-orange-700' : ''} />}
+        sub={pending > 0 ? '需要人工处理' : '没有需要人工处理的'}
+      />
+      <StatCard
+        label="已退费"
+        value={stats?.refunded ?? 0}
+        tone="red"
+        // 明细多的两张卡在 H5 上占满一整行，半幅卡片里三行 11px 会挤成两列折行
+        className="max-sm:col-span-2"
+        sub={
+          <>
+            自动 {stats?.auto_refunded ?? 0} · 人工 {stats?.manual_refunded ?? 0} ·{' '}
+            <span className={manualCredits > 0 ? 'font-medium text-red-700' : ''}>
+              真成本 {manualCredits} 积分
+            </span>
+          </>
+        }
+        tooltip={`真成本只算「人工退费」那部分：上游当时没明确拒绝，很可能已经生成并计费。
+自动退费（本次 ${stats?.auto_refunded ?? 0} 条、${stats?.auto_refunded_credits ?? 0} 积分）是上游明确拒绝了本次任务，上游不计费，不是我们的成本。${
+          (stats?.unknown_refunded_credits ?? 0) > 0
+            ? `\n另有 ${stats?.unknown_refunded_credits} 积分是上线前退的、来源分不清，未计入。`
+            : ''
+        }`}
+      />
+      <StatCard
+        label="扣费合计"
+        value={charged}
+        className="max-sm:col-span-2"
+        sub={
+          <>
+            已退 {refundedCredits} → 净{' '}
+            <span className="font-medium text-[var(--dv-text-1)]">
+              {charged - refundedCredits}
+            </span>
+          </>
+        }
+        tooltip={`扣费合计是毛额：所有对账行的扣费相加，包含后来退掉的那部分（本次 ${refundedCredits} 积分）。净 = 扣费合计 − 已退 = ${charged - refundedCredits}。`}
+      />
+    </div>
+  );
+}
+
 // 状态就四种（含旧数据的 failed/已退费兜底）：
 // 进行中 → 已交付 / 上游报失败自动退费 / 上游没返回待人工决定
 const STATUS_META: Record<string, { text: string; color: string }> = {
@@ -593,51 +720,8 @@ export default function ProviderTaskReconciliation() {
         onClose={() => setPreview(null)}
       />
 
-      {/* 汇总条：一眼看清「要动手的有几条」和「白付上游多少钱」 */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="px-3 py-2 rounded bg-gray-50 text-[12px] text-gray-600">
-          共 <span className="text-gray-900 font-medium">{stats?.total ?? 0}</span> 条
-        </div>
-        <div className="px-3 py-2 rounded bg-green-50 text-[12px] text-green-700">
-          已交付 {stats?.delivered ?? 0}
-        </div>
-        <div className="px-3 py-2 rounded bg-orange-50 text-[12px] text-orange-800 flex items-center gap-1">
-          <WarningOutlined />
-          待人工决定 {stats?.pending_review ?? 0} 条
-        </div>
-        {/* 一行说完：真成本只算「人工退费」（上游可能已计费）；自动退费是上游明确拒绝、上游不计费。
-            理由收进浮层，不占版面。 */}
-        <Tooltip
-          title={`真成本只算「人工退费」那部分：上游当时没明确拒绝，很可能已经生成并计费。
-自动退费（本次 ${stats?.auto_refunded ?? 0} 条、${stats?.auto_refunded_credits ?? 0} 积分）是上游明确拒绝了本次任务，上游不计费，不是我们的成本。${
-            (stats?.unknown_refunded_credits ?? 0) > 0
-              ? `\n另有 ${stats?.unknown_refunded_credits} 积分是上线前退的、来源分不清，未计入。`
-              : ''
-          }`}
-        >
-          <div className="px-3 py-2 rounded bg-red-50 text-[12px] text-red-700 cursor-help">
-            已退费 {stats?.refunded ?? 0} 条（自动 {stats?.auto_refunded ?? 0} · 人工{' '}
-            {stats?.manual_refunded ?? 0} · 真成本 {stats?.manual_refunded_credits ?? 0} 积分）
-          </div>
-        </Tooltip>
-        {/* 扣费合计是**毛额**：所有行的扣费相加，包含后来退掉的那部分。
-            这里直接把「已退 → 净」写在旁边，免得再被问「这个数退了没退」。 */}
-        <Tooltip
-          title={`扣费合计是毛额：所有对账行的扣费相加，包含后来退掉的那部分（本次 ${
-            stats?.refunded_credits ?? 0
-          } 积分）。净 = 扣费合计 − 已退 = ${
-            (stats?.charged_credits ?? 0) - (stats?.refunded_credits ?? 0)
-          }。`}
-        >
-          <div className="px-3 py-2 rounded bg-gray-50 text-[12px] text-gray-600 cursor-help">
-            扣费合计 {stats?.charged_credits ?? 0}
-            <span className="text-gray-400">
-              （已退 {stats?.refunded_credits ?? 0} → 净{' '}
-              {(stats?.charged_credits ?? 0) - (stats?.refunded_credits ?? 0)}）
-            </span>
-          </div>
-        </Tooltip>
-      </div>
+      {/* 顶部汇总（结构见文件上方的 ReconciliationSummary） */}
+      <ReconciliationSummary stats={stats} />
 
       {/* 筛选 */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
