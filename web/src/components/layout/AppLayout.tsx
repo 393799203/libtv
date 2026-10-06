@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Dropdown, Space, Button, App } from 'antd';
 import {
-  VideoCameraOutlined,
+  VideoCameraFilled,
   LogoutOutlined,
   ControlOutlined,
   SettingOutlined,
@@ -96,8 +96,13 @@ export function AppLayout() {
             改由 ConfigProvider 的暗色 headerBg 提供；再压深一档，让导航文字对比更强 */}
         <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
         <div className="flex items-center gap-1.5 md:gap-3">
-          <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity cursor-pointer">
-            <VideoCameraOutlined className="text-lg text-blue-500" />
+          <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 text-gray-800 hover:opacity-80 transition-opacity cursor-pointer">
+            {/* 品牌标：白色"实心"相机（原先是蓝色线性描边图标 —— 蓝色在头部跟导航激活态撞色，
+                线性描边在玻璃暗底上也偏轻、不像一个"标"）。实心白在暗底上最干净、对比最足。
+                颜色写在 button 上让它继承：antd 的 .anticon{color:inherit} 是运行时注入的
+                （排在静态样式表之后，同特异度下永远赢），直接写在图标上的 text-white 会被盖掉 ——
+                这就是社区入口那段注释里踩过的同一个坑。 */}
+            <VideoCameraFilled className="text-lg shrink-0" />
             <span className="font-semibold text-base text-gray-800">漫蛙AI</span>
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
