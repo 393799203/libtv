@@ -5,7 +5,7 @@ import type { NodeType } from '@/types/canvas';
 import { RESOLUTION_OPTIONS, VIDEO_RESOLUTION_OPTIONS, ASPECT_RATIO_ROWS, WAN3_VIDEO_ASPECT_RATIOS, buildDurationOptions, aspectRatioLabel } from '@/configs/promptConfig';
 import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services/pricingApi';
 import { useModelStore } from '@/stores/modelStore';
-import { message } from 'antd';
+import { message } from '@/utils/antdApp';
 import { addEnhanceNodeAfter } from '@/utils/enhanceNode';
 
 // 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；

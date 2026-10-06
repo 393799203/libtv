@@ -6,7 +6,7 @@ import {
   ImportOutlined,
   ExperimentOutlined,
 } from '@ant-design/icons';
-import { message } from 'antd';
+import { message } from '@/utils/antdApp';
 import type { ImageNodeData } from '@/types/canvas';
 import type { UserAsset } from '@/services/assetApi';
 import { useCanvasStore } from '@/stores/canvasStore';

@@ -315,6 +315,12 @@ func (s *ShowService) ListCategories(ctx context.Context) ([]*model.ShowCategory
 	return s.showRepo.ListCategories(ctx)
 }
 
+// CountHiddenShowsByCategory 各分类下「后台看不到」的历史视频数（status 为空、两处列表都不列），
+// 只用于删除标签前的后果提示，查不到不影响列表本身。
+func (s *ShowService) CountHiddenShowsByCategory(ctx context.Context) (map[string]int64, error) {
+	return s.showRepo.CountUnmanagedShowsByCategory(ctx)
+}
+
 func (s *ShowService) UpdateCategory(ctx context.Context, cat *model.ShowCategory) error {
 	err := s.showRepo.UpdateCategory(ctx, cat)
 	if err != nil && errors.Is(err, repository.ErrCategoryNameConflict) {
@@ -323,15 +329,37 @@ func (s *ShowService) UpdateCategory(ctx context.Context, cat *model.ShowCategor
 	return err
 }
 
-func (s *ShowService) DeleteCategory(ctx context.Context, id string) error {
-	count, err := s.showRepo.CategoryHasManagedShows(ctx, id)
+// DeleteCategory 删除分类（前台叫「标签」）。
+// 允许删除的条件：分类下没有「后台能管理」的视频（published / pending / rejected）。
+//
+// 但 shows.category_id 上有一条真实外键（fk_shows_category，NO ACTION）：只要还有任何一行引用
+// 这个分类，Postgres 就会拒绝删除（SQLSTATE 23503）。而能满足上面条件后还留下的引用行，
+// 只可能是 status 为空的历史存量 —— 视频管理只查 published、待审核只查 pending/rejected，
+// 它们在两处列表里都看不到、也没法处理，只会让标签永远删不掉。
+// 所以这里把它们连同分类一起清掉（行先整行快照到 shows_cleanup_backup、视频文件保留，
+// 便于事后追溯），返回值是清理掉的历史条数，由 handler 如实带到前端提示里。
+func (s *ShowService) DeleteCategory(ctx context.Context, id string) (int64, error) {
+	managed, err := s.showRepo.CategoryHasManagedShows(ctx, id)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if count > 0 {
-		// 挑明「可能看不到」的原因：标签上的数字只算已发布的视频，
-		// 只含待审核/已拒绝视频的标签在视频管理里也是 0、列表也是空的。
-		return fmt.Errorf("该标签下还有 %d 个视频（可能处于待审核/已拒绝状态），无法删除", count)
+	if managed > 0 {
+		// 刻意用 AppError（400）而不是普通 error：普通 error 会被当成 500 处理，
+		// 前端要么只看到"服务器内部错误"，要么把原始错误当提示弹出来。
+		return 0, apperror.New(1004, http.StatusBadRequest,
+			fmt.Sprintf("该标签下还有 %d 个视频（可能处于待审核/已拒绝状态），无法删除", managed))
 	}
-	return s.showRepo.DeleteCategory(ctx, id)
+
+	cleaned, err := s.showRepo.BackupAndDeleteUnmanagedShows(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if cleaned > 0 {
+		log.Printf("[show] 删除标签 %s：一并清理 %d 条后台不可见的历史视频（已快照到 shows_cleanup_backup）", id, cleaned)
+	}
+
+	if err := s.showRepo.DeleteCategory(ctx, id); err != nil {
+		return 0, err
+	}
+	return cleaned, nil
 }

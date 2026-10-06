@@ -32,6 +32,8 @@ export interface ShowCategoryItem {
   name: string;
   sort_order: number;
   show_count: number;
+  /** 该标签下后台看不到的历史视频数（status 为空）；删标签时会连带清掉，用于删除前提示 */
+  hidden_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -73,9 +75,9 @@ export const showApi = {
   updateCategory: (id: string, data: { name?: string; sort_order?: number }) =>
     api.put<ShowCategoryItem>(`/shows/categories/${id}`, data),
 
-  /** 删除分类（需登录） */
+  /** 删除分类（需登录）；cleaned_hidden_shows 是被连带清掉的历史视频条数 */
   deleteCategory: (id: string) =>
-    api.delete(`/shows/categories/${id}`),
+    api.delete<{ cleaned_hidden_shows: number }>(`/shows/categories/${id}`),
 
   /** 创建视频（需登录） */
   create: (data: {

@@ -332,8 +332,7 @@ export default function AdminPage() {
     const banner = banners.find(b => b.id === id);
     if (!banner) return;
 
-    const { Modal } = await import('antd');
-    Modal.confirm({
+    modal.confirm({
       title: '确认删除',
       content: `确定要删除版图「${banner.title}」吗？此操作不可恢复。`,
       okText: '确定删除',
@@ -394,23 +393,37 @@ export default function AdminPage() {
   // 删除标签：只对「视频数为 0」的标签开放（有已发布视频的标签不显示删除入口）。
   // 注意徽标上的数字只算已发布的视频，所以后端还会再拦一道：待审核/已拒绝的视频也算「有视频」，
   // 那种情况会返回「该标签下还有 N 个视频（可能处于待审核/已拒绝状态），无法删除」。
+  // hidden_count 是那些 status 为空、后台任何列表都看不到的历史视频：它们同样引用着这个标签，
+  // 不清掉外键就不让删，所以删除时会一起清掉 —— 这件事必须在确认框里先说清楚。
   // 删掉当前选中的标签后必须自己挪一下选中项 —— 重新拉视频的 useEffect 只在
   // activeShowCategory 变化时触发，留着一个已删除的 id 会让列表一直空着。
   const handleDeleteShowCategory = (cat: ShowCategoryItem) => {
+    const hidden = cat.hidden_count || 0;
     modal.confirm({
       title: '删除标签',
-      content: `确定删除标签「${cat.name}」吗？该标签下没有已发布的视频。`,
+      content: (
+        <div className="space-y-1">
+          <div>确定删除标签「{cat.name}」吗？该标签下没有已发布的视频。</div>
+          {hidden > 0 && (
+            <div className="text-[12px] text-gray-400">
+              该标签下还有 {hidden} 条后台看不到的历史数据（状态为空，视频管理和待审核视频里都不显示），
+              会随标签一起删除；行数据已留档备份、视频文件保留在存储里，需要时可找回。
+            </div>
+          )}
+        </div>
+      ),
       okText: '确定删除',
       cancelText: '取消',
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await showApi.deleteCategory(cat.id);
-          message.success('标签已删除');
-          const res = await showApi.categories();
-          setShowCategories(res);
+          const res = await showApi.deleteCategory(cat.id);
+          const cleaned = res?.cleaned_hidden_shows || 0;
+          message.success(cleaned > 0 ? `标签已删除，同时清理了 ${cleaned} 条历史数据` : '标签已删除');
+          const list = await showApi.categories();
+          setShowCategories(list);
           if (activeShowCategory === cat.id) {
-            const next = res[0]?.id || '';
+            const next = list[0]?.id || '';
             setActiveShowCategory(next);
             if (!next) setShows([]);
           }
@@ -472,8 +485,7 @@ export default function AdminPage() {
     if (!show) return;
 
     // 使用 antd 的 modal 确认
-    const { Modal } = await import('antd');
-    Modal.confirm({
+    modal.confirm({
       title: '确认删除',
       content: `确定要删除视频「${show.title}」吗？此操作不可恢复，关联的封面图和视频文件也将被删除。`,
       okText: '确定删除',
@@ -1287,9 +1299,8 @@ export default function AdminPage() {
                                 <button
                                   onClick={async (e) => {
                                     e.stopPropagation();
-                                    const { Modal } = await import('antd');
                                     // 第一次确认
-                                    Modal.confirm({
+                                    modal.confirm({
                                       title: '删除用户',
                                       content: `确定要删除用户「${user.email}」吗？`,
                                       okText: '确认',
@@ -1297,7 +1308,7 @@ export default function AdminPage() {
                                       okButtonProps: { danger: true },
                                       onOk: () => {
                                         // 第二次确认（明确告知将删除所有关联数据）
-                                        Modal.confirm({
+                                        modal.confirm({
                                           title: '⚠️ 永久删除警告',
                                           content: (
                                             <div>
@@ -1316,7 +1327,8 @@ export default function AdminPage() {
                                           onOk: () => {
                                             userApi.delete(user.id)
                                               .then(() => loadUsers())
-                                              .catch(() => Modal.error({ title: '删除失败' }));
+                                              // 用块体包一层：modal.error 的返回值不是 boolean，直接 return 会污染链式类型
+                                              .catch(() => { modal.error({ title: '删除失败' }); });
                                           },
                                         });
                                       },

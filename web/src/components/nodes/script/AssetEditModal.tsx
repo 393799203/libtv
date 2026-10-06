@@ -1,5 +1,6 @@
 import { memo, useState, useRef, useCallback, useEffect } from 'react';
-import { Modal, message } from 'antd';
+import { Modal } from 'antd';
+import { message } from '@/utils/antdApp';
 import { LoadingOutlined } from '@ant-design/icons';
 import type {
   ScriptCharacter,

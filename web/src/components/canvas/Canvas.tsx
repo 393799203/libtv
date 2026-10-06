@@ -14,7 +14,8 @@ import {
   type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Button, message } from 'antd';
+import { Button } from 'antd';
+import { message } from '@/utils/antdApp';
 import {
   FileTextOutlined,
   SnippetsOutlined,

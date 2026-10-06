@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
-import { message } from 'antd';
+import { message } from '@/utils/antdApp';
 import { useAuthStore } from '@/stores/authStore';
 
 declare module 'axios' {

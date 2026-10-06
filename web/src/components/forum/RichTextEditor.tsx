@@ -2,7 +2,8 @@ import '@wangeditor/editor/dist/css/style.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Editor, Toolbar } from '@wangeditor/editor-for-react';
 import type { IDomEditor, IEditorConfig, IToolbarConfig } from '@wangeditor/editor';
-import { Input, message } from 'antd';
+import { Input } from 'antd';
+import { message } from '@/utils/antdApp';
 import { useAuthStore } from '@/stores/authStore';
 import { useIsTouchDevice } from '@/hooks/useIsMobile';
 

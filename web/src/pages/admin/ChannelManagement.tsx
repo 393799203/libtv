@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { message } from 'antd';
+import { message } from '@/utils/antdApp';
 import { channelApi, type ChannelPolicy } from '@/services/channelApi';
 
 // 策略说明

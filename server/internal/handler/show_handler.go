@@ -50,6 +50,15 @@ func (h *ShowHandler) ListCategories(c *gin.Context) {
 	type CatWithCount struct {
 		model.ShowCategory
 		ShowCount int64 `json:"show_count"`
+		// HiddenCount 该分类下后台看不到的历史视频数（status 为空，视频管理/待审核两处列表都不列）。
+		// 删除这个标签时会连带清掉它们，所以先告诉前端，让确认框能把后果说清楚。
+		HiddenCount int64 `json:"hidden_count"`
+	}
+
+	// 一次 GROUP BY 取回所有分类的历史条数，避免每个分类多查一次
+	hiddenCounts, err := h.showService.CountHiddenShowsByCategory(c.Request.Context())
+	if err != nil {
+		hiddenCounts = nil
 	}
 
 	var result []CatWithCount
@@ -60,6 +69,7 @@ func (h *ShowHandler) ListCategories(c *gin.Context) {
 		result = append(result, CatWithCount{
 			ShowCategory: *cat,
 			ShowCount:    count,
+			HiddenCount:  hiddenCounts[cat.ID],
 		})
 	}
 
@@ -505,11 +515,13 @@ func (h *ShowHandler) UpdateCategory(c *gin.Context) {
 // DeleteCategory 删除分类（需登录）
 func (h *ShowHandler) DeleteCategory(c *gin.Context) {
 	id := c.Param("id")
-	if err := h.showService.DeleteCategory(c.Request.Context(), id); err != nil {
+	cleaned, err := h.showService.DeleteCategory(c.Request.Context(), id)
+	if err != nil {
 		response.FailWith(c, err)
 		return
 	}
-	response.OKWithMsg(c, "deleted", nil)
+	// 带上清理条数：删标签时可能顺带清掉几条后台看不到的历史数据，操作者应该知道
+	response.OKWithMsg(c, "deleted", gin.H{"cleaned_hidden_shows": cleaned})
 }
 
 // ========== 服务端抽帧生成封面 ==========

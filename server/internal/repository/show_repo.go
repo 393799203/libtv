@@ -40,10 +40,23 @@ type ShowRepo interface {
 	// 那是 2026-06 之前留下的记录，视频管理处只查 published、待审核处只查 pending/rejected，
 	// 两处列表都看不到它们，不该拦住标签删除。
 	CategoryHasManagedShows(ctx context.Context, categoryID string) (int64, error)
+	// CountUnmanagedShowsByCategory 按分类统计上面那类「后台看不到」的历史视频数，
+	// 供前端在删除标签前提示「会一并清掉几条看不到的历史数据」。一次 GROUP BY 查完。
+	CountUnmanagedShowsByCategory(ctx context.Context) (map[string]int64, error)
+	// BackupAndDeleteUnmanagedShows 清掉该分类下的历史存量行：先整行快照进 shows_cleanup_backup，
+	// 再删除这些行，返回清理行数。必须清 —— shows.category_id 上有真实外键
+	// （fk_shows_category，NO ACTION），只要还有一行引用这个分类，删分类就会被 Postgres 拒绝。
+	BackupAndDeleteUnmanagedShows(ctx context.Context, categoryID string) (int64, error)
 }
 
 // ErrShowNotFound Show 不存在
 var ErrShowNotFound = errors.New("show not found")
+
+// 后台「能看到/能管理」的视频状态：视频管理列表只列 published，待审核视频列表只列 pending/rejected。
+var managedShowStatuses = []string{"published", "pending", "rejected"}
+
+// 上面那组状态的 SQL 字面量（原生 SQL 里写死，不依赖占位符对切片的展开行为）
+const unmanagedShowsSQL = "status IS NULL OR status NOT IN ('published', 'pending', 'rejected')"
 
 // ErrCategoryNotFound 分类不存在
 var ErrCategoryNotFound = errors.New("category not found")
@@ -212,9 +225,57 @@ func (r *showRepo) DeleteCategory(ctx context.Context, id string) error {
 func (r *showRepo) CategoryHasManagedShows(ctx context.Context, categoryID string) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.Show{}).
-		Where("category_id = ? AND status IN ?", categoryID, []string{"published", "pending", "rejected"}).
+		Where("category_id = ? AND status IN ?", categoryID, managedShowStatuses).
 		Count(&count).Error
 	return count, err
+}
+
+func (r *showRepo) CountUnmanagedShowsByCategory(ctx context.Context) (map[string]int64, error) {
+	var rows []struct {
+		CategoryID string
+		Total      int64
+	}
+	err := r.db.WithContext(ctx).Model(&model.Show{}).
+		Select("category_id, count(*) AS total").
+		Where(unmanagedShowsSQL).
+		Group("category_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		counts[row.CategoryID] = row.Total
+	}
+	return counts, nil
+}
+
+func (r *showRepo) BackupAndDeleteUnmanagedShows(ctx context.Context, categoryID string) (int64, error) {
+	var cleaned int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 备份表放整行 jsonb 快照而不是固定列：shows 以后加字段也不影响这里写入
+		if err := tx.Exec(`CREATE TABLE IF NOT EXISTS shows_cleanup_backup (
+			id text PRIMARY KEY,
+			category_id text,
+			snapshot jsonb NOT NULL,
+			cleaned_at timestamptz NOT NULL DEFAULT now()
+		)`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`INSERT INTO shows_cleanup_backup (id, category_id, snapshot)
+			SELECT s.id, s.category_id, to_jsonb(s) FROM shows s
+			WHERE s.category_id = ? AND (`+unmanagedShowsSQL+`)
+			ON CONFLICT (id) DO NOTHING`, categoryID).Error; err != nil {
+			return err
+		}
+		res := tx.Where("category_id = ? AND ("+unmanagedShowsSQL+")", categoryID).Delete(&model.Show{})
+		if res.Error != nil {
+			return res.Error
+		}
+		cleaned = res.RowsAffected
+		return nil
+	})
+	return cleaned, err
 }
 
 // ========== 点赞 ==========

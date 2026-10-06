@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { message } from 'antd';
+import { message } from '@/utils/antdApp';
 import { useExecutionStore } from '@/stores/executionStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useAuthStore } from '@/stores/authStore';

@@ -1,6 +1,9 @@
 package response
 
 import (
+	"log"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"libtv/internal/pkg/apperror"
@@ -59,11 +62,36 @@ func FailWith(c *gin.Context, err error) {
 	if code == 0 {
 		code = appErrCode(httpStatus)
 	}
+	msg := sanitizeMsg(apperror.MsgFromError(err))
+	if msg != err.Error() {
+		// 兜底换掉了原始信息，真实原因必须留在日志里（否则这类错误无法排查）
+		log.Printf("[error] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	}
 	c.JSON(httpStatus, gin.H{
 		"code": code,
-		"msg":  apperror.MsgFromError(err),
+		"msg":  msg,
 		"data": nil,
 	})
+}
+
+// rawErrFragments 驱动层/数据库层原始报错的典型片段。
+// 这类信息对用户毫无意义、还会把表结构和约束名暴露出去，绝不能当提示弹给用户
+// （曾经出现过前端提示条直接显示 "violates foreign key constraint fk_shows_category"）。
+var rawErrFragments = []string{
+	"SQLSTATE", "pq:", "gorm", "constraint", "duplicate key", "violates",
+	"invalid input syntax", "relation \"", "column \"",
+	"dial tcp", "connection refused", "no such host", "i/o timeout", "EOF",
+}
+
+// sanitizeMsg 把原始技术错误换成人能看懂又不泄露内部信息的提示；
+// 业务错误（"该标签下还有 3 个视频…"、"不支持的文件格式"）原样保留。
+func sanitizeMsg(msg string) string {
+	for _, frag := range rawErrFragments {
+		if strings.Contains(msg, frag) {
+			return "服务器内部错误，请稍后重试（如反复出现请联系管理员）"
+		}
+	}
+	return msg
 }
 
 // appErrCode 根据 HTTP 状态码生成默认业务错误码

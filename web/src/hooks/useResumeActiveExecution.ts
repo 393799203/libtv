@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { message } from 'antd';
+import { message } from '@/utils/antdApp';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
 import { workflowApi, type ActiveExecutionItem } from '@/services/workflowApi';

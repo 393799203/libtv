@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { router } from '@/router';
+import { bindAntdApp } from '@/utils/antdApp';
 
 /**
  * 平台主题：高饱和冷色暗底（黑 / 青 / 蓝 / 紫）。
@@ -17,6 +18,19 @@ import { router } from '@/router';
  * 两者合起来才不出现"组件暗了、页面还白着"的割裂。
  */
 const THEME_CLASSES = ['theme-dark', 'theme-dark-root'] as const;
+
+/**
+ * 把 antd <App> 提供的（带上面这套主题的）message / modal 注册给非组件代码用。
+ * 没有它，services 层只能用 antd 静态方法，弹出来的是没主题的浅色提示条（白底）。
+ * 详见 src/utils/antdApp.ts。
+ */
+function AntdAppBridge({ children }: { children: ReactNode }) {
+  const { message, modal } = AntApp.useApp();
+  useEffect(() => {
+    bindAntdApp({ message, modal });
+  }, [message, modal]);
+  return <>{children}</>;
+}
 
 function App() {
   useEffect(() => {
@@ -110,7 +124,9 @@ function App() {
       }}
     >
       <AntApp>
-        <RouterProvider router={router} />
+        <AntdAppBridge>
+          <RouterProvider router={router} />
+        </AntdAppBridge>
       </AntApp>
     </ConfigProvider>
   );

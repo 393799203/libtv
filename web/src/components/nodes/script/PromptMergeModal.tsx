@@ -1,5 +1,6 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Modal, Button, message, Select, Segmented } from 'antd';
+import { Modal, Button, Select, Segmented } from 'antd';
+import { message } from '@/utils/antdApp';
 import { ReloadOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import type { ScriptShot, ScriptNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
