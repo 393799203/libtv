@@ -15,7 +15,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 /** 参考单价估算：视频取当前渠道第一个 480p 已配价模型，图片取第一个已配价模型 */
 const REF_VIDEO_RESOLUTION = '480p';
 
-/** 参考单价（积分/秒、积分/张），来自运营后台「价格管理」，未配置时为 0 */
+/** 参考单价（积分/秒、积分/张），来自运营管理中心「价格管理」，未配置时为 0 */
 interface RefPrices {
   videoPricePerSec: number;
   imagePricePerPiece: number;

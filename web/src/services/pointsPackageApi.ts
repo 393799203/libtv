@@ -1,6 +1,6 @@
 import api from './api';
 
-/** 积分套餐（积分超市卡片，运营后台「套餐管理」维护） */
+/** 积分套餐（积分超市卡片，运营管理中心「套餐管理」维护） */
 export interface PointsPackage {
   id: number;
   /** 套餐名称，如「尝鲜包」 */

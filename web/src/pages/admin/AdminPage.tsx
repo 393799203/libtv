@@ -728,7 +728,7 @@ export default function AdminPage() {
       {/* 左侧边栏 */}
       <aside className="w-[200px] bg-white border-r border-gray-200 flex flex-col shrink-0">
         <div className="px-4 py-4 border-b border-gray-100">
-          <h2 className="text-[15px] font-semibold text-gray-800">运营后台</h2>
+          <h2 className="text-[15px] font-semibold text-gray-800">运营管理中心</h2>
         </div>
         <nav className="flex-1 p-2 space-y-0.5">
           {menuItems.map(item => (
