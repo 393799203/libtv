@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Input, Pagination, Popover, Select, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
+  LinkOutlined,
+  PictureOutlined,
+  PlayCircleOutlined,
   ReloadOutlined,
   SafetyOutlined,
   WarningOutlined,
-  LinkOutlined,
-  PlayCircleOutlined,
 } from '@ant-design/icons';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import {
@@ -329,6 +330,11 @@ export default function ProviderTaskReconciliation() {
         // 注意按钮是 Popover 的**兄弟**而不是子节点 —— 放里面点一下会连带把产物气泡也切出来。
         // artifact 在上面（body 那段）已经算过，这里复用，别重复声明
         const artifactSource: 'result' | 'provider' = artifact?.own ? 'result' : 'provider';
+        // 产物是图片时换成图片图标：否则一行行看下去全是同一个播放图标，分不清哪条是图、哪条是视频。
+        // 判断口径与上面的类型识别保持一致（task_kind 优先，其次按扩展名兜底）。
+        const isImageArtifact =
+          row.task_kind === 'ai.image' ||
+          /\.(png|jpe?g|webp|gif)(\?|$)/i.test(artifact?.url || '');
         const viewBtn = artifact ? (
           <Tooltip
             // 预览打开时强制收起：Tooltip 的层级（1070）比 Modal（1000）高，
@@ -340,7 +346,7 @@ export default function ProviderTaskReconciliation() {
               type="text"
               size="small"
               className="!px-0"
-              icon={<PlayCircleOutlined />}
+              icon={isImageArtifact ? <PictureOutlined /> : <PlayCircleOutlined />}
               onClick={() => openPreview(row, artifactSource)}
             />
           </Tooltip>
