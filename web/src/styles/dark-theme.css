@@ -96,6 +96,16 @@
   --dv-violet: #8b5cf6;
   --dv-danger: #f43f5e;
 
+  /* 强调色的"软"用法：底 / 底(hover) / 描边 / 描边(hover) / 文字。
+     数值与 App.tsx 里 antd 的 colorPrimaryBg、colorPrimaryBgHover、Segmented 选中文字色一致 ——
+     用于"这是主推进动作，但不必是一整块实心青"的按钮（如实心青在节点里太吵）。 */
+  --dv-cyan-soft: rgba(34, 211, 238, 0.14);
+  --dv-cyan-soft-hover: rgba(34, 211, 238, 0.2);
+  --dv-cyan-border: rgba(34, 211, 238, 0.35);
+  --dv-cyan-border-hover: rgba(34, 211, 238, 0.55);
+  --dv-cyan-text: #a5f3fc;
+  --dv-cyan-text-strong: #cffafe;
+
   background-color: var(--dv-bg);
   color: var(--dv-text-1);
 }

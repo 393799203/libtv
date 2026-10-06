@@ -96,11 +96,20 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               e.stopPropagation();
               onAddShot();
             }}
-            className="text-xs font-medium h-9 px-3 rounded-md bg-[var(--dv-surface-2)] hover:bg-[var(--dv-surface-3)] border-transparent"
+            /* 三颗按钮都用 ! ：antd 的 CSS-in-JS 是运行时注入的，同特异度下排在 Tailwind 之后，
+               不写 ! 的话 h-9 / px-3 / rounded-md / text-xs / bg-* 全都不生效
+               （实测：不写 ! 时按钮高 24px、圆角 4px、底色是 antd 默认值 —— 本文件里原有的
+               h-9 与 bg-[var(--dv-surface-2)] 其实一直是空转的） */
+            className="!text-xs !font-medium !h-9 !px-3 !rounded-md
+                       !bg-[var(--dv-surface-3)] !border-[var(--dv-border-1)] !text-[var(--dv-text-1)]
+                       hover:!bg-[var(--dv-surface-4)] hover:!border-[var(--dv-border-2)]"
           >
             添加镜头
           </Button>
         )}
+        {/* 上一步：次级动作 —— 描边款（透明底 + 一档描边），hover 才浮起一档底色。
+            原来是默认按钮 + border-black/hover:border-gray-800：暗色下 border-black 就是隐形边框，
+            看着像个"没边框的按钮"，hover 又突然冒出框来。 */}
         {prevStepLabel && onPrevStep && (
           <Button
             size="small"
@@ -110,22 +119,29 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               e.stopPropagation();
               onPrevStep();
             }}
-            className="text-xs font-medium h-9 px-3 rounded-md border-black text-black hover:border-gray-800 hover:text-gray-800"
+            className="!text-xs !font-medium !h-9 !px-3 !rounded-md
+                       !bg-transparent !border-[var(--dv-border-1)] !text-[var(--dv-text-2)]
+                       hover:!bg-[var(--dv-surface-2)] hover:!border-[var(--dv-border-2)] hover:!text-[var(--dv-text-1)]"
           >
             {prevStepLabel}
           </Button>
         )}
+        {/* 下一步：主推进动作 —— 强调色"软"款（浅青底 + 青描边 + 浅青字），
+            与「添加镜头」的中性灰底区分开（原来两个都是一样的灰底，分不出主次）。
+            箭头放在文字后面：指向"往前走"的方向（iconPosition="end"）。 */}
         {nextStepLabel && onNextStep && (
           <Button
             size="small"
-            type="primary"
             icon={<RightOutlined />}
+            iconPosition="end"
             loading={nextLoading}
             onClick={(e) => {
               e.stopPropagation();
               onNextStep();
             }}
-            className="text-xs font-medium h-9 px-3 rounded-md bg-[var(--dv-surface-2)] hover:bg-[var(--dv-surface-3)] border-transparent"
+            className="!text-xs !font-medium !h-9 !px-3 !rounded-md
+                       !bg-[var(--dv-cyan-soft)] !border-[var(--dv-cyan-border)] !text-[var(--dv-cyan-text)]
+                       hover:!bg-[var(--dv-cyan-soft-hover)] hover:!border-[var(--dv-cyan-border-hover)] hover:!text-[var(--dv-cyan-text-strong)]"
           >
             {nextStepLabel}
           </Button>
