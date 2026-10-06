@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"libtv/internal/middleware"
 	"libtv/internal/model"
@@ -159,13 +160,16 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 // 传 page>=1 时分页返回（管理员排前，同角色按注册时间倒序）；不传 page 保持全量返回（作者选择器等场景）
 func (h *UserHandler) List(c *gin.Context) {
 	keyword := c.Query("keyword")
+	// 角色 / 渠道筛选：都是可选参数，空值（不传）表示不限，保持原有全量分页行为
+	role := strings.TrimSpace(c.Query("role"))
+	channel := strings.TrimSpace(c.Query("channel"))
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "0"))
 	if page >= 1 {
 		pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 		if pageSize <= 0 || pageSize > 100 {
 			pageSize = 10
 		}
-		items, total, err := h.userService.ListWithStatsPaged(c.Request.Context(), keyword, page, pageSize, middleware.GetUserID(c))
+		items, total, err := h.userService.ListWithStatsPaged(c.Request.Context(), keyword, role, channel, page, pageSize, middleware.GetUserID(c))
 		if err != nil {
 			response.FailWith(c, err)
 			return

@@ -55,8 +55,8 @@ function App() {
           colorTextDisabled: '#63718a',
           colorIcon: '#d9e3f3',
           colorIconHover: '#f8faff',
-          colorBorder: '#1e2942',
-          colorBorderSecondary: '#1a2338',
+          colorBorder: '#3a4a6b',   // 与 --dv-border-2 同步（旧的 #1e2942 是提亮前的值 → 框看不见）
+          colorBorderSecondary: '#2b3a58',   // 与 --dv-border-1 同步
           // antd 暗色算法把分隔线推导成"半透明白"，在近黑底上会变成刺眼白线
           colorSplit: '#2b3a58',
           // ---- 选中态统一：全站"被选中"一律用青色 ----

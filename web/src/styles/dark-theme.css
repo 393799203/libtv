@@ -398,6 +398,38 @@ html.theme-dark-root #root {
    适用对象：固定在内容之上的"悬浮层"——头部、侧栏、下拉/气泡、弹窗遮罩。
    不适用：正文卡片（内容密集，背景透出来会降低可读性）。
    -webkit- 前缀保留：Safari 仍需前缀，漏了等于没做。 */
+/* 输入类控件的静止态边框：antd 的 colorBorder 由基底色推导，在深底上几乎与背景同值，
+   表现就是"看不出这是个框"（文字能看见、框看不见）。这里显式给一档可辨识的描边，
+   hover/聚焦仍走品牌青，状态语义不变。只作用于输入类控件，不动表格/卡片描边。 */
+.theme-dark :is(.ant-input, .ant-input-affix-wrapper, .ant-input-number,
+                .ant-select-selector, .ant-picker) {
+  border-color: var(--dv-border-2) !important;
+}
+.theme-dark :is(.ant-input, .ant-input-affix-wrapper, .ant-input-number,
+                .ant-select-selector, .ant-picker):hover {
+  border-color: var(--dv-text-3) !important;
+}
+.theme-dark :is(.ant-input:focus, .ant-input-affix-wrapper-focused, .ant-input-number-focused,
+                .ant-select-focused .ant-select-selector, .ant-picker-focused) {
+  border-color: #22d3ee !important;
+}
+
+/* 原生输入框（首页搜索框、编辑视频的视频地址框等 —— 它们不是 antd 组件，
+   antd 的描边令牌管不到）：给面色底 + 可见描边 + 亮文字。
+   ⚠️ 必须排除 antd 自己的 input（[class*='ant-']），否则会覆盖 antd 输入框的样式 ——
+   上一次就是漏了这个排除条件，把整站输入框的框弄没了。 */
+.theme-dark :is(input, textarea, select):not([class*='ant-']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='submit']):not([type='button']) {
+  background-color: var(--dv-surface-2);
+  border-color: var(--dv-border-2);
+  color: var(--dv-text-1);
+}
+.theme-dark :is(input, textarea)::placeholder {
+  color: var(--dv-text-3);
+}
+.theme-dark :is(input, textarea):focus {
+  border-color: #22d3ee;
+}
+
 .theme-dark :is(.ant-layout-header, .ant-layout-sider) {
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);

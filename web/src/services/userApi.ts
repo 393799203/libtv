@@ -34,9 +34,18 @@ export const userApi = {
   list: () =>
     api.get('/users').then((res: any) => res),
 
-  /** 分页获取用户列表（管理员，管理员排前，同角色按注册时间倒序） */
-  listPaged: (page: number, pageSize: number, keyword?: string) =>
-    api.get('/users', { params: { page, page_size: pageSize, keyword: keyword || undefined } }).then((res: any) => res),
+  /** 分页获取用户列表（管理员，管理员排前，同角色按注册时间倒序）；
+   *  keyword 模糊匹配昵称/邮箱，role（user/admin）与 channel（wasu/dianxin）为可选筛选，空值表示不限 */
+  listPaged: (page: number, pageSize: number, keyword?: string, role?: string, channel?: string) =>
+    api.get('/users', {
+      params: {
+        page,
+        page_size: pageSize,
+        keyword: keyword || undefined,
+        role: role || undefined,
+        channel: channel || undefined,
+      },
+    }).then((res: any) => res),
 
   /** 搜索用户 */
   search: (keyword: string) =>

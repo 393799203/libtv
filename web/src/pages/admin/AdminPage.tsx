@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+  Input,
   App,
   Select,
   Pagination,
   Button,
 } from 'antd';
 import {
+  SearchOutlined,
   AccountBookOutlined,
   CaretRightOutlined,
   DeleteOutlined,
@@ -69,6 +71,12 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [userPage, setUserPage] = useState(1);        // 当前页码（一页10条，管理员排前）
+  // 用户搜索：输入词与已应用词分开，回车才真正查询（避免每敲一个字就请求一次）
+  const [userKeywordInput, setUserKeywordInput] = useState('');
+  const [userKeyword, setUserKeyword] = useState('');
+  // 角色 / 渠道筛选（'' 表示不限），对应筛选行上的两个 Select
+  const [userRole, setUserRole] = useState('');
+  const [userChannel, setUserChannel] = useState('');
   const [userTotal, setUserTotal] = useState(0);      // 用户总数（分页用）
   const [billingUserId, setBillingUserId] = useState<string | null>(null); // 查看哪个用户的积分明细
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null); // 充值弹窗目标用户
@@ -155,11 +163,19 @@ export default function AdminPage() {
     else if (activeTab === 'styles' && activeCategory) loadStyles(activeCategory);
   };
 
-  // 加载用户列表（分页：一页10条，管理员排前）
   const USER_PAGE_SIZE = 10;
-  const loadUsers = (page: number = userPage) => {
+  // 加载用户列表（分页：一页10条，管理员排前）
+  // 默认取当前已生效的搜索词 + 角色/渠道筛选（翻页、刷新、聚焦自动刷新都走默认值）；
+  // 刚刚改变筛选的那次调用要显式把新值传进来 —— setState 是异步的，
+  // 直接读 state 只会拿到旧值，导致选完筛选一刷新就跳回全量。
+  const loadUsers = (
+    page: number = userPage,
+    keyword: string = userKeyword,
+    role: string = userRole,
+    channel: string = userChannel,
+  ) => {
     setUserLoading(true);
-    userApi.listPaged(page, USER_PAGE_SIZE)
+    userApi.listPaged(page, USER_PAGE_SIZE, keyword, role, channel)
       .then((res) => {
         setUsers(res.items || []);
         setUserTotal(res.total || 0);
@@ -511,7 +527,9 @@ export default function AdminPage() {
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [activeTab, activeCategory]);
+    // 依赖用户筛选条件：监听器每次重建才能拿到最新的筛选/页码，
+    // 否则从别的窗口切回来会自动刷成「上一次注册监听时」的条件（改了角色/渠道又被刷回全量）
+  }, [activeTab, activeCategory, userKeyword, userRole, userChannel, userPage]);
 
   // 新建分类
   const handleCreateCategory = async () => {
@@ -1038,11 +1056,71 @@ export default function AdminPage() {
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-[13px] text-gray-500">共 {userTotal} 个用户</span>
-                  <Button size="small" icon={<ReloadOutlined />} onClick={() => loadUsers(userPage)}>
-                    刷新
-                  </Button>
+                {/* 筛选行：控件尺寸与「上游对账」一致（antd 默认尺寸、宽度用 style）；
+                    布局上「共 N 个用户」留在左侧，搜索框 + 角色/渠道筛选 + 刷新整体靠右 */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <span className="shrink-0 text-[12px] text-[var(--dv-text-3)] mr-1">共 {userTotal} 个用户</span>
+                  {/* 弹性占位：把后面的搜索/筛选/刷新推到右侧 */}
+                  <div className="flex-1" />
+                  <Input
+                    allowClear
+                    prefix={<SearchOutlined className="text-[var(--dv-text-3)]" />}
+                    placeholder="搜索用户名 / 手机号 / 邮箱"
+                    value={userKeywordInput}
+                    onChange={(e) => {
+                      setUserKeywordInput(e.target.value);
+                      if (!e.target.value) {
+                        setUserKeyword('');
+                        loadUsers(1, '', userRole, userChannel);
+                      }
+                    }}
+                    onPressEnter={() => {
+                      const kw = userKeywordInput.trim();
+                      setUserKeyword(kw);
+                      loadUsers(1, kw, userRole, userChannel);
+                    }}
+                    style={{ width: 260 }}
+                  />
+                  {/* 角色筛选：'' = 不限；选中即查询（回到第 1 页并带上当前其它筛选条件） */}
+                  <Select
+                    allowClear
+                    placeholder="角色"
+                    value={userRole}
+                    onChange={(v) => {
+                      const next = v || '';
+                      setUserRole(next);
+                      loadUsers(1, userKeyword, next, userChannel);
+                    }}
+                    style={{ width: 120 }}
+                    options={[
+                      { value: '', label: '全部' },
+                      { value: 'user', label: '普通用户' },
+                      { value: 'admin', label: '管理员' },
+                    ]}
+                  />
+                  {/* 渠道商筛选：'' = 不限；选中即查询（回到第 1 页并带上当前其它筛选条件） */}
+                  <Select
+                    allowClear
+                    placeholder="渠道商"
+                    value={userChannel}
+                    onChange={(v) => {
+                      const next = v || '';
+                      setUserChannel(next);
+                      loadUsers(1, userKeyword, userRole, next);
+                    }}
+                    style={{ width: 120 }}
+                    options={[
+                      { value: '', label: '全部' },
+                      { value: 'wasu', label: '华数' },
+                      { value: 'dianxin', label: '电信' },
+                    ]}
+                  />
+                  {/* 只留图标（悬停 title 提示），避免文字把右侧筛选组撑长 */}
+                  <Button
+                    icon={<ReloadOutlined />}
+                    title="刷新"
+                    onClick={() => loadUsers(userPage)}
+                  />
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <table className="w-full text-[13px]">

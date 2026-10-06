@@ -23,8 +23,9 @@ type UserRepo interface {
 	FindByID(ctx context.Context, id string) (*model.User, error)
 	List(ctx context.Context, keyword string) ([]model.User, error)
 	// ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序；
-	// 当前操作者（currentUserID）永远排在自己所在角色分组的第一个
-	ListPaged(ctx context.Context, keyword string, page, pageSize int, currentUserID string) ([]model.User, int64, error)
+	// 当前操作者（currentUserID）永远排在自己所在角色分组的第一个。
+	// role / channel 为可选的筛选条件（role=user|admin，channel=wasu|dianxin），空字符串表示不限
+	ListPaged(ctx context.Context, keyword, role, channel string, page, pageSize int, currentUserID string) ([]model.User, int64, error)
 	// StatsByUserIDs 批量统计指定用户的项目数与分类型资产数（管理员列表展示用）
 	StatsByUserIDs(ctx context.Context, userIDs []string) (map[string]UserStats, error)
 	UpdateRole(ctx context.Context, id, role string) error
@@ -85,11 +86,20 @@ func (r *userRepo) List(ctx context.Context, keyword string) ([]model.User, erro
 }
 
 // ListPaged 分页用户列表：管理员排在前面，同角色按注册时间倒序；
-// 当前操作者（currentUserID）永远排在自己所在角色分组的第一个
-func (r *userRepo) ListPaged(ctx context.Context, keyword string, page, pageSize int, currentUserID string) ([]model.User, int64, error) {
+// 当前操作者（currentUserID）永远排在自己所在角色分组的第一个。
+// role / channel 为空表示不限，条件全部走参数占位符（不拼 SQL）
+func (r *userRepo) ListPaged(ctx context.Context, keyword, role, channel string, page, pageSize int, currentUserID string) ([]model.User, int64, error) {
 	q := r.db.WithContext(ctx).Model(&model.User{})
 	if keyword != "" {
 		q = q.Where("nickname LIKE ? OR email LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	// 角色筛选：'user'=普通用户 / 'admin'=管理员
+	if role != "" {
+		q = q.Where("role = ?", role)
+	}
+	// 渠道筛选：'wasu'=华数 / 'dianxin'=电信
+	if channel != "" {
+		q = q.Where("channel = ?", channel)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
