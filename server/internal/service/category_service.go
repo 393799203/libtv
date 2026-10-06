@@ -99,8 +99,11 @@ func (s *CategoryService) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if count > 0 {
-		// wrap sentinel error，便于上层用 errors.Is 识别
-		return fmt.Errorf("%w: 该分类下还有 %d 个风格，无法删除", ErrCategoryNotEmpty, count)
+		// 带上具体数量：只写"还有风格"操作者不知道还剩几个、也不知道是不是自己看漏了。
+		// 错误码/状态码仍取 sentinel，保证前端按 code=3002 判断的老逻辑不受影响；
+		// 措辞与视频标签那边一致（那边是「该标签下还有 N 个视频…，无法删除」）。
+		return apperror.New(ErrCategoryNotEmpty.Code, ErrCategoryNotEmpty.HTTPStatus,
+			fmt.Sprintf("该标签下还有 %d 个风格，无法删除", count))
 	}
 	rowsAffected, err := s.categoryRepo.Delete(ctx, id)
 	if err != nil {

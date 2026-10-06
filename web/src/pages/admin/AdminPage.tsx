@@ -598,6 +598,36 @@ export default function AdminPage() {
     setCreatingCat(false);
   };
 
+  // 删除标签：和视频管理那边同一套机制 —— 只对「风格数为 0」的标签开放删除入口，
+  // 后端还会再拦一道（有风格时返回「该标签下还有 N 个风格，无法删除」）。
+  // 删掉当前选中的标签后必须自己挪一下选中项 —— 重新拉风格的 useEffect 只在
+  // activeCategory 变化时触发，留着一个已删除的 id 会让列表一直空着。
+  const handleDeleteCategory = (cat: CategoryItem) => {
+    modal.confirm({
+      title: '删除标签',
+      content: `确定删除标签「${cat.name}」吗？该标签下没有风格。`,
+      okText: '确定删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await styleApi.deleteCategory(cat.id);
+          message.success('标签已删除');
+          const res = await styleApi.categories();
+          setCategories(res);
+          if (activeCategory === cat.id) {
+            const next = res[0]?.id || '';
+            setActiveCategory(next);
+            if (!next) setStyles([]);
+          }
+        } catch (err) {
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
+          console.error(err);
+        }
+      },
+    });
+  };
+
   // 打开添加弹窗
   const openAddDialog = () => {
     setEditingStyle(null);
@@ -995,20 +1025,36 @@ export default function AdminPage() {
               {(categories?.length || 0) === 0 ? (
                 <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
               ) : (
-                <div className="flex gap-1.5 overflow-x-auto">
+                <div className="flex gap-1.5">
                   {(categories || []).map(cat => (
-                    <button
+                    <div
                       key={cat.id}
-                      onClick={() => setActiveCategory(cat.id)}
-                      className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                      className={`group relative flex items-center whitespace-nowrap rounded-lg transition-colors ${
                         activeCategory === cat.id ? 'bg-cyan-500/15 text-cyan-200 font-medium' : 'text-gray-500 hover:bg-gray-100'
                       }`}
                     >
-                      {cat.name}
-                      <span className={`text-[10px] ${activeCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
-                        {cat.style_count}
-                      </span>
-                    </button>
+                      <button
+                        onClick={() => setActiveCategory(cat.id)}
+                        className="px-3.5 py-1.5 text-[12px] cursor-pointer flex items-center gap-1"
+                      >
+                        {cat.name}
+                        <span className={`text-[10px] ${activeCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                          {cat.style_count}
+                        </span>
+                      </button>
+                      {/* 风格数为 0 的标签可删：与视频管理那条标签条同一套做法 ——
+                          悬停时在右上角冒一个小 ×，平时不占标签宽度、也不挤压数量徽标；
+                          不显示时同时关掉点击（opacity-0 的元素照样接收鼠标事件）。 */}
+                      {cat.style_count === 0 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat); }}
+                          title={`删除标签「${cat.name}」`}
+                          className="absolute -top-1 -right-1 z-10 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white shadow-md cursor-pointer opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-red-600"
+                        >
+                          <CloseOutlined style={{ fontSize: 9 }} />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
