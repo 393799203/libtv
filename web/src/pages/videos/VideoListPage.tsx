@@ -607,7 +607,10 @@ export default function VideoListPage() {
         overflowX: 'hidden', // 防止横向滚动
       }}
     >
-      {/* Banner 3D轮播图 */}
+      {/* Banner 3D轮播图
+          注意：这个容器是拖拽切换的，inline 设了 cursor: grab（拖拽时 grabbing），
+          所以里面所有可点元素都必须自己声明 cursor-pointer —— 否则 hover 上去
+          显示的是"抓手"，看不出能点（左右箭头、指示点都踩过这个）。 */}
       <div
         className="relative w-full h-60 md:h-96 overflow-hidden mb-6 md:mb-8 bg-gradient-to-b from-gray-900 to-gray-800 select-none"
         onMouseEnter={handleBannerMouseEnter}
@@ -743,7 +746,7 @@ export default function VideoListPage() {
             {banners.length > 1 && (
               <>
                 <button
-                  className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
+                  className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors cursor-pointer z-20"
                   onClick={() => {
                     setCurrentBannerIndex((prev) =>
                       prev === 0 ? banners.length - 1 : prev - 1
@@ -755,7 +758,7 @@ export default function VideoListPage() {
                   </svg>
                 </button>
                 <button
-                  className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors z-20"
+                  className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors cursor-pointer z-20"
                   onClick={() => {
                     setCurrentBannerIndex((prev) =>
                       prev === banners.length - 1 ? 0 : prev + 1
@@ -776,7 +779,7 @@ export default function VideoListPage() {
                 {banners.map((_, index) => (
                   <button
                     key={index}
-                    className={`rounded-full transition-all ${
+                    className={`rounded-full transition-all cursor-pointer ${
                       index === currentBannerIndex
                         ? 'w-2 h-2 bg-[#ffffff]'
                         : 'w-1.5 h-1.5 bg-[#ffffff8c] hover:bg-[#ffffffcc]'
