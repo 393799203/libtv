@@ -3,7 +3,6 @@ import { Modal, Tag, Select, DatePicker, Button, Pagination, Tooltip } from 'ant
 import {
   FileTextOutlined,
   QuestionCircleOutlined,
-  ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -111,15 +110,6 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
     };
   }, [page, filterType, filterScene, filterModel, filterDateRange]);
 
-  // 重置筛选
-  const handleReset = () => {
-    setFilterType('');
-    setFilterScene('');
-    setFilterModel('');
-    setFilterDateRange(null);
-    setPage(1);
-  };
-
   // 查询（重置到第一页）
   const handleSearch = () => {
     setPage(1);
@@ -179,9 +169,6 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
         />
         <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
           查询
-        </Button>
-        <Button icon={<ReloadOutlined />} onClick={handleReset}>
-          重置
         </Button>
       </div>
 
