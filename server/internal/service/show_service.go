@@ -324,12 +324,14 @@ func (s *ShowService) UpdateCategory(ctx context.Context, cat *model.ShowCategor
 }
 
 func (s *ShowService) DeleteCategory(ctx context.Context, id string) error {
-	count, err := s.showRepo.CategoryHasShows(ctx, id)
+	count, err := s.showRepo.CategoryHasManagedShows(ctx, id)
 	if err != nil {
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("该分类下还有 %d 个视频，无法删除", count)
+		// 挑明「可能看不到」的原因：标签上的数字只算已发布的视频，
+		// 只含待审核/已拒绝视频的标签在视频管理里也是 0、列表也是空的。
+		return fmt.Errorf("该标签下还有 %d 个视频（可能处于待审核/已拒绝状态），无法删除", count)
 	}
 	return s.showRepo.DeleteCategory(ctx, id)
 }

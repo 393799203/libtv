@@ -35,7 +35,11 @@ type ShowRepo interface {
 	ListCategories(ctx context.Context) ([]*model.ShowCategory, error)
 	UpdateCategory(ctx context.Context, cat *model.ShowCategory) error
 	DeleteCategory(ctx context.Context, id string) error
-	CategoryHasShows(ctx context.Context, categoryID string) (int64, error)
+	// CategoryHasManagedShows 统计分类下「后台能看到/能管理」的视频数：
+	// 只算 published / pending / rejected，不含 status 为空的历史数据 ——
+	// 那是 2026-06 之前留下的记录，视频管理处只查 published、待审核处只查 pending/rejected，
+	// 两处列表都看不到它们，不该拦住标签删除。
+	CategoryHasManagedShows(ctx context.Context, categoryID string) (int64, error)
 }
 
 // ErrShowNotFound Show 不存在
@@ -204,9 +208,12 @@ func (r *showRepo) DeleteCategory(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Delete(&model.ShowCategory{}, "id = ?", id).Error
 }
 
-func (r *showRepo) CategoryHasShows(ctx context.Context, categoryID string) (int64, error) {
+// 注意：status 为空的遗留记录不计入（后台两处列表都看不到它们，见接口注释）
+func (r *showRepo) CategoryHasManagedShows(ctx context.Context, categoryID string) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&model.Show{}).Where("category_id = ?", categoryID).Count(&count).Error
+	err := r.db.WithContext(ctx).Model(&model.Show{}).
+		Where("category_id = ? AND status IN ?", categoryID, []string{"published", "pending", "rejected"}).
+		Count(&count).Error
 	return count, err
 }
 

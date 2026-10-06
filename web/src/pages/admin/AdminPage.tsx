@@ -391,6 +391,37 @@ export default function AdminPage() {
     setCreatingShowCat(false);
   };
 
+  // 删除标签：只对「视频数为 0」的标签开放（有已发布视频的标签不显示删除入口）。
+  // 注意徽标上的数字只算已发布的视频，所以后端还会再拦一道：待审核/已拒绝的视频也算「有视频」，
+  // 那种情况会返回「该标签下还有 N 个视频（可能处于待审核/已拒绝状态），无法删除」。
+  // 删掉当前选中的标签后必须自己挪一下选中项 —— 重新拉视频的 useEffect 只在
+  // activeShowCategory 变化时触发，留着一个已删除的 id 会让列表一直空着。
+  const handleDeleteShowCategory = (cat: ShowCategoryItem) => {
+    modal.confirm({
+      title: '删除标签',
+      content: `确定删除标签「${cat.name}」吗？该标签下没有已发布的视频。`,
+      okText: '确定删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await showApi.deleteCategory(cat.id);
+          message.success('标签已删除');
+          const res = await showApi.categories();
+          setShowCategories(res);
+          if (activeShowCategory === cat.id) {
+            const next = res[0]?.id || '';
+            setActiveShowCategory(next);
+            if (!next) setShows([]);
+          }
+        } catch (err) {
+          // HTTP 错误已由 api.ts 拦截器统一 message.error()
+          console.error(err);
+        }
+      },
+    });
+  };
+
   const openAddShowDialog = () => {
     setEditingShow(null);
     setShowAddShowDialog(true);
@@ -702,18 +733,36 @@ export default function AdminPage() {
                   ) : (
                     <div className="flex gap-1.5 overflow-x-auto">
                       {showCategories.map(cat => (
-                        <button
+                        <div
                           key={cat.id}
-                          onClick={() => { setActiveShowCategory(cat.id); setPlayingShowId(null); }}
-                          className={`px-3.5 py-1.5 text-[12px] whitespace-nowrap rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                          className={`group flex items-center whitespace-nowrap rounded-lg transition-colors ${
                             activeShowCategory === cat.id ? 'bg-cyan-500/15 text-cyan-200 font-medium' : 'text-gray-500 hover:bg-gray-100'
                           }`}
                         >
-                          {cat.name}
-                          <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
-                            {cat.show_count}
-                          </span>
-                        </button>
+                          <button
+                            onClick={() => { setActiveShowCategory(cat.id); setPlayingShowId(null); }}
+                            className="pl-3.5 py-1.5 pr-2 text-[12px] cursor-pointer flex items-center gap-1"
+                          >
+                            {cat.name}
+                            <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
+                              {cat.show_count}
+                            </span>
+                          </button>
+                          {/* 视频数为 0 的标签可删；悬停才显形，避免误点（与本页视频卡片的操作按钮同一套做法） */}
+                          {cat.show_count === 0 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteShowCategory(cat); }}
+                              title={`删除标签「${cat.name}」`}
+                              className={`mr-1.5 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
+                                activeShowCategory === cat.id
+                                  ? 'text-cyan-200/70 hover:text-red-300 hover:bg-red-500/15'
+                                  : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
+                              }`}
+                            >
+                              <DeleteOutlined style={{ fontSize: 11 }} />
+                            </button>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
