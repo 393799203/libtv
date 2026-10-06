@@ -1125,17 +1125,22 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	}
 
 	// 优先使用 prompt（用户输入的提示词），如果为空则用 content
-	userInput := stripMentionMarkers(data.Prompt)
+	userInput := strings.TrimSpace(stripMentionMarkers(data.Prompt))
 	if userInput == "" {
-		userInput = data.Content
+		userInput = strings.TrimSpace(data.Content)
 	}
 
-	// 如果没有用户输入，直接透传
+	// 没有用户输入就报错，不再"静默成功"。
+	// 原来这里返回 success + 空内容：前端连红点都没有，用户看到的就是"点了生成什么也没发生"，
+	// 排查时也没有任何线索（线上文本节点日志里连一条记录都没有）。
+	// 文本节点不吃上游文本（不读 GetUpstreamSources），所以只看自己的 prompt/content。
 	if userInput == "" {
 		return &NodeOutput{
 			NodeID: node.ID,
-			Status: "success",
-			Data:   map[string]interface{}{"content": ""},
+			Status: "failed",
+			Data: map[string]interface{}{
+				"error": "没有输入提示词，无法生成文本：请先写下要生成的内容",
+			},
 		}, nil
 	}
 
@@ -1282,6 +1287,12 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 
 	// 既没有上游文本也没有用户 prompt：透传保留的 scriptContent
 	if material == "" && data.Prompt == "" {
+		// 连 scriptContent 都是空的话，就是"真什么都没有"（上游连的又不是文本节点，
+		// 上面两种错误提示都没命中）—— 原来这里会返回 success + 空剧本，
+		// 前端一点反馈都没有。直接说清该怎么补输入。
+		if strings.TrimSpace(data.ScriptContent) == "" {
+			return nil, fmt.Errorf("没有可用的剧本内容：请连接上游文本/剧本节点并用 @ 引用，或直接输入创作提示词")
+		}
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "success",
@@ -1611,14 +1622,16 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（结束） ========== ")
 	log.Printf("[ImageExecutor] 最终结果: upstreamImageURLs=%v (是否使用图生图=%v 图片数=%d)", upstreamImageURLs, len(upstreamImageURLs) > 0, len(upstreamImageURLs))
 
-	// 没有提示词时直接返回空结果
-	if data.Prompt == "" {
+	// 没有提示词就报错。原来这里返回的是 success + 空 imageUrl —— 前端一样没有任何反馈
+	// （节点不红、没有错误信息），用户以为"点了没反应"。
+	// 判定用清掉 @ 引用标记后的文本：只插了 @ 引用、没写实际描述的也算没有提示词
+	// （图片节点的语义是"必须有提示词"，上游参考图/风格图只是附加条件）。
+	if strings.TrimSpace(stripMentionMarkers(data.Prompt)) == "" {
 		return &NodeOutput{
 			NodeID: node.ID,
-			Status: "success",
+			Status: "failed",
 			Data: map[string]interface{}{
-				"imageUrl":  "",
-				"imageUrls": []string{},
+				"error": "没有输入提示词，无法生成图片：请先描述要生成什么",
 			},
 		}, nil
 	}
@@ -2139,6 +2152,21 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				}
 			}
 		}
+	}
+
+	// 完全没有输入就直接报错：既没有提示词，也没有任何参考素材（图/视频/音频）。
+	// 原来这种"空节点"会把空提示词发给上游，换回一条技术性报错 —— 用户白等一趟。
+	// 只在"真空白"时拦：首尾帧 / 参考模式可能只靠素材生成，提示词是可选的，
+	// 各上游对空提示词的容忍度不一样，这里不做过度判断（拦错比放过更糟）。
+	if strings.TrimSpace(stripMentionMarkers(data.Prompt)) == "" &&
+		len(imageURLs) == 0 && len(videoURLs) == 0 && len(audioURLs) == 0 {
+		return &NodeOutput{
+			NodeID: node.ID,
+			Status: "failed",
+			Data: map[string]interface{}{
+				"error": "没有输入提示词，也没有上游参考素材，无法生成视频",
+			},
+		}, nil
 	}
 
 	// 参考音频约束：① 不能作为唯一参考（华数要求 reference_audio 必须搭配图片/视频参考）；
