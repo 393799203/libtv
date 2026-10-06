@@ -602,7 +602,7 @@ export default function VideoListPage() {
 
   return (
     <div
-      className="min-h-screen bg-white pb-20"
+      className="min-h-screen home-bg pb-20"
       style={{
         overflowX: 'hidden', // 防止横向滚动
       }}

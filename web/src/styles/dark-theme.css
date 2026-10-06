@@ -21,6 +21,10 @@
   /* 底色：近黑 + 冷蓝偏移，避免纯黑发灰 */
   --dv-bg: #151e31; /* 页面最底层：与画布底色同一值（全站一个底色，首页不再偏暗） */
   --dv-surface-1: #1c2740; /* 卡片 / 面板（比页面底亮一档 → 节点/卡片"浮"起来） */
+  /* 首页（/）大背景：不用纯色，改用一道极浅的线性渐变（顶部偏亮一档 → 约 3/4 处回到页面底色）。
+     首页最上面一截被 Banner 盖住，所以把最亮的那档放在 Banner 下沿附近，
+     肉眼能看到的部分正好落在变化区间里；底部与 body 同色，滚到底不会出现色差接缝。 */
+  --dv-home-gradient: linear-gradient(168deg, #22304f 0%, #1e2946 32%, var(--dv-bg) 76%);
   /* 画布工作区底色：独立于页面最底层(--dv-bg 深蓝)。
      画布是"工作台"，不是页面背景，用面色才不显得像一块纯黑；
      取值与画布加载态(bg-gray-50 → surface-2)一致，加载前后不会突然变色。 */
@@ -88,6 +92,15 @@ html.theme-dark-root #root {
 /* ========== 背景：白底/浅灰底 → 暗面 ========== */
 .theme-dark .bg-white {
   background-color: var(--dv-surface-1);
+}
+/* 首页大背景：渐变替掉纯色。单独给一个类，不去覆盖 .bg-white，免得依赖规则先后顺序
+   （浅色主题下退回白底，行为与改之前一致） */
+.home-bg {
+  background-color: #fff;
+}
+.theme-dark .home-bg {
+  background-color: var(--dv-bg);
+  background-image: var(--dv-home-gradient);
 }
 .theme-dark :is(.bg-gray-50, .bg-slate-50, .bg-gray-100, .bg-slate-100) {
   background-color: var(--dv-surface-2);
