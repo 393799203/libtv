@@ -100,19 +100,20 @@
   content: '';
   width: 24px;
   height: 24px;
-  background: #fff;
-  border: 1px solid #d9d9d9;
+  /* 空心：不填充，只留一圈浅色描边（原为白底 + 灰边，在暗色画布上就是两个白点） */
+  background: transparent;
+  border: 2.5px solid rgba(255, 255, 255, 0.55);
   border-radius: 50%;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   transform: translate(-50%, -50%) scale(0.4);
 }
 .react-flow__handle.libtv-handle::after {
   content: '+';
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 700;
   line-height: 1;
-  color: #6b7280;
-  transform: translate(-50%, -52%) scale(0.4);
+  color: var(--dv-text-2, #c2cfe4);
+  transform: translate(-50%, calc(-52% - 1px)) scale(0.4);
 }
 
 /* hover 或选中节点时弹出：圆圈从边缘中心 ease 滑出，停留在节点外侧 12px */
@@ -127,7 +128,7 @@
 }
 .react-flow__node:hover .react-flow__handle-left.libtv-handle::after,
 .react-flow__node.selected .react-flow__handle-left.libtv-handle::after {
-  transform: translate(-50%, -52%) translateX(-12px) scale(1);
+  transform: translate(-50%, calc(-52% - 1px)) translateX(-12px) scale(1);
 }
 .react-flow__node:hover .react-flow__handle-right.libtv-handle::before,
 .react-flow__node.selected .react-flow__handle-right.libtv-handle::before {
@@ -135,26 +136,26 @@
 }
 .react-flow__node:hover .react-flow__handle-right.libtv-handle::after,
 .react-flow__node.selected .react-flow__handle-right.libtv-handle::after {
-  transform: translate(-50%, -52%) translateX(12px) scale(1);
+  transform: translate(-50%, calc(-52% - 1px)) translateX(12px) scale(1);
 }
 
 /* 耳朵自身的 hover 反馈 */
 .react-flow__node:hover .react-flow__handle-left.libtv-handle:hover::before {
-  border-color: #3b82f6;
+  border-color: #22d3ee;
   transform: translate(-50%, -50%) translateX(-12px) scale(1.1);
 }
 .react-flow__node:hover .react-flow__handle-right.libtv-handle:hover::before {
-  border-color: #3b82f6;
+  border-color: #22d3ee;
   transform: translate(-50%, -50%) translateX(12px) scale(1.1);
 }
 .react-flow__handle.libtv-handle:hover::after {
-  color: #3b82f6;
+  color: #67e8f9;
 }
 
 /* 拖拽连线悬停到目标节点：卡片微微放大 + 蓝色高亮 outline，释放后恢复原样 */
 .react-flow__node.libtv-connect-target > div {
   transform: scale(1.03);
-  box-shadow: 0 0 0 2px #3b82f6, 0 8px 24px rgba(59, 130, 246, 0.3) !important;
+  box-shadow: 0 0 0 2px #22d3ee, 0 8px 24px rgba(34, 211, 238, 0.28) !important;
 }
 
 /* 连线默认实线（不强制覆盖，由组件控制） */
@@ -478,7 +479,7 @@
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    background: #fff;
+    background: var(--dv-surface-1, #fff);
   }
 
   /* 标题吸顶：往下翻套餐时仍知道自己在哪 */
@@ -488,8 +489,8 @@
     z-index: 10;
     margin-bottom: 0 !important;
     padding: 16px 14px !important;
-    background: #fff;
-    border-bottom: 1px solid #f0f0f0;
+    background: var(--dv-surface-1, #fff);
+    border-bottom: 1px solid var(--dv-border-1, #f0f0f0);
   }
 
   .points-mall-modal .ant-modal-body {

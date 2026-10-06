@@ -266,7 +266,7 @@ function WorkspaceInner() {
             size="small"
             icon={<ShopOutlined />}
             onClick={() => setShowPointsMall(true)}
-            className="!text-amber-600"
+            className="!text-amber-500"
           />
         </Tooltip>
         <Tooltip title="查看积分明细（扣费 / 退款 / 充值）">

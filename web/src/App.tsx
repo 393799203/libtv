@@ -63,8 +63,11 @@ function App() {
           controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)', 
         },
         components: {
-          Layout: { headerBg: '#080d18', bodyBg: '#070a12', siderBg: '#080d18' },
+          // headerBg 半透明：配合 dark-theme.css 里的 backdrop-filter 做玻璃化头部
+          Layout: { headerBg: 'rgba(9, 14, 26, 0.72)', bodyBg: '#070a12', siderBg: 'rgba(9, 14, 26, 0.72)' },
           Modal: { contentBg: '#0d1320', headerBg: '#0d1320' },
+          // 主按钮的投影：青色调、柔和下沉，让按钮"浮"在面板上（比默认灰影更贴主题）
+          Button: { primaryShadow: '0 6px 18px -6px rgba(34, 211, 238, 0.55)' },
           Card: { colorBgContainer: '#0d1320' },
           Table: {
             colorBgContainer: '#0d1320',

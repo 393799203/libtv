@@ -158,7 +158,7 @@ export function AppLayout() {
             {/* 积分超市入口（移动端也要显示，内边距收窄以便和社区入口并排） */}
             <button
               onClick={() => setShowPointsMall(true)}
-              className="hidden md:flex md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none text-gray-600 transition-colors cursor-pointer hover:text-amber-600 hover:bg-amber-50"
+              className="hidden md:flex md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none text-amber-500 transition-colors cursor-pointer hover:text-amber-400 hover:bg-amber-50"
             >
               <ShopOutlined className="text-[18px] md:text-[14px]" />
               积分超市

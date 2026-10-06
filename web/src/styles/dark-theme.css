@@ -20,10 +20,18 @@
 
   /* 底色：近黑 + 冷蓝偏移，避免纯黑发灰 */
   --dv-bg: #070a12;
-  --dv-surface-1: #0d1320; /* 卡片 / 面板 */
-  --dv-surface-2: #131b2b; /* 次级区块 */
-  --dv-surface-3: #1a2438; /* hover / 选中底色 */
+  --dv-surface-1: #0f1626; /* 卡片 / 面板 */
+  --dv-surface-2: #151e31; /* 次级区块 */
+  --dv-surface-3: #1b2539; /* hover / 选中底色 */
   --dv-surface-4: #223049; /* 更高一档的 hover */
+
+  /* 高度体系：暗色下阴影要更大更黑才有层次（浅色那套 shadow-sm/md 在暗底几乎不可见）。
+     1=贴地卡片，2=浮起面板/下拉，3=弹窗/全屏浮层 */
+  --dv-elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -8px rgba(0, 0, 0, 0.55);
+  --dv-elev-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 16px 36px -14px rgba(0, 0, 0, 0.68);
+  --dv-elev-3: 0 8px 20px rgba(0, 0, 0, 0.5), 0 32px 72px -20px rgba(0, 0, 0, 0.75);
+  /* 顶部 1px 内高光：模拟"被顶光照到"的物理感，是暗色 UI 显精致的关键细节 */
+  --dv-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.055);
 
   /* 描边：冷色偏蓝，不用中性灰 */
   --dv-border-1: #1e2942;
@@ -352,4 +360,170 @@ html.theme-dark-root #root {
 /* 空状态/骨架屏：默认是浅灰块，暗色下要把降级色一起换掉 */
 .theme-dark :is(.bg-gray-100.animate-pulse, .animate-pulse.bg-gray-100) {
   background-color: var(--dv-surface-3);
+}
+
+/* ========== 分层落地（第一批视觉升级） ==========
+   目标：全站从"纯色块 + 1px 灰边"变成"有厚度的层级"。
+   做法：不改业务 className，统一在主题层给"容器型"元素加 顶部内高光 + 高度阴影。 */
+.theme-dark :is(.ant-card, .ant-modal-content, .ant-drawer-content, .ant-popover-inner,
+                .ant-dropdown-menu, .ant-select-dropdown, .ant-picker-dropdown, .ant-tooltip-inner) {
+  box-shadow: var(--dv-hairline), var(--dv-elev-2);
+}
+.theme-dark :is(.ant-modal-content, .ant-drawer-content) {
+  box-shadow: var(--dv-hairline), var(--dv-elev-3);
+}
+.theme-dark :is(.ant-table-wrapper, .ant-table-container) {
+  box-shadow: var(--dv-hairline);
+}
+
+/* 历史代码里的"卡片"：圆角较大的面板（rounded-xl/2xl/3xl）加高光边 + 贴地阴影。
+   只挑大圆角容器，避免给标签/徽标这类小元素加阴影（那会很脏）。 */
+.theme-dark :is(.rounded-xl, .rounded-2xl, .rounded-3xl)[class*="bg-white"],
+.theme-dark :is(.rounded-xl, .rounded-2xl, .rounded-3xl)[class*="bg-gray-50"],
+.theme-dark :is(.rounded-xl, .rounded-2xl, .rounded-3xl)[class*="bg-gray-100"] {
+  box-shadow: var(--dv-hairline), var(--dv-elev-1);
+}
+
+
+/* ========== 玻璃化（第二批视觉升级） ==========
+   适用对象：固定在内容之上的"悬浮层"——头部、侧栏、下拉/气泡、弹窗遮罩。
+   不适用：正文卡片（内容密集，背景透出来会降低可读性）。
+   -webkit- 前缀保留：Safari 仍需前缀，漏了等于没做。 */
+.theme-dark :is(.ant-layout-header, .ant-layout-sider) {
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--dv-hairline), 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.theme-dark :is(.ant-dropdown-menu, .ant-select-dropdown, .ant-picker-dropdown,
+                .ant-popover-inner, .ant-tooltip-inner) {
+  background-color: rgba(21, 30, 49, 0.88) !important;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+/* 弹窗遮罩：背后页面做轻模糊，视觉焦点收拢到弹窗上（高级感的常见手法） */
+.theme-dark .ant-modal-mask,
+.theme-dark .ant-drawer-mask {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  background-color: rgba(3, 6, 12, 0.62) !important;
+}
+
+
+/* bg-white 的低透明度档（/40、/50）之前没映射 —— 暗底上就是"一块发白"。
+   注意：装饰性用法（彩色渐变上的高光/文字）走任意值 bg-[#ffffff..] 显式声明，不受这里影响。 */
+.theme-dark :is(.bg-white\/30, .bg-white\/40, .bg-white\/50) {
+  background-color: rgba(21, 30, 49, 0.55);
+}
+
+
+/* ========== 排版质感（第三批） ==========
+   暗底白字最容易显得"糊、廉价"，三个细节决定观感：字形平滑、数字不抖、标题不散。 */
+
+/* 1) 字形平滑：暗底上的浅色文字开启灰度抗锯齿，笔画更干净、不发胖 */
+.theme-dark {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 2) 数字等宽：积分、时长、金额、进度这些数字在刷新/动画时不再左右抖动。
+   只给"数字密集"的组件上，避免影响正文排版。 */
+.theme-dark :is(.ant-table, .ant-statistic-content, .ant-pagination, .ant-progress-text,
+                .ant-input-number-input, .ant-descriptions-item-content, .ant-badge-count) {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* 3) 标题收紧字距 + 自动换行平衡：大字号默认字距偏松，看着散 */
+.theme-dark :is(h1, h2, h3, .ant-typography h1, .ant-typography h2, .ant-typography h3) {
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* ========== 焦点态与选区（第四批） ==========
+   键盘可达性 + 一致性：全站焦点圈统一为品牌青，选区也是品牌青。 */
+.theme-dark ::selection {
+  background: rgba(34, 211, 238, 0.3);
+  color: #f2f6ff;
+}
+.theme-dark :is(button, a, summary, [role='button'], [tabindex]):focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.75);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* antd 输入类组件自带主色聚焦描边（colorPrimary=青），这里不再叠加外圈，避免双层框 */
+.theme-dark :is(.ant-input, .ant-input-affix-wrapper, .ant-select-selector, .ant-picker):focus-visible {
+  outline: none;
+}
+
+
+/* ========== 画布节点连接点（"耳朵"） ==========
+   React Flow 的暗色主题默认给 .react-flow__handle 描 1px 白边，在整个暗色画布上就剩它是最亮的白点。
+   改为：暗面填充 + 冷色描边（与主题一致），悬停/连线时高亮为品牌青。 */
+.theme-dark .react-flow__handle {
+  width: 9px;
+  height: 9px;
+  background: #1b2539;
+  border: 1.5px solid #33425f;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.theme-dark .react-flow__handle:hover {
+  background: #24344f;
+  border-color: #22d3ee;
+  transform: scale(1.15);
+}
+/* 正在从该点拉线 / 正在连到该点：高亮成品牌青 */
+.theme-dark :is(.react-flow__handle.connectingfrom, .react-flow__handle.connectingto,
+                .react-flow__handle.valid) {
+  background: #22d3ee;
+  border-color: #67e8f9;
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.22);
+}
+/* 连线预览路径也统一成青色 */
+.theme-dark .react-flow__connection-path {
+  stroke: #22d3ee;
+  stroke-width: 2;
+}
+
+
+/* ========== 第五批：品牌渐变收敛 ==========
+   把「青 → 紫」定为全站唯一的高级签名，只出现在主操作上（主按钮、选中强调、生成中）。
+   其它地方不再各自用蓝/紫渐变，避免稀释辨识度。 */
+.theme-dark .ant-btn-primary:not(:disabled) {
+  background-image: linear-gradient(135deg, #22d3ee 0%, #3b82f6 55%, #8b5cf6 100%);
+  border-color: transparent;
+}
+.theme-dark .ant-btn-primary:not(:disabled):hover {
+  background-image: linear-gradient(135deg, #38dff5 0%, #4f92f7 55%, #9d74f8 100%);
+}
+
+/* ========== 第六批：微交互动效 ==========
+   统一动效节奏：hover 150ms、按下 0.98 回弹、骨架屏替转圈。
+   动效"克制且一致"比"多"更显高级，所以只做这几件事。 */
+.theme-dark :is(.ant-btn, .ant-tag, .ant-switch, a) {
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+              color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+}
+.theme-dark :is(.ant-btn, .ant-tag):active {
+  transform: scale(0.98);
+}
+/* 卡片：hover 轻微抬起（2px）+ 阴影加深，给出"可点"的物理反馈 */
+.theme-dark .ant-card {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.theme-dark .ant-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dv-hairline), var(--dv-elev-2);
+}
+/* 骨架屏：暗底上用"冷色微光扫过"代替默认的浅灰块 */
+.theme-dark .ant-skeleton-content .ant-skeleton-title,
+.theme-dark .ant-skeleton-content .ant-skeleton-paragraph > li,
+.theme-dark .ant-skeleton-button,
+.theme-dark .ant-skeleton-avatar {
+  background: linear-gradient(90deg, rgba(27, 37, 57, 0.9) 25%, rgba(42, 56, 83, 0.9) 37%, rgba(27, 37, 57, 0.9) 63%);
+  background-size: 400% 100%;
+  animation: dv-shimmer 1.4s ease infinite;
+}
+@keyframes dv-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
 }
