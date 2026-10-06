@@ -64,7 +64,12 @@ export const CreateProjectCard = memo(function CreateProjectCard({ onClick }: { 
     <div>
       <Card
         hoverable
-        className="!rounded-lg border-dashed cursor-pointer"
+        /* overflow-hidden：卡片内层那个铺满 body 的 div 是直角的（body padding 为 0），
+           不裁的话它会顶到卡片边缘，圆角处只剩月牙；而 hover 时 antd 又会把虚线边框
+           变成透明（.ant-card-hoverable:hover { border-color: transparent }），
+           于是 hover 上去"圆角像没了"。裁到圆角内，形状就一直是对的。
+           （裁的是卡片自己的内容，卡片自身的 hover 阴影不受影响。） */
+        className="!rounded-lg border-dashed cursor-pointer overflow-hidden"
         styles={{ body: { padding: 0 } }}
         onClick={onClick}
       >

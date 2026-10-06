@@ -616,6 +616,14 @@ html.theme-dark-root #root {
   transform: translateY(-2px);
   box-shadow: var(--dv-hairline), var(--dv-elev-2);
 }
+
+/* 虚线卡（「开始创作」）hover 时保留边框：antd 的 .ant-card-hoverable:hover 会把边框改成
+   transparent，让阴影接管形状 —— 但虚线卡的身份就是那条虚线，一旦透明，hover 上去形状判断
+   只剩圆角处的一小片月牙（实测就是"圆角像没了"的观感）。这里只是把边框留着并提亮一档，
+   上移 + 阴影的 hover 反馈不变。选择器限定 .border-dashed，不影响其它 hoverable 卡片。 */
+.theme-dark .ant-card-hoverable.border-dashed:hover {
+  border-color: var(--dv-border-2);
+}
 /* 骨架屏：暗底上用"冷色微光扫过"代替默认的浅灰块 */
 .theme-dark .ant-skeleton-content .ant-skeleton-title,
 .theme-dark .ant-skeleton-content .ant-skeleton-paragraph > li,
