@@ -263,10 +263,10 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
           </div>
         ) : (
           <div
-            className="w-full rounded-lg bg-gray-50 flex flex-col items-center justify-center"
+            className="w-full rounded-lg bg-transparent flex flex-col items-center justify-center"
             style={{ minHeight: `${imageContainerHeight}px` }}
           >
-            <PictureOutlined className="text-4xl text-gray-300" />
+            <PictureOutlined className="text-4xl text-gray-500" />
           </div>
         )}
 

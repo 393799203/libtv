@@ -550,7 +550,7 @@ export const AssetEditModal = memo<AssetEditModalProps>(
                   <button
                     onClick={() => handleGenerate()}
                     disabled={generating || uploading}
-                    className="flex-1 h-8 rounded-md bg-gray-800 hover:bg-gray-900 text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                    className="flex-1 h-8 rounded-md bg-[var(--dv-surface-2)] hover:bg-[var(--dv-surface-3)] text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
                     title={`基于描述生成${assetType === 'character' ? '三视图' : assetType === 'scene' ? '四视图' : '六视图'}`}
                   >
                     {generating ? (

@@ -198,7 +198,7 @@ export const EnhanceNode = memo<NodeProps<EnhanceNodeType>>(function EnhanceNode
 
         {/* 结果 / 占位 */}
         {displayUrl ? (
-          <div className="relative w-full rounded overflow-hidden bg-black">
+          <div className="relative w-full rounded overflow-hidden bg-[var(--dv-canvas-bg)]">
             <video
               key={displayUrl}
               src={displayUrl}
@@ -224,7 +224,7 @@ export const EnhanceNode = memo<NodeProps<EnhanceNodeType>>(function EnhanceNode
             )}
           </div>
         ) : (
-          <div className="w-full h-32 rounded-lg bg-gray-50 flex flex-col items-center justify-center gap-1.5">
+          <div className="w-full h-32 rounded-lg bg-transparent flex flex-col items-center justify-center gap-1.5">
             <FormatPainterOutlined className="text-3xl text-gray-300" />
             <span className="text-xs text-gray-400">
               {upstreamHasVideo ? '点「开始清晰化」处理上游视频' : '把视频节点连到左侧输入'}

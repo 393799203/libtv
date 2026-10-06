@@ -141,7 +141,7 @@ const TBTN = 'flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] text-gray
 // 触发按钮中"当前值"强调
 const TVAL = 'font-medium text-gray-800';
 // 下拉面板：统一圆角/阴影/边框
-const TDROP = 'absolute bottom-full left-0 mb-1.5 bg-white rounded-xl shadow-lg border border-gray-200/80 ring-1 ring-black/5 overflow-hidden z-30';
+const TDROP = 'absolute bottom-full left-0 mb-1.5 bg-white rounded-xl border border-gray-200/80 ring-1 ring-white/10 shadow-[var(--dv-hairline),var(--dv-elev-2)] overflow-hidden z-30';
 // 下拉项：紧凑
 const TITEM = 'w-full px-3 py-1.5 text-left text-[12px] text-gray-600 hover:bg-gray-50 transition-colors';
 // 下拉项选中态
@@ -200,7 +200,7 @@ const ModelSelector = memo(function ModelSelector({
               unavailable ? 'bg-red-400' : currentModel ? 'bg-blue-400' : 'bg-gray-300'
             }`}
           />
-          <span className={`max-w-[120px] truncate text-[12px] ${unavailable ? 'line-through' : TVAL}`}>
+          <span className={`whitespace-nowrap text-[12px] ${unavailable ? 'line-through' : TVAL}`}>
             {unavailable ? `${value}（渠道不可用）` : currentModel?.label || '选择模型'}
           </span>
         </span>
@@ -211,7 +211,7 @@ const ModelSelector = memo(function ModelSelector({
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className={`${TDROP} w-[260px]`}>
+          <div className={`${TDROP} min-w-[300px] w-auto`}>
             {/* 面板头：标题 + 当前渠道提示 */}
             <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
               <span className="text-[10px] font-semibold text-gray-400 tracking-wider uppercase">选择模型</span>
@@ -241,7 +241,7 @@ const ModelSelector = memo(function ModelSelector({
                   >
                     {/* 名称 + tag + 对勾 */}
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`text-[12px] truncate ${active ? 'text-cyan-300 font-medium' : 'text-gray-700'}`}>
+                      <span className={`text-[12px] whitespace-nowrap ${active ? 'text-cyan-300 font-medium' : 'text-gray-700'}`}>
                         {model.label}
                       </span>
                       {model.tag && (
@@ -488,7 +488,7 @@ const AspectRatioSelector = memo(function AspectRatioSelector({
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-30 mb-2 w-[358px] rounded-2xl border border-gray-100/90 bg-white p-4 shadow-[0_16px_44px_-14px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.03]">
+          <div className="absolute bottom-full left-0 z-30 mb-2 w-[358px] rounded-2xl border border-gray-100/90 bg-white p-4 shadow-[var(--dv-hairline),var(--dv-elev-3)] ring-1 ring-white/10">
             {/* 清晰度 */}
             <div>
               <SectionHeader
@@ -1083,8 +1083,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             disabled={audioReferenced}
             className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer mr-1 ${
               generateAudio
-                ? 'bg-gray-100 text-gray-700'
-                : 'text-gray-400 hover:bg-gray-100/80'
+                ? 'bg-[var(--dv-surface-3)] text-[var(--dv-text-1)]'
+                : 'text-[var(--dv-text-3)] hover:bg-[var(--dv-surface-3)] hover:text-[var(--dv-text-1)]'
             } ${audioReferenced ? 'opacity-60 cursor-not-allowed' : ''}`}
             title={
               audioReferenced

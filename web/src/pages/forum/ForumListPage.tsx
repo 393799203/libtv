@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { App, Button, Empty, Input, Modal, Pagination, Spin, Tag } from 'antd';
+import { App, Button, Input, Modal, Pagination, Spin, Tag } from 'antd';
 import {
   EyeOutlined,
+  FileTextOutlined,
   MessageOutlined,
   PlusOutlined,
   PushpinFilled,
@@ -15,6 +16,7 @@ import { Highlight } from '@/components/forum/Highlight';
 import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
+import { EmptyState } from '@/components/common/EmptyState';
 
 const PAGE_SIZE = 10;
 
@@ -178,7 +180,11 @@ export default function ForumListPage() {
         </div>
       ) : posts.length === 0 ? (
         <div className="py-20">
-          <Empty description={keyword ? `没有找到包含「${keyword}」的帖子` : '还没有帖子，来发第一篇吧'} />
+          <EmptyState
+              icon={<FileTextOutlined />}
+              title={keyword ? `没有找到包含「${keyword}」的帖子` : '还没有帖子'}
+              hint={keyword ? '换个关键词试试，或清空搜索看全部帖子' : '把你的创作心得、踩坑经验写下来，就是社区的起点'}
+            />
         </div>
       ) : (
         <div>
@@ -212,7 +218,7 @@ export default function ForumListPage() {
                     <img
                       src={post.avatar_url || '/default-avatar.svg'}
                       alt=""
-                      className="h-5 w-5 shrink-0 rounded-full bg-gray-100 object-cover"
+                      className="h-5 w-5 shrink-0 rounded-full bg-gray-100 object-cover" loading="lazy" decoding="async"
                       onError={(e) => {
                         (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
                       }}

@@ -276,7 +276,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
             />
           ) : data.videoUrl ? (
             <div
-              className="relative w-full h-full flex items-center justify-center bg-gray-900 cursor-pointer group"
+              className="relative w-full h-full flex items-center justify-center bg-[var(--dv-surface-1)] cursor-pointer group"
               onClick={handlePlayClick}
             >
               <video
@@ -288,7 +288,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
               <PlayCircleOutlined className="relative text-5xl !text-white" />
             </div>
           ) : (
-            <div className="flex items-center justify-center w-full h-full bg-gray-50 rounded">
+            <div className="flex items-center justify-center w-full h-full bg-transparent rounded">
               {uploading ? (
                 <div className="flex flex-col items-center gap-2 px-4">
                   <div className={`w-6 h-6 border-2 rounded-full animate-spin ${

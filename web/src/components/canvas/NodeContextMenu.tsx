@@ -192,8 +192,9 @@ export const NodeContextMenu = memo(function NodeContextMenu({
       <Menu
         items={menuItems}
         style={{
+          background: 'var(--dv-surface-2)',
           borderRadius: 8,
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+          boxShadow: 'var(--dv-hairline), var(--dv-elev-2)',
         }}
       />
     </div>

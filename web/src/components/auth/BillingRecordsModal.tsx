@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Modal, Empty, Tag, Select, DatePicker, Button, Pagination, Tooltip } from 'antd';
-import { SearchOutlined, ReloadOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { Modal, Tag, Select, DatePicker, Button, Pagination, Tooltip } from 'antd';
+import {
+  FileTextOutlined,
+  QuestionCircleOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { billingApi, type BillingRecord, type BillingType } from '@/services/billingApi';
 import { pricingApi } from '@/services/pricingApi';
 import { channelLabel, channelTagColor } from '@/constants/channel';
+import { EmptyState } from '../../components/common/EmptyState';
 
 const { RangePicker } = DatePicker;
 
@@ -185,7 +191,12 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
           <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">加载中...</div>
         ) : records.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
-            <Empty description="暂无费用记录" />
+            <EmptyState
+              size="sm"
+              icon={<FileTextOutlined />}
+              title="没有费用记录"
+              hint="生成任务扣费、退款与充值都会记在这里；换个时间范围或类型再试试"
+            />
           </div>
         ) : (
           <>

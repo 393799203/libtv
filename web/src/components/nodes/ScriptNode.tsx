@@ -64,7 +64,8 @@ export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ 
 
   return (
     <>
-      <BaseNode id={id} data={data} selected={selected} noContentPadding>
+      {/* 宽度与图片节点对齐（图片节点为 320px）：分镜卡片原本由内容撑开，导致同一列节点宽窄不一 */}
+      <BaseNode id={id} data={data} selected={selected} noContentPadding className="!w-[320px]">
         <ScriptCard data={cardData} onOpen={handleOpenDetail} />
       </BaseNode>
 

@@ -27,7 +27,7 @@ export const ProjectCard = memo(function ProjectCard({
       {project.coverUrl ? (
         <img src={project.coverUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
       ) : (
-        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-cyan-500">
+        <div className="w-full h-full flex items-center justify-center bg-gray-100">
           <img src={`https://picsum.photos/200/150?random=${project.id}`} alt="" className="w-full h-full object-cover" loading="lazy" />
         </div>
       )}

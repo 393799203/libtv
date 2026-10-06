@@ -1,8 +1,13 @@
 import { memo, useEffect, useState, useCallback } from 'react';
-import { Modal, Empty, Pagination, Spin, App } from 'antd';
-import { ClockCircleOutlined, CheckOutlined } from '@ant-design/icons';
+import { Modal, Pagination, Spin, App } from 'antd';
+import {
+  CheckOutlined,
+  ClockCircleOutlined,
+  HistoryOutlined,
+} from '@ant-design/icons';
 import { generationHistoryApi, type GenerationHistoryItem } from '@/services/generationHistoryApi';
 import dayjs from 'dayjs';
+import { EmptyState } from '@/components/common/EmptyState';
 
 interface GenerationHistoryModalProps {
   nodeId: string;
@@ -77,7 +82,12 @@ export const GenerationHistoryModal = memo(function GenerationHistoryModal({
       <div className="h-[520px] flex flex-col">
         {items.length === 0 && !loading ? (
           <div className="flex-1 flex items-center justify-center">
-            <Empty description={`暂无${typeLabel}生成记录`} />
+            <EmptyState
+              size="sm"
+              icon={<HistoryOutlined />}
+              title={`暂无${typeLabel}生成记录`}
+              hint="每次生成的历史都会留在这里，方便你复用之前的参数"
+            />
           </div>
         ) : (
           <Spin spinning={loading} className="flex-1 flex flex-col">

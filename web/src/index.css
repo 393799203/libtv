@@ -310,7 +310,7 @@
   object-fit: contain;
   margin: 0.6em 0;
   border-radius: 8px;
-  background: #000;
+  background: var(--dv-bg);
 }
 
 /* 正文图片链接：行内 <a> 套块级 <img> 会被撑成整行宽（实测 992px vs 图片 642px），

@@ -699,7 +699,7 @@ export const Canvas = memo(function Canvas() {
   }, [selectedNode?.id, promptSuppressed, flowToScreenPosition, viewport, getNodes, containerOffset]);
 
   return (
-    <div ref={containerRef} className="w-full h-full relative" onContextMenu={handleContextMenu}>
+    <div ref={containerRef} className="w-full h-full relative bg-[var(--dv-canvas-bg)]" onContextMenu={handleContextMenu}>
       <style>{`
         .react-flow-cursor-default .react-flow__pane { cursor: default !important; }
         .react-flow-cursor-default .react-flow__pane:active { cursor: default !important; }

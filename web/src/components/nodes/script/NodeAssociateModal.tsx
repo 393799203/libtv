@@ -1,7 +1,8 @@
 import { memo } from 'react';
-import { Modal, Empty } from 'antd';
+import { Modal } from 'antd';
 import { PictureOutlined, CheckCircleFilled } from '@ant-design/icons';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { EmptyState } from '@/components/common/EmptyState';
 
 interface NodeAssociateModalProps {
   open: boolean;
@@ -48,10 +49,11 @@ export const NodeAssociateModal = memo<NodeAssociateModalProps>(
         destroyOnClose
       >
         {imageNodes.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="画布上暂无图片节点"
-            className="py-8"
+          <EmptyState
+            size="sm"
+            icon={<PictureOutlined />}
+            title="画布上还没有图片节点"
+            hint="先在画布上放一个图片节点（或生成一张图），再回来把它关联到分镜"
           />
         ) : (
           <div className="grid grid-cols-4 gap-3 max-h-[480px] overflow-y-auto py-1">

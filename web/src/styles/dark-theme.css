@@ -19,28 +19,33 @@
   color-scheme: dark;
 
   /* 底色：近黑 + 冷蓝偏移，避免纯黑发灰 */
-  --dv-bg: #070a12;
-  --dv-surface-1: #0f1626; /* 卡片 / 面板 */
-  --dv-surface-2: #151e31; /* 次级区块 */
-  --dv-surface-3: #1b2539; /* hover / 选中底色 */
-  --dv-surface-4: #223049; /* 更高一档的 hover */
+  --dv-bg: #151e31; /* 页面最底层：与画布底色同一值（全站一个底色，首页不再偏暗） */
+  --dv-surface-1: #1c2740; /* 卡片 / 面板（比页面底亮一档 → 节点/卡片"浮"起来） */
+  /* 画布工作区底色：独立于页面最底层(--dv-bg 深蓝)。
+     画布是"工作台"，不是页面背景，用面色才不显得像一块纯黑；
+     取值与画布加载态(bg-gray-50 → surface-2)一致，加载前后不会突然变色。 */
+  --dv-canvas-bg: #151e31; /* 与 --dv-bg 同值：画布与页面同底色，只有内容层次不同 */
+  --dv-surface-2: #222e4a; /* 次级区块 / 弹窗底 */
+  --dv-surface-3: #2a3752; /* hover / 选中底色 */
+  --dv-surface-4: #344260; /* 更高一档的 hover */
 
   /* 高度体系：暗色下阴影要更大更黑才有层次（浅色那套 shadow-sm/md 在暗底几乎不可见）。
      1=贴地卡片，2=浮起面板/下拉，3=弹窗/全屏浮层 */
   --dv-elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -8px rgba(0, 0, 0, 0.55);
   --dv-elev-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 16px 36px -14px rgba(0, 0, 0, 0.68);
   --dv-elev-3: 0 8px 20px rgba(0, 0, 0, 0.5), 0 32px 72px -20px rgba(0, 0, 0, 0.75);
+
   /* 顶部 1px 内高光：模拟"被顶光照到"的物理感，是暗色 UI 显精致的关键细节 */
   --dv-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.055);
 
   /* 描边：冷色偏蓝，不用中性灰 */
-  --dv-border-1: #1e2942;
-  --dv-border-2: #2a3853;
+  --dv-border-1: #2b3a58;
+  --dv-border-2: #3a4a6b;
 
   /* 文字：三级层次，全部带冷色偏移 */
-  --dv-text-1: #f2f6ff; /* 主文字：近白（暗底上对比最足） */
-  --dv-text-2: #c2cfe4; /* 次级文字：导航/标签，提亮一档保证在深底上清楚 */
-  --dv-text-3: #8a9cb8; /* 弱化文字：说明/占位 */
+  --dv-text-1: #f8faff; /* 主文字：近白（暗底上对比最足） */
+  --dv-text-2: #d9e3f3; /* 次级文字：导航/标签（原来偏灰，统一提亮） */
+  --dv-text-3: #b3c0d6; /* 弱化文字：说明/占位/面板按钮（B 方案：只抬这一档，保持层级） */
 
   /* 提示词编辑器里的 @ 引用标签 / 音频标签：跟主色同族（青色），别再是浅蓝浅灰 */
   --dv-mention-bg: rgba(34, 211, 238, 0.16);
@@ -77,7 +82,7 @@
 html.theme-dark-root,
 html.theme-dark-root body,
 html.theme-dark-root #root {
-  background-color: #070a12;
+  background-color: var(--dv-bg);
 }
 
 /* ========== 背景：白底/浅灰底 → 暗面 ========== */
@@ -261,7 +266,7 @@ html.theme-dark-root #root {
    （首页轮播描述、海报副标题、深色卡片里的弱化文字）——所以暗色下必须映射成"偏亮的弱化色"，
    之前映射成了暗色（#4d5d78），结果这些文字在 banner 上直接看不见了。 */
 .theme-dark :is(.text-gray-300, .text-slate-300) {
-  color: #b6c4da;
+  color: var(--dv-text-2);
 }
 
 /* ========== 描边 / 分隔线 ========== */
@@ -271,7 +276,7 @@ html.theme-dark-root #root {
 /* 表格行分隔线常用 border-gray-50（最浅一档）：暗色下必须是"冷色暗线"，
    否则近黑底上会出现刺眼白线。 */
 .theme-dark :is(.border-gray-50, .border-slate-50) {
-  border-color: #172234;
+  border-color: #2b3a58;
 }
 .theme-dark :is(.border-gray-300, .border-slate-300) {
   border-color: var(--dv-border-2);
@@ -303,6 +308,10 @@ html.theme-dark-root #root {
 }
 
 /* ========== hover 态：别把卡片"提亮成白块" ========== */
+/* hover + 透明度 的交叉变体：上面两批规则的"交集"最容易被漏（静音按钮 hover:bg-gray-100/80 就是） */
+.theme-dark :is(.hover\:bg-gray-100\/80:hover, .hover\:bg-gray-100\/90:hover, .hover\:bg-gray-50\/70:hover, .hover\:bg-gray-200\/70:hover) {
+  background-color: var(--dv-surface-3) !important;
+}
 .theme-dark :is(.hover\:bg-white:hover, .hover\:bg-gray-50:hover, .hover\:bg-gray-100:hover, .hover\:bg-slate-50:hover) {
   background-color: var(--dv-surface-3);
 }
@@ -347,10 +356,10 @@ html.theme-dark-root #root {
 
 /* React Flow：画布底色与点阵 */
 .theme-dark .react-flow {
-  background-color: var(--dv-bg);
+  background-color: var(--dv-canvas-bg);
 }
 .theme-dark .react-flow__handle {
-  border-color: var(--dv-bg);
+  border-color: var(--dv-canvas-bg);
 }
 .theme-dark .react-flow__attribution {
   background: transparent;
@@ -392,11 +401,16 @@ html.theme-dark-root #root {
 .theme-dark :is(.ant-layout-header, .ant-layout-sider) {
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: var(--dv-hairline), 0 1px 0 rgba(255, 255, 255, 0.03);
+  /* 层次：暗底上"下边界 + 投影"才分得开头部与页面（只靠色调差在暗色里几乎看不见） */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: var(--dv-hairline), 0 10px 28px -16px rgba(0, 0, 0, 0.65);
+}
+.theme-dark .ant-layout-sider {
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 .theme-dark :is(.ant-dropdown-menu, .ant-select-dropdown, .ant-picker-dropdown,
                 .ant-popover-inner, .ant-tooltip-inner) {
-  background-color: rgba(21, 30, 49, 0.88) !important;
+  background-color: rgba(34, 46, 74, 0.88) !important;
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
@@ -409,11 +423,6 @@ html.theme-dark-root #root {
 }
 
 
-/* bg-white 的低透明度档（/40、/50）之前没映射 —— 暗底上就是"一块发白"。
-   注意：装饰性用法（彩色渐变上的高光/文字）走任意值 bg-[#ffffff..] 显式声明，不受这里影响。 */
-.theme-dark :is(.bg-white\/30, .bg-white\/40, .bg-white\/50) {
-  background-color: rgba(21, 30, 49, 0.55);
-}
 
 
 /* ========== 排版质感（第三批） ==========

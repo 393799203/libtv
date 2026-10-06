@@ -8,13 +8,14 @@ import {
   Spin,
 } from 'antd';
 import {
-  HeartOutlined,
-  PlusOutlined,
-  PlayCircleOutlined,
-  SearchOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
   DesktopOutlined,
+  HeartOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons';
 import { projectApi } from '@/services/projectApi';
 import { showApi } from '@/services/showApi';
@@ -171,7 +172,7 @@ const VideoCard = memo(function VideoCard({
           ref={tipRef}
           className="pointer-events-none fixed left-0 top-0 z-[9999] will-change-transform"
         >
-          <div className="line-clamp-4 max-w-[280px] rounded-lg bg-gray-900/95 px-2.5 py-1.5 text-[12px] leading-5 text-white shadow-lg">
+          <div className="line-clamp-4 max-w-[280px] rounded-lg bg-[var(--dv-canvas-bg)] px-2.5 py-1.5 text-[12px] leading-5 text-white shadow-lg">
             {item.description}
           </div>
         </div>,
@@ -397,7 +398,7 @@ export default function VideoListPage() {
         thumbnailUrl: item.thumbnail_url || undefined,
         videoUrl: item.video_url,
         duration: item.duration,
-        author: item.author || 'LibTV',
+        author: item.author || '漫蛙AI',
         authorId: item.author_id || '',
         authorAvatar: item.author_avatar || '',
         tags: item.tags || undefined,
@@ -438,7 +439,7 @@ export default function VideoListPage() {
         thumbnailUrl: item.thumbnail_url || undefined,
         videoUrl: item.video_url,
         duration: item.duration,
-        author: item.author || 'LibTV',
+        author: item.author || '漫蛙AI',
         authorId: item.author_id || '',
         authorAvatar: item.author_avatar || '',
         tags: item.tags || undefined,
@@ -915,8 +916,12 @@ export default function VideoListPage() {
             {/* 空状态：在固定高度容器内居中，文案样式与“已加载全部”一致 */}
             {!videosLoading && tvShowVideos.length === 0 && (
               <div className="h-[440px] flex items-center justify-center">
-                <div className="text-gray-400 text-sm">
-                  <span className="text-gray-300">—</span> 暂无视频内容 <span className="text-gray-300">—</span>
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#131b2b] text-gray-400 ring-1 ring-white/5">
+                    <VideoCameraOutlined className="text-[22px]" />
+                  </div>
+                  <div className="text-[14px] text-gray-300">还没有视频内容</div>
+                  <div className="text-[12px] text-gray-500">换个分类看看，或去画布创作你的第一条作品</div>
                 </div>
               </div>
             )}

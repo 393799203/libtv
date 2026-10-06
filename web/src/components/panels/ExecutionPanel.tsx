@@ -1,6 +1,8 @@
 import { memo } from 'react';
-import { Typography, Empty, Badge } from 'antd';
+import { Typography, Badge } from 'antd';
 import { useExecutionStore } from '@/stores/executionStore';
+import { HistoryOutlined } from '@ant-design/icons';
+import { EmptyState } from '@/components/common/EmptyState';
 
 const { Title } = Typography;
 
@@ -14,10 +16,11 @@ export const ExecutionPanel = memo(function ExecutionPanel() {
         <Title level={5} className="!mb-3 !text-sm">
           执行控制台
         </Title>
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="暂无执行记录"
-          className="!my-4"
+        <EmptyState
+          size="sm"
+          icon={<HistoryOutlined />}
+          title="暂无执行记录"
+          hint="生成任务开始后，这里会显示排队顺序、进度与耗时"
         />
       </div>
     );

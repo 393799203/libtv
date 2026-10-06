@@ -342,7 +342,7 @@ export function AIBuildModal({
                     <video
                       ref={videoRef}
                       src={selectedVideoUrl}
-                      className="w-full h-40 bg-black rounded-lg"
+                      className="w-full h-40 bg-[var(--dv-canvas-bg)] rounded-lg"
                       controls
                       crossOrigin="anonymous"
                     />

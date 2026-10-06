@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Empty, Input, Popconfirm, App } from 'antd';
+import { Input, Popconfirm, App } from 'antd';
 import {
   CloseOutlined,
   SearchOutlined,
@@ -14,6 +14,7 @@ import { assetApi, type UserAsset, type UserAssetType } from '@/services/assetAp
 import { downloadFile } from '@/utils/download';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
 import { emitAssetDrop, setDraggingAsset } from '@/components/canvas/assetDnd';
+import { EmptyState } from '@/components/common/EmptyState';
 
 /**
  * 个人资产库（画布左侧停靠面板）
@@ -61,7 +62,7 @@ function AssetThumb({ asset }: { asset: UserAsset }) {
         playsInline
         preload="metadata"
         draggable={false}
-        className="w-full h-full object-cover bg-black"
+        className="w-full h-full object-cover bg-[var(--dv-canvas-bg)]"
         onError={() => setFailed(true)}
       />
     );
@@ -262,18 +263,16 @@ export function AssetPanel({ onClose }: AssetPanelProps) {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            className="mt-10"
-            description={
-              <span className="text-[12px] text-gray-400">
+          <EmptyState
+            size="sm"
+            icon={keyword ? <SearchOutlined /> : <PictureOutlined />}
+            title={<span className="text-[12px] text-gray-400">
                 {keyword
                   ? '没有匹配的资产'
                   : type === 'image'
                     ? '暂无图片资产：在画布图片节点上右键可保存'
                     : '暂无视频资产：在画布视频节点上右键可保存'}
-              </span>
-            }
+              </span>}
           />
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
@@ -322,7 +321,7 @@ export function AssetPanel({ onClose }: AssetPanelProps) {
                     src={asset.url}
                     autoPlay
                     controls
-                    className="absolute inset-0 w-full h-full object-cover bg-black"
+                    className="absolute inset-0 w-full h-full object-cover bg-[var(--dv-canvas-bg)]"
                     onClick={(e) => e.stopPropagation()}
                     onEnded={() => setPlayingId(null)}
                   />

@@ -98,16 +98,16 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   return (
     <div
       className={`
-        min-w-[200px] w-full rounded-[0.5rem] bg-white shadow-md border-gray-200 overflow-visible
+        min-w-[200px] w-full rounded-[0.5rem] bg-white border-gray-200 overflow-visible shadow-[var(--dv-hairline),var(--dv-elev-1)]
         transition-all duration-150 relative flex flex-col pt-8 group
-        ${selected ? 'shadow-lg ring-2 border-cyan-400' : 'hover:shadow-lg'}
+        ${selected ? 'ring-2 border-cyan-400 shadow-[var(--dv-hairline),var(--dv-elev-3)]' : 'ring-1 ring-white/10 hover:shadow-[var(--dv-hairline),var(--dv-elev-2)]'}
         ${status === 'failed' ? 'ring-2 ring-red-400/70 border-red-300 shadow-[0_0_0_3px_rgba(239,68,68,0.12)]' : ''}
         ${className || ''}
       `}
     >
       {/* 节点头部 — 负 margin 使其视觉上在节点上方 */}
       <div
-        className={`-mt-8 flex items-center justify-between py-1 px-3 text-sm font-medium text-gray-700`}
+        className={`-mt-8 flex items-center justify-between py-1 px-3 text-[13px] font-medium text-gray-700`}
         onDoubleClick={(e) => {
           e.stopPropagation();
           setIsRenaming(true);

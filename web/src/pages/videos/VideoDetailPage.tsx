@@ -312,7 +312,7 @@ export default function VideoDetailPage() {
 
   if (!videoInfo) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--dv-bg)] flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
       </div>
     );
@@ -320,12 +320,12 @@ export default function VideoDetailPage() {
 
   return (
     <div 
-      className="min-h-screen bg-black relative"
+      className="min-h-screen bg-[var(--dv-bg)] relative"
       onMouseMove={handleMouseMove}
       onMouseLeave={() => isPlaying && setShowControls(false)}
     >
       {/* 全屏视频区域 */}
-      <div className="w-full h-screen flex items-center justify-center bg-black relative">
+      <div className="w-full h-screen flex items-center justify-center bg-[var(--dv-bg)] relative">
         {videoInfo ? (
           <video
             ref={videoRef}

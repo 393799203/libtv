@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Modal, App, Empty } from 'antd';
-import { GoldOutlined, CheckCircleFilled, CrownFilled } from '@ant-design/icons';
+import { Modal, App } from 'antd';
+import { GiftOutlined,
+  CheckCircleFilled,
+  CrownFilled,
+  GoldOutlined,
+  ShoppingOutlined,
+} from '@ant-design/icons';
 import { pointsPackageApi, type PointsPackage } from '@/services/pointsPackageApi';
 import { pricingApi } from '@/services/pricingApi';
 import { paymentApi } from '@/services/paymentApi';
 import { refreshCredits as refreshCreditsGlobal } from '@/utils/refreshCredits';
+import { EmptyState } from '../../components/common/EmptyState';
 
 /** 参考单价估算：视频取当前渠道第一个 480p 已配价模型，图片取第一个已配价模型 */
 const REF_VIDEO_RESOLUTION = '480p';
@@ -18,6 +24,15 @@ interface RefPrices {
 }
 
 /** 生成「可生成多少视频 / 图片」的参考文案（单价未配置时跳过对应条目） */
+/** 平台基准汇率：100 积分 = 1 元（默认价，运营不加赠送时的兑法）。
+ *  "多送"就是纯减法：积分 − 售价×100 → 套餐里真金白银多给的部分。*/
+const POINTS_PER_YUAN = 100;
+
+function bonusPoints(pkg: PointsPackage): number {
+  if (pkg.points <= 0 || pkg.price <= 0) return 0;
+  return Math.max(0, Math.round(pkg.points - pkg.price * POINTS_PER_YUAN));
+}
+
 function capacityFeatures(points: number, prices: RefPrices): string[] {
   const features: string[] = [];
   if (prices.videoPricePerSec > 0) {
@@ -172,7 +187,11 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-center py-20 text-gray-400 text-sm">加载中...</div>
       ) : packages.length === 0 ? (
         <div className="py-10">
-          <Empty description="暂无在售套餐" />
+          <EmptyState
+            icon={<ShoppingOutlined />}
+            title="暂无在售套餐"
+            hint="套餐上架后会显示在这里，稍后再来看看"
+          />
         </div>
       ) : (
         // 列数按套餐数量自适应：4 个及以上一行 4 个（窄屏退化为 2 列，避免卡片被压扁）。
@@ -194,13 +213,14 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
               ...capacityFeatures(pkg.points, prices),
               ...(pkg.features || '').split('\n').map((f) => f.trim()).filter(Boolean),
             ];
+            const bonus = bonusPoints(pkg);
             return (
               <div
                 key={pkg.id}
-                className={`relative flex flex-col rounded-2xl p-4 md:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
+                className={`relative flex flex-col rounded-2xl p-4 md:p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-[var(--dv-hairline),var(--dv-elev-2)] ${
                   pkg.recommended
                     ? 'bg-gradient-to-b from-cyan-500/15 via-blue-500/10 to-violet-500/15 shadow-lg ring-2 ring-cyan-400/60'
-                    : 'bg-gray-50 ring-1 ring-gray-200 hover:ring-gray-300'
+                    : 'bg-[var(--dv-surface-1)] ring-1 ring-white/10 shadow-[var(--dv-hairline),var(--dv-elev-1)] hover:ring-white/25'
                 }`}
               >
                 {/* 角标 */}
@@ -224,22 +244,37 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
 
                 {/* 积分数量 */}
                 <div className="mt-3 text-center">
-                  <span className={`text-[32px] md:text-[28px] font-bold leading-none ${pkg.recommended ? 'text-cyan-200' : 'text-gray-800'}`}>
+                  <span className={`text-[32px] md:text-[28px] font-bold leading-none tabular-nums ${pkg.recommended ? 'text-cyan-200' : 'text-[var(--dv-text-1)]'}`}>
                     {pkg.points.toLocaleString()}
                   </span>
                   <span className="ml-1 text-[13px] text-gray-500">积分</span>
                 </div>
 
-                {/* 价格 */}
-                <div className="mt-1.5 text-center text-[13px] text-gray-400">
-                  售价 <span className="text-[16px] font-semibold text-red-500">¥{pkg.price}</span>
+                {/* 多送积分：只有真的比入门套餐更划算才出现 */}
+                {bonus > 0 && (
+                  <div className="mt-2 flex justify-center">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/15 px-2.5 py-[3px] text-[11px] font-medium text-amber-300 tabular-nums ring-1 ring-amber-300/30">
+                      <GiftOutlined className="text-[11px]" />
+                      多送 {bonus.toLocaleString()} 积分
+                    </span>
+                  </div>
+                )}
+
+                {/* 价格 + 单价折算（让"值不值"一眼可比） */}
+                <div className="mt-2 text-center text-[13px] text-[var(--dv-text-3)]">
+                  售价 <span className="text-[17px] font-semibold text-amber-300 tabular-nums">¥{pkg.price}</span>
+                  {pkg.points > 0 && (
+                    <div className="mt-0.5 text-[11px] tabular-nums text-[var(--dv-text-3)]">
+                      基准 {pkg.price * POINTS_PER_YUAN >= 1000 ? (pkg.price * POINTS_PER_YUAN).toLocaleString() : pkg.price * POINTS_PER_YUAN} 积分 · 折合 ¥{(pkg.price / pkg.points).toFixed(4)}/积分
+                    </div>
+                  )}
                 </div>
 
                 {/* 特点列表 */}
-                <ul className="mt-4 flex-1 space-y-2 border-t border-gray-200/70 pt-4">
+                <ul className="mt-4 flex-1 space-y-2 border-t border-[var(--dv-border-1)] pt-4">
                   {features.map((f) => (
                     <li key={f} className="flex items-start gap-1.5 text-[13px] md:text-[12px] leading-5 text-gray-600">
-                      <CheckCircleFilled className={`mt-0.5 shrink-0 text-[12px] ${pkg.recommended ? 'text-cyan-400' : 'text-green-500'}`} />
+                      <CheckCircleFilled className={`mt-0.5 shrink-0 text-[12px] text-cyan-400`} />
                       {f}
                     </li>
                   ))}
@@ -256,7 +291,7 @@ export function PointsMallModal({ onClose }: { onClose: () => void }) {
                   } ${
                     pkg.recommended
                       ? 'bg-gradient-to-r from-cyan-500 to-violet-600 hover:from-cyan-400 hover:to-violet-500'
-                      : 'bg-gradient-to-r from-gray-700 to-gray-900 hover:from-gray-800 hover:to-black'
+                      : 'bg-gradient-to-r from-[var(--dv-surface-3)] to-[var(--dv-border-2)] hover:brightness-110'
                   }`}
                 >
                   {payingPkgId === pkg.id ? '正在跳转支付宝...' : '立即购买'}

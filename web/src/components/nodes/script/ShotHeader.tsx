@@ -96,7 +96,7 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               e.stopPropagation();
               onAddShot();
             }}
-            className="text-xs font-medium h-9 px-3 rounded-md bg-black hover:bg-gray-800 border-black"
+            className="text-xs font-medium h-9 px-3 rounded-md bg-[var(--dv-surface-2)] hover:bg-[var(--dv-surface-3)] border-transparent"
           >
             添加镜头
           </Button>
@@ -125,7 +125,7 @@ export const ShotHeader = memo<ShotHeaderProps>(function ShotHeader({
               e.stopPropagation();
               onNextStep();
             }}
-            className="text-xs font-medium h-9 px-3 rounded-md bg-black hover:bg-gray-800 border-black"
+            className="text-xs font-medium h-9 px-3 rounded-md bg-[var(--dv-surface-2)] hover:bg-[var(--dv-surface-3)] border-transparent"
           >
             {nextStepLabel}
           </Button>

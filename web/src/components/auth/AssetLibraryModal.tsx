@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Modal, Tabs, Empty, App, Popconfirm } from 'antd';
-import { CaretRightOutlined } from '@ant-design/icons';
+import { Modal, Tabs, App, Popconfirm } from 'antd';
+import {
+  CaretRightOutlined,
+  PictureOutlined,
+  VideoCameraOutlined,
+} from '@ant-design/icons';
 import { assetApi, type UserAsset, type UserAssetType } from '@/services/assetApi';
 import { downloadFile } from '@/utils/download';
+import { EmptyState } from '../../components/common/EmptyState';
 
 interface AssetLibraryModalProps {
   onClose: () => void;
@@ -100,7 +105,7 @@ function AssetCard({
   // 视频卡片：横屏 16:9 展示
   return (
     <div className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
-      <div className="relative bg-gray-900 aspect-video">
+      <div className="relative bg-[var(--dv-canvas-bg)] aspect-video">
         {playing ? (
           <video
             src={asset.url}
@@ -175,7 +180,7 @@ function PickCard({ asset, onPick }: { asset: UserAsset; onPick: (asset: UserAss
 
   return (
     <div onClick={() => onPick(asset)} title="点击选择该资产" className={cardCls}>
-      <div className="relative bg-gray-900 aspect-video">
+      <div className="relative bg-[var(--dv-canvas-bg)] aspect-video">
         <video
           src={asset.url}
           className="absolute inset-0 w-full h-full object-cover"
@@ -284,8 +289,11 @@ export function AssetLibraryModal({ onClose, pickType, onPick }: AssetLibraryMod
       {loading ? (
         <div className="py-16 text-center text-gray-400 text-sm">加载中...</div>
       ) : currentList.length === 0 ? (
-        <Empty
-          description={activeTab === 'image' ? '暂无图片资产，在画布图片节点上右键可保存' : '暂无视频资产，在画布视频节点上右键可保存'}
+        <EmptyState
+          size="sm"
+          icon={activeTab === 'image' ? <PictureOutlined /> : <VideoCameraOutlined />}
+          title={activeTab === 'image' ? '还没有图片资产' : '还没有视频资产'}
+          hint="在画布的图片 / 视频节点上右键即可保存到资产库，之后能直接拖进画布复用"
           className="py-12"
         />
       ) : activeTab === 'image' ? (

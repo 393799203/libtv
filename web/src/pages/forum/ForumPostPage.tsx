@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { App, Button, Empty, Input, Modal, Spin, Tag } from 'antd';
+import { App, Button, Input, Modal, Spin, Tag } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  FileSearchOutlined,
   MessageOutlined,
   PushpinFilled,
   PushpinOutlined,
@@ -17,6 +18,7 @@ import { isRichTextEmpty } from '@/components/forum/richText';
 import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { decorateForumContent } from '@/utils/thumbUrl';
+import { EmptyState } from '@/components/common/EmptyState';
 
 function formatTime(iso: string): string {
   const time = new Date(iso).getTime();
@@ -219,7 +221,11 @@ export default function ForumPostPage() {
   if (notFound || !post) {
     return (
       <div className="mx-auto w-full max-w-5xl px-4 py-24 text-center">
-        <Empty description="帖子不存在或已被删除" />
+        <EmptyState
+          icon={<FileSearchOutlined />}
+          title="帖子不存在或已被删除"
+          hint="它可能已被作者或管理员删除，去论坛列表看看其他内容吧"
+        />
       </div>
     );
   }
@@ -326,7 +332,7 @@ export default function ForumPostPage() {
             <img
               src={post.avatar_url || '/default-avatar.svg'}
               alt=""
-              className="h-6 w-6 rounded-full border border-gray-200 object-cover"
+              className="h-6 w-6 rounded-full border border-gray-200 object-cover" loading="lazy" decoding="async"
             />
             {post.nickname || '匿名用户'}
           </span>
@@ -350,9 +356,12 @@ export default function ForumPostPage() {
         </h2>
 
         {replies.length === 0 ? (
-          <div className="py-10 text-center text-[13px] text-gray-400">
-            还没有人回复，来说两句吧
-          </div>
+          <EmptyState
+            size="sm"
+            icon={<MessageOutlined />}
+            title="还没有人回复"
+            hint="来说两句吧——作者通常在等第一条反馈"
+          />
         ) : (
           <div>
             {replies.map((reply, index) => {
@@ -362,7 +371,7 @@ export default function ForumPostPage() {
                   <img
                     src={reply.avatar_url || '/default-avatar.svg'}
                     alt=""
-                    className="h-8 w-8 shrink-0 rounded-full border border-gray-200 object-cover"
+                    className="h-8 w-8 shrink-0 rounded-full border border-gray-200 object-cover" loading="lazy" decoding="async"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-[12px] text-gray-400">

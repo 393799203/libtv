@@ -1,8 +1,10 @@
 import { memo, useCallback } from 'react';
-import { Typography, Empty } from 'antd';
+import { Typography } from 'antd';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { PromptCompose } from './prompt';
 import type { LibTVNodeData } from '@/types/canvas';
+import { SettingOutlined } from '@ant-design/icons';
+import { EmptyState } from '@/components/common/EmptyState';
 
 const { Title } = Typography;
 
@@ -42,10 +44,11 @@ export const NodePropsPanel = memo(function NodePropsPanel() {
         <Title level={5} className="!mb-3 !text-sm">
           属性面板
         </Title>
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="选中节点查看属性"
-          className="!my-4"
+        <EmptyState
+          size="sm"
+          icon={<SettingOutlined />}
+          title="未选中节点"
+          hint="在画布上点选任意节点，这里会显示它的参数与操作"
         />
       </div>
     );

@@ -275,8 +275,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
         data={data}
         selected={selected}
         headerRight={headerRight}
-        noContentPadding
-      >
+        noContentPadding>
         <div className="w-full">
           {data.audioUrl ? (
             /* 有音频：显示波形播放器 */
@@ -317,7 +316,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
             </div>
           ) : uploading ? (
             /* 上传中状态 */
-            <div className="flex flex-col items-center justify-center py-6 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+            <div className="flex flex-col items-center justify-center py-6 bg-transparent rounded-xl border border-dashed border-gray-300">
               <div className="w-7 h-7 border-2 border-emerald-200 border-t-emerald-500 rounded-full animate-spin mb-2" />
               <span className="text-xs text-gray-500">上传中 {uploadPercent}%</span>
               <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden mt-2">
@@ -340,7 +339,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
             </div>
           ) : (
             /* 空状态：按配置高度撑开 + 背景图标 */
-            <div className="w-full h-full min-h-[120px] rounded-lg bg-gray-50 flex flex-col items-center justify-center">
+            <div className="w-full h-full min-h-[120px] rounded-lg bg-transparent flex flex-col items-center justify-center">
               <SoundOutlined className="text-4xl text-gray-300" />
             </div>
           )

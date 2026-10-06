@@ -108,7 +108,7 @@ export function LoginModal() {
               {authMode === 'login' ? '欢迎回来' : '创建账号'}
             </h2>
             <p className="text-gray-400 text-xs">
-              {authMode === 'login' ? '登录 LibTV，开启 AI 视频创作' : '注册账号，开始你的创作之旅'}
+              {authMode === 'login' ? '登录 漫蛙AI，开启 AI 视频创作' : '注册账号，开始你的创作之旅'}
             </p>
           </div>
 

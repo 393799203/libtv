@@ -189,7 +189,7 @@ function WorkspaceInner() {
 
   return (
     <ReactFlowProvider>
-    <div className="w-full h-full flex flex-col overflow-hidden">
+    <div className="w-full h-full flex flex-col overflow-hidden bg-[var(--dv-canvas-bg)]">
       {/* SSE 订阅实例：每个 activeStream 一个独立 EventSource */}
       {activeStreams.map((s) => (
         <StreamSubscriber key={s.executionId} stream={s} />
