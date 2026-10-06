@@ -94,7 +94,7 @@ export function AppLayout() {
     <Layout className="h-screen">
       {/* 底色不再写死 !bg-white（Tailwind 的 ! 强制类会绕过主题映射，导致"白底白字"），
             改由 ConfigProvider 的暗色 headerBg 提供；再压深一档，让导航文字对比更强 */}
-        <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#1a2438] !leading-none">
+        <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
         <div className="flex items-center gap-1.5 md:gap-3">
           <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity cursor-pointer">
             <VideoCameraOutlined className="text-lg text-blue-500" />
@@ -201,7 +201,7 @@ export function AppLayout() {
             onClick={() => openLoginModal()}
             className="px-4 py-1.5 text-sm text-white rounded-lg transition-all duration-200 hover:shadow-lg hover:scale-105 active:scale-95"
             style={{
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+              background: 'linear-gradient(135deg, #33353a 0%, #26282c 50%, #1a1b1e 100%)',
               border: '1px solid rgba(255,255,255,0.1)',
             }}
           >

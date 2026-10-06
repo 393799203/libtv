@@ -52,27 +52,27 @@ function App() {
           colorWarning: '#f59e0b',
           colorError: '#f43f5e',
           borderRadius: 6,
-          // 底色与文字都压到冷色暗面，避免 antd 默认的纯灰
-          colorBgBase: '#131c2d',
-          colorTextBase: '#f8faff',
+          // 底色与文字都压到中性黑灰（原来偏藏蓝），避免 antd 默认的纯灰
+          colorBgBase: '#121316',
+          colorTextBase: '#f6f6f7',
           // 显式指定文字色阶：antd 默认由基色按透明度混出次级色，在暗底上总是偏灰，
           // 这里直接对齐 dark-theme.css 的 --dv-text-2/3，让 antd 组件与手写样式同一档白度
-          colorTextSecondary: '#d9e3f3',
-          colorTextTertiary: '#b3c0d6',
-          colorTextQuaternary: '#93a2ba',
+          colorTextSecondary: '#d6d7da',
+          colorTextTertiary: '#aaacb1',
+          colorTextQuaternary: '#8b8d93',
           // 主文字与图标：antd 组件（菜单、按钮、分页、下拉）内部用的是这几个令牌，
           // 不显式接管就会用默认的"基色混透明度"，在深底上整体偏暗
-          colorText: '#f8faff',
-          colorTextHeading: '#f8faff',
-          colorTextDescription: '#b3c0d6',
-          colorTextPlaceholder: '#93a2ba',
-          colorTextDisabled: '#63718a',
-          colorIcon: '#d9e3f3',
-          colorIconHover: '#f8faff',
-          colorBorder: '#3a4a6b',   // 与 --dv-border-2 同步（旧的 #1e2942 是提亮前的值 → 框看不见）
-          colorBorderSecondary: '#2b3a58',   // 与 --dv-border-1 同步
+          colorText: '#f6f6f7',
+          colorTextHeading: '#f6f6f7',
+          colorTextDescription: '#aaacb1',
+          colorTextPlaceholder: '#8b8d93',
+          colorTextDisabled: '#5f6166',
+          colorIcon: '#d6d7da',
+          colorIconHover: '#f6f6f7',
+          colorBorder: '#3a3d43',   // 与 --dv-border-2 同步（这两个值必须一起改，否则框/分隔线在暗底上看不见）
+          colorBorderSecondary: '#2c2e33',   // 与 --dv-border-1 同步
           // antd 暗色算法把分隔线推导成"半透明白"，在近黑底上会变成刺眼白线
-          colorSplit: '#2b3a58',
+          colorSplit: '#2c2e33',
           // ---- 选中态统一：全站"被选中"一律用青色 ----
           // colorPrimaryBg / controlItemBgActive 是 antd 里绝大多数"选中/激活"的取值来源：
           // 下拉选中项、菜单激活项、表格选中行底色都走它们，统一在这里定义就不会各处分叉。
@@ -84,42 +84,42 @@ function App() {
           // 在近黑底上就会"发白"（文字按钮、标签、图标按钮的 hover 底都是它）。
           // 这里改成冷色暗面/青色淡染，与整体色调一致，也不会亮得刺眼。
           controlItemBgHover: 'rgba(34, 211, 238, 0.10)',
-          colorFillTertiary: '#232f4a',
-          colorFillSecondary: '#2a3752',
-          colorFill: '#344260',
-          colorFillQuaternary: '#222e4a',
+          colorFillTertiary: '#232427',
+          colorFillSecondary: '#2b2d31',
+          colorFill: '#36383d',
+          colorFillQuaternary: '#232427',
           controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)', 
         },
         components: {
           // headerBg 半透明：配合 dark-theme.css 里的 backdrop-filter 做玻璃化头部
-          Layout: { headerBg: 'rgba(21, 30, 49, 0.86)', bodyBg: '#151e31', siderBg: 'rgba(21, 30, 49, 0.86)' },
-          Modal: { contentBg: '#222e4a', headerBg: '#222e4a' },
+          Layout: { headerBg: 'rgba(18, 19, 22, 0.86)', bodyBg: '#121316', siderBg: 'rgba(18, 19, 22, 0.86)' },
+          Modal: { contentBg: '#232427', headerBg: '#232427' },
           // 主按钮的投影：青色调、柔和下沉，让按钮"浮"在面板上（比默认灰影更贴主题）
           Button: { primaryShadow: '0 6px 18px -6px rgba(34, 211, 238, 0.55)' },
-          Card: { colorBgContainer: '#1c2740' },
+          Card: { colorBgContainer: '#1b1c1f' },
           Table: {
-            colorBgContainer: '#1c2740',
-            headerBg: '#222e4a',
-            borderColor: '#2b3a58',
-            headerSplitColor: '#2b3a58',
-            rowHoverBg: '#2a3752',
+            colorBgContainer: '#1b1c1f',
+            headerBg: '#232427',
+            borderColor: '#2c2e33',
+            headerSplitColor: '#2c2e33',
+            rowHoverBg: '#2b2d31',
           },
-          Dropdown: { colorBgElevated: '#222e4a' },
+          Dropdown: { colorBgElevated: '#232427' },
           Menu: {
             itemBg: 'transparent',
             subMenuItemBg: 'transparent',
             itemSelectedBg: 'rgba(34, 211, 238, 0.16)',
             itemSelectedColor: '#67e8f9',
-            itemColor: '#d9e3f3',
-            itemHoverColor: '#f8faff',
-            darkItemColor: '#d9e3f3',
-            darkItemHoverColor: '#f8faff',
+            itemColor: '#d6d7da',
+            itemHoverColor: '#f6f6f7',
+            darkItemColor: '#d6d7da',
+            darkItemHoverColor: '#f6f6f7',
             darkItemSelectedColor: '#67e8f9',
           },
           Tabs: { itemSelectedColor: '#67e8f9', inkBarColor: '#22d3ee' },
           Segmented: { itemSelectedBg: 'rgba(34, 211, 238, 0.2)', itemSelectedColor: '#a5f3fc' },
           Select: { optionSelectedBg: 'rgba(34, 211, 238, 0.16)' },
-          Tooltip: { colorBgSpotlight: '#2a3752' },
+          Tooltip: { colorBgSpotlight: '#2b2d31' },
         },
       }}
     >

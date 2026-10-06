@@ -1,9 +1,10 @@
 /**
- * 平台暗色主题（高饱和冷色：黑 / 青 / 蓝 / 紫）
+ * 平台暗色主题（黑灰底 + 青色强调）
  *
  * 设计动机：用户在这个平台上高强度连续作业（分镜、生图、剪片往往一坐几小时），
- * 大面积白底造成的眩光和眼疲劳是真实成本；冷色暗底能显著降低亮度对比冲击，
- * 同时冷色系（青/蓝/紫）本身就更贴合"科技/工具"的调性。
+ * 大面积白底造成的眩光和眼疲劳是真实成本；黑灰暗底能显著降低亮度对比冲击，
+ * 同时把饱和色全部让给强调色（青/蓝/紫）—— 底色不带色相，强调色才"跳"得出来，
+ * 素材（图片/视频封面）也不容易被底色带偏色。
  *
  * 落地方式（为什么不逐个组件改）：
  *   1) antd 走 darkAlgorithm —— 所有 antd 组件（表格/弹窗/下拉/输入/日期…）自动变暗；
@@ -12,26 +13,30 @@
  *   3) 选择器权重比 Tailwind 的 `.bg-white` 高一档（多一个 .theme-dark 祖先），所以能稳定覆盖，
  *      且不需要动几百处 className。
  *
+ * 色轴：中性灰阶（R/G/B 基本齐平，只带 2~3 点冷偏移避免发闷），从 --dv-bg 到 --dv-surface-4
+ * 共 5 档、每档亮度差 4~5 —— 层次靠"亮度"拉开，不靠"色相"。
+ * 强调色（青/蓝/紫/玫红）与语义色（链接、行内代码、@ 引用标签）保持原样。
+ *
  * 后续若要做成可切换主题：把 `.theme-dark` 换成 `[data-theme="dark"]`，再补一套亮色变量即可。
  */
 
 .theme-dark {
   color-scheme: dark;
 
-  /* 底色：近黑 + 冷蓝偏移，避免纯黑发灰 */
-  --dv-bg: #151e31; /* 页面最底层：与画布底色同一值（全站一个底色，首页不再偏暗） */
-  --dv-surface-1: #1c2740; /* 卡片 / 面板（比页面底亮一档 → 节点/卡片"浮"起来） */
+  /* 底色：近黑的中性灰（原来偏藏蓝，现在把色相让给内容） */
+  --dv-bg: #121316; /* 页面最底层：与画布底色同一值（全站一个底色，首页不再偏暗） */
+  --dv-surface-1: #1b1c1f; /* 卡片 / 面板（比页面底亮一档 → 节点/卡片"浮"起来） */
   /* 首页（/）大背景：不用纯色，改用一道极浅的线性渐变（顶部偏亮一档 → 约 3/4 处回到页面底色）。
      首页最上面一截被 Banner 盖住，所以把最亮的那档放在 Banner 下沿附近，
      肉眼能看到的部分正好落在变化区间里；底部与 body 同色，滚到底不会出现色差接缝。 */
-  --dv-home-gradient: linear-gradient(168deg, #22304f 0%, #1e2946 32%, var(--dv-bg) 76%);
-  /* 画布工作区底色：独立于页面最底层(--dv-bg 深蓝)。
+  --dv-home-gradient: linear-gradient(168deg, #1f2024 0%, #1a1b1f 32%, var(--dv-bg) 76%);
+  /* 画布工作区底色：独立于页面最底层。
      画布是"工作台"，不是页面背景，用面色才不显得像一块纯黑；
      取值与画布加载态(bg-gray-50 → surface-2)一致，加载前后不会突然变色。 */
-  --dv-canvas-bg: #151e31; /* 与 --dv-bg 同值：画布与页面同底色，只有内容层次不同 */
-  --dv-surface-2: #222e4a; /* 次级区块 / 弹窗底 */
-  --dv-surface-3: #2a3752; /* hover / 选中底色 */
-  --dv-surface-4: #344260; /* 更高一档的 hover */
+  --dv-canvas-bg: #121316; /* 与 --dv-bg 同值：画布与页面同底色，只有内容层次不同 */
+  --dv-surface-2: #232427; /* 次级区块 / 弹窗底 */
+  --dv-surface-3: #2b2d31; /* hover / 选中底色 */
+  --dv-surface-4: #36383d; /* 更高一档的 hover */
 
   /* 高度体系：暗色下阴影要更大更黑才有层次（浅色那套 shadow-sm/md 在暗底几乎不可见）。
      1=贴地卡片，2=浮起面板/下拉，3=弹窗/全屏浮层 */
@@ -42,14 +47,14 @@
   /* 顶部 1px 内高光：模拟"被顶光照到"的物理感，是暗色 UI 显精致的关键细节 */
   --dv-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.055);
 
-  /* 描边：冷色偏蓝，不用中性灰 */
-  --dv-border-1: #2b3a58;
-  --dv-border-2: #3a4a6b;
+  /* 描边：跟着灰阶走（比 surface-3 略亮一点，保证在 surface-1 上看得见） */
+  --dv-border-1: #2c2e33;
+  --dv-border-2: #3a3d43;
 
-  /* 文字：三级层次，全部带冷色偏移 */
-  --dv-text-1: #f8faff; /* 主文字：近白（暗底上对比最足） */
-  --dv-text-2: #d9e3f3; /* 次级文字：导航/标签（原来偏灰，统一提亮） */
-  --dv-text-3: #b3c0d6; /* 弱化文字：说明/占位/面板按钮（B 方案：只抬这一档，保持层级） */
+  /* 文字：三级层次，中性近灰白（底色无色相，文字也不带冷色偏移，读起来更"实"） */
+  --dv-text-1: #f6f6f7; /* 主文字：近白（暗底上对比最足） */
+  --dv-text-2: #d6d7da; /* 次级文字：导航/标签（原来偏灰，统一提亮） */
+  --dv-text-3: #aaacb1; /* 弱化文字：说明/占位/面板按钮（B 方案：只抬这一档，保持层级） */
 
   /* 提示词编辑器里的 @ 引用标签 / 音频标签：跟主色同族（青色），别再是浅蓝浅灰 */
   --dv-mention-bg: rgba(34, 211, 238, 0.16);
@@ -65,7 +70,7 @@
   --dv-audio-tone-bd: rgba(249, 115, 22, 0.35);
 
   /* 长文正文（论坛/帖子）：比主文字略柔一档，长时间阅读不刺眼 */
-  --dv-text-body: #dbe4f2;
+  --dv-text-body: #d8d9dd;
   --dv-link: #38bdf8; /* 链接：天蓝，暗底上足够亮 */
   --dv-code: #f9a8d4; /* 行内代码：浅粉，暗底上保住"代码"的色相语义 */
 
@@ -106,6 +111,20 @@ html.theme-dark-root #root {
   background-color: var(--dv-surface-2);
 }
 .theme-dark :is(.bg-gray-200, .bg-slate-200, .bg-gray-300) {
+  background-color: var(--dv-surface-3);
+}
+/* 深色底（bg-gray-700~900 / bg-slate-…）：浅色主题里就是"深色块" —— 步骤条选中态、
+   音频进度条已播段、素材位空态。暗色下落到 surface-4（比 surface-3 亮一档），
+   正好对应"暗色里越亮越突出"，不会跟 bg-gray-300（→surface-3）撞成同色。 */
+.theme-dark :is(.bg-gray-700, .bg-slate-700, .bg-gray-800, .bg-slate-800, .bg-gray-900, .bg-slate-900) {
+  background-color: var(--dv-surface-4);
+}
+/* 带透明度的深色底（3D 编辑器里的悬浮工具条 bg-slate-800/80）：等价于半透明浮层，
+   用 surface-2 + alpha，与弹窗/下拉那套保持一致 */
+.theme-dark :is(.bg-gray-800\/80, .bg-slate-800\/80, .bg-gray-900\/80, .bg-slate-900\/80) {
+  background-color: rgba(35, 36, 39, 0.8);
+}
+.theme-dark :is(.hover\:bg-gray-700:hover, .hover\:bg-slate-700:hover) {
   background-color: var(--dv-surface-3);
 }
 
@@ -277,7 +296,7 @@ html.theme-dark-root #root {
 }
 /* text-gray-300/slate-300 在浅色主题里是"极浅的灰"，实际几乎都用在**彩色/图片底之上**
    （首页轮播描述、海报副标题、深色卡片里的弱化文字）——所以暗色下必须映射成"偏亮的弱化色"，
-   之前映射成了暗色（#4d5d78），结果这些文字在 banner 上直接看不见了。 */
+   之前映射成了暗色（旧版那个偏蓝的暗色），结果这些文字在 banner 上直接看不见了。 */
 .theme-dark :is(.text-gray-300, .text-slate-300) {
   color: var(--dv-text-2);
 }
@@ -286,10 +305,10 @@ html.theme-dark-root #root {
 .theme-dark :is(.border-gray-100, .border-gray-200, .border-slate-100, .border-slate-200) {
   border-color: var(--dv-border-1);
 }
-/* 表格行分隔线常用 border-gray-50（最浅一档）：暗色下必须是"冷色暗线"，
+/* 表格行分隔线常用 border-gray-50（最浅一档）：暗色下必须是"暗线"，
    否则近黑底上会出现刺眼白线。 */
 .theme-dark :is(.border-gray-50, .border-slate-50) {
-  border-color: #2b3a58;
+  border-color: var(--dv-border-1);
 }
 .theme-dark :is(.border-gray-300, .border-slate-300) {
   border-color: var(--dv-border-2);
@@ -304,17 +323,17 @@ html.theme-dark-root #root {
 /* 带透明度的浅灰底：这类变体最容易被漏掉（后台主区域就是 bg-gray-50/50），
    漏一处就会出现"整块还是浅灰、文字已经变白"的割裂。按相近透明度映射到暗面。 */
 .theme-dark :is(.bg-gray-50\/50, .bg-gray-50\/60, .bg-gray-50\/70) {
-  background-color: rgba(19, 27, 43, 0.6);
+  background-color: rgba(27, 28, 31, 0.6);
 }
 .theme-dark :is(.bg-gray-100\/80, .bg-gray-100\/90, .bg-gray-200\/70) {
-  background-color: rgba(26, 36, 56, 0.8);
+  background-color: rgba(35, 36, 39, 0.8);
 }
 
 /* 半透明白底（浮层/把手/悬浮卡）：映射成半透明暗面，保住"浮在内容之上"的层次。
    注意：bg-white/15 ~ /50 一律不映射 —— 它们几乎都用在"叠在彩色渐变/海报上的浅色元素"
    （轮播指示点、进度条、标签），映射成暗色会直接看不见。 */
 .theme-dark :is(.bg-white\/70, .bg-white\/80, .bg-white\/90, .bg-white\/95) {
-  background-color: rgba(13, 19, 32, 0.94);
+  background-color: rgba(27, 28, 31, 0.94);
 }
 .theme-dark :is(.border-gray-200\/60, .border-gray-200\/50, .border-gray-200\/90, .border-white\/50) {
   border-color: var(--dv-border-2);
@@ -348,7 +367,7 @@ html.theme-dark-root #root {
 
 /* 表单占位符 */
 .theme-dark ::placeholder {
-  color: #55647f;
+  color: #8b8d93;
 }
 
 /* 滚动条：暗色细条，避免白色滚动条割裂界面 */
@@ -357,11 +376,11 @@ html.theme-dark-root #root {
   height: 8px;
 }
 .theme-dark ::-webkit-scrollbar-thumb {
-  background: #26334c;
+  background: #2b2d31;
   border-radius: 4px;
 }
 .theme-dark ::-webkit-scrollbar-thumb:hover {
-  background: #33425f;
+  background: #3a3d43;
 }
 .theme-dark ::-webkit-scrollbar-track {
   background: transparent;
@@ -376,7 +395,7 @@ html.theme-dark-root #root {
 }
 .theme-dark .react-flow__attribution {
   background: transparent;
-  color: #3d4a63;
+  color: #4a4d53;
 }
 
 /* 空状态/骨架屏：默认是浅灰块，暗色下要把降级色一起换掉 */
@@ -455,7 +474,7 @@ html.theme-dark-root #root {
 }
 .theme-dark :is(.ant-dropdown-menu, .ant-select-dropdown, .ant-picker-dropdown,
                 .ant-popover-inner, .ant-tooltip-inner) {
-  background-color: rgba(34, 46, 74, 0.88) !important;
+  background-color: rgba(35, 36, 39, 0.88) !important;
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
@@ -464,7 +483,7 @@ html.theme-dark-root #root {
 .theme-dark .ant-drawer-mask {
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
-  background-color: rgba(3, 6, 12, 0.62) !important;
+  background-color: rgba(0, 0, 0, 0.62) !important;
 }
 
 
@@ -512,16 +531,16 @@ html.theme-dark-root #root {
 
 /* ========== 画布节点连接点（"耳朵"） ==========
    React Flow 的暗色主题默认给 .react-flow__handle 描 1px 白边，在整个暗色画布上就剩它是最亮的白点。
-   改为：暗面填充 + 冷色描边（与主题一致），悬停/连线时高亮为品牌青。 */
+   改为：暗面填充 + 灰阶描边（与主题一致），悬停/连线时高亮为品牌青。 */
 .theme-dark .react-flow__handle {
   width: 9px;
   height: 9px;
-  background: #1b2539;
-  border: 1.5px solid #33425f;
+  background: #1b1c1f;
+  border: 1.5px solid #3a3d43;
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 .theme-dark .react-flow__handle:hover {
-  background: #24344f;
+  background: #33353a;
   border-color: #22d3ee;
   transform: scale(1.15);
 }
@@ -573,7 +592,7 @@ html.theme-dark-root #root {
 .theme-dark .ant-skeleton-content .ant-skeleton-paragraph > li,
 .theme-dark .ant-skeleton-button,
 .theme-dark .ant-skeleton-avatar {
-  background: linear-gradient(90deg, rgba(27, 37, 57, 0.9) 25%, rgba(42, 56, 83, 0.9) 37%, rgba(27, 37, 57, 0.9) 63%);
+  background: linear-gradient(90deg, rgba(28, 29, 32, 0.9) 25%, rgba(44, 46, 50, 0.9) 37%, rgba(28, 29, 32, 0.9) 63%);
   background-size: 400% 100%;
   animation: dv-shimmer 1.4s ease infinite;
 }

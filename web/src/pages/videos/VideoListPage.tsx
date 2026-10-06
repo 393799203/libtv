@@ -922,7 +922,7 @@ export default function VideoListPage() {
             {!videosLoading && tvShowVideos.length === 0 && (
               <div className="h-[440px] flex items-center justify-center">
                 <div className="flex flex-col items-center gap-3 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#131b2b] text-gray-400 ring-1 ring-white/5">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1f2024] text-gray-400 ring-1 ring-white/5">
                     <VideoCameraOutlined className="text-[22px]" />
                   </div>
                   <div className="text-[14px] text-gray-300">还没有视频内容</div>

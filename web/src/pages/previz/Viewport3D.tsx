@@ -1061,10 +1061,10 @@ export function Viewport3D() {
           select(null);
         }}
       >
-        <color attach="background" args={['#1e293b']} />
+        <color attach="background" args={['#1c1d20']} />
         {/* 三点打光（免下载 Environment 的替代方案）：环境底光 + 半球天光 + 主方向光（投影）+ 背光补光 */}
         <ambientLight intensity={0.35} />
-        <hemisphereLight args={['#cbd5e1', '#334155', 0.5]} />
+        <hemisphereLight args={['#cbd5e1', '#36383d', 0.5]} />
         <directionalLight
           position={[10, 12, 8]}
           intensity={1.1}
@@ -1083,7 +1083,7 @@ export function Viewport3D() {
           <shadowMaterial transparent opacity={0.3} />
         </mesh>
         {/* 地面参考网格 20x20（编辑器辅助物：导出白片/静帧时自动隐藏） */}
-        <gridHelper name={EDITOR_HELPER_NAME} args={[20, 20, '#94a3b8', '#475569']} />
+        <gridHelper name={EDITOR_HELPER_NAME} args={[20, 20, '#94a3b8', '#4a4d53']} />
 
         {objects.map((obj) => (
           <SceneObject key={obj.id} obj={obj} registerRef={registerRef} />

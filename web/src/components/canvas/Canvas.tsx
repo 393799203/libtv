@@ -791,7 +791,7 @@ export const Canvas = memo(function Canvas() {
         className="react-flow-cursor-default"
       >
         {/* 点阵颜色跟随暗色主题（React Flow 默认是浅灰点，暗底上会看不见/刺眼） */}
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#243352" />
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#33353a" />
 
       </ReactFlow>
       </div>
@@ -800,7 +800,7 @@ export const Canvas = memo(function Canvas() {
       {/* 空画布引导：融入画布的虚线占位（非弹窗），0 节点且未手动关闭时展示 */}
       {!dismissedEmptyGuide && !isLoading && nodes.length === 0 && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="relative w-[620px] max-w-[94%] rounded-2xl border-2 border-dashed border-white/15 bg-[rgba(21,30,49,0.5)] backdrop-blur-[2px] px-8 py-9">
+          <div className="relative w-[620px] max-w-[94%] rounded-2xl border-2 border-dashed border-white/15 bg-[rgba(18,19,22,0.5)] backdrop-blur-[2px] px-8 py-9">
             <button
               className="absolute top-3 right-3 text-gray-300 hover:text-gray-500 cursor-pointer pointer-events-auto"
               onClick={() => setDismissedEmptyGuide(true)}

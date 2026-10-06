@@ -451,7 +451,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       bordered
       // [!] 字号缩到 11px + padding 收紧
       // 深度选择器覆盖 antd Input/TextArea/Select 内部 14px 硬编码
-      className="[&_.ant-table-cell]:!p-1.5 [&_.ant-table-thead>tr>th]:!bg-[#131b2b] [&_.ant-table-thead>tr>th]:!font-medium [&_.ant-table-thead>tr>th]:!text-[12px] [&_.ant-table-cell]:!text-[12px] [&_.ant-table-cell_input]:!text-[12px] [&_.ant-table-cell_input>_input]:!text-[12px] [&_.ant-table-cell_textarea]:!text-[12px] [&_.ant-table-cell_textarea>_textarea]:!text-[12px]"
+      className="[&_.ant-table-cell]:!p-1.5 [&_.ant-table-thead>tr>th]:!bg-[#232427] [&_.ant-table-thead>tr>th]:!font-medium [&_.ant-table-thead>tr>th]:!text-[12px] [&_.ant-table-cell]:!text-[12px] [&_.ant-table-cell_input]:!text-[12px] [&_.ant-table-cell_input>_input]:!text-[12px] [&_.ant-table-cell_textarea]:!text-[12px] [&_.ant-table-cell_textarea>_textarea]:!text-[12px]"
       locale={{ emptyText: '暂无分镜数据，请从上游文本节点生成或手动添加' }}
     />
   );

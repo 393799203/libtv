@@ -213,7 +213,7 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
             disabled={saving || avatarUploading}
             className="w-full py-2.5 text-sm text-white rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             style={{
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+              background: 'linear-gradient(135deg, #33353a 0%, #26282c 50%, #1a1b1e 100%)',
               border: '1px solid rgba(255,255,255,0.1)',
             }}
           >
