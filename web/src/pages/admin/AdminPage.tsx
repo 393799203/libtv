@@ -744,9 +744,7 @@ export default function AdminPage() {
                   {(showCategories?.length || 0) === 0 ? (
                     <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
                   ) : (
-                    <div className="flex gap-1.5 overflow-x-auto py-1">
-                      {/* py-1 是给悬停时挂在标签右上角的删除 × 留的空间：
-                          overflow-x-auto 会让 overflow-y 也算成 auto，冒出去的部分会被裁掉 */}
+                    <div className="flex gap-1.5">
                       {showCategories.map(cat => (
                         <div
                           key={cat.id}
