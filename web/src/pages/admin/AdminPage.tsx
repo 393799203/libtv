@@ -11,6 +11,7 @@ import {
   SearchOutlined,
   AccountBookOutlined,
   CaretRightOutlined,
+  CloseOutlined,
   DeleteOutlined,
   DollarOutlined,
   EditOutlined,
@@ -743,35 +744,36 @@ export default function AdminPage() {
                   {(showCategories?.length || 0) === 0 ? (
                     <span className="text-gray-400 text-[13px]">暂无分类，点击右侧按钮创建</span>
                   ) : (
-                    <div className="flex gap-1.5 overflow-x-auto">
+                    <div className="flex gap-1.5 overflow-x-auto py-1">
+                      {/* py-1 是给悬停时挂在标签右上角的删除 × 留的空间：
+                          overflow-x-auto 会让 overflow-y 也算成 auto，冒出去的部分会被裁掉 */}
                       {showCategories.map(cat => (
                         <div
                           key={cat.id}
-                          className={`group flex items-center whitespace-nowrap rounded-lg transition-colors ${
+                          className={`group relative flex items-center whitespace-nowrap rounded-lg transition-colors ${
                             activeShowCategory === cat.id ? 'bg-cyan-500/15 text-cyan-200 font-medium' : 'text-gray-500 hover:bg-gray-100'
                           }`}
                         >
                           <button
                             onClick={() => { setActiveShowCategory(cat.id); setPlayingShowId(null); }}
-                            className="pl-3.5 py-1.5 pr-2 text-[12px] cursor-pointer flex items-center gap-1"
+                            className="px-3.5 py-1.5 text-[12px] cursor-pointer flex items-center gap-1"
                           >
                             {cat.name}
                             <span className={`text-[10px] ${activeShowCategory === cat.id ? 'bg-cyan-500/25 text-cyan-100' : 'bg-gray-200 text-gray-400'} rounded-full px-1.5 py-px`}>
                               {cat.show_count}
                             </span>
                           </button>
-                          {/* 视频数为 0 的标签可删；悬停才显形，避免误点（与本页视频卡片的操作按钮同一套做法） */}
+                          {/* 视频数为 0 的标签可删：悬停时在右上角冒出一个小 ×。
+                              绝对定位挂到角上，平时不占标签宽度、也不挤压数量徽标；
+                              不显示时同时关掉点击 —— opacity-0 的元素照样接收鼠标事件，
+                              会挡住旁边标签或徽标的点击。 */}
                           {cat.show_count === 0 && (
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteShowCategory(cat); }}
                               title={`删除标签「${cat.name}」`}
-                              className={`mr-1.5 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
-                                activeShowCategory === cat.id
-                                  ? 'text-cyan-200/70 hover:text-red-300 hover:bg-red-500/15'
-                                  : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
-                              }`}
+                              className="absolute -top-1 -right-1 z-10 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white shadow-md cursor-pointer opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-red-600"
                             >
-                              <DeleteOutlined style={{ fontSize: 11 }} />
+                              <CloseOutlined style={{ fontSize: 9 }} />
                             </button>
                           )}
                         </div>
