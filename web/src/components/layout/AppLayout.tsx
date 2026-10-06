@@ -103,7 +103,7 @@ export function AppLayout() {
                 （排在静态样式表之后，同特异度下永远赢），直接写在图标上的 text-white 会被盖掉 ——
                 这就是社区入口那段注释里踩过的同一个坑。 */}
             <VideoCameraFilled className="text-lg shrink-0" />
-            <span className="font-semibold text-base text-gray-800">漫蛙AI</span>
+            <span className="font-semibold text-base text-gray-800">漫蛙</span>
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
