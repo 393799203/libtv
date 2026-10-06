@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Input, InputNumber, Modal, Switch, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, LoadingOutlined, GoldOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, LoadingOutlined, GoldOutlined, ReloadOutlined } from '@ant-design/icons';
 import { pointsPackageApi, type PointsPackage, type PointsPackagePayload } from '@/services/pointsPackageApi';
 
 /** 编辑表单（editing=null 为新建） */
@@ -156,10 +156,10 @@ export default function PointsPackageManagement() {
           维护积分超市的套餐卡片；特点每行一条，卡片按行展示；「推荐」的套餐高亮显示
         </div>
         <div className="flex-1" />
-        <Button size="small" onClick={load} disabled={saving}>
-          刷新
-        </Button>
-        <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+        {/* 按钮统一：刷新只留图标（悬停有 title），主操作是带图标的主色按钮；
+            尺寸取默认，与价格管理、用户管理等页面保持一致 */}
+        <Button icon={<ReloadOutlined />} title="刷新" loading={loading} disabled={saving} onClick={load} />
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           新建套餐
         </Button>
       </div>

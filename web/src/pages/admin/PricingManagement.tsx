@@ -8,6 +8,8 @@ import {
   AudioOutlined,
   DeploymentUnitOutlined,
   LoadingOutlined,
+  ReloadOutlined,
+  SaveOutlined,
   UndoOutlined,
 } from '@ant-design/icons';
 import { pricingApi, type NodePriceGroup } from '@/services/pricingApi';
@@ -164,16 +166,18 @@ export default function PricingManagement() {
             {dirtyItems.length} 项未保存
           </span>
         )}
+        {/* 按钮统一：刷新只留图标（悬停有 title），主操作是带图标的主色按钮。
+            尺寸取默认（不使用 size="small"），与用户管理、上游对账等页面的工具栏一致 */}
         <Button
-          size="small"
-          onClick={() => load()}
+          icon={<ReloadOutlined />}
+          title="刷新"
+          loading={loading}
           disabled={saving}
-        >
-          刷新
-        </Button>
+          onClick={() => load()}
+        />
         <Button
           type="primary"
-          size="small"
+          icon={<SaveOutlined />}
           loading={saving}
           disabled={dirtyItems.length === 0}
           onClick={handleSave}
