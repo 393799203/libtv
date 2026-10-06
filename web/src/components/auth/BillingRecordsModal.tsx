@@ -3,7 +3,7 @@ import { Modal, Tag, Select, DatePicker, Button, Pagination, Tooltip } from 'ant
 import {
   FileTextOutlined,
   QuestionCircleOutlined,
-  SearchOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { billingApi, type BillingRecord, type BillingType } from '@/services/billingApi';
@@ -44,6 +44,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [reloadTick, setReloadTick] = useState(0); // 刷新按钮用：见 handleRefresh
 
   // 筛选状态
   const [filterType, setFilterType] = useState<BillingType | ''>('');
@@ -108,11 +109,14 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
     return () => {
       cancelled = true;
     };
-  }, [page, filterType, filterScene, filterModel, filterDateRange]);
+  }, [page, reloadTick, filterType, filterScene, filterModel, filterDateRange]);
 
-  // 查询（重置到第一页）
-  const handleSearch = () => {
+  // 刷新：回到第一页重新拉取。
+  // 只用 setPage(1) 是不够的 —— 已经停在第 1 页时这是"同值更新"，React 不会重新渲染、
+  // 依赖 page 的 effect 也不会再跑，点刷新会像没反应一样。用自增的 reloadTick 明确触发一次。
+  const handleRefresh = () => {
     setPage(1);
+    setReloadTick((t) => t + 1);
   };
 
   return (
@@ -167,9 +171,13 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
           format="YYYY-MM-DD"
           className="flex-1"
         />
-        <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
-          查询
-        </Button>
+        {/* 刷新：只留图标（悬停 title 提示），和用户管理/上游对账页的刷新按钮同一套写法 */}
+        <Button
+          icon={<ReloadOutlined />}
+          title="刷新"
+          loading={loading}
+          onClick={handleRefresh}
+        />
       </div>
 
       {/* 表格区域：固定高度避免抖动 */}
