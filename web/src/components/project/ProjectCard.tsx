@@ -69,8 +69,10 @@ export const CreateProjectCard = memo(function CreateProjectCard({ onClick }: { 
         onClick={onClick}
       >
         <div className="h-28 bg-gray-50 flex flex-col items-center justify-center">
-          <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center mb-2">
-            <PlusOutlined className="text-blue-500" />
+          {/* 圆底用中性灰一档（bg-gray-50 卡片底 → surface-2，圆用 bg-gray-200 → surface-3 才看得出圆），
+              + 图标按要求用白色（原来是蓝色，在暗底上偏"外链色"，不像"新建"） */}
+          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mb-2">
+            <PlusOutlined className="text-white" />
           </div>
           <Text type="secondary" className="text-xs">开始创作</Text>
         </div>

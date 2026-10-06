@@ -802,11 +802,11 @@ export default function VideoListPage() {
           <Text className="text-gray-600 font-medium">最近项目</Text>
           {isAuthenticated && projectTotal > 4 && (
             <a
-              className="group inline-flex items-center gap-1 text-[13px] text-blue-500 hover:text-blue-600 cursor-pointer transition-colors"
+              className="group inline-flex items-center gap-1 text-[13px] text-gray-800 hover:opacity-75 cursor-pointer transition-opacity"
               onClick={() => navigate('/projects')}
             >
               查看全部
-              <span className="text-gray-400 transition-colors group-hover:text-blue-400">({projectTotal})</span>
+              <span className="text-gray-400 transition-colors group-hover:text-gray-500">({projectTotal})</span>
               {/* 箭头用图标而不是「→」：字符在不同字体下形状/粗细/基线都不受控，看着毛糙；
                   图标能和文字对齐，hover 时轻微右移，做出"点得进去"的暗示 */}
               <ArrowRightOutlined className="text-[11px] transition-transform duration-200 group-hover:translate-x-0.5" />
