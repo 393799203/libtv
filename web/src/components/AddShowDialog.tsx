@@ -481,7 +481,11 @@ export default function AddShowDialog({
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
-      <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 max-h-[85vh] flex flex-col">
+      {/* 宽度 640px（原 520px）：内容区 472px 时，"视频+封面图"那一行的两栏各只有 230px ——
+          标题右侧的「截当前帧/自动挑帧/换封面/换视频」四个小按钮加起来约 250px，挤在一行里必然溢出；
+          16:9 的视频预览也只有 230×129，拖进度条挑封面帧看不清。640px 让两栏各 ~290px（预览 290×163），
+          刚好容下四个按钮与标签。max-w 兜住窄窗口/手机，避免弹窗横向超出屏幕（原来没有任何宽度上限）。 */}
+      <div className="relative w-[640px] max-w-[calc(100vw-32px)] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 max-h-[85vh] flex flex-col">
         <div className="px-6 py-4 border-b border-gray-100 shrink-0 flex items-center justify-between">
           <h3 className="text-[15px] font-semibold text-gray-800">{editingShow ? '编辑视频' : status === 'pending' ? '提交视频发布' : '添加视频'}</h3>
           {existingShow && (
