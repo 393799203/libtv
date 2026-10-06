@@ -29,7 +29,18 @@
   /* 首页（/）大背景：不用纯色，改用一道极浅的线性渐变（顶部偏亮一档 → 约 3/4 处回到页面底色）。
      首页最上面一截被 Banner 盖住，所以把最亮的那档放在 Banner 下沿附近，
      肉眼能看到的部分正好落在变化区间里；底部与 body 同色，滚到底不会出现色差接缝。 */
-  --dv-home-gradient: linear-gradient(168deg, #1f2024 0%, #1a1b1f 32%, var(--dv-bg) 76%);
+  --dv-home-gradient:
+    radial-gradient(1100px 520px at 15% 16%, rgba(46, 48, 53, 0.22) 0%, rgba(46, 48, 53, 0) 62%),
+    linear-gradient(168deg, #17191e 0%, #14161a 34%, #0d0e11 100%);
+  /* 全站页面大背景（非首页）：不做纯色 —— 左上角一层柔光（模拟顶光落在背景上），
+     再纵向从偏亮压到偏暗，大面积暗底就有了"明暗关系"而不是一块死板的黑。
+     固定附着视口（background-attachment: fixed）：滚动时底色不跟着动，
+     任何一屏都有同样的亮暗过渡，而且只绘制一次，不随内容高度重画。
+     注意整条渐变都压在卡片色（--dv-surface-1）之下：明暗关系靠"页面内部的明暗"表达，
+     不让页面某一段亮过卡片 —— 否则那一块里的卡片会反过来显得比背景暗（"浮"不起来）。 */
+  --dv-page-gradient:
+    radial-gradient(1200px 560px at 16% -10%, rgba(46, 48, 53, 0.22) 0%, rgba(46, 48, 53, 0) 62%),
+    linear-gradient(180deg, #15171b 0%, #101216 52%, #0b0c0f 100%);
   /* 画布工作区底色：独立于页面最底层。
      画布是"工作台"，不是页面背景，用面色才不显得像一块纯黑；
      取值与画布加载态(bg-gray-50 → surface-2)一致，加载前后不会突然变色。 */
@@ -92,6 +103,9 @@ html.theme-dark-root,
 html.theme-dark-root body,
 html.theme-dark-root #root {
   background-color: var(--dv-bg);
+  /* 页面底也铺同一道渐变：透明区域的页面不会露出"比渐变更黑的纯色块" */
+  background-image: var(--dv-page-gradient);
+  background-attachment: fixed;
 }
 
 /* ========== 背景：白底/浅灰底 → 暗面 ========== */
@@ -106,6 +120,17 @@ html.theme-dark-root #root {
 .theme-dark .home-bg {
   background-color: var(--dv-bg);
   background-image: var(--dv-home-gradient);
+  background-attachment: fixed;
+}
+/* 页面级容器（应用主内容区、我的项目、视频详情这类"整页"的壳）：
+   用同一道页面渐变，别再是一块纯色 */
+.page-bg {
+  background-color: #fff;
+}
+.theme-dark .page-bg {
+  background-color: var(--dv-bg);
+  background-image: var(--dv-page-gradient);
+  background-attachment: fixed;
 }
 .theme-dark :is(.bg-gray-50, .bg-slate-50, .bg-gray-100, .bg-slate-100) {
   background-color: var(--dv-surface-2);
@@ -388,7 +413,11 @@ html.theme-dark-root #root {
 
 /* React Flow：画布底色与点阵 */
 .theme-dark .react-flow {
+  /* 画布是"工作台"：底色用同一道页面渐变，点阵画在上面，
+     整块画布也有顶光到压暗的层次，而不是一块纯黑 */
   background-color: var(--dv-canvas-bg);
+  background-image: var(--dv-page-gradient);
+  background-attachment: fixed;
 }
 .theme-dark .react-flow__handle {
   border-color: var(--dv-canvas-bg);
@@ -599,4 +628,90 @@ html.theme-dark-root #root {
 @keyframes dv-shimmer {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
+}
+
+/* ============================================================
+   富文本编辑器（wangEditor 5：发帖 / 回帖 / 编辑帖子 / 编辑回复）
+   ------------------------------------------------------------
+   wangEditor 把整套配色都放在它自己的 CSS 变量里（:root 上的 --w-e-*），
+   所以只要把变量接回本主题的灰阶，它的工具栏、编辑区、下拉面板、弹窗
+   就一起变暗 —— 不用逐个覆盖它的几十条选择器。
+   选择器带 .theme-dark 祖先（权重 0,2,0 > :root 的 0,1,0），
+   所以不管两份 CSS 在产物里谁先谁后，都以这里为准。
+
+   为什么必须显式接：它的默认值是 --w-e-textarea-bg-color:#fff /
+   --w-e-toolbar-bg-color:#fff，工具栏的浅色工具类覆盖不到编辑器内部，
+   结果就是"页面都黑了，编辑帖子和发表回复还亮着一块纯白"。
+   ============================================================ */
+.theme-dark :is(.w-e-text-container, .w-e-toolbar) {
+  /* 编辑区 */
+  --w-e-textarea-bg-color: var(--dv-surface-1);
+  --w-e-textarea-color: var(--dv-text-1);
+  --w-e-textarea-border-color: var(--dv-border-2);
+  --w-e-textarea-slight-border-color: var(--dv-border-1);
+  --w-e-textarea-slight-color: var(--dv-text-3); /* 占位符文字 */
+  --w-e-textarea-slight-bg-color: var(--dv-surface-3); /* 行内 code / 引用块 / 表头底 */
+  --w-e-textarea-selected-border-color: var(--dv-cyan); /* 选中框：全站选中一贯用青色 */
+  --w-e-textarea-handler-bg-color: var(--dv-cyan); /* 上传进度条 / 图片拖拽手柄 */
+
+  /* 工具栏与它内部的下拉面板 / 弹窗（比编辑区深一档，浮起感与弹窗一致） */
+  --w-e-toolbar-bg-color: var(--dv-surface-2);
+  --w-e-toolbar-color: var(--dv-text-2);
+  --w-e-toolbar-active-color: var(--dv-text-1);
+  --w-e-toolbar-active-bg-color: var(--dv-surface-3);
+  --w-e-toolbar-disabled-color: #6b6d72;
+  --w-e-toolbar-border-color: var(--dv-border-1);
+  --w-e-modal-button-bg-color: var(--dv-surface-3);
+  --w-e-modal-button-border-color: var(--dv-border-2);
+}
+
+/* 工具栏按钮的 tooltip：wangEditor 拿 --w-e-toolbar-active-color 当气泡底色，
+   而那个变量同时是"hover 文字色"（必须亮），于是暗色下会冒出白底黑字的亮气泡。
+   这里单独按暗面色阶画 */
+.theme-dark .w-e-menu-tooltip-v5::before {
+  background-color: var(--dv-surface-4);
+  color: var(--dv-text-1);
+}
+.theme-dark .w-e-menu-tooltip-v5::after {
+  border-bottom-color: var(--dv-surface-4);
+}
+.theme-dark .w-e-menu-tooltip-v5.tooltip-right::after {
+  border-right-color: var(--dv-surface-4);
+  border-bottom-color: transparent;
+}
+
+/* 代码块：底色跟着上面的变量走，但语法高亮那套 token 颜色是浅色主题的
+   （#690 深绿 / #905 深红 / #07a 深蓝…），在深底上要么看不清要么发脏；
+   顺带去掉 pre>code 的 text-shadow: 0 1px #fff（浅色主题用来"描白边"的写法） */
+.theme-dark .w-e-text-container [data-slate-editor] pre > code {
+  text-shadow: none;
+  color: var(--dv-text-2);
+}
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.comment, .token.cdata, .token.doctype, .token.prolog, .token.punctuation
+) { color: var(--dv-text-3); }
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.atrule, .token.attr-value, .token.keyword
+) { color: #7dd3fc; }
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.attr-name, .token.builtin, .token.char, .token.inserted, .token.selector, .token.string
+) { color: #86efac; }
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.boolean, .token.constant, .token.deleted, .token.number, .token.property, .token.symbol, .token.tag
+) { color: #fca5a5; }
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.class-name, .token.function
+) { color: #f0abfc; }
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.entity, .token.operator, .token.url, .language-css .token.string, .style .token.string
+) { color: #fdba74; }
+.theme-dark .w-e-text-container [data-slate-editor] pre > code :is(
+  .token.important, .token.regex, .token.variable
+) { color: #fde68a; }
+
+/* 视频占位块的棋盘格是写死的 #eee / #fff，暗色下会是一块亮底 */
+.theme-dark .w-e-textarea-video-container {
+  background-image:
+    linear-gradient(45deg, #26282c 25%, transparent 0, transparent 75%, #26282c 0, #26282c),
+    linear-gradient(45deg, #26282c 25%, #1b1c1f 0, #1b1c1f 75%, #26282c 0, #26282c);
 }

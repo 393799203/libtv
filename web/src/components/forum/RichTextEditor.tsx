@@ -338,7 +338,7 @@ export function RichTextEditor({
         editor={editor}
         defaultConfig={toolbarConfig}
         mode="default"
-        style={{ borderBottom: '1px solid #f0f0f0', background: 'var(--dv-surface-2, #fafafa)' }}
+        style={{ borderBottom: '1px solid var(--dv-border-1, #f0f0f0)', background: 'var(--dv-surface-2, #fafafa)' }}
       />
       <Editor
         defaultConfig={editorConfig}

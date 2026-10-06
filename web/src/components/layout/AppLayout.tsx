@@ -210,7 +210,7 @@ export function AppLayout() {
         )}
       </AntHeader>
 
-      <Content className="bg-white overflow-auto">
+      <Content className="page-bg overflow-auto">
         <Outlet />
       </Content>
     </Layout>

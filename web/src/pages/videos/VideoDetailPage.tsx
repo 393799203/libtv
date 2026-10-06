@@ -312,7 +312,7 @@ export default function VideoDetailPage() {
 
   if (!videoInfo) {
     return (
-      <div className="min-h-screen bg-[var(--dv-bg)] flex items-center justify-center">
+      <div className="min-h-screen page-bg flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
       </div>
     );
@@ -320,7 +320,7 @@ export default function VideoDetailPage() {
 
   return (
     <div 
-      className="min-h-screen bg-[var(--dv-bg)] relative"
+      className="min-h-screen page-bg relative"
       onMouseMove={handleMouseMove}
       onMouseLeave={() => isPlaying && setShowControls(false)}
     >

@@ -77,7 +77,7 @@ export default function MyProjectsPage() {
   }, [modal, message, projects.length, page, loadProjects]);
 
   return (
-    <div className="min-h-screen bg-white pb-20">
+    <div className="min-h-screen page-bg pb-20">
       <div className="max-w-7xl mx-auto px-6 pt-8">
         {/* 标题栏 */}
         <div className="flex items-center justify-between mb-6">
