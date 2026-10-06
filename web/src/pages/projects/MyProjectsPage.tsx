@@ -5,7 +5,7 @@ import { PlusOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { projectApi } from '@/services/projectApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { ProjectListItem } from '@/types/project';
-import { ProjectCard, CreateProjectCard } from '@/components/project/ProjectCard';
+import { ProjectCard } from '@/components/project/ProjectCard';
 
 const { Title, Text } = Typography;
 
@@ -99,7 +99,9 @@ export default function MyProjectsPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                <CreateProjectCard onClick={handleCreateProject} />
+                {/* 这里不再放「开始创作」卡片：右上角已有「新建项目」主按钮，
+                    本页空状态文案也是"点击右上角「新建项目」开始创作" —— 两个入口重复了。
+                    （该卡片只有首页需要：首页头部没有新建按钮） */}
                 {projects.map((project) => (
                   <ProjectCard
                     key={project.id}
