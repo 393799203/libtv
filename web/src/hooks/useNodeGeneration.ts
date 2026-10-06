@@ -19,7 +19,25 @@ const PROMPT_NODE_TYPES: NodeType[] = ['text', 'image', 'video', 'audio', 'scrip
 const INPUT_FIELDS = ['prompt', 'content', 'text', 'scriptContent'] as const;
 
 /**
- * 生成前的输入自检：节点既没有提示词、也没有任何上游连线时，返回要提示用户的话；
+ * 必须自己写提示词、上游连线替代不了的类型（与后端执行器语义对齐）：
+ * - text：TextExecutor 不读上游（只看自己的 prompt/content）；
+ * - image：ImageExecutor 没有提示词就直接判失败，上游参考图/风格图只是附加条件；
+ * - script：ScriptExecutor 要求提示词里有 @ 引用（或已有剧本内容走透传）。
+ * 其余类型（audio 会读上游文本、video 的首尾帧/参考模式可能只靠素材）有连线就算有输入。
+ */
+const PROMPT_REQUIRED_TYPES: NodeType[] = ['text', 'image', 'script'];
+
+/** 各类型的提示语：说清"该补什么"，而不是笼统地都说"请先输入提示词" */
+const EMPTY_INPUT_HINTS: Partial<Record<NodeType, string>> = {
+  text: '请先写下要生成的内容（提示词），再点生成',
+  image: '请先描述要生成什么（提示词）；上游参考图/风格图只是附加，不能替代提示词',
+  video: '请先输入提示词再生成；首尾帧 / 参考模式也可以只连上游素材',
+  audio: '请先输入要配音的文字，或连一个文本节点作为输入',
+  script: '请先输入创作提示词；若要基于上游剧本，请用 @ 引用插入',
+};
+
+/**
+ * 生成前的输入自检：节点既没有提示词、也没有可用上游输入时，返回要提示用户的话；
  * 可以生成则返回 null。
  *
  * 为什么必须挡在发请求之前（这些都是线上真出现过的后果）：
@@ -29,9 +47,8 @@ const INPUT_FIELDS = ['prompt', 'content', 'text', 'scriptContent'] as const;
  * - 音频/脚本节点：后端虽有兜底报错（「没有输入文本，无法生成音频」等），
  *   但也是先发请求、再在节点上亮红点。能提前一句话说清，就不该让用户等这一趟。
  *
- * 只对"真空白"的节点生效：只要提示词有内容，或者有任意上游连线
- * （图生图、首尾帧、参考模式、风格图、上游文本都可能让提示词变成可选项）就放行；
- * 白模/清晰化节点不吃提示词，直接放行。
+ * 后端现在有同样的校验（server/internal/engine/executor_input_guard_test.go 锁着），
+ * 这里只是提前一步、用更贴近操作的说法把话说在点按钮之前。
  */
 function checkInputBeforeGenerate(nodeId: string): string | null {
   const { nodes, edges } = useCanvasStore.getState();
@@ -45,18 +62,11 @@ function checkInputBeforeGenerate(nodeId: string): string | null {
     (key) => typeof data[key] === 'string' && (data[key] as string).trim() !== '',
   );
   if (hasInput) return null;
-  if (edges.some((e) => e.target === nodeId)) return null;
 
-  switch (type) {
-    case 'text':
-      return '请先写下要生成的内容（提示词），再点生成';
-    case 'audio':
-      return '请先输入要配音的文字，或连一个文本节点作为输入';
-    case 'script':
-      return '请先输入创作提示词，或连接上游文本/剧本节点并用 @ 引用';
-    default:
-      return '请先输入提示词再生成；也可以连接上游素材（图片 / 视频 / 文本）后生成';
-  }
+  // 只有"上游连线能当输入"的类型才把连线算作有输入
+  if (!PROMPT_REQUIRED_TYPES.includes(type) && edges.some((e) => e.target === nodeId)) return null;
+
+  return EMPTY_INPUT_HINTS[type] ?? '请先输入提示词再生成';
 }
 
 export interface UseNodeGenerationResult {
