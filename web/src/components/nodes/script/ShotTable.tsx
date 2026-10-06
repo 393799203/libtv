@@ -8,6 +8,7 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   MergeCellsOutlined,
+  EyeOutlined,
 } from '@ant-design/icons';
 import type { ScriptShot } from '@/types/canvas';
 
@@ -420,12 +421,21 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
       render: (_: unknown, record) =>
         readOnly && onMergePrompt ? (
           // 第三阶段：显示最终提示词按钮
+          /* 两种状态、两种语义：
+             没有提示词 → 「生成提示词」是这一行该做的事，用强调色"软"款（与节点里的「下一步」同一套语言）；
+             已有提示词 → 「查看提示词」是低强调的查看动作，用描边款（与「上一步」同一套语言）。
+             图标跟着语义换：生成=合并（画面+运动提示词合成），查看=眼睛。
+             样式一律加 ! 前缀：antd 的 CSS-in-JS 是运行时注入、同特异度排在 Tailwind 之后，
+             原来那句 className="text-[10px]" 一直被覆盖（实际按 antd 的 14px 渲染）。 */
           <Button
             size="small"
-            type={record.finalPrompt ? 'default' : 'primary'}
-            icon={<MergeCellsOutlined />}
+            icon={record.finalPrompt ? <EyeOutlined /> : <MergeCellsOutlined />}
             onClick={() => onMergePrompt(record.id)}
-            className="text-[10px]"
+            className={
+              record.finalPrompt
+                ? '!text-[11px] !rounded-md !bg-transparent !border-[var(--dv-border-1)] !text-[var(--dv-text-2)] hover:!bg-[var(--dv-surface-3)] hover:!border-[var(--dv-border-2)] hover:!text-[var(--dv-text-1)]'
+                : '!text-[11px] !rounded-md !bg-[var(--dv-cyan-soft)] !border-[var(--dv-cyan-border)] !text-[var(--dv-cyan-text)] hover:!bg-[var(--dv-cyan-soft-hover)] hover:!border-[var(--dv-cyan-border-hover)] hover:!text-[var(--dv-cyan-text-strong)]'
+            }
           >
             {record.finalPrompt ? '查看提示词' : '生成提示词'}
           </Button>

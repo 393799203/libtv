@@ -197,15 +197,18 @@ export default function ForumListPage() {
               }`}
             >
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                {/* 置顶标签放在标题后面。H5 适配靠这两点：
+                    标题 min-w-0（flex 项默认 min-width:auto，不写就拒绝收缩，truncate 失效、
+                    长标题会把标签顶出屏幕），标签 shrink-0（永远不被压扁，宁可让标题省略号）。 */}
+                <div className="flex min-w-0 items-center gap-2">
+                  <h3 className="min-w-0 truncate text-[16px] md:text-[15px] font-medium text-gray-900">
+                    <Highlight text={post.title} keyword={keyword} />
+                  </h3>
                   {post.is_pinned && (
-                    <Tag color="red" className="shrink-0 !mr-0" icon={<PushpinFilled />}>
+                    <Tag color="red" className="shrink-0 !m-0" icon={<PushpinFilled />}>
                       置顶
                     </Tag>
                   )}
-                  <h3 className="truncate text-[16px] md:text-[15px] font-medium text-gray-900">
-                    <Highlight text={post.title} keyword={keyword} />
-                  </h3>
                 </div>
                 <p className="mt-1 line-clamp-2 text-[13px] leading-6 text-gray-500">
                   <Highlight

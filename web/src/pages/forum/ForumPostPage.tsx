@@ -278,13 +278,16 @@ export default function ForumPostPage() {
       <article className="pb-6">
         {/* flex-wrap 必须加：否则下面 max-md:w-full 的按钮行换不了行，只能去挤标题 */}
         <div className="flex flex-wrap items-start justify-between gap-4">
+          {/* 置顶标签同样放在标题后面。对齐用 align-middle（24px 的行高里让标签居中），
+              左右外边距显式写死：antd 的 Tag 自带 margin-inline-end，不写 !mr-0 会在标题后多留一截。
+              H5 下标题很长时标签跟着行内换行，不会把标题挤出屏幕。 */}
           <h1 className="text-[24px] font-bold leading-8 text-gray-900">
+            {post.title}
             {post.is_pinned && (
-              <Tag color="red" className="mr-2 align-middle" icon={<PushpinFilled />}>
+              <Tag color="red" className="!ml-2 !mr-0 align-middle" icon={<PushpinFilled />}>
                 置顶
               </Tag>
             )}
-            {post.title}
           </h1>
           {/* 编辑入口：移动端隐藏、PC 端保留（见上方按钮上的 max-md:!hidden）；
                 桌面端仍改为标题独占一行 + 按钮下一行，避免按钮把标题挤窄 */}
