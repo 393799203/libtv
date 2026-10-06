@@ -603,7 +603,7 @@ export default function ProviderTaskReconciliation() {
         </div>
         <div className="px-3 py-2 rounded bg-orange-50 text-[12px] text-orange-800 flex items-center gap-1">
           <WarningOutlined />
-          待人工决定 {stats?.pending_review ?? 0} 条（上游没返回，退不退你定）
+          待人工决定 {stats?.pending_review ?? 0} 条
         </div>
         {/* 一行说完：真成本只算「人工退费」（上游可能已计费）；自动退费是上游明确拒绝、上游不计费。
             理由收进浮层，不占版面。 */}
