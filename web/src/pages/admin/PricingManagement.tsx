@@ -37,8 +37,8 @@ export default function PricingManagement() {
   const [nodes, setNodes] = useState<NodePriceGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  // 当前查看的渠道（价格按渠道独立配置）
-  const [channel, setChannel] = useState<'wasu' | 'dianxin'>('wasu');
+  // 当前查看的渠道（价格按渠道独立配置）。默认选中电信（原来默认华数）
+  const [channel, setChannel] = useState<'wasu' | 'dianxin'>('dianxin');
   // 编辑中的价格：「node_type|model_id|resolution」-> 新价格（各节点独立编辑，互不影响）；
   // 「带参考视频」单价用同键 + '|ref' 后缀，两类编辑互不覆盖
   const [edits, setEdits] = useState<Record<string, number>>({});
