@@ -287,7 +287,7 @@ export default function ProviderTaskReconciliation() {
     {
       title: '时间 / 状态',
       dataIndex: 'status',
-      // 150：够放状态标签 + 产物链接图标 + 在线查看图标（退费按钮/异常标记长了会折到第二行，flex-wrap 已开）
+      // 150：够放状态标签（有产物时图标在标签里面）+ 在线查看图标（退费按钮/异常标记长了会折到第二行，flex-wrap 已开）
       width: 150,
       render: (s: string, row: ProviderTask) => {
         const meta = STATUS_META[s] || { text: s || '-', color: 'default' };
@@ -295,8 +295,19 @@ export default function ProviderTaskReconciliation() {
         const auto = s === 'refunded' && row.refund_source === 'auto';
         const manual = s === 'refunded' && row.refund_source === 'manual';
         const tagText = auto ? '自动退费' : manual ? '人工退费' : meta.text;
-        const tag = <Tag color={auto ? 'blue' : manual ? 'red' : meta.color}>{tagText}</Tag>;
         const artifact = artifactOf(row);
+        // 标签内容：有产物时把链接图标放进标签内部（antd Tag 的 icon 槽位）——
+        // 原来图标挂在标签外面紧挨着标签，两个元素挤在一起显得零碎，也看不出图标到底
+        // 属于哪条状态；合成一个标签后"这个状态点得开产物"更明确，还省一点行内宽度。
+        const tag = (
+          <Tag
+            color={auto ? 'blue' : manual ? 'red' : meta.color}
+            icon={artifact ? <LinkOutlined /> : undefined}
+            className={artifact ? 'cursor-pointer' : undefined}
+          >
+            {tagText}
+          </Tag>
+        );
         // 悬停解释「为什么这条要人工看」/「为什么这条的钱退不回来」
         const tip =
           auto
@@ -308,7 +319,8 @@ export default function ProviderTaskReconciliation() {
                 : s === 'pending_review' || s === 'failed'
               ? '上游没有明确报错（超时 / 没拿到结果等），按规则不自动退费，需要人工判断'
               : '';
-        // 有产物就做成可点开的面板：交付的看交付地址，没转存成功的看上游地址
+        // 有产物就做成可点开的面板：交付的看交付地址，没转存成功的看上游地址。
+        // 图标已经在标签里面了（见上面的 tag），这里直接包住标签整个作为触发区
         const body = artifact ? (
           <Popover
             content={artifactPanel(row)}
@@ -318,10 +330,7 @@ export default function ProviderTaskReconciliation() {
             open={artifactPopover === row.id}
             onOpenChange={(v) => setArtifactPopover(v ? row.id : null)}
           >
-            <span className="cursor-pointer inline-flex items-center gap-0.5">
-              {tag}
-              <LinkOutlined className="text-[12px] text-blue-500" />
-            </span>
+            {tag}
           </Popover>
         ) : (
           <span className={tip ? 'cursor-help' : undefined}>{tag}</span>
