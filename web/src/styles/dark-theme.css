@@ -34,8 +34,10 @@
     linear-gradient(168deg, #17191e 0%, #14161a 34%, #0d0e11 100%);
   /* 全站页面大背景（非首页）：不做纯色 —— 左上角一层柔光（模拟顶光落在背景上），
      再纵向从偏亮压到偏暗，大面积暗底就有了"明暗关系"而不是一块死板的黑。
-     固定附着视口（background-attachment: fixed）：滚动时底色不跟着动，
-     任何一屏都有同样的亮暗过渡，而且只绘制一次，不随内容高度重画。
+     这里刻意【不】用 background-attachment: fixed：Chrome 下 fixed 背景走"视口固定"的
+     绘制路径，滚动时每帧重绘整屏 —— 实测（线上首页，同一页面只切这一个属性）
+     滚动 p95 帧时长 21.5ms → 17.3ms、最慢帧 49.7ms → 17.6ms、>33ms 的卡顿帧 3 → 0。
+     默认的 scroll 附着由合成器直接搬动，几乎不花时间，观感也一样（整页仍是上亮下暗）。
      注意整条渐变都压在卡片色（--dv-surface-1）之下：明暗关系靠"页面内部的明暗"表达，
      不让页面某一段亮过卡片 —— 否则那一块里的卡片会反过来显得比背景暗（"浮"不起来）。 */
   --dv-page-gradient:
@@ -105,7 +107,7 @@ html.theme-dark-root #root {
   background-color: var(--dv-bg);
   /* 页面底也铺同一道渐变：透明区域的页面不会露出"比渐变更黑的纯色块" */
   background-image: var(--dv-page-gradient);
-  background-attachment: fixed;
+  /* 不要加 background-attachment: fixed（会每帧重绘整屏，见文件顶部说明） */
 }
 
 /* ========== 背景：白底/浅灰底 → 暗面 ========== */
@@ -120,7 +122,6 @@ html.theme-dark-root #root {
 .theme-dark .home-bg {
   background-color: var(--dv-bg);
   background-image: var(--dv-home-gradient);
-  background-attachment: fixed;
 }
 /* 页面级容器（应用主内容区、我的项目、视频详情这类"整页"的壳）：
    用同一道页面渐变，别再是一块纯色 */
@@ -130,7 +131,6 @@ html.theme-dark-root #root {
 .theme-dark .page-bg {
   background-color: var(--dv-bg);
   background-image: var(--dv-page-gradient);
-  background-attachment: fixed;
 }
 .theme-dark :is(.bg-gray-50, .bg-slate-50, .bg-gray-100, .bg-slate-100) {
   background-color: var(--dv-surface-2);
@@ -417,7 +417,7 @@ html.theme-dark-root #root {
      整块画布也有顶光到压暗的层次，而不是一块纯黑 */
   background-color: var(--dv-canvas-bg);
   background-image: var(--dv-page-gradient);
-  background-attachment: fixed;
+  /* 同上：不加 fixed —— 画布滚动/平移时每帧重绘最费 */
 }
 .theme-dark .react-flow__handle {
   border-color: var(--dv-canvas-bg);
