@@ -813,7 +813,12 @@ export default function VideoListPage() {
             </a>
           )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[240px] overflow-hidden">
+        {/* 裁切层：max-h 卡住两行，多出来的走「我的项目」页。
+            上面留 4px 余量（pt-1 撑开、-mt-1 抵消 → 卡片视觉位置不变）：
+            卡片 hover 时会 translateY(-2px)（见 dark-theme.css 的 .ant-card:hover），
+            不留余量的话第一行卡片上移的那 2px 正好被 overflow-hidden 裁掉 ——
+            顶边和圆角看着像被切了一刀。max-h 同步 +4px，"正好两行"的高度不变。 */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 max-h-[244px] pt-1 -mt-1 overflow-hidden">
           {/* 新建项目卡片 */}
           <CreateProjectCard onClick={handleCreateProject} />
 
