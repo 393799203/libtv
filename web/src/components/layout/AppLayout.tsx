@@ -97,14 +97,14 @@ export function AppLayout() {
         <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
         <div className="flex items-center gap-1.5 md:gap-3">
           <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 text-gray-800 hover:opacity-80 transition-opacity cursor-pointer">
-            {/* 品牌标：自制 SVG「可爱青蛙头」（见 BrandLogo.tsx），替掉原来那颗通用相机图标 ——
+            {/* 品牌标：矢量描摹标（见 BrandMarkTraced.tsx，从用户提供的那张图描摹而来），替掉原来那颗通用相机图标 ——
                 antd 的 VideoCameraFilled 是"通用图标库里的相机"，谁都能用，配一行普通字重的文字
                 读起来就是"干燥的文字"，不像一枚品牌标。
                 现在是：开口圆环（镜筒/眼白）+ 偏移实心圆（瞳孔，也是镜头高光），
                 字标两个字形共用一条青→蓝→紫→品红的横向渐变。
                 另外三个候选方向见 web/public/logo-lab.html。
                 H5 上标缩到 24px、字缩到 15px，跟头部的紧凑尺寸对齐。 */}
-            <BrandLogo size={28} wordClass="h-[15.5px] md:h-[16.5px]" markClass="max-sm:h-6 max-sm:w-6" />
+            <BrandLogo size={28} wordClass="h-[15.5px] md:h-[16.5px]" markClass="max-sm:h-5 max-sm:w-auto" />
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
