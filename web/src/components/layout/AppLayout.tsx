@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Dropdown, Space, Button, App } from 'antd';
 import {
-  VideoCameraFilled,
   LogoutOutlined,
   ControlOutlined,
   SettingOutlined,
@@ -14,6 +13,7 @@ import {
   ReadOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
+import { BrandLogo } from '@/components/layout/BrandLogo';
 import { useAuthStore } from '@/stores/authStore';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
@@ -97,13 +97,14 @@ export function AppLayout() {
         <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
         <div className="flex items-center gap-1.5 md:gap-3">
           <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 text-gray-800 hover:opacity-80 transition-opacity cursor-pointer">
-            {/* 品牌标：白色"实心"相机（原先是蓝色线性描边图标 —— 蓝色在头部跟导航激活态撞色，
-                线性描边在玻璃暗底上也偏轻、不像一个"标"）。实心白在暗底上最干净、对比最足。
-                颜色写在 button 上让它继承：antd 的 .anticon{color:inherit} 是运行时注入的
-                （排在静态样式表之后，同特异度下永远赢），直接写在图标上的 text-white 会被盖掉 ——
-                这就是社区入口那段注释里踩过的同一个坑。 */}
-            <VideoCameraFilled className="text-lg shrink-0" />
-            <span className="font-semibold text-base text-gray-800">漫蛙</span>
+            {/* 品牌标：自制 SVG「蛙眼镜头」（见 BrandLogo.tsx），替掉原来那颗通用相机图标 ——
+                antd 的 VideoCameraFilled 是"通用图标库里的相机"，谁都能用，配一行普通字重的文字
+                读起来就是"干燥的文字"，不像一枚品牌标。
+                现在是：开口圆环（镜筒/眼白）+ 偏移实心圆（瞳孔，也是镜头高光），
+                字标两个字形共用一条青→蓝→紫→品红的横向渐变。
+                另外三个候选方向见 web/public/logo-lab.html。
+                H5 上标缩到 24px、字缩到 15px，跟头部的紧凑尺寸对齐。 */}
+            <BrandLogo size={28} textClass="text-[15px] md:text-base" markClass="max-sm:h-6 max-sm:w-6" />
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
