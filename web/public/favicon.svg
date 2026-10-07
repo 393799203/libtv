@@ -1,14 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- 漫蛙品牌标「蛙眼镜头」：开口圆环（镜筒/眼白）+ 偏移实心圆（瞳孔 = 镜头高光）。
-       与 src/components/layout/BrandLogo.tsx 同一套几何，但描边与瞳孔各加粗一档：
-       favicon 实际只有 16–32px，按 32 网格的原始线宽会虚掉。
-       改这里记得同步改组件（反之亦然）。 -->
+  <!-- 漫蛙品牌标 = 可爱青蛙头：右倾（左低右高）、左眼特别大、右下角露半截舌头。
+       与 src/components/layout/BrandLogo.tsx 的 frog 变体同一套几何（含同样的倾斜与缩放）。
+       改这里记得同步改组件，反之亦然。 -->
   <defs>
-    <linearGradient id="g" x1="4" y1="3" x2="28" y2="29" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#5eead4"/><stop offset="0.35" stop-color="#22d3ee"/>
-      <stop offset="0.7" stop-color="#6366f1"/><stop offset="1" stop-color="#c026d3"/>
+    <linearGradient id="fg" x1="4" y1="6" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5eead4"/><stop offset="0.42" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/>
     </linearGradient>
   </defs>
-  <path d="M11.49 24.88A9.6 9.6 0 1 1 21.09 24.54" stroke="url(#g)" stroke-width="4.4" stroke-linecap="round" fill="none"/>
-  <circle cx="16" cy="15.3" r="5.2" fill="url(#g)"/>
+  <g transform="rotate(-8 16 16.8) translate(-2.894 -5.658) scale(1.1624)">
+    <circle cx="10.4" cy="15.6" r="7.2" fill="url(#fg)"/>
+    <circle cx="23.8" cy="11.4" r="4.9" fill="url(#fg)"/>
+    <rect x="4" y="15" width="24.2" height="11.4" rx="5.7" fill="url(#fg)"/>
+    <circle cx="10.4" cy="15.6" r="5" fill="#fff"/>
+    <circle cx="11.5" cy="16.7" r="2.5" fill="#101318"/>
+    <circle cx="9.3" cy="13.5" r="1.25" fill="#fff"/>
+    <circle cx="23.8" cy="11.4" r="2.85" fill="#fff"/>
+    <circle cx="24.6" cy="12.1" r="1.45" fill="#101318"/>
+    <circle cx="23.1" cy="10.5" r="0.7" fill="#fff"/>
+    <path d="M18.6 20.2h8.4a4.3 4.3 0 0 1-4.2 5.1 4.3 4.3 0 0 1-4.2-5.1Z" fill="#101318"/>
+    <path d="M21.6 22.4h7v3.6a3.5 3.5 0 0 1-7 0Z" fill="#fb7185"/>
+  </g>
 </svg>
