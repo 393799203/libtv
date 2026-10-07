@@ -104,7 +104,7 @@ export function AppLayout() {
                 字标两个字形共用一条青→蓝→紫→品红的横向渐变。
                 另外三个候选方向见 web/public/logo-lab.html。
                 H5 上标缩到 24px、字缩到 15px，跟头部的紧凑尺寸对齐。 */}
-            <BrandLogo size={28} wordClass="h-[15.5px] md:h-[16.5px]" markClass="max-sm:h-5 max-sm:w-auto" />
+            <BrandLogo size={28} wordClass="h-[17px] md:h-[18px]" markClass="max-sm:h-5 max-sm:w-auto" />
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
