@@ -2,13 +2,16 @@
  * 漫蛙字标 —— 纯 SVG 路径，白色。
  *
  * 字形来源：Noto Sans SC（SIL OFL 1.1，可商用）在 wght=900 上实例化后，用 fontTools 取出
- * 「漫」「蛙」两个字的轮廓，转成路径内联在这里。渲染不依赖用户设备装了什么中文字体 ——
- * 之前用 <span>漫蛙</span>，macOS 落苹方、Windows 落微软雅黑，线条粗细和字面都不一样。
+ * 「漫」「蛙」两个字的轮廓内联在这里（unitsPerEm=1000）。渲染不依赖用户设备装了什么中文字体。
+ *
+ * ⚠ 坐标系陷阱（踩过一次，字是倒的）：字体轮廓是 **y 轴向上**，SVG 是 **y 轴向下**，
+ * 直接内联会上下颠倒。下面 transform 里的 scale(1 -1) 就是干这个的；平移量必须显式算出来，
+ * 不要从别处文本里正则捞数字 —— 曾经捞错成蛙字那条的 translate，导致一个字被推出画布、
+ * 页面上只剩另一个字。
  *
  * 两处字标化处理（正文里不会这么做）：
- * 1) 字距收紧到 30/1000 em（Noto 原生字间墨迹间隙是 36，收紧后 22）；
- * 2) 同色描边 8 单位 + stroke-linejoin:round —— 字形的直角统一转圆，
- *    顺带把字重从 900 略提到约 920，呼应可爱蛙头的圆润气质。
+ * 1) 字距收紧到 30/1000 em（Noto 原生两字间墨迹间隙 36，收紧后 22）；
+ * 2) 同色描边 8 单位 + stroke-linejoin:round：把字形直角统一转圆，字重从 900 略提到约 920。
  */
 const VIEW_W = 1964;
 const VIEW_H = 971;
@@ -29,7 +32,8 @@ export function BrandWordmark({ className = '', fill = '#fff', title = '漫蛙' 
       aria-label={title}
       fill="none"
     >
-      <g transform="translate(989 0)" fill={fill} stroke={fill} strokeWidth="8" strokeLinejoin="round">
+      {/* translate 与 scale(1,-1) 顺序：先翻 y，再整体挪到画布内 */}
+      <g transform="translate(-8 864) scale(1 -1)" fill={fill} stroke={fill} strokeWidth="8" strokeLinejoin="round">
         <path d={GLYPH_MAN} />
         <path d={GLYPH_WA} transform="translate(989 0)" />
       </g>
