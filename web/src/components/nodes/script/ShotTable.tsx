@@ -219,13 +219,22 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
           const fn = onChangeRef.current;
           if (!fn) return;
           const currentShots = shotsRef.current;
+          const idx = currentShots.findIndex((s) => s.id === shot.id);
           const newShot: ScriptShot = {
             ...shot,
             id: `shot-${Date.now()}`,
-            shotNumber: currentShots.length + 1,
+            shotNumber: idx + 2, // 插在源行后面，先占个位，紧接着统一重排
           };
-          const idx = currentShots.findIndex((s) => s.id === shot.id);
-          fn([...currentShots.slice(0, idx + 1), newShot, ...currentShots.slice(idx + 1)]);
+          // 必须重排：复制是"插到中间"，如果只给新行写 length+1，序号就和位置脱钩了
+          // （原来是 1,2,3 → 复制第1行 → 1,4,2,3）。而下面「上移/下移」的禁用判断
+          // 与 handler 的提前返回都拿 shotNumber 当位置用，序号一乱就会出现
+          // "能下移的行按钮被禁用""最后一行的下移亮着却点不动"。
+          // 不变量：shotNumber 恒等于数组位置（复制/删除/上移/下移四条路都要重排）。
+          fn(
+            [...currentShots.slice(0, idx + 1), newShot, ...currentShots.slice(idx + 1)].map(
+              (s, i) => ({ ...s, shotNumber: i + 1 }),
+            ),
+          );
         },
       },
       {
