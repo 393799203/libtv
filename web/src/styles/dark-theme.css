@@ -545,10 +545,16 @@ html.theme-dark-root #root {
   font-feature-settings: 'tnum';
 }
 
-/* 3) 标题收紧字距 + 自动换行平衡：大字号默认字距偏松，看着散 */
+/* 3) 标题收紧字距：大字号默认字距偏松，看着散
+   注意：这里**不能**再写 text-wrap: balance。
+   text-wrap 是简写（含 text-wrap-mode: wrap|nowrap），white-space 也是简写（同样含 text-wrap-mode），
+   而这条规则的特异度 (0,1,1) 高于 .truncate 的 (0,1,0) —— 一旦写 balance，它会在两者共有的
+   longhand text-wrap-mode 上把 .truncate 的 nowrap 覆盖成 wrap：
+   h1/h2/h3 上的 truncate 全部静默失效（H5 上标题不再单行省略，而是折行），
+   折行后又被 balance 拉成两行等长（实测 192/189，"每行都不撑满"）。
+   确实想要两行均衡的标题，请在**那个元素上**单独写 text-balance，别在标签级加。 */
 .theme-dark :is(h1, h2, h3, .ant-typography h1, .ant-typography h2, .ant-typography h3) {
   letter-spacing: -0.015em;
-  text-wrap: balance;
 }
 
 /* ========== 焦点态与选区（第四批） ==========

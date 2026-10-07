@@ -192,7 +192,10 @@ export default function ForumListPage() {
             <div
               key={post.id}
               onClick={() => navigate(`/forum/${post.id}`)}
-              className={`cursor-pointer p-4 transition-colors hover:bg-gray-50 ${
+              /* 横向不留内边距：帖子正文要和上面的搜索框共用同一条左基线
+                 （原来行内还有 p-4，比搜索多缩进 16px，"帖子没和搜索对齐"）。
+                 纵向 py-4 保留原节奏，hover 底色正好铺满行盒。 */
+              className={`cursor-pointer py-4 transition-colors hover:bg-gray-50 ${
                 index > 0 ? 'border-t border-gray-100' : ''
               }`}
             >
@@ -201,7 +204,11 @@ export default function ForumListPage() {
                     标题 min-w-0（flex 项默认 min-width:auto，不写就拒绝收缩，truncate 失效、
                     长标题会把标签顶出屏幕），标签 shrink-0（永远不被压扁，宁可让标题省略号）。 */}
                 <div className="flex min-w-0 items-center gap-2">
-                  <h3 className="min-w-0 truncate text-[16px] md:text-[15px] font-medium text-gray-900">
+                  {/* H5：允许折行并撑满（break-words 兜住长英文/无空格串）；
+                      md 起回到单行省略。原来只写 truncate，被上面那条 text-wrap: balance
+                      （同样是 longhand text-wrap-mode 的冲突）打掉了 nowrap，
+                      H5 上折成两行又被 balance 拉成等长。 */}
+                  <h3 className="min-w-0 break-words md:truncate text-[16px] md:text-[15px] font-medium text-gray-900">
                     <Highlight text={post.title} keyword={keyword} />
                   </h3>
                   {post.is_pinned && (
