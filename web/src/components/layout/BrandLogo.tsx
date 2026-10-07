@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { BrandWordmark } from './BrandWordmark';
 
 /**
  * 漫蛙品牌标。两版几何，用 variant 切换：
@@ -112,39 +113,33 @@ export function BrandMark({
 
 /**
  * 品牌锁形（标 + 字标）。
- * 字标两个字形共用一条横向多色渐变（青→蓝→紫→品红），即"彩色有过渡"。
- * 这里用的是 W1；W2/W3/W4 见 logo-lab.html。
  *
- * 注意：渐变文字必须 bg-clip-text 与 text-transparent 一起写，而且不能加在 antd 组件上
- * —— antd 的 CSS-in-JS 是运行时注入的，同特异度下永远排在静态样式表之后。
+ * 字标现在是纯 SVG 路径（见 BrandWordmark.tsx），颜色为白色。
+ * 之前是 <span>漫蛙</span> + 渐变裁切：字形来自用户设备的中文字体（macOS 苹方 / Windows
+ * 微软雅黑），字面与线条粗细都随系统变；改成路径后处处一致。
+ * 曾经做过一版彩色渐变（青→蓝→紫→品红），按需求改回白色。
  */
 export function BrandLogo({
   size = 28,
-  textClass = 'text-base',
+  wordClass = 'h-[15.5px] md:h-[16.5px]',
   variant = 'frog',
   mono = false,
   className = '',
   markClass = '',
 }: {
   size?: number;
-  textClass?: string;
+  /** 字标高度的类。SVG 的 viewBox 宽高比是 1964:971，宽度自动。 */
+  wordClass?: string;
   variant?: BrandMarkVariant;
   mono?: boolean;
   className?: string;
   /** 标自身的类（响应式尺寸用，如 max-sm:h-6 max-sm:w-6） */
   markClass?: string;
 }) {
-  const wordClass = mono
-    ? 'text-[var(--dv-text-1)]'
-    : 'bg-[linear-gradient(100deg,#67e8f9_0%,#22d3ee_28%,#818cf8_58%,#c084fc_82%,#f0abfc_100%)] bg-clip-text text-transparent';
-
   return (
     <span className={`flex items-center gap-2 ${className}`}>
       <BrandMark size={size} variant={variant} mono={mono} className={`shrink-0 ${markClass}`} />
-      {/* 字距放宽 0.06em：中文两字标默认贴着显闷，拉开后像"标"而不像正文 */}
-      <span className={`font-extrabold leading-none tracking-[0.06em] ${textClass} ${wordClass}`}>
-        漫蛙
-      </span>
+      <BrandWordmark className={`w-auto shrink-0 ${wordClass}`} fill={mono ? 'currentColor' : '#fff'} />
     </span>
   );
 }
