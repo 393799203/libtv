@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import { BrandWordmark } from './BrandWordmark';
+import { BrandMarkTraced } from './BrandMarkTraced';
 
 /**
  * 漫蛙品牌标。两版几何，用 variant 切换：
@@ -36,12 +37,12 @@ const FROG_TONGUE = '#fb7185';
 
 const LENS_RING_D = 'M11.49 24.88A9.6 9.6 0 1 1 21.09 24.54';
 
-export type BrandMarkVariant = 'frog' | 'lens';
+export type BrandMarkVariant = 'traced' | 'frog' | 'lens';
 
 export function BrandMark({
   size = 28,
   className = '',
-  variant = 'frog',
+  variant = 'traced',
   /** 单色模式（仅 lens 有意义）：走 currentColor */
   mono = false,
   /** lens 小尺寸加粗：favicon 或 16–20px 场合，细线会虚掉 */
@@ -57,6 +58,21 @@ export function BrandMark({
   const uid = useId().replace(/:/g, '');
   const gradId = `bmg-${uid}`;
   const paint = mono && variant === 'lens' ? 'currentColor' : `url(#${gradId})`;
+
+  // traced 变体必须在这里直接 return，不能塞进下面那个 <svg> 里：
+  // 外层 svg 是 32x32 的 viewBox，内层 svg 的 width/height 会按外层的用户单位解释，
+  // 1.244:1 的标算出来是 34.8 单位宽 > 32，右边就会被裁掉
+  //（用户反馈的"青蛙最右边被切掉了"就是这个，实测右边留白 0px、标盒塌成 28x28）。
+  if (variant === 'traced') {
+    return (
+      <BrandMarkTraced
+        size={size}
+        color={!mono}
+        fill={mono ? 'currentColor' : '#fff'}
+        className={className}
+      />
+    );
+  }
 
   return (
     <svg
@@ -122,7 +138,7 @@ export function BrandMark({
 export function BrandLogo({
   size = 28,
   wordClass = 'h-[15.5px] md:h-[16.5px]',
-  variant = 'frog',
+  variant = 'traced',
   mono = false,
   className = '',
   markClass = '',
