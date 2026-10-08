@@ -724,18 +724,18 @@ export default function AdminPage() {
   ];
 
   return (
-    <div className="flex flex-col md:flex-row h-[calc(100vh-56px)]">
+    <div className="flex flex-col lg:flex-row h-[calc(100vh-56px)]">
       {/* 左侧边栏 */}
-      <aside className="w-full md:w-[200px] bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0">
-        <div className="hidden md:block px-4 py-4 border-b border-gray-100">
+      <aside className="w-full lg:w-[200px] bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col shrink-0">
+        <div className="hidden lg:block px-4 py-4 border-b border-gray-100">
           <h2 className="text-[15px] font-semibold text-gray-800">运营管理中心</h2>
         </div>
-        <nav className="flex md:block gap-1 md:gap-0 p-2 md:flex-1 md:space-y-0.5 overflow-x-auto md:overflow-x-visible shrink-0 md:shrink">
+        <nav className="flex lg:block gap-1 lg:gap-0 p-2 lg:flex-1 lg:space-y-0.5 overflow-x-auto lg:overflow-x-visible shrink-0 lg:shrink">
           {menuItems.map(item => (
             <button
               key={item.key}
               onClick={() => navigate(`/admin/${item.key}`)}
-              className={`relative shrink-0 md:shrink md:w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+              className={`relative shrink-0 lg:shrink lg:w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
                 activeTab === item.key
                   ? 'text-cyan-200 font-medium'
                   : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
@@ -745,7 +745,7 @@ export default function AdminPage() {
                   改用左侧青色强调条 + 青色文字，视觉更干净也更省地方 */}
               {activeTab === item.key && (
                 /* 选中条只在竖排侧栏里有意义；窄屏是横向 chip 条，靠青色文字表示选中 */
-                <span className="hidden md:block absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full bg-cyan-400" />
+                <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full bg-cyan-400" />
               )}
               <span className={activeTab === item.key ? 'text-cyan-300' : 'text-gray-400'}>{item.icon}</span>
               {item.label}
@@ -1166,7 +1166,7 @@ export default function AdminPage() {
                 {/* 筛选行：控件尺寸与「上游对账」一致（antd 默认尺寸、宽度用 style）；
                     布局上「共 N 个用户」留在左侧，搜索框 + 角色/渠道筛选 + 刷新整体靠右 */}
                 <div className="flex flex-wrap items-center gap-2 mb-4">
-                  <span className="hidden md:inline shrink-0 text-[12px] text-[var(--dv-text-3)] mr-1">共 {userTotal} 个用户</span>
+                  <span className="hidden lg:inline shrink-0 text-[12px] text-[var(--dv-text-3)] mr-1">共 {userTotal} 个用户</span>
                   {/* 弹性占位：只在 lg 以上需要（宽屏把控件组推到右侧）；
                       窄屏它会同搜索框抢 flex 空间，把搜索框压没 */}
                   <div className="hidden lg:block flex-1" />
@@ -1237,14 +1237,14 @@ export default function AdminPage() {
                   <table className="w-full text-[13px] min-w-[380px] lg:min-w-[1000px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
-                        <th className="px-4 py-3 text-left font-medium text-gray-600">用户（ID / 邮箱）</th>
+                        <th className="min-w-[180px] px-4 py-3 text-left font-medium text-gray-600">用户（ID / 邮箱）</th>
                         <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">昵称</th>
-                        <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
+                        <th className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
                         <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">渠道商</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">剩余积分</th>
                         <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
-                        <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">最后操作</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-600">最后操作</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">操作</th>
                       </tr>
                     </thead>
@@ -1253,12 +1253,12 @@ export default function AdminPage() {
                         const isCurrentUser = currentUser && user.id === currentUser.id;
                         return (
                           <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                            <td className="px-4 py-3">
+                            <td className="min-w-[180px] px-4 py-3">
                               <div className="text-gray-800 break-all">{user.email}</div>
                               <div className="text-gray-400 font-mono text-[11px] mt-0.5 break-all">{user.id}</div>
                             </td>
                             <td className="hidden lg:table-cell px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
-                            <td className="hidden lg:table-cell px-4 py-3 text-gray-500 text-[12px]">
+                            <td className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-gray-500 text-[12px]">
                               <span>项目 {user.project_count || 0}</span>
                               <span className="inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
                               <span>图片 {user.asset_image_count || 0}</span>
@@ -1314,8 +1314,9 @@ export default function AdminPage() {
                             <td className="hidden lg:table-cell px-4 py-3 text-gray-500">
                               {new Date(user.created_at).toLocaleDateString('zh-CN')}
                             </td>
-                            {/* 只展示"最后操作"（带 token 调任意接口的时间）：平台已不再记录"最后登录" */}
-                            <td className="hidden lg:table-cell px-4 py-3 text-gray-500 whitespace-nowrap">
+                            {/* 只展示"最后操作"（带 token 调任意接口的时间）：平台已不再记录"最后登录"。
+                                这列是主要列 —— 窄屏也保留（用户明确要求） */}
+                            <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                               {user.last_active_at
                                 ? new Date(user.last_active_at).toLocaleString('zh-CN', {
                                     year: 'numeric', month: '2-digit', day: '2-digit',
