@@ -38,16 +38,67 @@ type NodeOutput struct {
 // 上游明确报错 → 自动退费；其余（超时/拿不到结果）→ 不自动退，进「待人工决定」。
 // 区别只在编号：同步调用没有上游任务号，用「执行 + 节点」当 key（同一节点重试只更新同一行）。
 
+// maxBillingResolutionRunes 账单表「计费口径」列能放下的字符数。
+//
+// billing_records.resolution 是 varchar(10)（model.BillingRecord 也是 size:10），
+// 按设计只放**档位**：视频 480p/720p/1080p、图片 2K/4K。
+// 对账行的 charge_resolution 是另一列（varchar(32)），那边才允许记「档位(实际尺寸)」。
+const maxBillingResolutionRunes = 10
+
+// billingResolutionOf 取写**账单**要用的计费口径（必须与扣费分录完全一致）。
+//
+// 为什么单独有这么个函数（线上事故 2026-10-09 13:57，对账页上表现为「金额对不上」）：
+// 图片退费把**对账展示口径**「2K(2560x1440)」（13 字）写进了只有 varchar(10) 的账单列，
+// PG 直接拒绝（value too long for type character varying(10)）；而写账单失败只打日志、
+// 不返回错误（billing.Service.Refund → writeRecord）→ 退费被当成成功、对账行标成「已退费」，
+// 账面却没有这条退费分录，自检按「退费金额 30 ≠ 流水退费合计 0」标出 amount_mismatch。
+// 用户的钱其实退到了（先加积分后写分录），缺的是账面上那条分录 —— 于是账就核不平了。
+//
+//   - 图片：口径 = 扣费时用的那个短档位（2K/4K），**逐字沿用**，档位为空就记空
+//     （扣费分录当初记的就是空，退费必须与它一致，不能拿展示口径去顶替）；
+//   - 其它同步调用（故事/剧本/音频/…）：本来就没有档位，沿用 Resolution（历史上就是空）。
+//
+// 万一还是超长，按列宽截断并留日志 —— 宁可口径少一截，也不能让整条 money 分录写不进去。
+func billingResolutionOf(bill, fallback string) string {
+	v := strings.TrimSpace(bill)
+	if v == "" {
+		v = strings.TrimSpace(fallback)
+	}
+	if r := []rune(v); len(r) > maxBillingResolutionRunes {
+		log.Printf("[Billing] ⚠️ 计费口径超长(%d 字)已按账单列宽截断，避免整条分录写不进去: %q", len(r), v)
+		return string(r[:maxBillingResolutionRunes])
+	}
+	return v
+}
+
+// refundResolution 退费要带上的计费口径：与**当初扣费那条分录**逐字一致。
+//
+// 图片：只用 BillingResolution（扣费用的档位，可能为空 = 老画布没选过档位，扣费记的就是空）；
+// 其它同步调用：它们没有档位字段，口径就在 Resolution 上。
+func (t syncTask) refundResolution() string {
+	if t.Action == billing.ActionImage {
+		return billingResolutionOf(t.BillingResolution, "")
+	}
+	return billingResolutionOf(t.Resolution, "")
+}
+
 // syncTask 一次同步调用的对账现场
 type syncTask struct {
-	Ledger     *billing.Ledger
-	Action     string // billing.ActionX
-	Scene      string // 账单/退费场景名，如「图片生成」
-	Model      string
-	Provider   string // 渠道（账单口径）
-	Resolution string // 计费口径（图片=尺寸），无则空
-	Seconds    int    // 计费口径（音频=字数折算秒），无则 0
-	Charged    int64
+	Ledger   *billing.Ledger
+	Action   string // billing.ActionX
+	Scene    string // 账单/退费场景名，如「图片生成」
+	Model    string
+	Provider string // 渠道（账单口径）
+	// Resolution 对账展示口径（图片=「档位(实际尺寸)」，如 2K(2560x1440)），无则空
+	Resolution string
+	// BillingResolution 写**账单**用的口径（图片=扣费时用的短档位，如 2K）——**退费时要逐字沿用**。
+	//
+	// 与 Resolution 分开是因为两张表的列宽不一样：对账行那列 32 字、账单那列只有 10 字。
+	// 图片这一路以前两张表共用「2K(2560x1440)」→ 退费分录写不进账单（见 billingResolutionOf）。
+	// 取用规则见 refundResolution：图片只认这个字段（为空就是当初没档位），其它同步调用沿用 Resolution。
+	BillingResolution string
+	Seconds           int // 计费口径（音频=字数折算秒），无则 0
+	Charged           int64
 	// ChargeKey 这一笔扣费的唯一编号 —— **对账行的身份**，扣费那一刻生成、此后永不改变。
 	// 没有它时行的身份是「sync:执行:节点」，拿到上游任务号后又被改写成任务号：
 	// 同一节点在同一次执行里被扣两次费时，第二次写入会挤进第一行并覆盖金额（线上出现过）。
@@ -174,7 +225,13 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 	}
 	// 退费与扣费必须带同一把 charge_key：这样「同一笔生成」的扣费/退费两条账单分录
 	// 才能在对账里被归到一起，金额也能精确核对
-	extra := billing.ChargeExtra{Resolution: t.Resolution, Seconds: t.Seconds, ChargeKey: t.ChargeKey}
+	// 口径也必须与扣费那条分录一模一样，且必须是写账单能放下的短档位：
+	// 对账展示口径（2K(2560x1440)）比账单列宽长，直接写会丢掉这条退费分录（见 billingResolutionOf）
+	extra := billing.ChargeExtra{
+		Resolution: t.refundResolution(),
+		Seconds:    t.Seconds,
+		ChargeKey:  t.ChargeKey,
+	}
 	reason := billing.AutoRefundReason(detail)
 	if refundErr := biller.RefundDetached(ctx, execCtx.GetUserID(), t.Charged, t.Action, t.Model, t.Scene, reason, extra); refundErr != nil {
 		log.Printf("[%s] 自动退费失败（转人工）: %v", t.Scene, refundErr)
@@ -287,6 +344,10 @@ func (v *VideoExecutor) refundCharge(ctx context.Context, execCtx *ExecutionCont
 	// 不留这一笔，事后就无法向渠道核对「这次失败到底有没有让上游接单并计费」，
 	// 也找不回上游可能已经产出的结果（线上实例：10-03 00:04 那次超时中断）。
 	extra.TaskID = taskID
+	// 计费口径按账单表的列宽收敛：视频档位（720p 等）本来就短，这里是兜底 ——
+	// 口径超长会让这条退费分录写不进账单，而写账单失败只打日志不报错，
+	// 于是「钱退了、账上没有」（线上 10-09 那笔 amount_mismatch 就是这个形态）
+	extra.Resolution = billingResolutionOf(extra.Resolution, "")
 	if !llm.TryMarkRefunded(taskID) {
 		log.Printf("[VideoExecutor] 上游任务 %s 的扣费已退过，跳过重复退费（node 无关）", taskID)
 		return nil
@@ -1736,6 +1797,10 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		chargeBasis = fmt.Sprintf("%s(%s)", chargeTier, size)
 	}
 	imgTask := newSyncTask(i.providerTasks, ctx, execCtx, billing.ActionImage, "图片生成", apiModelID, chargeBasis, chargedAmount)
+	// 账单口径 = 扣费时用的那个短档位（2K/4K），必须与扣费分录一致：
+	// 「2K(2560x1440)」是给对账行看的展示口径（列宽 32），写进账单表（列宽 10）会被 PG 拒绝，
+	// 而写账单失败只打日志不报错 → 退费分录静默丢失、账平不了（线上 10-09 那笔 amount_mismatch）
+	imgTask.BillingResolution = chargeTier
 	imgTask.write(ctx, execCtx, node.ID, billing.StatusSubmitted, "", 0, "")
 
 	// ✅ 调用图像生成 API（根据是否有用户@引用的上游图片选择文生图或图生图）

@@ -137,9 +137,32 @@ type ProviderConfig struct {
 	BaseURL string `yaml:"base_url"`
 }
 
-// PaymentConfig 支付配置
+// PaymentConfig 支付配置（支付宝 / 微信支付两条线平级共存，各自独立开关）
 type PaymentConfig struct {
 	Alipay AlipayConfig `yaml:"alipay"`
+	Wxpay  WxpayConfig  `yaml:"wxpay"`
+}
+
+// WxpayConfig 微信支付（APIv3）配置。
+//
+// 与支付宝同一注入方式：config.yaml 里留空占位，生产用 WXPAY_* 环境变量注入，
+// 或在后台「商务配置 → 支付配置」页填写（两者都留空即视为未配置 → 前端置灰「暂未开通」）。
+//
+// 无任何一个密钥需要（也不允许）写进仓库：config.yaml 中的字段保持空串。
+type WxpayConfig struct {
+	Enabled      bool   `yaml:"enabled"`        // 启用开关
+	AppID        string `yaml:"app_id"`         // 公众号/小程序 AppID（须与商户号绑定）
+	MchID        string `yaml:"mchid"`          // 商户号
+	APIv3Key     string `yaml:"api_v3_key"`     // APIv3 密钥（32 字节）
+	CertSerialNo string `yaml:"cert_serial_no"` // 商户 API 证书序列号
+	PrivateKey   string `yaml:"private_key"`    // 商户 API 私钥 PEM（apiclient_key.pem）
+	PlatformCert string `yaml:"platform_cert"`  // 微信支付平台证书 PEM（留空则自动获取）
+	PublicKey    string `yaml:"public_key"`     // 微信支付公钥 PEM（公钥模式）
+	PublicKeyID  string `yaml:"public_key_id"`  // 微信支付公钥 ID（PUB_KEY_ID_ 开头）
+	NotifyURL    string `yaml:"notify_url"`     // 异步回调地址（留空则由站点域名推导）
+	SiteBaseURL  string `yaml:"site_base_url"`  // 站点基地址（推导回调地址用）
+	APIBase      string `yaml:"api_base"`       // API 域名覆盖（默认官方域名）
+	H5Enabled    bool   `yaml:"h5_enabled"`     // H5 支付权限是否已开通（需单独申请）
 }
 
 // AlipayConfig 支付宝开放平台配置（企业账户；RSA2 签名）
@@ -253,6 +276,72 @@ func Load(path string) error {
 			return fmt.Errorf("read ALIPAY_PUBLIC_KEY_FILE %s: %w", v, err)
 		}
 		C.Payment.Alipay.AlipayPublicKey = string(b)
+	}
+
+	// 微信支付环境变量覆盖（与支付宝同一套注入方式；密钥建议走环境变量/文件，避免明文入库）
+	if v := os.Getenv("WXPAY_ENABLED"); v != "" {
+		C.Payment.Wxpay.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("WXPAY_APP_ID"); v != "" {
+		C.Payment.Wxpay.AppID = v
+	}
+	if v := os.Getenv("WXPAY_MCHID"); v != "" {
+		C.Payment.Wxpay.MchID = v
+	}
+	if v := os.Getenv("WXPAY_API_V3_KEY"); v != "" {
+		C.Payment.Wxpay.APIv3Key = v
+	}
+	if v := os.Getenv("WXPAY_CERT_SERIAL_NO"); v != "" {
+		C.Payment.Wxpay.CertSerialNo = v
+	}
+	if v := os.Getenv("WXPAY_PUBLIC_KEY_ID"); v != "" {
+		C.Payment.Wxpay.PublicKeyID = v
+	}
+	if v := os.Getenv("WXPAY_NOTIFY_URL"); v != "" {
+		C.Payment.Wxpay.NotifyURL = v
+	}
+	if v := os.Getenv("WXPAY_API_BASE"); v != "" {
+		C.Payment.Wxpay.APIBase = v
+	}
+	if v := os.Getenv("WXPAY_H5_ENABLED"); v != "" {
+		C.Payment.Wxpay.H5Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	// 站点基地址：既用于推导回调地址，也复用支付宝同步跳转用的 FRONTEND_BASE
+	if v := os.Getenv("SITE_BASE_URL"); v != "" {
+		C.Payment.Wxpay.SiteBaseURL = v
+	} else if v := os.Getenv("FRONTEND_BASE"); v != "" {
+		C.Payment.Wxpay.SiteBaseURL = v
+	}
+	// 私钥 / 平台证书 / 微信支付公钥走 PEM 文件（推荐：挂载进容器，避免换行与转义问题）
+	if v := os.Getenv("WXPAY_PRIVATE_KEY"); v != "" {
+		C.Payment.Wxpay.PrivateKey = v
+	}
+	if v := os.Getenv("WXPAY_PRIVATE_KEY_FILE"); v != "" {
+		b, err := os.ReadFile(v)
+		if err != nil {
+			return fmt.Errorf("read WXPAY_PRIVATE_KEY_FILE %s: %w", v, err)
+		}
+		C.Payment.Wxpay.PrivateKey = string(b)
+	}
+	if v := os.Getenv("WXPAY_PLATFORM_CERT"); v != "" {
+		C.Payment.Wxpay.PlatformCert = v
+	}
+	if v := os.Getenv("WXPAY_PLATFORM_CERT_FILE"); v != "" {
+		b, err := os.ReadFile(v)
+		if err != nil {
+			return fmt.Errorf("read WXPAY_PLATFORM_CERT_FILE %s: %w", v, err)
+		}
+		C.Payment.Wxpay.PlatformCert = string(b)
+	}
+	if v := os.Getenv("WXPAY_PUBLIC_KEY"); v != "" {
+		C.Payment.Wxpay.PublicKey = v
+	}
+	if v := os.Getenv("WXPAY_PUBLIC_KEY_FILE"); v != "" {
+		b, err := os.ReadFile(v)
+		if err != nil {
+			return fmt.Errorf("read WXPAY_PUBLIC_KEY_FILE %s: %w", v, err)
+		}
+		C.Payment.Wxpay.PublicKey = string(b)
 	}
 
 	return nil

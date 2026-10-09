@@ -32,8 +32,26 @@ sync_dir() { # $1=本地路径 $2=远端路径 [额外 rsync 参数...]
 }
 
 # 后端整体同步（排除构建产物/日志，避免上传几十 MB 无用文件）；
-# 用整个 server/ 而非逐个子目录，避免新增目录（cmd、go.mod 等）被漏同步
-sync_server() { sync_dir server/ /opt/libtv/server/ --exclude 'bin/' --exclude 'logs/'; }
+# 用整个 server/ 而非逐个子目录，避免新增目录（cmd、go.mod 等）被漏同步。
+# --delete：远端要和仓库**完全一致**，否则仓库里删掉的文件会永远留在远端被编进镜像。
+# 2026-10-09 实测远端比仓库多了 6 个陈旧文件（cmd/dianxincheck/main.go、cmd/server/models.yaml、
+# configs/config.yaml.bak，以及 internal/service/{billing,pricing,provider_task}_service.go
+# —— 最后三个是重构前的旧实现，会被一起编译进后端镜像，属于「线上跑的代码 ≠ 仓库代码」）。
+# --exclude 的 bin/ 与 logs/ 不会被 --delete 删掉（被排除的路径同时受保护），
+# 所以远端构建产物与日志照旧保留。
+sync_server() { sync_dir server/ /opt/libtv/server/ --delete --exclude 'bin/' --exclude 'logs/'; }
+
+# 前端产物同步：**必须带 --delete**。
+# web/dist 每次构建都换一整套带哈希的文件名，不带 --delete 的话远端只会越堆越多：
+# 2026-10-09 实测远端 assets/ 里积了 4211 个文件、245MB（几十次部署的历史 chunk），
+# 每次重建镜像都把它们整包 COPY 进镜像层 —— 又占磁盘又拖慢构建，翻日志还容易被旧文件误导。
+# 删掉的只是「当前版本不再引用」的旧哈希文件，是安全的：
+#   · index.html 是 no-cache/no-store（见 web/libtv-app.conf），每次都会指向当前 chunk；
+#   · 只有「改版前就开着、且还没刷新」的标签页可能请求到已删除的旧 chunk，
+#     刷新一下即可（这正是带哈希文件名 + 短缓存 index.html 的标准代价）。
+# --exclude '.DS_Store' 顺手挡掉 macOS 垃圾文件（远端曾混进去一个）；
+# 但 **--exclude 会让这个文件免于被删**，所以还要 --delete-excluded，远端的历史垃圾才会真被清掉。
+sync_dist() { sync_dir web/dist/ /opt/libtv/web/dist/ --delete --delete-excluded --exclude '.DS_Store'; }
 
 cd "$ROOT" || exit 1
 
@@ -54,7 +72,7 @@ sync_infra() {
 echo "▶ 同步代码到服务器…"
 case "$TARGET" in
   frontend)
-    sync_dir web/dist/ /opt/libtv/web/dist/
+    sync_dist
     # nginx 配置随前端镜像一起重建：不在这里同步的话，线上会用旧配置重建镜像
     # （TLS/端口/代理改动会静默丢失）
     sync_dir web/nginx.conf /opt/libtv/web/nginx.conf
@@ -76,7 +94,7 @@ case "$TARGET" in
   *)
     sync_server
     sync_infra
-    [ -d web/dist ] && sync_dir web/dist/ /opt/libtv/web/dist/
+    [ -d web/dist ] && sync_dist
     ;;
 esac
 

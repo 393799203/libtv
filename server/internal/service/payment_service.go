@@ -14,11 +14,9 @@ import (
 	"fmt"
 	"libtv/internal/billing"
 	"log"
-	"math"
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -175,26 +173,12 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID string, package
 	if !s.cfg.Enabled {
 		return nil, "", ErrPaymentDisabled
 	}
-	var pkg model.PointsPackage
-	if err := s.db.WithContext(ctx).First(&pkg, "id = ? AND enabled = true", packageID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", apperror.New(400, http.StatusBadRequest, "套餐不存在或已下架")
-		}
+	pkg, err := loadEnabledPackage(ctx, s.db, packageID)
+	if err != nil {
 		return nil, "", err
 	}
-	if pkg.Price <= 0 || pkg.Points <= 0 {
-		return nil, "", ErrPaymentOrderFails
-	}
 
-	order := &model.PaymentOrder{
-		OrderNo:     genOrderNo(),
-		UserID:      userID,
-		PackageID:   strconv.FormatInt(pkg.ID, 10),
-		PackageName: pkg.Name,
-		Points:      pkg.Points,
-		AmountFen:   int64(math.Round(pkg.Price * 100)),
-		Status:      "pending",
-	}
+	order := newPendingOrder(userID, pkg, model.PayChannelAlipay)
 	if err := s.db.WithContext(ctx).Create(order).Error; err != nil {
 		log.Printf("[Payment] 创建订单失败: userID=%s err=%v", userID, err)
 		return nil, "", ErrPaymentOrderFails
@@ -306,39 +290,24 @@ func (s *PaymentService) HandleNotify(values url.Values) (bool, error) {
 
 // chargeOrder 到账（幂等）：原子抢占 pending 订单后调用 Recharge 增加积分
 func (s *PaymentService) chargeOrder(ctx context.Context, orderNo, alipayTradeNo string) (bool, error) {
-	var order model.PaymentOrder
-	if err := s.db.WithContext(ctx).First(&order, "order_no = ?", orderNo).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	order, claimed, err := claimPaidOrder(ctx, s.db, orderNo, alipayTradeNo)
+	if err != nil {
+		if errors.Is(err, ErrPaymentOrderNotFound) {
 			log.Printf("[Payment] 通知订单不存在: orderNo=%s", orderNo)
 			return true, nil // 未知订单直接消费，避免支付宝持续重试
 		}
 		return false, err
 	}
-
-	// 原子抢占：只有 pending → paid 成功的那一次才执行到账
-	now := time.Now()
-	res := s.db.Model(&model.PaymentOrder{}).
-		Where("order_no = ? AND status = 'pending'", orderNo).
-		Updates(map[string]interface{}{
-			"status":          "paid",
-			"alipay_trade_no": alipayTradeNo,
-			"paid_at":         now,
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	if res.RowsAffected == 0 {
+	if !claimed {
 		// 已处理过（幂等）或订单已关闭
 		return true, nil
 	}
 
 	// 到账：调用既有 Recharge（加分 + 记账单）
-	remark := fmt.Sprintf("支付宝购买「%s」", order.PackageName)
-	if err := s.billing.Recharge(ctx, order.UserID, order.Points, "积分充值", remark, billing.RechargeOrder{OrderNo: orderNo, AlipayTradeNo: alipayTradeNo}); err != nil {
+	if err := rechargeClaimedOrder(ctx, s.billing, order, alipayTradeNo, "支付宝"); err != nil {
 		log.Printf("[Payment] ⚠️ 到账失败，回滚订单状态: orderNo=%s userID=%s points=%d err=%v", orderNo, order.UserID, order.Points, err)
 		// 回滚抢占状态，让支付宝重试
-		s.db.Model(&model.PaymentOrder{}).Where("order_no = ?", orderNo).
-			Updates(map[string]interface{}{"status": "pending", "alipay_trade_no": "", "paid_at": nil})
+		rollbackClaim(ctx, s.db, orderNo, model.PayChannelAlipay)
 		return false, err
 	}
 

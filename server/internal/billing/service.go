@@ -657,11 +657,12 @@ func (s *Service) Refund(ctx context.Context, userID string, amount int64, actio
 	return nil
 }
 
-// RechargeOrder 充值的支付订单信息，用于和支付宝对账。
-// 只有支付宝回调过来的充值才带这两个号；后台手工充值没有支付宝订单，传零值。
+// RechargeOrder 充值的支付订单信息，用于和支付宝/微信对账。
+// 只有支付回调过来的充值才带这些号；后台手工充值没有渠道订单，传零值。
 type RechargeOrder struct {
-	OrderNo       string // 商户订单号（payment_orders.order_no / 支付宝 out_trade_no）
+	OrderNo       string // 商户订单号（payment_orders.order_no / 渠道侧 out_trade_no）
 	AlipayTradeNo string // 支付宝交易号（trade_no）
+	WxpayTradeNo  string // 微信支付交易号（transaction_id）
 }
 
 // Recharge 充值积分（后续管理端 / 支付回调调用）
@@ -691,6 +692,7 @@ func (s *Service) Recharge(ctx context.Context, userID string, amount int64, sce
 		BalanceAfter:  balance,
 		OrderNo:       order.OrderNo,
 		AlipayTradeNo: order.AlipayTradeNo,
+		WxpayTradeNo:  order.WxpayTradeNo,
 	})
 	s.notifyBalance(BalanceEvent{
 		UserID:  userID,

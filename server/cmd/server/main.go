@@ -196,6 +196,14 @@ func main() {
 
 	// 初始化 LLM 客户端（多渠道 token 路由：wasu=华数 / dianxin=电信，后台三档切换）
 	settingRepo := repository.NewSettingRepo(db)
+
+	// 微信支付（APIv3）配置与业务服务：与支付宝平级并存
+	// 配置来源**只有服务器一处**：config.yaml 的 payment.wxpay 段 + WXPAY_* 环境变量
+	// （含 WXPAY_PRIVATE_KEY_FILE / WXPAY_PLATFORM_CERT_FILE 读 PEM），不读 settings 表、后台无配置页；
+	// 未配置时（默认）走优雅降级：下单返回「微信支付暂未开通」，前台置灰，绝不影响支付宝
+	wechatPayConfigService := service.NewWechatPayConfigService(
+		config.C.Payment.Wxpay, config.C.Payment.Alipay.Enabled, os.Getenv("FRONTEND_BASE"))
+	wechatPayService := service.NewWechatPayService(db, billingService, wechatPayConfigService)
 	channelRouter := llm.NewChannelRouter(nil, config.C.AI.Providers)
 	channelService := service.NewChannelService(settingRepo, userRepo, channelRouter)
 	// 渠道路由读取全局策略（带 5s 缓存：后台切换后最多 5s 生效）
@@ -233,10 +241,10 @@ func main() {
 			return // 前端直连的计费接口（提示词/白模）没有执行流，由前端在响应返回后自行同步
 		}
 		eng.Publish(ev.ExecutionID, "credits_changed", map[string]interface{}{
-			"kind":    ev.Kind,   // deduct / refund / recharge
-			"action":  ev.Action, // 计费动作（如 ai.image）
-			"scene":   ev.Scene,  // 场景文案（如「图片生成」）
-			"amount":  ev.Amount, // 本次变动金额（正数）
+			"kind":    ev.Kind,    // deduct / refund / recharge
+			"action":  ev.Action,  // 计费动作（如 ai.image）
+			"scene":   ev.Scene,   // 场景文案（如「图片生成」）
+			"amount":  ev.Amount,  // 本次变动金额（正数）
 			"balance": ev.Balance, // 变动后的余额快照（同一个扣费流程里读到的值）
 		})
 	})
@@ -293,7 +301,16 @@ func main() {
 	if frontendBase == "" {
 		frontendBase = "http://192.168.110.115:8880"
 	}
-	paymentHandler := handler.NewPaymentHandler(paymentService, frontendBase)
+	paymentHandler := handler.NewPaymentHandler(paymentService, wechatPayService, frontendBase)
+	wechatPayHandler := handler.NewWechatPayHandler(wechatPayService)
+
+	// 启动时预取微信平台证书（配置就绪才有动作）：让第一笔回调不必现拉证书，
+	// 稳稳落在微信要求的 5 秒 ACK 预算内；未配置时只记一行日志，不阻断启动
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		wechatPayService.Prefetch(ctx)
+	}()
 
 	// ==================== Redis 增强能力：限流 / 并发闸门 / 生成任务队列 ====================
 	// Redis 是增强而非硬依赖：连接失败时自动降级（限流关闭、生成任务回到进程内执行），
@@ -388,6 +405,12 @@ func main() {
 	r.POST("/api/payment/alipay/notify", paymentHandler.AlipayNotify)
 	r.GET("/api/payment/alipay/return", paymentHandler.AlipayReturn)
 
+	// 微信支付异步通知（APIv3：验签 + 解密 + 幂等到账；成功回微信要求的 SUCCESS 体）
+	r.POST("/api/payment/wechat/notify", wechatPayHandler.Notify)
+
+	// 收银台支付方式能力查询（公开：不含敏感信息；用于「微信支付」置灰与 H5 可用性标注）
+	r.GET("/api/payment/methods", paymentHandler.Methods)
+
 	// 公开上传接口
 	publicUpload := r.Group("/api/upload")
 	{
@@ -412,7 +435,7 @@ func main() {
 
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
-		api.POST("/auth/refresh", userHandler.Refresh) // 滑动续期：剩余寿命不足时换新 token
+		api.POST("/auth/refresh", userHandler.Refresh)                  // 滑动续期：剩余寿命不足时换新 token
 		api.PUT("/auth/profile", userHandler.UpdateProfile)             // 更新当前用户个人资料（昵称/头像）
 		api.PUT("/auth/password", userHandler.ChangePassword)           // 修改当前用户密码
 		api.POST("/upload/avatar", uploadHandler.UploadAvatar)          // 上传头像（存 users/<userID>/avatar/）

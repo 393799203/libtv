@@ -134,14 +134,14 @@ export default function ForumListPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8">
+    <div className="mx-auto w-full max-w-5xl py-8">
       {/* 说明行 */}
-      <p className="mb-4 text-[13px] text-gray-500">
+      <p className="mb-4 px-4 text-[13px] text-gray-500">
         活动公告、创作交流、问题反馈都发在这里 · 共 {total} 篇帖子
       </p>
 
       {/* 搜索与发帖同一行：搜索占满剩余宽度，发帖固定在右侧 */}
-      <div className="mb-5 flex items-center gap-3">
+      <div className="mb-5 flex items-center gap-3 px-4">
         <Input
           className="flex-1 max-md:!h-11"
           size="large"
@@ -195,7 +195,7 @@ export default function ForumListPage() {
               /* 横向不留内边距：帖子正文要和上面的搜索框共用同一条左基线
                  （原来行内还有 p-4，比搜索多缩进 16px，"帖子没和搜索对齐"）。
                  纵向 py-4 保留原节奏，hover 底色正好铺满行盒。 */
-              className={`cursor-pointer py-4 transition-colors hover:bg-gray-50 ${
+              className={`cursor-pointer px-4 py-4 transition-colors hover:bg-gray-50 ${
                 index > 0 ? 'border-t border-gray-100' : ''
               }`}
             >

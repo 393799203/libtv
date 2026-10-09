@@ -128,3 +128,29 @@ payment:
     notify_url: ""           # 异步回调（公网可达）；环境变量 ALIPAY_NOTIFY_URL
     return_url: ""           # 同步跳转；环境变量 ALIPAY_RETURN_URL
     subject_prefix: "漫蛙AI积分"
+
+  # ---- 微信支付（APIv3；与支付宝平级共存，各自独立开关）----
+  # 严禁把任何密钥/证书写进这里（仓库会被提交）：留空即「未配置」，
+  # 密钥请用环境变量注入（WXPAY_*，见 internal/config/config.go），
+  # 或在运营后台「商务配置 → 支付配置」页填写（后台值优先，会脱敏回显）。
+  #
+  # 回调地址：可留空，由下面的 site_base_url 推导为
+  #   <site_base_url>/api/payment/wechat/notify   ←  必须公网可达且为 HTTPS
+  # 平台证书/微信支付公钥：可留空 —— 留空时运行时调用 /v3/certificates 动态获取
+  # 并缓存（6 小时过期 + 验签遇未知序列号立刻刷新），证书轮换无需人工干预。
+  # H5 支付（手机）需在商户平台**单独申请开通**，开通后把 h5_enabled 置 true；
+  # 未开通时能力接口会如实标注「H5 不可用」，前端回落扫码支付。
+  wxpay:
+    enabled: false
+    app_id: ""               # 公众号/小程序 AppID（必须与商户号绑定）；WXPAY_APP_ID
+    mchid: ""                # 商户号；WXPAY_MCHID
+    api_v3_key: ""           # APIv3 密钥（32 字节）；WXPAY_API_V3_KEY
+    cert_serial_no: ""       # 商户 API 证书序列号；WXPAY_CERT_SERIAL_NO
+    private_key: ""          # 商户 API 私钥 PEM（apiclient_key.pem）；WXPAY_PRIVATE_KEY / WXPAY_PRIVATE_KEY_FILE
+    platform_cert: ""        # 微信支付平台证书 PEM（可留空，自动获取）；WXPAY_PLATFORM_CERT_FILE
+    public_key: ""           # 微信支付公钥 PEM（公钥模式，可留空）；WXPAY_PUBLIC_KEY_FILE
+    public_key_id: ""        # 微信支付公钥 ID（PUB_KEY_ID_ 开头）；WXPAY_PUBLIC_KEY_ID
+    notify_url: ""           # 异步回调地址（留空由站点域名推导）；WXPAY_NOTIFY_URL
+    site_base_url: "https://manwa.yunqueai.cloud"  # 站点基地址（推导回调地址）；SITE_BASE_URL / FRONTEND_BASE
+    api_base: ""             # API 域名覆盖（默认 https://api.mch.weixin.qq.com）；沙箱联调用
+    h5_enabled: false        # H5 支付权限是否已开通（需商户平台单独申请）

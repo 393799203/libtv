@@ -398,10 +398,13 @@ type BillingRecord struct {
 	// Duration - RefVideoDuration 即输出视频时长。无参考视频输入、非视频节点与历史账单均为 0。
 	RefVideoDuration int `gorm:"not null;default:0" json:"ref_video_duration"`
 	// OrderNo 充值对应的商户订单号（payment_orders.order_no）。
-	// 仅支付宝充值有；后台手工充值为空。与支付宝对账时靠它对上流水。
+	// 支付宝/微信充值都有（两条支付线共用一套订单表）；后台手工充值为空。
 	OrderNo string `gorm:"size:64;default:''" json:"order_no"`
 	// AlipayTradeNo 支付宝交易号（支付宝侧 trade_no）：退款与对账的唯一凭据，仅支付宝充值有。
 	AlipayTradeNo string `gorm:"size:64;default:''" json:"alipay_trade_no"`
+	// WxpayTradeNo 微信支付交易号（微信侧 transaction_id）：与 AlipayTradeNo 同职，仅微信充值有。
+	// 两条线共用本表与 OrderNo，「订单号 + 对应渠道交易号」即可对上渠道流水。
+	WxpayTradeNo string `gorm:"size:64;default:''" json:"wxpay_trade_no"`
 	// TaskID 上游异步任务号（视频生成才有）。
 	// 账单行是永久记录，而异步任务登记（Redis，24h）在退费成功后就被消费掉了 ——
 	// 少了这一列，事后既无法向渠道核对「这笔失败有没有让上游真的接单并计费」，

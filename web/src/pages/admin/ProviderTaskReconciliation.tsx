@@ -186,23 +186,140 @@ function formatTokens(n: number): string {
   return `${(n / 10000).toFixed(1)}万`;
 }
 
-/** 非 token 口径的简短展示：video_duration=9 video_count=1 → 时长9 · 张数1 */
-function formatUsageBrief(usage: string): string {
-  const map: Record<string, string> = {
-    video_duration: '时长',
-    video_count: '张数',
-    duration: '时长',
-    generated_images: '张数',
-    image_count: '张数',
+/**
+ * 分辨率：SR=720 → 720P。
+ * 上游也可能给「1280x720」这种带乘号的写法，取小的那一段（视频档位按短边叫：
+ * 1080x1920 是 1080P，不是 1920P），认不出数字就返回空串（不展示）。
+ */
+function formatUsageResolution(raw: string): string {
+  const v = (raw || '').trim();
+  if (!v) return '';
+  if (/^\d+$/.test(v)) return `${v}P`;
+  const dims = v
+    .split(/[x×*]/)
+    .map((s) => s.trim())
+    .filter((s) => /^\d+$/.test(s))
+    .map(Number);
+  return dims.length ? `${Math.min(...dims)}P` : '';
+}
+
+/**
+ * 上游 usage 原文 → 认得出来的参数（键名归一到 resolution/duration/fps/ratio/count）。
+ *
+ * usage 是上游回带的「按什么口径计费」的原文快照，形如空格分隔的 K=V（不同模型/渠道的键不同）：
+ *   SR=720 duration=8 fps=30 input_video_duration=0 output_video_duration=8 ratio=16:9 video_count=1
+ * 规则：认不得的键（如 input_video_duration）不返回；不是 K=V 的中文说明
+ * （如「按交付像素推算 3840x2160÷256」）一个都认不出 → 返回空对象；同名键保留先出现的那个。
+ */
+function parseUsageParams(usage: string): Record<string, string> {
+  const raw = (usage || '').trim();
+  if (!raw) return {};
+
+  // 先切成 K=V 字典
+  const kv: Record<string, string> = {};
+  for (const token of raw.split(/\s+/)) {
+    const at = token.indexOf('=');
+    if (at <= 0 || at === token.length - 1) continue;
+    const key = token.slice(0, at).trim();
+    const value = token.slice(at + 1).trim();
+    if (key && value && kv[key] === undefined) kv[key] = value;
+  }
+  // 取第一个有值的别名（多个别名是为兼容不同上游的叫法：同一样东西各家键名不一样）
+  const pick = (...keys: string[]): string => {
+    for (const k of keys) if (kv[k] !== undefined) return kv[k];
+    return '';
   };
-  const parts = usage
-    .split(/\s+/)
-    .map((kv) => {
-      const [k, v] = kv.split('=');
-      return k && v ? `${map[k] ?? k}${v}` : kv;
-    })
-    .filter(Boolean);
-  return parts.length ? parts.join(' · ') : usage;
+  // 值为 0 的参数等于「本次没有这个参数」：不返回，免得写成 0s / 0fps 像是异常
+  const notZero = (v: string) => !!v && !/^0+(\.0+)?$/.test(v);
+
+  const out: Record<string, string> = {};
+  const resolution = pick('SR', 'resolution', 'video_resolution');
+  if (resolution) out.resolution = resolution;
+  const duration = pick('duration', 'video_duration', 'output_video_duration');
+  if (notZero(duration)) out.duration = duration;
+  const fps = pick('fps', 'frame_rate');
+  if (notZero(fps)) out.fps = fps;
+  const ratio = pick('ratio', 'aspect_ratio');
+  if (ratio) out.ratio = ratio;
+  const count = pick('video_count', 'generated_images', 'image_count');
+  if (notZero(count)) out.count = count;
+  return out;
+}
+
+/**
+ * 我方计费口径里的分辨率写法：720p → 720P（纯档位）；2560x1440 → 2560×1440（二维尺寸原样保留，
+ * 不折算成短边，不然图片行会从「2560×1440」变成看不出是图片的「1440P」）。
+ */
+function formatChargeResolution(raw: string): string {
+  const v = (raw || '').trim();
+  if (!v) return '';
+  const level = /^(\d+)\s*[pP]$/.exec(v);
+  if (level) return `${level[1]}P`;
+  if (/^\d+$/.test(v)) return `${v}P`;
+  return v.replace('x', '×');
+}
+
+/**
+ * 「渠道 / 模型」格**第一行**里的参数（与渠道文字同一行，紧接渠道名之后）：
+ *   电信 720P · 8s · 30fps · 16:9 · 1张
+ *
+ * 这一串是**两个来源融合**出来的，不是各显示一半：
+ *   · 我方计费口径：charge_resolution / charge_seconds / charge_ref_seconds（原来那个灰底小标签）
+ *   · 上游回带口径：provider_usage 原文里解析出来的 SR/duration/fps/ratio/video_count
+ * 两边说的常常是同一件事（标签 `720p · 8s`、usage `SR=720 duration=8`），并排显示等于同一串
+ * 数字写两遍 —— 重复的只留一份（保留上游那份的写法：720P），各自独有的键继续显示
+ * （所以上游的 fps/ratio/张数、我方的「参考Ns」都不会丢）。
+ *
+ * 但两边**并不总是相同**：我们按 480p 下发、上游按 720p 计费的那种（成本差一倍，本页开头
+ * 注释里那条事故）必须一眼看得出来，所以分辨率/时长不一致时不是丢掉一个，而是写成
+ * 「我方→上游」：`480P→720P · 8s`。相同则只写一份。
+ *
+ * 什么都解析不出来时返回 null（**不是空 span**）——不渲染、不占位、行高不变；
+ * 行内不再换行（父级 flex-nowrap），放不下只让末尾省略号收尾，
+ * min-w-0 保证它不会撑破这一列。完整信息挂在 title 上：上游 usage 原文 + 我方计费口径。
+ */
+function UsageParamsBrief({ row }: { row: ProviderTask }) {
+  const usage = (row.provider_usage || '').trim();
+  const p = parseUsageParams(usage);
+
+  const chargeRes = formatChargeResolution(row.charge_resolution || '');
+  const usageRes = formatUsageResolution(p.resolution || '');
+  const chargeSec = row.charge_seconds > 0 ? `${row.charge_seconds}s` : '';
+  const usageSec = p.duration ? `${p.duration}s` : '';
+
+  // 融合后的顺序：分辨率 → 时长 → 帧率 → 比例 → 张数 → 参考Ns（我方的参考视频只在这里出现）
+  const parts: string[] = [];
+  if (chargeRes && usageRes) parts.push(chargeRes === usageRes ? usageRes : `${chargeRes}→${usageRes}`);
+  else if (chargeRes || usageRes) parts.push(chargeRes || usageRes);
+  if (chargeSec && usageSec) parts.push(chargeSec === usageSec ? usageSec : `${chargeSec}→${usageSec}`);
+  else if (chargeSec || usageSec) parts.push(chargeSec || usageSec);
+  if (p.fps) parts.push(`${p.fps}fps`);
+  if (p.ratio) parts.push(p.ratio);
+  if (p.count) parts.push(`${p.count}张`);
+  if (row.charge_ref_seconds > 0) parts.push(`参考${row.charge_ref_seconds}s`);
+
+  if (!parts.length) return null;
+
+  // 悬停看全：上游原文 + 我方计费口径（哪来的都写清楚，摘要被省略号截了也不丢信息）
+  const chargeText = [
+    chargeRes || (row.charge_resolution || ''),
+    chargeSec,
+    row.charge_ref_seconds > 0 ? `参考${row.charge_ref_seconds}s` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const title = [usage ? `上游 usage 原文：${usage}` : '', chargeText ? `我方计费口径：${chargeText}` : '']
+    .filter(Boolean)
+    .join('\n');
+
+  return (
+    <span
+      className="ml-1 min-w-0 text-[11px] leading-4 text-[var(--dv-text-3)] whitespace-nowrap overflow-hidden text-ellipsis"
+      title={title || undefined}
+    >
+      {parts.join(' · ')}
+    </span>
+  );
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -576,24 +693,24 @@ export default function ProviderTaskReconciliation() {
     {
       title: '渠道 / 模型',
       dataIndex: 'model',
-      // 224 → 160：渠道名 + 口径标签一行、模型名折行，用不了那么宽；腾出来的给备注
-      width: 160,
+      // 224 → 160 → 200：160 时「电信 + 参数」放不进一行（实测内容宽 156px，160px 列只有
+      // 144px 可用 → 参数必然被挤到第二行，看着像独立一行）。200 是让它稳稳在一行的宽度
+      // （可用 184px，留 ~28px 余量，换字体/换机器也不折行）；其它列宽一律没动，
+      // 表格最小宽度因此 +40px（scroll.x 必须跟着改，见 Table 处注释）。
+      width: 200,
       render: (_: string, r) => (
         <div className="text-[12px] leading-5">
-          {/* 口径（模型参数：分辨率 · 计费时长）跟在渠道名后面：模型名很长，跟在它后面会被挤掉 */}
-          {/* 第一行只放「渠道 + 口径」：口径就是这次调用用的模型参数，紧贴渠道名最省地方 */}
+          {/* 第一行只放「渠道 + 参数」：参数是我方计费口径与上游回带口径融合出来的一串
+              （分辨率 · 时长 · 帧率 · 比例 · 张数 · 参考Ns），紧贴渠道名最省地方 */}
+          {/* flex-nowrap（不是 flex-wrap）：渠道和参数必须留在同一条视觉线上，折行就等于又变成
+              用户不要的「独立一行」。宽度按实测留足，真遇上更长的组合（如带「参考Ns」的那种）
+              也只让参数串省略号收尾，绝不换行、不溢到下一列 */}
           <div className="flex items-center gap-1 flex-nowrap overflow-hidden">
             <span className="text-gray-800 whitespace-nowrap shrink-0">{providerText(r.provider)}</span>
-            {(r.charge_resolution || r.charge_seconds > 0) && (
-              <Tag
-                bordered={false}
-                className="!text-[9px] !px-1 !py-0 !mr-0 !leading-none shrink-0 text-gray-500 bg-gray-100"
-              >
-                {(r.charge_resolution || '').replace('x', '×')}
-                {r.charge_seconds > 0 ? `${r.charge_resolution ? ' · ' : ''}${r.charge_seconds}s` : ''}
-                {r.charge_ref_seconds > 0 ? ` · 参考${r.charge_ref_seconds}s` : ''}
-              </Tag>
-            )}
+            {/* 我方计费口径 + 上游回带参数**融合成一串**显示（重复的键只留一份：
+                以前这里是「720p · 8s」灰标签、后面再跟一串「720P · 8s · 30fps…」，
+                同一批数字说两遍）。解析不出来就返回 null：不占位、不改行高 */}
+            <UsageParamsBrief row={r} />
           </div>
           {/* 第二行放「类型 + 模型名」：模型名最长，单独一行折行显示，不跟口径抢宽度 */}
           <div className="text-[11px] text-gray-500 break-all" title={r.model}>
@@ -629,13 +746,18 @@ export default function ProviderTaskReconciliation() {
               >
                 <span className="text-sky-700 cursor-help">{formatTokens(r.provider_tokens)}</span>
               </Tooltip>
-            ) : r.provider_usage ? (
-              // 有非 token 口径（如 wan3.0 的时长/张数）：能看口径，但不冒充 tokens
-              <Tooltip title={`上游用量口径：${r.provider_usage}`}>
-                <span className="text-gray-400 cursor-help">按{formatUsageBrief(r.provider_usage)}</span>
-              </Tooltip>
             ) : (
-              <Tooltip title="上游结果里没有回带用量（部分渠道不回带）——留空而不是估算">
+              // tokens = 0/NULL 就是「上游不按 token 计费」：这里一律留「-」。
+              // 以前会把 usage 原文摘成一串「按时长8 · 张数1」塞进来，两个问题：
+              // 一是和「渠道 / 模型」格里那行参数摘要重复，二是把「按参数计费」写得像是
+              // 一个被算出来的数字。参数摘要归渠道/模型格，这一栏只回答「花了多少 token」。
+              <Tooltip
+                title={
+                  r.provider_usage
+                    ? `上游没有按 token 计费（本次口径：${r.provider_usage}）——所以这一栏是「-」而不是 0；参数已展示在「渠道 / 模型」列。`
+                    : '上游结果里没有回带用量（部分渠道不回带）——留空而不是估算'
+                }
+              >
                 <span className="text-gray-300 cursor-help">-</span>
               </Tooltip>
             )}
@@ -829,10 +951,20 @@ export default function ProviderTaskReconciliation() {
               } else {
                 message.success(`一致性核对通过（耗时 ${rep.duration}）`);
               }
+              // 自检的「无主问题」（orphans）不止一类，**不能写死成一个说法**：
+              //   · 要人工核查的：有扣费流水但对账行没写成；
+              //   · 属正常的：对账行引用的执行/项目已随项目删除而清理（自检原话就写着「属正常，无需处理」）。
+              // 以前这里把文案固定成前者，于是「项目删了」也被报成「有扣费流水但无对账记录」，
+              // 看着像账目出了问题 —— 直接把自检的原话显示出来，管理员不用去翻服务端日志。
               if (rep.orphans?.length) {
-                message.warning(
-                  `另有 ${rep.orphans.length} 条「有扣费流水但无对账记录」的问题，已写入服务端日志`
-                );
+                const shown = rep.orphans.slice(0, 3);
+                const more = rep.orphans.length - shown.length;
+                message.warning({
+                  content: `自检另有 ${rep.orphans.length} 条提示：${shown.join('；')}${
+                    more > 0 ? `（还有 ${more} 条见服务端日志）` : ''
+                  }`,
+                  duration: 8,
+                });
               }
               load();
             } catch {
@@ -867,9 +999,11 @@ export default function ProviderTaskReconciliation() {
         columns={columns}
         dataSource={items}
         pagination={false}
-        // 必须等于各列 width 之和（150+150+150+160+96+176+150+224=1256）：
+        // 必须等于各列 width 之和（150+150+150+200+132+176+150+224=1332）：
         // 不一致时 antd 的表头和表体宽度算法会对不上，列会错位
-        scroll={{ x: 1256 }}
+        // （原注释写的是 …+96+…=1256：那个 96 是「积分 / 消耗Token」列的旧宽度，
+        //   该列实际早已是 132，基数一直没跟上；本次只按真实值把它写对，没有动任何别的列宽）
+        scroll={{ x: 1332 }}
         locale={{ emptyText: '暂无记录（对账表从本次上线开始记录）' }}
       />
 
