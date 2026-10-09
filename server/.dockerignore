@@ -11,6 +11,8 @@ ENV/
 .gitignore
 .idea/
 .vscode/
+.DS_Store
+**/.DS_Store
 *.md
 .pytest_cache/
 .coverage

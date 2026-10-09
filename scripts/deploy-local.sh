@@ -39,7 +39,12 @@ sync_dir() { # $1=本地路径 $2=远端路径 [额外 rsync 参数...]
 # —— 最后三个是重构前的旧实现，会被一起编译进后端镜像，属于「线上跑的代码 ≠ 仓库代码」）。
 # --exclude 的 bin/ 与 logs/ 不会被 --delete 删掉（被排除的路径同时受保护），
 # 所以远端构建产物与日志照旧保留。
-sync_server() { sync_dir server/ /opt/libtv/server/ --delete --exclude 'bin/' --exclude 'logs/'; }
+# .DS_Store 只做「不再上传」，**不加 --delete-excluded**：--delete-excluded 会把所有被排除的
+# 路径一并删掉，包括远端 logs/（实测有 server.log / restart.log）和 bin/。
+# 远端已有的那两个 .DS_Store 在 2026-10-09 手工清掉了，之后由这条 exclude 保证不再回来。
+sync_server() {
+  sync_dir server/ /opt/libtv/server/ --delete --exclude 'bin/' --exclude 'logs/' --exclude '.DS_Store'
+}
 
 # 前端产物同步：**必须带 --delete**。
 # web/dist 每次构建都换一整套带哈希的文件名，不带 --delete 的话远端只会越堆越多：
