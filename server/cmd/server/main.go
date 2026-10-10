@@ -20,6 +20,7 @@ import (
 	"libtv/internal/handler"
 	"libtv/internal/idem"
 	"libtv/internal/llm"
+	"libtv/internal/mail"
 	"libtv/internal/middleware"
 	"libtv/internal/model"
 	"libtv/internal/queue"
@@ -40,6 +41,23 @@ func getPublicDir(subdir string) string {
 		return filepath.Join("/app/public", subdir)
 	}
 	return filepath.Join("..", "public", subdir)
+}
+
+// mailSiteURL 欢迎邮件里「进入漫蛙」按钮指向的地址。
+//
+// 依次回退：SMTP_SITE_URL / smtp.site_url → FRONTEND_BASE → 支付配置里的站点域名
+// （都为空时用线上默认域名兜底），保证邮件链接始终指向当前环境，而不是写死一个域名。
+func mailSiteURL() string {
+	for _, candidate := range []string{
+		config.C.SMTP.SiteURL,
+		os.Getenv("FRONTEND_BASE"),
+		config.C.Payment.Wxpay.SiteBaseURL,
+	} {
+		if v := strings.TrimSpace(candidate); v != "" {
+			return strings.TrimRight(v, "/")
+		}
+	}
+	return "https://manwa.yunqueai.cloud"
 }
 
 // initStorage 通过 storage.Create 工厂创建存储实例；
@@ -164,7 +182,27 @@ func main() {
 	appStorage := initStorage()
 
 	// 初始化 Service
-	userService := service.NewUserService(userRepo, appStorage)
+	// 邮件：注册欢迎邮件用。没配 SMTP（默认）时 Enabled()==false，UserService 会静默跳过，
+	// 注册接口与邮件完全解耦 —— 邮件发不出去不影响任何业务流程。
+	mailSender := mail.New(mail.Options{
+		Enabled:    config.C.SMTP.Enabled,
+		Host:       config.C.SMTP.Host,
+		Port:       config.C.SMTP.Port,
+		Username:   config.C.SMTP.Username,
+		Password:   config.C.SMTP.Password,
+		From:       config.C.SMTP.From,
+		FromName:   config.C.SMTP.FromName,
+		SiteURL:    mailSiteURL(),
+		SkipVerify: config.C.SMTP.SkipVerify,
+	})
+	if mailSender.Enabled() {
+		// 启动日志里把发信身份打出来：判断「欢迎邮件到底开没开」不该靠猜
+		log.Printf("[Mail] ✅ SMTP 已启用：%s:%d 发件人=%s 邮件跳转=%s",
+			config.C.SMTP.Host, config.C.SMTP.Port, config.C.SMTP.Username, mailSiteURL())
+	} else {
+		log.Printf("[Mail] 未启用 SMTP（smtp.enabled=false 或缺少 host/from），注册欢迎邮件不会发送")
+	}
+	userService := service.NewUserService(userRepo, appStorage, mailSender)
 	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, commentRepo, appStorage)

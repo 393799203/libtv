@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,23 @@ type Config struct {
 	AI        AIConfig        `yaml:"ai"`
 	Payment   PaymentConfig   `yaml:"payment"`
 	CORS      CORSConfig      `yaml:"cors"`
+	SMTP      SMTPConfig      `yaml:"smtp"`
+}
+
+// SMTPConfig 系统通知邮件的 SMTP 配置（当前用于注册欢迎邮件）。
+//
+// 与支付密钥同一套注入方式：config.yaml 里留空占位，生产用 SMTP_* 环境变量注入，
+// 口令不要写进仓库。enabled=false（默认）时完全不发信，注册流程不受任何影响。
+type SMTPConfig struct {
+	Enabled    bool   `yaml:"enabled"`     // 启用开关
+	Host       string `yaml:"host"`        // 如 smtp.qq.com / smtp.163.com / smtpdm.aliyun.com
+	Port       int    `yaml:"port"`        // 465=隐式 TLS；587/25=明文 + STARTTLS
+	Username   string `yaml:"username"`    // 一般是完整邮箱地址
+	Password   string `yaml:"password"`    // 授权码（不是登录密码）
+	From       string `yaml:"from"`        // 发件地址；留空用 username
+	FromName   string `yaml:"from_name"`   // 发件人显示名
+	SiteURL    string `yaml:"site_url"`    // 欢迎邮件按钮跳转地址；留空回退站点基地址
+	SkipVerify bool   `yaml:"skip_verify"` // 自建 SMTP 用自签证书时才置 true
 }
 
 // VideoConfig 视频生成（上游异步任务）的轮询预算。
@@ -342,6 +360,39 @@ func Load(path string) error {
 			return fmt.Errorf("read WXPAY_PUBLIC_KEY_FILE %s: %w", v, err)
 		}
 		C.Payment.Wxpay.PublicKey = string(b)
+	}
+
+	// SMTP（注册欢迎邮件等系统通知）：与支付同一套注入方式，口令只走环境变量
+	if v := os.Getenv("SMTP_ENABLED"); v != "" {
+		C.SMTP.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("SMTP_HOST"); v != "" {
+		C.SMTP.Host = v
+	}
+	if v := os.Getenv("SMTP_PORT"); v != "" {
+		port, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || port <= 0 || port > 65535 {
+			return fmt.Errorf("invalid SMTP_PORT %q", v)
+		}
+		C.SMTP.Port = port
+	}
+	if v := os.Getenv("SMTP_USERNAME"); v != "" {
+		C.SMTP.Username = v
+	}
+	if v := os.Getenv("SMTP_PASSWORD"); v != "" {
+		C.SMTP.Password = v
+	}
+	if v := os.Getenv("SMTP_FROM"); v != "" {
+		C.SMTP.From = v
+	}
+	if v := os.Getenv("SMTP_FROM_NAME"); v != "" {
+		C.SMTP.FromName = v
+	}
+	if v := os.Getenv("SMTP_SITE_URL"); v != "" {
+		C.SMTP.SiteURL = v
+	}
+	if v := os.Getenv("SMTP_SKIP_VERIFY"); v != "" {
+		C.SMTP.SkipVerify = v == "1" || strings.EqualFold(v, "true")
 	}
 
 	return nil

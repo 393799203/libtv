@@ -29,13 +29,21 @@ var (
 	ErrWrongPassword    = apperror.New(2005, http.StatusBadRequest, "原密码不正确")
 )
 
+// WelcomeMailer 注册成功后的欢迎邮件发送方（*mail.Sender 实现）。
+// 抽成接口是为了让 service 层不必知道 SMTP 细节，也能在没配邮件时直接传 nil。
+type WelcomeMailer interface {
+	Enabled() bool
+	SendWelcome(to, nickname string) error
+}
+
 type UserService struct {
 	userRepo repository.UserRepo
 	storage  storage.Storage
+	mailer   WelcomeMailer
 }
 
-func NewUserService(userRepo repository.UserRepo, s storage.Storage) *UserService {
-	return &UserService{userRepo: userRepo, storage: s}
+func NewUserService(userRepo repository.UserRepo, s storage.Storage, mailer WelcomeMailer) *UserService {
+	return &UserService{userRepo: userRepo, storage: s, mailer: mailer}
 }
 
 // GetUserRole 查询用户角色（供 RequireAdmin 中间件鉴权使用）
@@ -82,7 +90,32 @@ func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, 
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
+	// 注册成功即发欢迎邮件：异步 + 只记日志，绝不因为邮件问题让注册失败
+	s.sendWelcomeAsync(user)
 	return user, nil
+}
+
+// sendWelcomeAsync 异步发送注册欢迎邮件（未配置 SMTP 时静默跳过）。
+//
+// 放 goroutine 里是因为 SMTP 握手到投递常有秒级延迟，不该让用户等注册接口返回；
+// 单独 recover 是为了邮件库里的任何意外都不会把整个进程带崩。
+func (s *UserService) sendWelcomeAsync(user *model.User) {
+	if user == nil || s.mailer == nil || !s.mailer.Enabled() {
+		return
+	}
+	email, nickname := user.Email, user.Nickname
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Mail] ⚠️ 欢迎邮件发送异常 to=%s: %v", email, r)
+			}
+		}()
+		if err := s.mailer.SendWelcome(email, nickname); err != nil {
+			log.Printf("[Mail] ⚠️ 欢迎邮件发送失败 to=%s: %v", email, err)
+			return
+		}
+		log.Printf("[Mail] ✅ 欢迎邮件已发送 to=%s", email)
+	}()
 }
 
 func (s *UserService) Login(ctx context.Context, email, password string) (string, *model.User, error) {

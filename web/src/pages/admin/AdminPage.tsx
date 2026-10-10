@@ -1254,12 +1254,14 @@ export default function AdminPage() {
                         return (
                           <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                             <td className="min-w-[180px] px-4 py-3">
-                              {/* 昵称紧跟邮箱、浅一档；whitespace-nowrap 保证它不会被拆成
-                                  「昵称前半」换行、「昵称后半」再换行；没昵称就不占位 */}
+                              {/* 昵称紧跟邮箱；whitespace-nowrap 保证它不会被拆成
+                                  「昵称前半」换行、「昵称后半」再换行；没昵称就不占位。
+                                  2026-10-10 反馈「用户名看的不是太明显」：原来 12px/gray-400 太淡，
+                                  改成与邮箱同级字号 + 加粗一档 + 深一档灰度，读起来是个名字而不是脚注。 */}
                               <div className="text-gray-800 break-all">
                                 {user.email}
                                 {user.nickname && (
-                                  <span className="ml-1.5 whitespace-nowrap text-[12px] text-gray-400">
+                                  <span className="ml-1.5 whitespace-nowrap text-[13px] font-medium text-gray-600">
                                     · {user.nickname}
                                   </span>
                                 )}

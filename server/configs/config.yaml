@@ -154,3 +154,17 @@ payment:
     site_base_url: "https://manwa.yunqueai.cloud"  # 站点基地址（推导回调地址）；SITE_BASE_URL / FRONTEND_BASE
     api_base: ""             # API 域名覆盖（默认 https://api.mch.weixin.qq.com）；沙箱联调用
     h5_enabled: false        # H5 支付权限是否已开通（需商户平台单独申请）
+
+# 系统通知邮件（当前用于「注册欢迎邮件」）。
+# enabled=false（默认）时完全不发信，注册流程不受影响；
+# 口令/授权码不要写进仓库 —— 用 SMTP_PASSWORD 环境变量注入（其余字段同样支持 SMTP_* 覆盖）。
+smtp:
+  enabled: false
+  host: ""                 # 如 smtp.qq.com / smtp.163.com / smtpdm.aliyun.com；SMTP_HOST
+  port: 465                # 465=隐式 TLS；587/25=明文 + STARTTLS；SMTP_PORT
+  username: ""             # 一般是完整邮箱地址；SMTP_USERNAME
+  password: ""             # 授权码（不是登录密码）；SMTP_PASSWORD
+  from: ""                 # 发件地址，留空用 username；SMTP_FROM
+  from_name: "漫蛙"         # 发件人显示名；SMTP_FROM_NAME
+  site_url: ""             # 欢迎邮件里按钮的跳转地址；留空回退 payment.wechat.site_base_url（即本站域名）
+  skip_verify: false       # 自建 SMTP 用自签证书时才置 true；SMTP_SKIP_VERIFY
