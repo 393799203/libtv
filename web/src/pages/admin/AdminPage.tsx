@@ -1237,8 +1237,8 @@ export default function AdminPage() {
                   <table className="w-full text-[13px] min-w-[380px] lg:min-w-[1000px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
-                        <th className="min-w-[180px] px-4 py-3 text-left font-medium text-gray-600">用户（ID / 邮箱）</th>
-                        <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">昵称</th>
+                        {/* 昵称并入邮箱后面（原来单占一列，lg 以下还会整列消失） */}
+                        <th className="min-w-[180px] px-4 py-3 text-left font-medium text-gray-600">用户（ID / 邮箱 / 昵称）</th>
                         <th className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
                         <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">渠道商</th>
@@ -1254,10 +1254,18 @@ export default function AdminPage() {
                         return (
                           <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                             <td className="min-w-[180px] px-4 py-3">
-                              <div className="text-gray-800 break-all">{user.email}</div>
+                              {/* 昵称紧跟邮箱、浅一档；whitespace-nowrap 保证它不会被拆成
+                                  「昵称前半」换行、「昵称后半」再换行；没昵称就不占位 */}
+                              <div className="text-gray-800 break-all">
+                                {user.email}
+                                {user.nickname && (
+                                  <span className="ml-1.5 whitespace-nowrap text-[12px] text-gray-400">
+                                    · {user.nickname}
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-gray-400 font-mono text-[11px] mt-0.5 break-all">{user.id}</div>
                             </td>
-                            <td className="hidden lg:table-cell px-4 py-3 text-gray-600">{user.nickname || '-'}</td>
                             <td className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-gray-500 text-[12px]">
                               <span>项目 {user.project_count || 0}</span>
                               <span className="inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
