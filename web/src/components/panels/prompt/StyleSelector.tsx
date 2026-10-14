@@ -1,20 +1,23 @@
-import { memo, useState, useCallback, useMemo, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import {
-  CloseOutlined,
-  HeartFilled,
-  HeartOutlined,
-} from '@ant-design/icons';
+import { memo, useState, useCallback, useMemo } from 'react';
+import { CloseOutlined } from '@ant-design/icons';
 import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
-import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
+import type { StyleItem } from '@/services/styleApi';
 import { createNode } from '@/utils/nodeFactory';
+import { StyleMarketModal } from '@/components/style/StyleMarketModal';
 
 interface StyleSelectorProps {
   /** 当前节点 ID，用于定位画布上的风格节点与连线 */
   targetNodeId?: string;
 }
 
+/**
+ * 节点内的「风格」入口：显示已选风格缩略图，点开风格市场挑一个。
+ *
+ * 风格图是独立通道：后端从上游连线收集 style- 节点（id 前缀或 data.styleId），
+ * 无需往提示词里插 @ 引用，所以这里只做「连/断一个风格节点」这一件事。
+ * 浏览市场的 UI 在 StyleMarketModal 里（与左侧「风格素材」入口共用）。
+ */
 export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
   targetNodeId,
 }) {
@@ -24,15 +27,8 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
   const addEdgeFn = useCanvasStore((s) => s.addEdge);
   const removeNodes = useCanvasStore((s) => s.removeNodes);
 
-  // 风格市场弹窗状态
+  // 风格市场弹窗开关
   const [styleMarketOpen, setStyleMarketOpen] = useState(false);
-  const [styles, setStyles] = useState<StyleItem[]>([]);
-  const [styleLoading, setStyleLoading] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<string>('');
-  const [searchKeyword, setSearchKeyword] = useState('');
-  const [categories, setCategories] = useState<CategoryItem[]>([]);
-  const [favoritedMap, setFavoritedMap] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<'market' | 'favorites'>('market');
 
   // 订阅"当前节点入边里的 style- 节点"签名，画布上直接删节点/断线会自动反映
   const styleSignature = useCanvasStore((s) => {
@@ -75,29 +71,9 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetNodeId, styleSignature]);
 
-  // 加载收藏列表
-  const loadFavorites = useCallback(() => {
-    setStyleLoading(true);
-    styleApi.listFavorites()
-      .then((res) => {
-        const items = res.items || [];
-        setStyles(items);
-        if (items.length > 0) {
-          styleApi.checkFavorited(items.map(s => s.id))
-            .then(setFavoritedMap)
-            .catch(() => {});
-        }
-      })
-      .catch(() => {})
-      .finally(() => setStyleLoading(false));
-  }, []);
-
-  // 选中风格：先清理旧风格，再创建新图片节点 + 连接。
+  // 选中风格：先清理旧风格，再创建新风格节点 + 连接。
   // 只做画布操作，选中状态由画布派生（画布变更 → styleSignature 变 → UI 自动更新）。
-  // 风格图是独立通道：后端始终从上游连线收集 style- 节点，无需往提示词里插 @ 引用。
   const handleSelectStyle = useCallback((style: StyleItem) => {
-    setStyleMarketOpen(false);
-
     if (!targetNodeId) return;
 
     // 如果已有旧风格节点，先删除它和连线
@@ -118,14 +94,15 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
 
     const newNodeId = `style-${Date.now()}`;
     const styleLabel = `风格-${style.name}`;
-    const styleNode = createNode('image', { x: posX, y: posY }, {
-      id: newNodeId,
-      data: {
-        label: styleLabel,
-        imageUrl: style.image_url,
-        styleId: style.id,
-      } as any,
-    });
+    const styleNode = createNode('image', { x: posX, y: posY }, { id: newNodeId });
+    // styleId 不在 LibTVNodeData 的类型里（历史扩展字段），与左侧「风格素材」入口同一写法：
+    // 显式断言一次，不在类型上开 any 的口子。
+    styleNode.data = {
+      ...styleNode.data,
+      label: styleLabel,
+      imageUrl: style.image_url,
+      styleId: style.id,
+    } as typeof styleNode.data;
 
     addNode(styleNode);
     addEdgeFn({
@@ -152,62 +129,6 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
     // 删除图片节点
     removeNodes([styleNodeId]);
   }, [styleNodeId, targetNodeId, removeEdges, removeNodes]);
-
-  // 切换收藏
-  const handleToggleFav = async (e: React.MouseEvent, styleId: string) => {
-    e.stopPropagation();
-    try {
-      const res = await styleApi.toggleFavorite(styleId);
-      setFavoritedMap(prev => ({ ...prev, [styleId]: res.favorited }));
-    } catch {}
-  };
-
-  // 打开弹窗时：先加载分类列表，选中第一个后再加载风格
-  useEffect(() => {
-    if (!styleMarketOpen) return;
-    let cancelled = false;
-    setStyleLoading(true);
-    styleApi.categories()
-      .then((res) => {
-        if (cancelled) return;
-        setCategories(res || []);
-        // 自动选中第一个分类
-        const catId = (res || []).length > 0 ? res[0].id : '';
-        if (catId && !activeCategory) setActiveCategory(catId);
-        // 用选中的分类加载风格
-        return styleApi.list({ category_id: catId || activeCategory || undefined, keyword: searchKeyword });
-      })
-      .then((res) => {
-        if (cancelled || !res) return;
-        setStyles(res.items || []);
-        if ((res.items || []).length > 0) {
-          styleApi.checkFavorited(res.items.map(s => s.id))
-            .then(setFavoritedMap)
-            .catch(() => {});
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setStyleLoading(false); });
-    return () => { cancelled = true; };
-  }, [styleMarketOpen]);
-
-  // 切换分类/搜索
-  const handleFilterChange = useCallback((category?: string, keyword?: string) => {
-    if (category !== undefined) setActiveCategory(category);
-    if (keyword !== undefined) setSearchKeyword(keyword);
-    setStyleLoading(true);
-    styleApi.list({ category_id: category ?? activeCategory, keyword: keyword ?? searchKeyword })
-      .then((res) => {
-        setStyles(res.items || []);
-        if ((res.items || []).length > 0) {
-          styleApi.checkFavorited(res.items.map(s => s.id))
-            .then(setFavoritedMap)
-            .catch(() => {});
-        }
-      })
-      .catch(() => {})
-      .finally(() => setStyleLoading(false));
-  }, [activeCategory, searchKeyword]);
 
   return (
     <div className="relative group/style">
@@ -243,152 +164,12 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
         </button>
       )}
 
-      {styleMarketOpen && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-          {/* 遮罩 */}
-          <div className="absolute inset-0 bg-black/40" onClick={() => setStyleMarketOpen(false)} />
-
-          {/* 居中面板 */}
-          <div className="relative w-[700px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
-            {/* 顶部栏：标题 + Tab + 搜索 + 关闭 */}
-            <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 shrink-0">
-              {/* Tab 切换 */}
-              <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
-                <button
-                  onClick={() => { setActiveTab('market'); handleFilterChange(activeCategory); }}
-                  className={`px-4 py-1.5 text-[13px] rounded-md transition-all cursor-pointer ${
-                    activeTab === 'market'
-                      ? 'bg-white text-gray-800 font-medium shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  广场
-                </button>
-                <button
-                  onClick={() => { setActiveTab('favorites'); loadFavorites(); }}
-                  className={`px-4 py-1.5 text-[13px] rounded-md transition-all cursor-pointer ${
-                    activeTab === 'favorites'
-                      ? 'bg-white text-gray-800 font-medium shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  我的收藏
-                </button>
-              </div>
-
-              {/* 搜索（仅广场显示） */}
-              {activeTab === 'market' && (
-                <div className="flex-1 max-w-xs">
-                  <input
-                    placeholder="搜索风格名称、作者、标签"
-                    className="w-full px-3 py-1.5 text-[13px] bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-                    onChange={(e) => handleFilterChange(undefined, e.target.value)}
-                  />
-                </div>
-              )}
-
-              <button
-                onClick={() => setStyleMarketOpen(false)}
-                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 cursor-pointer transition-colors ml-auto shrink-0"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* 分类标签栏（仅广场） */}
-            {activeTab === 'market' && (
-            <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-50 overflow-x-auto shrink-0">
-              {(categories?.length || 0) === 0 ? (
-                <span className="text-[12px] text-gray-400">暂无分类</span>
-              ) : (categories || []).map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => handleFilterChange(cat.id)}
-                  className={`px-3 py-1 text-[12px] whitespace-nowrap rounded-full transition-colors cursor-pointer ${
-                    activeCategory === cat.id ? 'text-gray-800 font-medium bg-gray-100' : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-            )}
-
-            {/* 风格卡片网格 */}
-            <div className="flex-1 overflow-y-auto p-5">
-              {styleLoading ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="text-gray-400 text-[13px]">加载中...</div>
-                </div>
-              ) : (styles?.length || 0) === 0 ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="text-gray-400 text-[13px]">暂无风格</div>
-                </div>
-              ) : (
-              <div className="grid grid-cols-6 gap-2.5">
-                {(styles || []).map((style) => (
-                  <div
-                    key={style.id}
-                    onClick={() => { handleSelectStyle(style); }}
-                    className={`group relative rounded-xl overflow-hidden border transition-all cursor-pointer ${
-                      selectedStyle?.id === style.id
-                        ? 'border-blue-400 ring-2 ring-blue-100'
-                        : 'border-gray-200 hover:border-gray-300 hover:shadow-md'
-                    }`}
-                  >
-                    {/* 全图 */}
-                    <img
-                      src={style.image_url}
-                      alt={style.name}
-                      className="aspect-[3/4] w-full object-cover group-hover:opacity-90 transition-opacity"
-                    />
-
-                    {/* 右上角标签 */}
-                    {(style.tags?.length || 0) > 0 && (
-                      <div className="absolute top-2 left-2 right-8 flex gap-1 z-10 flex-wrap">
-                        {(style.tags || []).slice(0, 2).map(tag => (
-                          <span key={tag} className="px-1.5 py-0.5 bg-black/50 backdrop-blur-sm text-white text-[9px] rounded-full">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 底部透明浮层 */}
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent px-3 pt-7 pb-2">
-                      <p className="text-white text-[12px] font-medium truncate drop-shadow">{style.name}</p>
-                      {style.author && (
-                        <span className="text-white/70 text-[10px] truncate block mt-0.5">{style.author}</span>
-                      )}
-                    </div>
-
-                    {/* 收藏按钮 */}
-                    <button
-                      onClick={(e) => handleToggleFav(e, style.id)}
-                      className="absolute bottom-2 right-2 z-20 w-6 h-6 flex items-center justify-center rounded-full backdrop-blur-md cursor-pointer transition-colors"
-                      style={{ background: favoritedMap[style.id] ? 'rgba(239,68,68,0.8)' : 'rgba(0,0,0,0.35)' }}
-                      title={favoritedMap[style.id] ? '取消收藏' : '收藏'}
-                    >
-                      {favoritedMap[style.id]
-                        ? <HeartFilled style={{ color: '#fff', fontSize: 11 }} />
-                        : <HeartOutlined style={{ color: '#fff', fontSize: 11 }} />
-                      }
-                    </button>
-
-                    {/* 选中标记 */}
-                    {selectedStyle?.id === style.id && (
-                      <div className="absolute top-2 right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-sm z-20">
-                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6L5 9L10 3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
+      {styleMarketOpen && (
+        <StyleMarketModal
+          onClose={() => setStyleMarketOpen(false)}
+          onPick={handleSelectStyle}
+          selectedStyleId={selectedStyle?.id}
+        />
       )}
     </div>
   );

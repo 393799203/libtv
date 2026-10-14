@@ -547,11 +547,14 @@ export const AssetEditModal = memo<AssetEditModalProps>(
                     )}
                   </div>
 
-                  {/* AI生成按钮 */}
+                  {/* AI生成按钮
+                      原来用 bg-[var(--dv-surface-2)] + text-white：--dv-surface-2 就是弹窗底色
+                      （dark-theme.css 里注释为"弹窗底"），按钮填充和弹窗底同色 → 白字看不见，
+                      整个按钮"糊"在背景里。改用全站主操作签名色（与 PromptToolbar 的生成按钮同款）。 */}
                   <button
                     onClick={() => handleGenerate()}
                     disabled={generating || uploading}
-                    className="flex-1 h-8 rounded-md bg-[var(--dv-surface-2)] hover:bg-[var(--dv-surface-3)] text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                    className="flex-1 h-8 rounded-md bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-cyan-500/25"
                     title={`基于描述生成${assetType === 'character' ? '三视图' : assetType === 'scene' ? '四视图' : '六视图'}`}
                   >
                     {generating ? (

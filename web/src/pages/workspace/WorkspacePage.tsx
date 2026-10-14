@@ -21,6 +21,7 @@ import { canvasApi } from '@/services/canvasApi';
 import { projectApi } from '@/services/projectApi';
 import AddShowDialog from '@/components/AddShowDialog';
 import { AssetPanel } from '@/components/canvas/AssetPanel';
+import { StyleMaterialEntry } from '@/components/canvas/StyleMaterialEntry';
 import { PointsMallModal } from '@/components/auth/PointsMallModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { useAuthStore } from '@/stores/authStore';
@@ -309,18 +310,24 @@ function WorkspaceInner() {
         <div className="flex-1 relative min-w-0">
           <CanvasWithDrop urlProjectId={urlProjectId} />
 
-          {/* 资产库开关：贴在画布左边缘的悬浮把手（打开后面板自带收起按钮，这里就隐藏）。
-              素材是"取材"动作，跟画布贴着更顺手，也就不占头部的位置了。 */}
+          {/* 左边缘把手列：资产库 + 风格素材。
+              两个都是「取材」动作，贴着画布左边缘比占头部位置更顺手；
+              同一条列里上下排列（而不是各自算 top 偏移），加第三个入口时也不用再量像素。 */}
           {!showAssetPanel && (
-            <Tooltip title="个人资产库：点一下从左侧展开" placement="right">
-              <button
-                onClick={() => setShowAssetPanel(true)}
-                className="absolute left-0 top-1/3 -translate-y-1/2 z-20 flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-r-lg bg-white/95 border border-l-0 border-gray-200 shadow-md text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors cursor-pointer"
-              >
-                <FolderOutlined className="text-[14px]" />
-                <span className="text-[11px] tracking-wider [writing-mode:vertical-rl]">资产库</span>
-              </button>
-            </Tooltip>
+            <div className="absolute left-0 top-1/3 -translate-y-1/2 z-20 flex flex-col gap-2">
+              <Tooltip title="个人资产库：点一下从左侧展开" placement="right">
+                <button
+                  onClick={() => setShowAssetPanel(true)}
+                  className="flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-r-lg bg-white/95 border border-l-0 border-gray-200 shadow-md text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors cursor-pointer"
+                >
+                  <FolderOutlined className="text-[14px]" />
+                  <span className="text-[11px] tracking-wider [writing-mode:vertical-rl]">资产库</span>
+                </button>
+              </Tooltip>
+
+              {/* 风格素材：挑一个风格 → 直接建出带该风格的图片节点 */}
+              <StyleMaterialEntry />
+            </div>
           )}
         </div>
       </div>
