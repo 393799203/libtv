@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { App, Button, InputNumber, Tooltip } from 'antd';
 import {
   FileTextOutlined,
@@ -13,6 +13,7 @@ import {
   UndoOutlined,
 } from '@ant-design/icons';
 import { pricingApi, type NodePriceGroup } from '@/services/pricingApi';
+import type { ChannelName } from '@/services/channelApi';
 
 // 节点图标（与画布节点类型对应）
 const NODE_ICONS: Record<string, React.ReactNode> = {
@@ -25,27 +26,44 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
 };
 
 /**
- * 价格管理：展示各节点下不同模型的价格设置
+ * 价格明细：展示各节点下不同模型的价格设置（「渠道与价格」页的下半部分）
  * - 文本 / 剧本 / 图片模型：按次价格（积分/次）
  * - 视频模型：按秒单价（积分/秒）；支持参考视频计费的模型（3 个 Seedance）额外可配
  *   「带参考视频」单价，未单独配置时按无参考视频单价的 6 折（与计费侧同一预设）
  * - 语音模型：按字单价（积分/100字）
- * - 价格按（节点 + 模型）维度独立配置：同一模型在不同节点可设不同价格
+ * - 价格按（渠道 + 节点 + 模型 + 分辨率）维度独立配置
+ *
+ * 本组件只管「某个渠道的价格清单」这一件事，渠道本身由父级 ChannelPricingPage 持有：
+ * 渠道切换统一交给上方那排渠道卡（这里不再放第二排「华数/电信」Tab —— 同页两个切换器是冗余的），
+ * 但切渠道前父级要能拦截未保存的改动，所以 channel 仍是受控 prop，
+ * 并通过 ref 把 save / getDirtyCount 交给父级（父级的「保存并切换」要用）。
  */
-export default function PricingManagement() {
+export interface PricingManagementHandle {
+  /** 保存当前渠道的改动，返回是否成功（父级据此决定要不要真的切渠道） */
+  save: () => Promise<boolean>;
+  /** 当前未保存条数：父级切渠道前用它判断是否需要二次确认 */
+  getDirtyCount: () => number;
+}
+
+interface PricingManagementProps {
+  /** 当前渠道（由父级持有；切换入口是父级那排渠道卡，本组件不再自带切换器） */
+  channel: ChannelName;
+  /** React 19 起 ref 可直接作为 prop，用来暴露命令式接口 */
+  ref?: React.Ref<PricingManagementHandle>;
+}
+
+export default function PricingManagement({ channel, ref }: PricingManagementProps) {
   const { message } = App.useApp();
   const [nodes, setNodes] = useState<NodePriceGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  // 当前查看的渠道（价格按渠道独立配置）。默认选中电信（原来默认华数）
-  const [channel, setChannel] = useState<'wasu' | 'dianxin'>('dianxin');
   // 编辑中的价格：「node_type|model_id|resolution」-> 新价格（各节点独立编辑，互不影响）；
   // 「带参考视频」单价用同键 + '|ref' 后缀，两类编辑互不覆盖
   const [edits, setEdits] = useState<Record<string, number>>({});
   // 已点「恢复默认」的条目（同键 + '|ref'）：保存时清除后台那一档配置，回到 6 折预设
   const [refResets, setRefResets] = useState<Record<string, boolean>>({});
 
-  const load = useCallback((ch: 'wasu' | 'dianxin' = channel) => {
+  const load = useCallback((ch: ChannelName = channel) => {
     setLoading(true);
     pricingApi.list(ch)
       .then((res) => {
@@ -119,47 +137,47 @@ export default function PricingManagement() {
     return items;
   }, [nodes, edits, refResets]);
 
-  const handleSave = () => {
-    if (dirtyItems.length === 0) return;
+  const save = useCallback(async (): Promise<boolean> => {
+    if (dirtyItems.length === 0) return true;
     setSaving(true);
-    pricingApi.save(channel, dirtyItems)
-      .then(() => {
-        message.success('价格设置已保存');
-        load();
-      })
-      .catch(() => {})
-      .finally(() => setSaving(false));
-  };
+    try {
+      await pricingApi.save(channel, dirtyItems);
+      message.success('价格设置已保存');
+      load(channel);
+      return true;
+    } catch {
+      // HTTP 错误已由 api.ts 拦截器统一提示
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [channel, dirtyItems, load, message]);
+
+  // 保存按钮仍留在本区工具栏（saving 状态在这里），与父级的「保存并切换」共用同一个 save
+  const handleSave = () => { void save(); };
+
+  // 未保存条数同步进 ref：父级要在「点切渠道」那一刻立刻读到，用 state 会滞后一次渲染
+  const dirtyCountRef = useRef(0);
+  useEffect(() => {
+    dirtyCountRef.current = dirtyItems.length;
+  }, [dirtyItems.length]);
+
+  // 给父级 ChannelPricingPage 的命令式接口
+  useImperativeHandle(ref, () => ({
+    save,
+    getDirtyCount: () => dirtyCountRef.current,
+  }), [save]);
 
   return (
     <div className="flex-1 overflow-y-auto">
       {/* 工具栏 */}
       <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 sticky top-0 z-10">
-        {/* 说明文案：让它自己占满并换行，不许挤窄右边的渠道 Tab */}
+        {/* 说明文案：让它自己占满并换行，不许挤窄右边的按钮 */}
         <div className="flex-1 min-w-0">
           <div className="text-[11px] text-gray-400 mt-0.5">
             文本按次、图片按次（按 2K/4K 分辨率档分别定价）、视频按秒、语音按字（每 100 字）计费，价格为 0 表示暂不扣费。
             3 个 Seedance 模型带参考视频输入时按「有参」单价计费（默认取无参价 6 折），计费时长 = 输出 + 参考视频
           </div>
-        </div>
-        {/* 渠道 Tab：华数 / 电信 价格独立配置（固定宽度，不被左侧文案挤压成竖排） */}
-        <div className="flex items-center gap-1 rounded-lg bg-gray-100 p-0.5 shrink-0">
-          {(['wasu', 'dianxin'] as const).map((ch) => (
-            <button
-              key={ch}
-              onClick={() => {
-                setChannel(ch);
-                load(ch);
-              }}
-              className={`w-14 shrink-0 whitespace-nowrap py-1 rounded-md text-[12px] font-medium text-center transition-colors cursor-pointer ${
-                channel === ch
-                  ? 'bg-white shadow-sm text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {ch === 'wasu' ? '华数' : '电信'}
-            </button>
-          ))}
         </div>
         {dirtyItems.length > 0 && (
           <span className="text-[12px] text-orange-500 shrink-0 whitespace-nowrap">

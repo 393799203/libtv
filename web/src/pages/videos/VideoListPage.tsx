@@ -819,7 +819,7 @@ export default function VideoListPage() {
         {/* 只显示两行（超过 19 个的走「我的项目」页），由 .recent-projects-grid 的
             媒体查询按断点把多余格子 display:none —— 不用 max-h + overflow-hidden 裁：
             裁切层会把卡片 hover 上移的那 2px 连同顶边/圆角、以及第二行的 hover 阴影一起切掉。 */}
-        <div className="recent-projects-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <div className="recent-projects-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 md:gap-3">
           {/* 新建项目卡片 */}
           <CreateProjectCard onClick={handleCreateProject} />
 

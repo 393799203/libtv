@@ -128,8 +128,11 @@ export function StyleMarketModal({
       {/* 遮罩 */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
-      {/* 居中面板 */}
-      <div className="relative w-[700px] max-h-[80vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
+      {/* 居中面板：宽高都定死（不再只给 max-h 让内容撑）。
+          原来是 w-[700px] max-h-[80vh]：风格少的时候弹窗只有一两行高，跟着内容忽大忽小；
+          现在固定 880×680，内容区自己滚动，弹窗尺寸始终稳定。
+          max-w/max-h 是给小屏的兜底，避免小视口下超出屏幕。 */}
+      <div className="relative w-[880px] max-w-[92vw] h-[680px] max-h-[85vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
         {/* 顶部栏：标题 + Tab + 搜索 + 关闭 */}
         <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 shrink-0">
           {/* Tab 切换 */}
@@ -204,11 +207,11 @@ export function StyleMarketModal({
         {/* 风格卡片网格 */}
         <div className="flex-1 overflow-y-auto p-5">
           {styleLoading ? (
-            <div className="flex items-center justify-center py-20">
+            <div className="flex items-center justify-center h-full">
               <div className="text-gray-400 text-[13px]">加载中...</div>
             </div>
           ) : (styles?.length || 0) === 0 ? (
-            <div className="flex items-center justify-center py-20">
+            <div className="flex items-center justify-center h-full">
               <div className="text-gray-400 text-[13px]">暂无风格</div>
             </div>
           ) : (

@@ -22,7 +22,7 @@ import {
   LoadingOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SettingOutlined,
+  ShoppingCartOutlined,
   TagOutlined,
   UploadOutlined,
   UserOutlined,
@@ -35,18 +35,23 @@ import { channelApi } from '@/services/channelApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import AddShowDialog from '@/components/AddShowDialog';
-import PricingManagement from './PricingManagement';
 import PointsPackageManagement from './PointsPackageManagement';
-import ChannelManagement from './ChannelManagement';
+import ChannelPricingPage from './ChannelPricingPage';
 import ProviderTaskReconciliation from './ProviderTaskReconciliation';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 
-type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'reconcile' | 'settings';
+type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'reconcile' | 'channels' | 'packages';
 
 export default function AdminPage() {
   const navigate = useNavigate();
   const { tab = 'banners' } = useParams<{ tab: string }>();
   const activeTab: AdminTab = (tab as AdminTab) || 'banners';
+
+  // 老链接兜底：原「商务配置」页签已拆成「渠道与价格」和「套餐管理」两个一级菜单，
+  // 书签/历史里的 /admin/settings 重定向到套餐管理（价格与渠道那部分挪到 /admin/channels）
+  useEffect(() => {
+    if (tab === 'settings') navigate('/admin/packages', { replace: true });
+  }, [tab, navigate]);
   const { message, modal } = App.useApp();
   const currentUser = useAuthStore((s) => s.user); // 获取当前登录用户
 
@@ -124,11 +129,6 @@ export default function AdminPage() {
   // 作者搜索（风格弹窗使用）
   const [authorOptions, setAuthorOptions] = useState<UserItem[]>([]);
   const [authorSearching, setAuthorSearching] = useState(false);
-
-  // ========== 商务配置状态 ==========
-  // 商务配置页内子页签（价格管理 / 套餐管理 / 渠道管理）
-  // 上游对账已独立成一级菜单，不再是这里的子页签
-  const [settingsSubTab, setSettingsSubTab] = useState<'pricing' | 'packages' | 'channel'>('pricing');
 
   // 远程搜索作者（供风格弹窗使用）：有关键词走服务端搜索（昵称/邮箱模糊匹配），无关键词拉全量
   const fetchAuthors = (keyword?: string) => {
@@ -711,45 +711,89 @@ export default function AdminPage() {
     });
   };
 
-  // 侧边栏菜单
-  const menuItems: { key: AdminTab; icon: React.ReactNode; label: string }[] = [
-    { key: 'banners', icon: <TagOutlined />, label: '版图管理' },
-    { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
-    { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
-    { key: 'users', icon: <UserOutlined />, label: '用户管理' },
-    // 上游对账：原来藏在「系统设置」的子页签里，且是唯一跟钱直接相关的页面 ——
-    // 独立成一级菜单并紧跟在用户管理下面，按用户/项目查账时不用再点两层。
-    { key: 'reconcile', icon: <FileSearchOutlined />, label: '上游对账' },
-    { key: 'settings', icon: <SettingOutlined />, label: '商务配置' }, // 路由 key 保持 settings，老链接不失效
+  // 侧边栏菜单：按 业务 / 财务 / 商务 分三组（分组只影响展示，tab key 与路由不变）
+  // 分组依据：业务=内容与用户运营；财务=真正管钱的账务；商务=渠道、定价与套餐
+  const menuGroups: {
+    label: string;
+    items: { key: AdminTab; icon: React.ReactNode; label: string }[];
+  }[] = [
+    {
+      label: '业务',
+      items: [
+        { key: 'banners', icon: <TagOutlined />, label: '版图管理' },
+        { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
+        { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
+        { key: 'users', icon: <UserOutlined />, label: '用户管理' },
+      ],
+    },
+    {
+      label: '财务',
+      // 上游对账：唯一直接查账的页面。原来藏在「系统设置」子页签里，
+      // 独立成一级菜单并紧跟在用户管理后面，按用户/项目查账时不用再点两层
+      items: [{ key: 'reconcile', icon: <FileSearchOutlined />, label: '上游对账' }],
+    },
+    {
+      label: '商务',
+      items: [
+        // 渠道与价格：原来藏在「商务配置」的子页签里，且拆成「价格管理」「渠道管理」两页 ——
+        // 但渠道本来就是一个维度（价格按渠道独立配置），判断「切成全电信会怎样」要来回三个页面，
+        // 所以合成一页并独立成一级菜单
+        { key: 'channels', icon: <DollarOutlined />, label: '渠道与价格' },
+        // 套餐管理：原来也是「商务配置」的子页签，商务配置整体去掉后独立成一级菜单
+        { key: 'packages', icon: <ShoppingCartOutlined />, label: '套餐管理' },
+      ],
+    },
   ];
 
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-56px)]">
-      {/* 左侧边栏 */}
-      <aside className="w-full lg:w-[200px] bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col shrink-0">
+    <div className="flex h-[calc(100vh-56px)]">
+      {/* 左侧边栏：任何宽度都在左侧竖排。
+          窄屏（<lg）收起成只留图标的 56px 窄条 —— 之前窄屏会变成顶部横向 chip 条，
+          但后台页面本身就吃宽度，横排占掉一整行反而更挤 */}
+      <aside className="w-[56px] lg:w-[200px] bg-white border-r border-gray-200 flex flex-col shrink-0">
         <div className="hidden lg:block px-4 py-4 border-b border-gray-100">
           <h2 className="text-[15px] font-semibold text-gray-800">运营管理中心</h2>
         </div>
-        <nav className="flex lg:block gap-1 lg:gap-0 p-2 lg:flex-1 lg:space-y-0.5 overflow-x-auto lg:overflow-x-visible shrink-0 lg:shrink">
-          {menuItems.map(item => (
-            <button
-              key={item.key}
-              onClick={() => navigate(`/admin/${item.key}`)}
-              className={`relative shrink-0 lg:shrink lg:w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                activeTab === item.key
-                  ? 'text-cyan-200 font-medium'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
+        <nav className="flex-1 p-2 overflow-y-auto overflow-x-hidden">
+          {menuGroups.map((group, gi) => (
+            <div
+              key={group.label}
+              className={`flex flex-col lg:block ${
+                /* 分组只用留白分隔（不加横线）；窄屏没有分组名，仅靠留白分段 */
+                gi > 0 ? 'mt-2 pt-2 lg:mt-3 lg:pt-3' : ''
               }`}
             >
-              {/* 选中态：不再铺一层浅色底（暗色侧栏上那块亮底很扎眼），
-                  改用左侧青色强调条 + 青色文字，视觉更干净也更省地方 */}
-              {activeTab === item.key && (
-                /* 选中条只在竖排侧栏里有意义；窄屏是横向 chip 条，靠青色文字表示选中 */
-                <span className="hidden lg:block absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full bg-cyan-400" />
-              )}
-              <span className={activeTab === item.key ? 'text-cyan-300' : 'text-gray-400'}>{item.icon}</span>
-              {item.label}
-            </button>
+              {/* 分组名只在宽屏显示：窄屏侧栏只有 56px，放不下两个字的标题 */}
+              <div className="hidden lg:block px-3 pb-1 text-[11px] text-gray-400">
+                {group.label}
+              </div>
+              <div className="flex flex-col items-center gap-1 lg:block lg:space-y-0.5">
+                {group.items.map(item => (
+                  <button
+                    key={item.key}
+                    onClick={() => navigate(`/admin/${item.key}`)}
+                    /* 窄屏只剩图标，用原生 tooltip 把语义补回来 */
+                    title={item.label}
+                    className={`relative shrink-0 w-10 h-10 p-0 lg:w-full lg:h-auto lg:px-3 lg:py-2.5 flex items-center justify-center lg:justify-start gap-2.5 text-[13px] rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                      activeTab === item.key
+                        ? 'text-cyan-200 font-medium'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
+                    }`}
+                  >
+                    {/* 选中态：不再铺一层浅色底（暗色侧栏上那块亮底很扎眼），
+                        改用左侧青色强调条 + 青色文字，视觉更干净也更省地方。
+                        窄屏同样是左侧竖排，所以这条强调条两种宽度下都显示 */}
+                    {activeTab === item.key && (
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full bg-cyan-400" />
+                    )}
+                    <span className={`text-[17px] lg:text-[13px] ${activeTab === item.key ? 'text-cyan-300' : 'text-gray-400'}`}>
+                      {item.icon}
+                    </span>
+                    <span className="hidden lg:inline">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
       </aside>
@@ -1616,53 +1660,11 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ========== 商务配置 Tab ========== */}
-        {activeTab === 'settings' && (
-          <div className="flex-1 overflow-hidden flex flex-col">
-            {/* 子页签栏 */}
-            <div className="bg-white px-6 border-b border-gray-100 shrink-0 flex items-center gap-1">
-              <button
-                onClick={() => setSettingsSubTab('pricing')}
-                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
-                  settingsSubTab === 'pricing'
-                    ? 'border-blue-600 text-blue-700 font-medium'
-                    : 'border-transparent text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                价格管理
-              </button>
-              <button
-                onClick={() => setSettingsSubTab('packages')}
-                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
-                  settingsSubTab === 'packages'
-                    ? 'border-blue-600 text-blue-700 font-medium'
-                    : 'border-transparent text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                套餐管理
-              </button>
-              <button
-                onClick={() => setSettingsSubTab('channel')}
-                className={`px-3 py-2.5 text-[13px] border-b-2 transition-colors cursor-pointer ${
-                  settingsSubTab === 'channel'
-                    ? 'border-blue-600 text-blue-700 font-medium'
-                    : 'border-transparent text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                渠道管理
-              </button>
-            </div>
+        {/* ========== 渠道与价格 Tab（原「商务配置」下的价格管理 + 渠道管理，合并后独立成一级菜单）========== */}
+        {activeTab === 'channels' && <ChannelPricingPage />}
 
-            {/* 价格管理页签 */}
-            {settingsSubTab === 'pricing' && <PricingManagement />}
-
-            {/* 套餐管理页签 */}
-            {settingsSubTab === 'packages' && <PointsPackageManagement />}
-
-            {/* 渠道管理页签 */}
-            {settingsSubTab === 'channel' && <ChannelManagement />}
-          </div>
-        )}
+        {/* ========== 套餐管理 Tab（原「商务配置」的子页签，独立成一级菜单）========== */}
+        {activeTab === 'packages' && <PointsPackageManagement />}
       </main>
 
       {/* ========== 首页管理：新建标签弹窗 ========== */}
