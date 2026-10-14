@@ -11,6 +11,7 @@ import {
   EyeOutlined,
 } from '@ant-design/icons';
 import type { ScriptShot } from '@/types/canvas';
+import { newId } from '@/utils/nodeFactory';
 
 interface ShotTableProps {
   shots: ScriptShot[];
@@ -222,7 +223,7 @@ export const ShotTable = memo<ShotTableProps>(function ShotTable({
           const idx = currentShots.findIndex((s) => s.id === shot.id);
           const newShot: ScriptShot = {
             ...shot,
-            id: `shot-${Date.now()}`,
+            id: newId('shot'),
             shotNumber: idx + 2, // 插在源行后面，先占个位，紧接着统一重排
           };
           // 必须重排：复制是"插到中间"，如果只给新行写 length+1，序号就和位置脱钩了

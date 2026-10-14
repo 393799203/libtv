@@ -30,19 +30,18 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
   // 风格市场弹窗开关
   const [styleMarketOpen, setStyleMarketOpen] = useState(false);
 
-  // 订阅"当前节点入边里的 style- 节点"签名，画布上直接删节点/断线会自动反映
+  // 订阅"当前节点入边里的风格节点"签名，画布上直接删节点/断线会自动反映
+  // 风格节点按 data.styleId 识别（不再看 id 前缀）
   const styleSignature = useCanvasStore((s) => {
     if (!targetNodeId) return '';
     const parts: string[] = [];
     for (const e of s.edges) {
-      if (e.target !== targetNodeId || !e.source.startsWith('style-')) continue;
+      if (e.target !== targetNodeId) continue;
       const n = s.nodes.find((x) => x.id === e.source);
-      if (n) {
-        const d = n.data as Record<string, unknown>;
-        parts.push(`${n.id}|${d.label}|${d.imageUrl}|${(d as { styleId?: string }).styleId ?? ''}`);
-      } else {
-        parts.push(`${e.source}|missing`);
-      }
+      // 节点不在画布上时读不到 data，无从判断它是不是风格节点，跳过即可
+      if (!n || !(n.data as { styleId?: string }).styleId) continue;
+      const d = n.data as Record<string, unknown>;
+      parts.push(`${n.id}|${d.label}|${d.imageUrl}|${(d as { styleId?: string }).styleId ?? ''}`);
     }
     return parts.join('\n');
   });
@@ -51,9 +50,9 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
   const { selectedStyle, styleNodeId } = useMemo<{ selectedStyle: StyleItem | undefined; styleNodeId: string | null }>(() => {
     if (!targetNodeId) return { selectedStyle: undefined, styleNodeId: null };
     const { nodes, edges } = useCanvasStore.getState();
-    // 找到上游"风格-"节点
+    // 找到上游的风格节点（按 data.styleId 识别）
     const styleNode = nodes.find((n) =>
-      n.id.startsWith('style-') &&
+      Boolean((n.data as { styleId?: string }).styleId) &&
       edges.some((e) => e.source === n.id && e.target === targetNodeId)
     );
     if (!styleNode) return { selectedStyle: undefined, styleNodeId: null };
@@ -92,22 +91,21 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
     const posX = (current?.position.x ?? 0) - 350;
     const posY = current?.position.y ?? 0;
 
-    const newNodeId = `style-${Date.now()}`;
+    // id 由工厂统一生成（不再有 style- 前缀）：风格身份写在 data.styleId 上，
+    // 后端与前端所有「是不是风格图」的判断都读这个字段
     const styleLabel = `风格-${style.name}`;
-    const styleNode = createNode('image', { x: posX, y: posY }, { id: newNodeId });
-    // styleId 不在 LibTVNodeData 的类型里（历史扩展字段），与左侧「风格素材」入口同一写法：
-    // 显式断言一次，不在类型上开 any 的口子。
+    const styleNode = createNode('image', { x: posX, y: posY });
     styleNode.data = {
       ...styleNode.data,
       label: styleLabel,
       imageUrl: style.image_url,
       styleId: style.id,
-    } as typeof styleNode.data;
+    };
 
     addNode(styleNode);
     addEdgeFn({
-      id: `e-${newNodeId}-${targetNodeId}`,
-      source: newNodeId,
+      id: `e-${styleNode.id}-${targetNodeId}`,
+      source: styleNode.id,
       target: targetNodeId,
       type: 'dataFlow',
     });

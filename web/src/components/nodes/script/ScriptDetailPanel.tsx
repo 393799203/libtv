@@ -2,6 +2,7 @@ import { memo, useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import { Drawer, Button } from 'antd';
 import { LoadingOutlined, MergeCellsOutlined } from '@ant-design/icons';
 import type { ScriptNodeData, ScriptShot } from '@/types/canvas';
+import { newId } from '@/utils/nodeFactory';
 import { ShotHeader } from './ShotHeader';
 import { ShotTable } from './ShotTable';
 import { AssetPreparationPanel } from './AssetPreparationPanel';
@@ -117,7 +118,7 @@ export const ScriptDetailPanel = memo<ScriptDetailPanelProps>(
     const handleAddShot = useCallback(() => {
       const currentData = dataRef.current;
       const newShot: ScriptShot = {
-        id: `shot-${Date.now()}`,
+        id: newId('shot'),
         shotNumber: currentData.shots.length + 1,
         duration: 5,
         visual: '',

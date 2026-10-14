@@ -27,6 +27,23 @@ export interface BaseNodeFields {
    * 历史节点无此字段 → 视为华数（历史数据均为华数时代创建）。
    */
   modelProvider?: string;
+
+  // ── 语义字段：取代「从节点 id 字符串里解析出语义」的历史做法 ──
+  // 节点 id 只是唯一标识符（统一由 utils/nodeFactory.ts 的 newNodeId 产出，格式 `<类型首字母>-` + 随机串），
+  // 任何「这个节点是什么 / 从哪来」的判断都必须读下面这些字段，**不得解析 id、不得按前缀判断**。
+  /** 风格图标识：后端据此只提取画风/色彩，不复制画面内容（executor.go 风格图判定） */
+  styleId?: string;
+  /** 资产图归属：与脚本节点的角色/场景/道具一一对应（资产侧的引用是 asset.nodeId） */
+  assetType?: 'character' | 'scene' | 'prop';
+  assetName?: string;
+  /** 本节点归属的脚本节点（派生类节点：资产图 / 分镜槽位） */
+  scriptNodeId?: string;
+  /** 分镜槽位所属分镜 id。只有同时带 refIndex 的节点才是分镜参考图槽位 */
+  shotId?: string;
+  /** 分镜槽位序号（1 起，与首尾帧顺序一致） */
+  refIndex?: number;
+  /** 多图生成派生副本的来源（一次生成 N 张时的第 2..N 张） */
+  derivedFrom?: { nodeId: string; index: number };
 }
 
 // 文本节点数据

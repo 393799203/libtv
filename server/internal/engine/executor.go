@@ -1474,19 +1474,9 @@ func stripMentionMarkers(s string) string {
 	return strings.TrimSpace(mentionMarkerRe.ReplaceAllString(s, ""))
 }
 
-// getAssetTypeFromNodeID 从节点 ID 中提取资产类型
-// 节点 ID 格式：{类型}-{资产名}-{脚本节点ID}
-// 例如："角色-小明-node123"、"场景-教室-node123"、"道具-椅子-node123"
-func getAssetTypeFromNodeID(nodeID string) string {
-	if strings.HasPrefix(nodeID, "角色-") {
-		return "character"
-	} else if strings.HasPrefix(nodeID, "场景-") {
-		return "scene"
-	} else if strings.HasPrefix(nodeID, "道具-") {
-		return "prop"
-	}
-	return "" // 普通图片节点
-}
+// getAssetTypeFromNodeID 已删除：资产归属改为读节点 data.assetType。
+// 原来它按 id 前缀（角色-/场景-/道具-）推断，而节点 id 只应是标识符——
+// 资产名里的 '-' 会把这种推断切错，线上已有实例（道具-折子-带血痕--script-…）。
 
 // ImageExecutor 图像节点执行器（调用图像生成API）
 type ImageExecutor struct {
@@ -1520,6 +1510,9 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		AspectRatio string          `json:"aspectRatio"` // 比例：16:9/9:16/1:1等
 		Quality     string          `json:"quality"`     // 画质：低画质/标准画质/高画质
 		Count       int             `json:"count"`       // 生成数量
+		// 资产归属（character/scene/prop）：前端写在节点 data 上。
+		// 历史上靠节点 id 前缀「角色-」等推断，id 不再承载语义，故改为读字段。
+		AssetType   string          `json:"assetType"`
 		Mentions    json.RawMessage `json:"mentions"`    // ✅ 添加 Mentions 字段，用于用户明确@引用的上游节点
 	}
 	if err := json.Unmarshal(node.Data, &data); err != nil {
@@ -1567,8 +1560,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 						StyleId  string `json:"styleId"`
 					}
 					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-						// 区分风格图（ID以style-开头或有styleId字段）和普通参考图
-						if strings.HasPrefix(m.NodeID, "style-") || nd.StyleId != "" {
+						// 区分风格图（data.styleId 有值）和普通参考图：id 不承载语义，只看字段
+						if nd.StyleId != "" {
 							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
 							log.Printf("[ImageExecutor] 🎨 从@引用的风格图提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
 						} else {
@@ -1605,7 +1598,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 
 	if len(upstreamImageURLs) > 0 {
 		// ✅ 风格图是独立通道：不参与 @ 引用，无论用户是否 @ 了参考图，
-		// 上游连线的风格节点（style- 前缀或带 styleId）始终参与生成，按 URL 去重
+		// 上游连线的风格节点（data.styleId 有值）始终参与生成，按 URL 去重
 		for _, sourceNodeID := range execCtx.GetUpstreamSources(node.ID) {
 			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
 				var nd struct {
@@ -1613,7 +1606,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 					StyleId  string `json:"styleId"`
 				}
 				if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-					if strings.HasPrefix(sourceNodeID, "style-") || nd.StyleId != "" {
+					if nd.StyleId != "" {
 						dup := false
 						for _, u := range styleImageURLs {
 							if u == nd.ImageUrl {
@@ -1658,7 +1651,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 						log.Printf("[ImageExecutor] ⚠️ 上游白模节点还没有静帧（需先在预演编辑器导出静帧）: upstreamNodeID=%s", sourceNodeID)
 					} else if nd.Type == "image" || nd.ImageUrl != "" {
 						// 区分风格图和普通参考图
-						if strings.HasPrefix(sourceNodeID, "style-") || nd.StyleId != "" {
+						if nd.StyleId != "" {
 							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
 							log.Printf("[ImageExecutor] 🎨 默认使用上游风格图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
 						} else {
@@ -1730,8 +1723,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 清理提示词中的占位符
 	cleanedPrompt := stripMentionMarkers(data.Prompt)
 
-	// ✅ 根据节点 ID 提取资产类型，使用统一的提示词构建函数
-	assetType := getAssetTypeFromNodeID(node.ID)
+	// 资产归属读节点 data（前端写入）；不再从节点 id 的「角色-/场景-/道具-」前缀推断
+	assetType := data.AssetType
 	finalPrompt := llm.BuildAssetImagePrompt(assetType, cleanedPrompt)
 
 	if assetType != "" {

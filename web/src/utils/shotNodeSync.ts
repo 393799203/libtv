@@ -1,15 +1,14 @@
 /**
  * 分镜节点同步工具
  * - 为单个镜头创建图片/视频节点（由分镜节点连出）
- * - 使用确定性 ID 避免重复创建（同一镜头复用同一节点）
+ * - 节点归属写在 data 上（scriptNodeId + shotId + refIndex），复用判断按 data 找，
+ *   历史那种「按 id 拼出节点名再去找」的做法已废弃：id 只是唯一标识符
  * - 触发单节点生成（保存画布 → 设置 running → 调后端 → 订阅 SSE）
  * 模式参考 assetImageSync.ts，但节点位于脚本节点下游（右侧）
  */
 
 import { useCanvasStore } from '@/stores/canvasStore';
-import { useExecutionStore } from '@/stores/executionStore';
 import { canvasApi } from '@/services/canvasApi';
-import { workflowApi } from '@/services/workflowApi';
 import { createNode } from '@/utils/nodeFactory';
 import { clearAllStale } from '@/utils/topology';
 import type {
@@ -158,33 +157,43 @@ export const SHOT_REF_IMAGE_COUNT = 2;
 const SHOT_REF_IMAGE_GAP_X = 360;
 
 /**
- * 生成分镜图片节点唯一 ID：shot-image-{shotId}-{scriptNodeId}
- * 第 2 张起追加 -ref{N} 后缀（第 1 张保持原格式，兼容已有画布）
+ * 找出某镜头的参考图槽位节点（按 refIndex 升序 = 首尾帧顺序）。
+ *
+ * 「是不是槽位」只看 data.refIndex：多图生成派生出来的副本（data.derivedFrom）虽然是从
+ * 槽位节点复制出来的，但不带 refIndex，因此不会被误当成槽位（否则视频会多接一帧参考图）。
  */
-export function generateShotImageNodeId(shotId: string, scriptNodeId: string, index = 1): string {
-  const base = `shot-image-${shotId}-${scriptNodeId}`;
-  return index > 1 ? `${base}-ref${index}` : base;
-}
-
-/** 生成分镜视频节点唯一 ID：shot-video-{shotId}-{scriptNodeId} */
-export function generateShotVideoNodeId(shotId: string, scriptNodeId: string): string {
-  return `shot-video-${shotId}-${scriptNodeId}`;
-}
-
-/** 找出某镜头已存在的全部参考图节点（按序号 1..N） */
 export function findShotImageNodes(scriptNodeId: string, shotId: string): LibTVNode[] {
   const store = useCanvasStore.getState();
-  const nodes: LibTVNode[] = [];
-  for (let i = 1; i <= SHOT_REF_IMAGE_COUNT; i++) {
-    const n = store.nodes.find(x => x.id === generateShotImageNodeId(shotId, scriptNodeId, i));
-    if (n) nodes.push(n);
-  }
-  return nodes;
+  return store.nodes
+    .filter(
+      (n) =>
+        n.data.scriptNodeId === scriptNodeId &&
+        n.data.shotId === shotId &&
+        typeof n.data.refIndex === 'number'
+    )
+    .sort((a, b) => (a.data.refIndex ?? 0) - (b.data.refIndex ?? 0));
+}
+
+/** 该镜头的参考图槽位（1..count）是否已全部创建（传 nodes 以便被 zustand 选择器响应式订阅） */
+export function haveAllShotImageSlots(
+  nodes: LibTVNode[],
+  scriptNodeId: string,
+  shotId: string,
+  count: number
+): boolean {
+  if (count <= 0) return false;
+  const slots = new Set(
+    nodes
+      .filter((n) => n.data.scriptNodeId === scriptNodeId && n.data.shotId === shotId)
+      .map((n) => n.data.refIndex)
+  );
+  for (let i = 1; i <= count; i++) if (!slots.has(i)) return false;
+  return true;
 }
 
 /**
  * 分镜图片节点的命名：首尾帧模式（一次建 2 张）叫起始/结束画面，贴合它的用途（视频首尾帧）；
- * 参考模式仍叫参考图。节点 ID 不随之变化（仍靠 shot-image-… / -refN 后缀识别）。
+ * 参考模式仍叫参考图。
  */
 function shotImageLabel(index: number, modeCount: number): string {
   if (modeCount < 2) return '参考图';
@@ -193,10 +202,15 @@ function shotImageLabel(index: number, modeCount: number): string {
   return `第${index}个瞬间`;
 }
 
-/** 查找已存在的分镜视频节点 */
+/** 查找已存在的分镜视频节点（按 data 上的归属字段） */
 export function findShotVideoNode(scriptNodeId: string, shotId: string): LibTVNode | null {
   const store = useCanvasStore.getState();
-  return store.nodes.find(n => n.id === generateShotVideoNodeId(shotId, scriptNodeId)) || null;
+  return (
+    store.nodes.find(
+      (n) =>
+        n.type === 'video' && n.data.scriptNodeId === scriptNodeId && n.data.shotId === shotId
+    ) || null
+  );
 }
 
 /**
@@ -223,18 +237,22 @@ export function createShotImageNode(
     return null;
   }
 
-  const imageNodeId = generateShotImageNodeId(shot.id, scriptNodeId, index);
   // ✅ 解析资产引用：mentions 以 nodeId 锚定，名字模糊匹配兜底；prompt 中 (@类型-名称) 转 [[m:<id>]]
   const { mentions: assetMentions, convertedPrompt } = resolveShotAssetRefs(scriptNodeId, storyboardPrompt);
-  const existing = store.nodes.find(n => n.id === imageNodeId);
+  // 槽位复用：按 data 上的归属字段找（scriptNodeId + shotId + refIndex）
+  const existing = store.nodes.find(
+    (n) =>
+      n.data.scriptNodeId === scriptNodeId && n.data.shotId === shot.id && n.data.refIndex === index
+  );
   if (existing) {
+    const existingId = existing.id;
     // 已存在：更新提示词，复用节点
     const existingModel = (existing.data as ImageNodeData).model || '';
     // 复用时同步自动命名的标签（参考图 ⇄ 起始/结束画面）；用户手动改过的名字不覆盖
     const nextLabel = `分镜${shot.shotNumber}-${shotImageLabel(index, modeCount)}`;
     const autoNamed = new RegExp(`^分镜${shot.shotNumber}-(参考图\\d*|起始画面|结束画面|第\\d+个瞬间)$`)
       .test(existing.data.label || '');
-    store.updateNodeData(imageNodeId, {
+    store.updateNodeData(existingId, {
       ...(autoNamed && existing.data.label !== nextLabel ? { label: nextLabel } : {}),
       prompt: convertedPrompt,
       model: modelId || existingModel || '',
@@ -243,16 +261,19 @@ export function createShotImageNode(
       error: undefined,
     } as Partial<ImageNodeData>);
     // ✅ 补齐资产→分镜节点的边（让上游栏显示资产）
-    ensureAssetEdges(assetMentions, imageNodeId);
+    ensureAssetEdges(assetMentions, existingId);
     return existing;
   }
 
   const scriptPos = scriptNode.position;
   const offsetY = (shot.shotNumber - 1) * 220;
   const imageNode = createNode('image', { x: scriptPos.x + 400 + (index - 1) * SHOT_REF_IMAGE_GAP_X, y: scriptPos.y + offsetY }, {
-    id: imageNodeId,
     data: {
       label: `分镜${shot.shotNumber}-${shotImageLabel(index, modeCount)}`,
+      // 归属字段：槽位复用与首尾帧顺序都读这里（id 不再编码语义）
+      scriptNodeId,
+      shotId: shot.id,
+      refIndex: index,
       prompt: convertedPrompt,
       model: modelId || '',
       mentions: assetMentions,
@@ -261,6 +282,7 @@ export function createShotImageNode(
       quality: '标准画质',
     },
   });
+  const imageNodeId = imageNode.id;
 
   store.addNode(imageNode);
   // 脚本节点 → 图片节点
@@ -295,16 +317,16 @@ export function createShotVideoNode(
     return null;
   }
 
-  const videoNodeId = generateShotVideoNodeId(shot.id, scriptNodeId);
   // 视频节点不需要资产引用，去掉提示词中的 (@类型-名称) 标签
   const cleanPrompt = finalPrompt.replace(/[（(]@[^）)]+[）)]/g, '');
 
-  // 查找该镜头的全部参考图节点；上游边的顺序决定首尾帧次序（第 1 张=first_frame，第 2 张=last_frame）
+  // 查找该镜头的全部参考图槽位；上游边的顺序决定首尾帧次序（第 1 张=first_frame，第 2 张=last_frame）
   const imageNodes = findShotImageNodes(scriptNodeId, shot.id);
   const lastImageNode = imageNodes.length ? imageNodes[imageNodes.length - 1] : null;
 
-  const existing = store.nodes.find(n => n.id === videoNodeId);
+  const existing = findShotVideoNode(scriptNodeId, shot.id);
   if (existing) {
+    const videoNodeId = existing.id;
     const existingModel = (existing.data as VideoNodeData).model || '';
     store.updateNodeData(videoNodeId, {
       prompt: cleanPrompt,
@@ -336,9 +358,11 @@ export function createShotVideoNode(
   const posY = lastImageNode ? lastImageNode.position.y : scriptNode.position.y + offsetY;
 
   const videoNode = createNode('video', { x: posX, y: posY }, {
-    id: videoNodeId,
     data: {
       label: `分镜${shot.shotNumber}-视频`,
+      // 归属字段：复用判断读这里（id 不再编码语义）
+      scriptNodeId,
+      shotId: shot.id,
       prompt: cleanPrompt,
       model: modelId || '',
       duration: shot.duration || 5,
@@ -347,6 +371,7 @@ export function createShotVideoNode(
       resolution: '1080p',
     },
   });
+  const videoNodeId = videoNode.id;
 
   store.addNode(videoNode);
   // 连 image→video（作为上游参考图）；有几张连几张，顺序即首尾帧顺序

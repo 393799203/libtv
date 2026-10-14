@@ -67,6 +67,11 @@ type ProviderTaskView struct {
 	// 库里那些以 sync: 开头的编号是我们自己造的对账 key，不是上游任务号，
 	// 界面上不能当成任务号展示（用户会拿它去渠道后台查，根本查不到）。
 	UpstreamTaskID string `json:"upstream_task_id"`
+	// NodeName 节点名：按 NodeID 从该项目的画布里实时取（如「角色-南方」「镜头3图片」）。
+	// node_id 只是个 id，管理员看 id 认不出这是哪个节点；名字不落库、查询时批量补齐，
+	// 改名后看到的就是当前名字。节点已被删除（历史行）时为空 —— 界面退回显示原始 id，
+	// 绝不拿节点 id 冒充名字。
+	NodeName string `json:"node_name"`
 }
 
 // ProviderTaskFilter 对账列表筛选条件（空值表示不筛）
@@ -286,19 +291,23 @@ func (r *providerTaskRepo) List(ctx context.Context, filter ProviderTaskFilter) 
 	return items, total, nil
 }
 
-// fillNames 批量补项目名/用户名（两条 IN 查询，不做 N+1）
+// fillNames 批量补项目名/用户名/节点名（三条 IN 查询，不做 N+1）
 func (r *providerTaskRepo) fillNames(ctx context.Context, items []ProviderTaskView) {
 	if len(items) == 0 {
 		return
 	}
 	projectIDs := make([]string, 0, len(items))
 	userIDs := make([]string, 0, len(items))
+	nodeIDs := make([]string, 0, len(items))
 	for _, it := range items {
 		if it.ProjectID != "" {
 			projectIDs = append(projectIDs, it.ProjectID)
 		}
 		if it.UserID != "" {
 			userIDs = append(userIDs, it.UserID)
+		}
+		if it.NodeID != "" {
+			nodeIDs = append(nodeIDs, it.NodeID)
 		}
 	}
 	projectNames := map[string]string{}
@@ -309,6 +318,41 @@ func (r *providerTaskRepo) fillNames(ctx context.Context, items []ProviderTaskVi
 				projectNames[p.ID] = p.Name
 			}
 		}
+	}
+
+	// 节点名：按 node_id 从项目画布里取（管理员看 id 认不出是哪个节点）。
+	// 只用一条 CROSS JOIN LATERAL 的原始 SQL 取 (项目, 节点, 名字) 三元组，
+	// 不把画布内容整包读进内存 —— 画布里有图片地址和提示词，单份可能几百 KB，
+	// 一页几十份不值当为一行名字全读出来。
+	// 名字取值顺序：data.label（节点显示名）→ data.assetName（资产图名字）→ 空（界面退回显示 id）。
+	nodeNames := map[string]string{}
+	if len(projectIDs) > 0 && len(nodeIDs) > 0 {
+		type nodeNameRow struct {
+			ProjectID string
+			NodeID    string
+			NodeName  string
+		}
+		var rows []nodeNameRow
+		err := r.db.WithContext(ctx).Raw(`
+			SELECT c.project_id AS project_id,
+			       n->>'id' AS node_id,
+			       COALESCE(
+			         NULLIF(btrim(n->'data'->>'label'), ''),
+			         NULLIF(btrim(n->'data'->>'assetName'), '')
+			       ) AS node_name
+			FROM canvases c
+			CROSS JOIN LATERAL jsonb_array_elements(
+			  CASE WHEN jsonb_typeof(c.content->'nodes') = 'array' THEN c.content->'nodes' ELSE '[]'::jsonb END
+			) AS n
+			WHERE c.project_id IN ? AND n->>'id' IN ?`, projectIDs, nodeIDs).Scan(&rows).Error
+		if err == nil {
+			for _, row := range rows {
+				if row.NodeName != "" {
+					nodeNames[row.ProjectID+"\x00"+row.NodeID] = row.NodeName
+				}
+			}
+		}
+		// 查询失败只影响这一列有没有名字，不影响对账列表本身，所以不往上抛错
 	}
 	type userRow struct {
 		ID       string
@@ -334,6 +378,7 @@ func (r *providerTaskRepo) fillNames(ctx context.Context, items []ProviderTaskVi
 			items[i].UserName = u.Nickname
 			items[i].UserEmail = u.Email
 		}
+		items[i].NodeName = nodeNames[items[i].ProjectID+"\x00"+items[i].NodeID]
 	}
 }
 

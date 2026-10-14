@@ -16,7 +16,73 @@ import {
   type XYPosition,
 } from '@xyflow/react';
 
+/** 脚本资产引用的清理目标 */
+interface AssetRefCleanup {
+  scriptNodeId: string;
+  dataType: string;
+  assetName: string;
+}
+
+/**
+ * 反查「哪些脚本资产引用了这些即将被删除的节点」。
+ *
+ * 为什么反查而不是从被删节点的 id 里解析「我是谁的图」：
+ * - id 只是标识符，不承载语义（历史格式 `角色-南方-script-123` 已废弃）
+ * - 关联方式不止一种：新建资产图节点、把画布上已有的图片节点关联到资产；
+ *   后者节点 id 完全不含资产信息，只有反查资产侧的 nodeId 才覆盖得到
+ * - 资产 nodeId 可指向图片/视频等任何节点类型，所以不按被删节点类型过滤
+ */
+function findAssetRefsToClear(nodes: LibTVNode[], removedIds: Set<string>): AssetRefCleanup[] {
+  if (removedIds.size === 0) return [];
+  const cleanups: AssetRefCleanup[] = [];
+  for (const scriptNode of nodes) {
+    if (scriptNode.type !== 'script') continue;
+    const scriptData = scriptNode.data as Record<string, unknown>;
+    for (const dataType of ASSET_ARRAY_FIELDS) {
+      const assets = scriptData[dataType];
+      if (!Array.isArray(assets)) continue;
+      for (const asset of assets as ScriptAssetItem[]) {
+        if (asset.nodeId && removedIds.has(asset.nodeId)) {
+          cleanups.push({ scriptNodeId: scriptNode.id, dataType, assetName: asset.name });
+          console.log('[CanvasStore] 清除资产 nodeId 引用:', {
+            scriptNodeId: scriptNode.id,
+            dataType,
+            assetName: asset.name,
+            removedNodeId: asset.nodeId,
+          });
+        }
+      }
+    }
+  }
+  return cleanups;
+}
+
+/**
+ * 把「清掉资产 nodeId」写回脚本节点：nodes 数组、script 节点、data、assets 数组、
+ * asset 对象每一层都新建 —— 这些对象被历史快照浅引用共享，原地写会污染历史导致 undo 失效。
+ */
+function clearAssetRefsInNodes(nodes: LibTVNode[], cleanups: AssetRefCleanup[]): LibTVNode[] {
+  return nodes.map((node) => {
+    if (node.type !== 'script') return node;
+    const targets = cleanups.filter((t) => t.scriptNodeId === node.id);
+    if (targets.length === 0) return node;
+
+    const newData: Record<string, unknown> = { ...node.data };
+    for (const { dataType, assetName } of targets) {
+      const assets = newData[dataType];
+      if (!Array.isArray(assets)) continue;
+      newData[dataType] = assets.map((a: ScriptAssetItem) =>
+        a.name === assetName ? { ...a, nodeId: undefined } : a,
+      );
+    }
+    return { ...node, data: newData as LibTVNode['data'] };
+  });
+}
+
 const MAX_HISTORY = 50;
+
+/** 脚本节点里存放三类资产的数组字段（assetType → 该字段的映射见 utils/assetImageSync.ts） */
+const ASSET_ARRAY_FIELDS = ['characters', 'scenes', 'props'] as const;
 
 // ========== 项目级画布数据（按项目隔离）==========
 
@@ -92,6 +158,13 @@ interface CanvasState extends WorkspaceUIState {
    * 避免各处手拼导致派生缩略图漏写（历史 bug：节点显示上一版小图）。
    */
   createMediaNodeAt: (nodeType: NodeType, position: XYPosition, payload: MediaPayload) => LibTVNode;
+  /**
+   * 一次性加入一组节点 + 连线（空画布引导页的「场景」快捷创建用）。
+   * 为什么必须批处理：addNode / addEdge 各自都会 saveHistory 一次，
+   * 一个「文本→分镜」的场景要占 3 条历史 —— 用户按一次 Ctrl+Z 只回退掉半组，很难受。
+   * 整组只走一次 saveHistory，一次撤销即可整组回退。
+   */
+  addNodesAndEdges: (nodes: LibTVNode[], edges: LibTVEdge[]) => void;
   removeNodes: (ids: string[]) => void;
   updateNodeData: (id: string, data: Partial<LibTVNode['data']>) => void;
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
@@ -372,60 +445,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   // --- React Flow 回调 ---
   onNodesChange: (changes: NodeChange<LibTVNode>[]) => {
-    // ✅ 处理节点删除：使用 ID 映射机制同步清空脚本节点资产
-    // 注意：这里只收集清理目标，不做原地 mutation —— scriptData[dataType] 数组和
-    // asset 对象被历史快照浅引用共享，原地写会污染所有历史条目导致 undo 无法恢复。
+    // ✅ 处理节点删除：清掉脚本资产对被删节点的引用（asset.nodeId）
+    // 只收集清理目标，不做原地 mutation —— scriptData[dataType] 数组和 asset 对象被历史快照
+    // 浅引用共享，原地写会污染所有历史条目导致 undo 无法恢复；写回由 clearAssetRefsInNodes 统一做。
     const removeChanges = changes.filter(c => c.type === 'remove');
-    const assetCleanups: { scriptNodeId: string; dataType: string; assetName: string }[] = [];
-    if (removeChanges.length > 0) {
-      const state = get();
-      const nodes = state.nodes;
-
-      for (const change of removeChanges) {
-        const deletedNode = nodes.find(n => n.id === (change as any).id);
-        if (deletedNode && deletedNode.type === 'image') {
-          // ✅ 从节点 ID 中提取资产信息（格式：{type}-{name}-{scriptNodeId}）
-          const nodeId = deletedNode.id;
-          const parts = nodeId.split('-');
-
-          // 解析节点 ID 格式："角色-南方-script-123" -> ["角色", "南方", "script-123"]
-          if (parts.length >= 3) {
-            const assetType = parts[0]; // "角色" / "场景" / "道具"
-            const assetName = parts[1]; // "南方" / "办公室" / "公文包"
-            const scriptNodeId = parts.slice(2).join('-'); // "script-123"
-
-            // 找到脚本节点
-            const scriptNode = nodes.find(n => n.id === scriptNodeId && n.type === 'script');
-            if (scriptNode) {
-              const scriptData = scriptNode.data as any;
-
-              // ✅ 清空资产的 imageUrl
-              const typeMap = {
-                '角色': 'characters',
-                '场景': 'scenes',
-                '道具': 'props',
-              };
-
-              const dataType = typeMap[assetType as '角色' | '场景' | '道具'];
-              if (dataType && scriptData[dataType]) {
-                const assets = scriptData[dataType];
-                // ✅ 不再原地 mutation，仅收集清理目标，稍后统一不可变写回
-                if (assets.some((a: any) => a.name === assetName)) {
-                  assetCleanups.push({ scriptNodeId, dataType, assetName });
-                  console.log('[CanvasStore] 清除资产 nodeId:', {
-                    assetType,
-                    assetName,
-                    scriptNodeId,
-                  });
-                }
-              }
-
-              // ✅ assetImageMapping 已废弃，不再需要清理映射关系
-            }
-          }
-        }
-      }
-    }
+    const removedIds = new Set(removeChanges.map(c => (c as { id: string }).id));
+    const assetCleanups = findAssetRefsToClear(get().nodes, removedIds);
 
     // ✅ 统一不可变写回资产清理：nodes 数组、script 节点、data、assets 数组、asset
     // 对象每一层都新建。这里故意不调 saveHistory、不置 skipHistory —— 随后的
@@ -439,21 +464,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         const data = cache.get(pid);
         if (!data) return {};
 
-        data.nodes = data.nodes.map((node) => {
-          if (node.type !== 'script') return node;
-          const targets = assetCleanups.filter((t) => t.scriptNodeId === node.id);
-          if (targets.length === 0) return node;
-
-          const newData: Record<string, unknown> = { ...node.data };
-          for (const { dataType, assetName } of targets) {
-            const assets = newData[dataType];
-            if (!Array.isArray(assets)) continue;
-            newData[dataType] = assets.map((a: ScriptAssetItem) =>
-              a.name === assetName ? { ...a, nodeId: undefined } : a,
-            );
-          }
-          return { ...node, data: newData as LibTVNode['data'] };
-        });
+        data.nodes = clearAssetRefsInNodes(data.nodes, assetCleanups);
         cache.set(pid, data);
 
         return { _cache: cache, ...syncFromCache(pid, cache) };
@@ -520,6 +531,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 
+  addNodesAndEdges: (nodes: LibTVNode[], edges: LibTVEdge[]) => {
+    if (nodes.length === 0 && edges.length === 0) return;
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid || state.isLoading) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid) || createEmptyProjectData();
+
+      data.nodes = [...data.nodes, ...nodes];
+      data.edges = [...data.edges, ...edges];
+      const hist = saveHistory(data);
+      Object.assign(data, hist);
+      cache.set(pid, data);
+
+      return { _cache: cache, isDirty: true, ...syncFromCache(pid, cache) };
+    });
+  },
+
   removeNodes: (ids: string[]) => {
     const idSet = new Set(ids);
     set((state) => {
@@ -532,6 +561,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       data.edges = data.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target));
       // 清理被删节点的选中状态
       data.selectedNodeIds = data.selectedNodeIds.filter((id) => !idSet.has(id));
+      // 清掉脚本资产对被删节点的引用：右键「删除节点」等路径直接走这里、不经过
+      // onNodesChange，所以清理必须两边都做（否则删掉资产图节点后资产仍指向悬空 id）
+      data.nodes = clearAssetRefsInNodes(data.nodes, findAssetRefsToClear(data.nodes, idSet));
       const hist = saveHistory(data);
       Object.assign(data, hist);
       cache.set(pid, data);

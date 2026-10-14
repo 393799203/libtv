@@ -17,7 +17,6 @@ import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
 import {
   getAssetImageNodeId,
   createAssetImageNode,
-  generateAssetImageNodeId,
 } from '@/utils/assetImageSync';
 
 type AssetType = 'character' | 'scene' | 'prop';
@@ -235,8 +234,12 @@ export const AssetEditModal = memo<AssetEditModalProps>(
             ? '四视图'
             : '六视图';
 
-      const imageNodeId = generateAssetImageNodeId(assetType, asset.name, scriptNodeId);
-      const msgKey = `asset-gen-${imageNodeId}`;
+      // 资产对应的图片节点：先看资产自己的 nodeId 引用，没有就建一个（id 不再按格式拼）
+      const linkedId = getAssetImageNodeId(scriptNodeId, assetType, asset.name);
+      const existingNode = linkedId ? store.nodes.find(n => n.id === linkedId) : undefined;
+      const created = existingNode ? null : createAssetImageNode(scriptNodeId, assetType, asset.name);
+      const imageNodeId = existingNode?.id ?? created?.id;
+      const msgKey = `asset-gen-${imageNodeId ?? asset.name}`;
       const modelName = IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel;
       message.loading({
         content: `正在使用 ${modelName} 生成${viewText}…`,
@@ -245,17 +248,9 @@ export const AssetEditModal = memo<AssetEditModalProps>(
       });
 
       try {
-        // Step 1: 确保图片节点存在（不存在则创建）
-        const existingNode = store.nodes.find(n => n.id === imageNodeId);
-        if (!existingNode) {
-          const created = createAssetImageNode(
-            scriptNodeId,
-            assetType,
-            asset.name,
-          );
-          if (!created) {
-            throw new Error('创建图片节点失败');
-          }
+        // Step 1: 图片节点已在上方确保存在
+        if (!imageNodeId) {
+          throw new Error('创建图片节点失败');
         }
 
         // Step 2: 把抽屉状态（模型、提示词等）写入图片节点，并重置运行状态

@@ -21,30 +21,27 @@ export function addEnhanceNodeAfter(sourceNodeId: string): LibTVNode | null {
   if (!source) return null;
 
   // 已有连线 → 复用（用户重复点「加清晰化节点」不该堆出一排节点）
+  // 判据是目标节点的类型，不看 id 前缀：清晰化节点就是 type==='enhance' 的节点
   const existingEdge = store.edges.find(
-    (e) => e.source === sourceNodeId && e.target.startsWith('enhance-')
+    (e) => e.source === sourceNodeId && store.nodes.find((n) => n.id === e.target)?.type === 'enhance'
   );
   if (existingEdge) {
     const existing = store.nodes.find((n) => n.id === existingEdge.target);
     if (existing) return existing;
   }
 
-  const nodeId = `enhance-${Date.now()}`;
-  const node = createNode(
-    'enhance',
-    {
-      x: source.position.x + ENHANCE_NODE_WIDTH + ENHANCE_NODE_GAP,
-      y: source.position.y,
-    },
-    { id: nodeId }
-  );
+  // 清晰化节点不需要自定义 id：工厂产出的统一 id 就够（幂等靠 type 判断，不靠 id 前缀）
+  const node = createNode('enhance', {
+    x: source.position.x + ENHANCE_NODE_WIDTH + ENHANCE_NODE_GAP,
+    y: source.position.y,
+  });
 
   store.addNode(node);
 
   const edge: LibTVEdge = {
-    id: `e-${sourceNodeId}-${nodeId}`,
+    id: `e-${sourceNodeId}-${node.id}`,
     source: sourceNodeId,
-    target: nodeId,
+    target: node.id,
     type: 'dataFlow',
   };
   store.addEdge(edge);

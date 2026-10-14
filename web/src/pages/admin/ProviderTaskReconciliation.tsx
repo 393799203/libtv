@@ -774,9 +774,12 @@ export default function ProviderTaskReconciliation() {
         r.exec_id > 0 ? (
           <div className="text-[11px] leading-5 text-gray-500">
             <div className="text-gray-700">exec {r.exec_id}</div>
-            {/* 节点 ID 常常很长（节点名 + 时间戳），放宽这一列并允许折行，别截断 */}
+            {/* 节点名由后端按 node_id 从项目画布实时解析（node_name）：
+                管理员看 id 认不出这是哪个节点。解析不到（节点已删除的历史行、
+                或画布里确实没有这个 id）时退回显示原始 id，不编名字。
+                原始 id 一律放原生 title，排查时仍拿得到。 */}
             <div className="break-all" title={r.node_id || ''}>
-              {r.node_id || '-'}
+              {r.node_name || r.node_id || '-'}
             </div>
           </div>
         ) : (

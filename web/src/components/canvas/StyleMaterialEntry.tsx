@@ -49,27 +49,21 @@ export function StyleMaterialEntry() {
     const imageNode = createNode('image', imagePos);
     store.addNode(imageNode);
 
-    // 2) 风格节点：id 前缀 style- + data.styleId 两个标记都给上。
-    //    后端认「id 以 style- 开头」或「有 styleId 字段」，据此把它当风格图（只提取画风/色彩，
-    //    不当作内容参考图），所以这里沿用节点内选风格的同一套字段。
-    const styleNodeId = `style-${Date.now()}`;
-    const styleNode = createNode('image', { x: imagePos.x + STYLE_NODE_OFFSET_X, y: imagePos.y }, {
-      id: styleNodeId,
-    });
-    // styleId 不在 LibTVNodeData 的类型里（历史上是随节点数据一起存的扩展字段），
-    // 与节点内选风格保持一致：显式断言一次，避免在类型上开一个口子。
+    // 2) 风格节点：身份靠 data.styleId（后端据此把它当风格图：只提取画风/色彩，
+    //    不当作内容参考图）。id 由工厂统一生成，不再带 style- 前缀。
+    const styleNode = createNode('image', { x: imagePos.x + STYLE_NODE_OFFSET_X, y: imagePos.y });
     styleNode.data = {
       ...styleNode.data,
       label: `风格-${style.name}`,
       imageUrl: style.image_url,
       styleId: style.id,
-    } as typeof styleNode.data;
+    };
     store.addNode(styleNode);
 
     // 3) 连线：风格节点 → 图片节点（后端从上游连线收集风格图）
     store.addEdge({
-      id: `e-${styleNodeId}-${imageNode.id}`,
-      source: styleNodeId,
+      id: `e-${styleNode.id}-${imageNode.id}`,
+      source: styleNode.id,
       target: imageNode.id,
       type: 'dataFlow',
     });

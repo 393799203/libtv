@@ -10,6 +10,11 @@ export interface ProviderTask {
   model: string;
   exec_id: number;
   node_id: string;
+  /**
+   * 节点名（后端按 node_id 从项目画布里实时解析，如「角色-南方」「镜头3图片」）。
+   * 节点已被删除（历史行）或画布里找不到时为空 —— 界面退回显示 node_id。
+   */
+  node_name?: string;
   user_id: string;
   project_id: string;
   /**

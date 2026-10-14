@@ -15,7 +15,7 @@ import {
   persistShotCanvas,
   findShotImageNodes,
   findShotVideoNode,
-  generateShotImageNodeId,
+  haveAllShotImageSlots,
 } from '@/utils/shotNodeSync';
 
 interface PromptMergeModalProps {
@@ -78,13 +78,10 @@ export const PromptMergeModal = memo<PromptMergeModalProps>(
 
     // 获取画布状态和模型列表（只在需要时获取，避免不必要的订阅）
     const projectId = useCanvasStore((s) => s.projectId);
-    // ✅ 响应式判断：该镜头的参考图节点是否已全部创建（全建好才隐藏"创建参考图节点"按钮）
-    const shotImageNodeIds = useMemo(
-      () => (shot ? Array.from({ length: refImageCount }, (_, i) => generateShotImageNodeId(shot.id, scriptNodeId, i + 1)) : []),
-      [shot, scriptNodeId, refImageCount],
-    );
-    const imageNodeExists = useCanvasStore(
-      (s) => shotImageNodeIds.length > 0 && shotImageNodeIds.every((id) => s.nodes.some((n) => n.id === id)),
+    // ✅ 响应式判断：该镜头的参考图槽位是否已全部创建（全建好才隐藏"创建参考图节点"按钮）
+    // 槽位按 data 上的 scriptNodeId + shotId + refIndex 判断，不再按 id 拼名字
+    const imageNodeExists = useCanvasStore((s) =>
+      shot ? haveAllShotImageSlots(s.nodes, scriptNodeId, shot.id, refImageCount) : false
     );
     const textModels = useModels('text');
     const imageModels = useModels('image');

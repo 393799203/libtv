@@ -15,12 +15,19 @@ import { canvasApi } from '@/services/canvasApi';
 import {
   updateAssetImageNodeUrl,
   createAssetImageNode,
-  generateAssetImageNodeId,
   getAssetImageNodeId,
   associateExistingImageNode,
+  mergeAssetFieldsInStore,
 } from '@/utils/assetImageSync';
 
 type AssetType = 'character' | 'scene' | 'prop';
+
+/** 资产数据字段名 → 资产类型（patchAssets 内部用） */
+const ASSET_TYPE_BY_KEY = {
+  characters: 'character',
+  scenes: 'scene',
+  props: 'prop',
+} as const;
 
 // ---- 单个资产卡片（角色/场景/道具通用）----
 interface AssetCardProps<T extends { name: string; description: string }> {
@@ -285,6 +292,27 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
     // 正在"导入资产"的资产（弹出资产库选择弹窗）
     const [importTarget, setImportTarget] = useState<{ assetType: AssetType; name: string } | null>(null);
 
+    // 改资产上的某个字段：合并逻辑走 mergeAssetFieldsInStore（**从 store 读当前那一份数组**），
+    // 不用 props 里的 data —— props 可能是旧快照，整组写回会把别处刚写上的 nodeId
+    // （「这个资产用哪个图片节点」的关联）覆盖成空。线上后果：同一资产出现两个图片节点
+    // （资产指向空节点、有结果的那个没人认领）。同款注释见 handleAssociateNode。
+    const patchAssets = useCallback(
+      (key: 'characters' | 'scenes' | 'props', name: string, patch: Record<string, unknown>) => {
+        const assetType = ASSET_TYPE_BY_KEY[key];
+        // 取不到 store 数据（脚本节点不在画布上）时才退回 props，避免把资产数组清空
+        const merged = mergeAssetFieldsInStore(
+          scriptNodeId,
+          assetType,
+          name,
+          patch,
+          (data as unknown as Record<string, Array<{ name: string }>>)[key] ?? []
+        );
+        if (!merged) return;
+        onUpdate({ [key]: merged } as Partial<AssetPreparationData>);
+      },
+      [scriptNodeId, data, onUpdate]
+    );
+
     // ✅ 通用的画布实时保存函数（避免代码重复）
     const saveCanvasRealtime = useCallback(async () => {
       const store = useCanvasStore.getState();
@@ -308,10 +336,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
     // 角色图片上传
     const handleCharacterUpload = useCallback(
       async (name: string, url: string) => {
-        const updated = data.characters.map((c) =>
-          c.name === name ? { ...c, imageUrl: url } : c
-        );
-        onUpdate({ characters: updated });
+        patchAssets('characters', name, { imageUrl: url });
         // 同步更新编辑中的角色（侧屏打开时实时刷新）
         setEditingCharacter((prev) =>
           prev && prev.name === name ? { ...prev, imageUrl: url } : prev
@@ -325,8 +350,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           if (character) {
             const created = createAssetImageNode(scriptNodeId, 'character', name);
             if (created) {
-              const imageNodeId = generateAssetImageNodeId('character', name, scriptNodeId);
-              useCanvasStore.getState().updateNodeData(imageNodeId, {
+              useCanvasStore.getState().updateNodeData(created.id, {
                 imageUrl: url,
                 prompt: character.description,
               } as any);
@@ -337,7 +361,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         // ✅ 实时保存画布（确保不丢失更改）
         await saveCanvasRealtime();
       },
-      [data.characters, onUpdate, scriptNodeId, saveCanvasRealtime]
+      [data.characters, patchAssets, scriptNodeId, saveCanvasRealtime]
     );
 
     // ✅ 关联画布上已有的图片节点到指定资产（写 nodeId + 连边 + 同步 imageUrl + 保存画布）
@@ -373,25 +397,19 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
     // 角色描述变更（失焦时自动保存）
     const handleCharacterDescriptionChange = useCallback(
       (name: string, description: string) => {
-        const updated = data.characters.map((c) =>
-          c.name === name ? { ...c, description } : c
-        );
-        onUpdate({ characters: updated });
+        patchAssets('characters', name, { description });
         // 同步更新编辑中的角色（侧屏打开时实时刷新）
         setEditingCharacter((prev) =>
           prev && prev.name === name ? { ...prev, description } : prev
         );
       },
-      [data.characters, onUpdate]
+      [patchAssets]
     );
 
     // 场景图片上传
     const handleSceneUpload = useCallback(
       async (name: string, url: string) => {
-        const updated = data.scenes.map((s) =>
-          s.name === name ? { ...s, imageUrl: url } : s
-        );
-        onUpdate({ scenes: updated });
+        patchAssets('scenes', name, { imageUrl: url });
         // 同步更新编辑中的场景（侧屏打开时实时刷新）
         setEditingScene((prev) =>
           prev && prev.name === name ? { ...prev, imageUrl: url } : prev
@@ -405,8 +423,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           if (scene) {
             const created = createAssetImageNode(scriptNodeId, 'scene', name);
             if (created) {
-              const imageNodeId = generateAssetImageNodeId('scene', name, scriptNodeId);
-              useCanvasStore.getState().updateNodeData(imageNodeId, {
+              useCanvasStore.getState().updateNodeData(created.id, {
                 imageUrl: url,
                 prompt: scene.description,
               } as any);
@@ -417,31 +434,25 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         // ✅ 实时保存画布（确保不丢失更改）
         await saveCanvasRealtime();
       },
-      [data.scenes, onUpdate, scriptNodeId, saveCanvasRealtime]
+      [data.scenes, patchAssets, scriptNodeId, saveCanvasRealtime]
     );
 
     // 场景描述变更（失焦时自动保存）
     const handleSceneDescriptionChange = useCallback(
       (name: string, description: string) => {
-        const updated = data.scenes.map((s) =>
-          s.name === name ? { ...s, description } : s
-        );
-        onUpdate({ scenes: updated });
+        patchAssets('scenes', name, { description });
         // 同步更新编辑中的场景（侧屏打开时实时刷新）
         setEditingScene((prev) =>
           prev && prev.name === name ? { ...prev, description } : prev
         );
       },
-      [data.scenes, onUpdate]
+      [patchAssets]
     );
 
     // 道具图片上传
     const handlePropUpload = useCallback(
       async (name: string, url: string) => {
-        const updated = data.props.map((p) =>
-          p.name === name ? { ...p, imageUrl: url } : p
-        );
-        onUpdate({ props: updated });
+        patchAssets('props', name, { imageUrl: url });
         // 同步更新编辑中的道具（侧屏打开时实时刷新）
         setEditingProp((prev) =>
           prev && prev.name === name ? { ...prev, imageUrl: url } : prev
@@ -455,8 +466,7 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
           if (prop) {
             const created = createAssetImageNode(scriptNodeId, 'prop', name);
             if (created) {
-              const imageNodeId = generateAssetImageNodeId('prop', name, scriptNodeId);
-              useCanvasStore.getState().updateNodeData(imageNodeId, {
+              useCanvasStore.getState().updateNodeData(created.id, {
                 imageUrl: url,
                 prompt: prop.description,
               } as any);
@@ -467,22 +477,19 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         // ✅ 实时保存画布（确保不丢失更改）
         await saveCanvasRealtime();
       },
-      [data.props, onUpdate, scriptNodeId, saveCanvasRealtime]
+      [data.props, patchAssets, scriptNodeId, saveCanvasRealtime]
     );
 
     // 道具描述变更（失焦时自动保存）
     const handlePropDescriptionChange = useCallback(
       (name: string, description: string) => {
-        const updated = data.props.map((p) =>
-          p.name === name ? { ...p, description } : p
-        );
-        onUpdate({ props: updated });
+        patchAssets('props', name, { description });
         // 同步更新编辑中的道具（侧屏打开时实时刷新）
         setEditingProp((prev) =>
           prev && prev.name === name ? { ...prev, description } : prev
         );
       },
-      [data.props, onUpdate]
+      [patchAssets]
     );
 
     // ✅ 将图片 URL 写入指定资产（上传图片 / 导入资产的公共分发入口，

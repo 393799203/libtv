@@ -45,8 +45,8 @@ function getUpstreamInputs(
       const sourceNode = nodes.find((n) => n.id === edge.source);
       if (!sourceNode) return null;
 
-      // 过滤掉风格图片节点（ID 以"style-"开头）
-      if (sourceNode.id.startsWith('style-')) return null;
+      // 过滤掉风格图片节点（按 data.styleId 识别：后端只把它当画风来源，不是内容参考图）
+      if (sourceNode.data.styleId) return null;
 
       const d = sourceNode.data;
       // 当前类型的序号 +1
@@ -117,16 +117,18 @@ function computeImportablePrompts(
   upstreamInputs: UpstreamInput[],
   nodes: LibTVNode[]
 ): { label: string; prompt: string; duration?: number }[] {
-  if (nodeType !== 'video' || nodeId.startsWith('shot-video-')) return [];
+  // 本节点自己就是分镜视频节点时不需要导入上游提示词（按 data.shotId 识别）
+  if (nodeType !== 'video' || nodes.find((n) => n.id === nodeId)?.data.shotId) return [];
   const result: { label: string; prompt: string; duration?: number }[] = [];
   for (const input of upstreamInputs) {
     if (input.nodeType !== 'image') continue;
-    // 分镜图片节点 ID 格式: shot-image-{shotId}-{scriptNodeId}（第 2 张起带 -refN 后缀）
-    const match = input.nodeId.match(/^shot-image-(.+)-(script-.+?)(?:-ref\d+)?$/);
-    if (!match) continue;
-    const [, shotId, scriptNodeId] = match;
-    const scriptNode = nodes.find((n) => n.id === scriptNodeId);
-    if (!scriptNode || scriptNode.type !== 'script') continue;
+    // 分镜图片节点：归属直接读 data（shotId + scriptNodeId），不再解析 id
+    const srcNode = nodes.find((n) => n.id === input.nodeId);
+    const shotId = srcNode?.data.shotId;
+    const scriptNodeId = srcNode?.data.scriptNodeId;
+    if (!shotId || !scriptNodeId) continue;
+    const scriptNode = nodes.find((n) => n.id === scriptNodeId && n.type === 'script');
+    if (!scriptNode) continue;
     const scriptData = scriptNode.data as ScriptNodeData;
     const shot = (scriptData.shots || []).find((s: ScriptShot) => s.id === shotId);
     if (shot?.finalPrompt) {
@@ -166,9 +168,8 @@ function computeUpstreamSignature(nodeId: string, nodes: LibTVNode[], edges: Lib
     const src = nodes.find((n) => n.id === e.source);
     addNode(src);
     // 分镜图片节点关联的 script 节点：shots 里被读到的字段也纳入签名
-    if (src && src.id.startsWith('shot-image-')) {
-      const m = src.id.match(/^shot-image-(.+)-(script-.+?)(?:-ref\d+)?$/);
-      const scriptNode = m ? nodes.find((n) => n.id === m[2]) : undefined;
+    if (src?.data.shotId && src.data.scriptNodeId) {
+      const scriptNode = nodes.find((n) => n.id === src.data.scriptNodeId && n.type === 'script');
       if (scriptNode) {
         addNode(scriptNode);
         const shots = (scriptNode.data as ScriptNodeData).shots || [];

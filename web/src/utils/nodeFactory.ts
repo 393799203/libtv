@@ -13,22 +13,76 @@ const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
 };
 
 /**
+ * 节点 id 生成器 —— 所有「新造一个节点」的路径都走 createNode，由它调用这里。
+ *
+ * 只做一件事：**给出一个唯一 id**。格式统一为 `<类型首字母>-` + 12 位随机串（t/i/v/a/s/p/e），
+ * 不带时间/序号等结构。前缀只是给人看的提示，**没有任何代码读它**：节点种类看
+ * `node.type` / `data.type`，语义（风格图、资产归属、分镜槽位…）看 data 字段，
+ * 见 types/canvas.ts 的 BaseNodeFields 注释。
+ *
+ * 历史教训（为什么不再往 id 里塞信息）：默认 id 曾是 `${type}-${Date.now()}`，
+ * **同一毫秒内建两个同类型节点会撞成同一个 id、两个节点被合并成一个**
+ * （「图生图」场景 image→image 实测暴露，剧本→分镜因类型不同一直没被发现）；
+ * 后来叠了会话短标识 + 自增序号勉强躲开，但那套结构再没人用得着。
+ * 现在唯一性只靠随机量：12 位 base36 ≈ 62 bit 熵，同毫秒爆发、多标签页并发都不会撞。
+ *
+ * 老画布里的历史 id（`shot-image-shot-1-script-…`、`角色-南方-script-…`、`style-…`）原样保留：
+ * 改 id 会切断 provider_tasks.node_id / charge_key 的历史扣费与对账关联。它们里面的语义
+ * 已由 scripts/migrate-node-semantics.mjs 一次性搬到 data 上，运行期代码一律不解析 id
+ * （后端同规则：只看 data.styleId / data.assetType）。
+ */
+const ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+/** 12 位随机串（拒绝采样消掉取模偏置，保证每位均匀） */
+function randomSuffix(len = 12): string {
+  let out = '';
+  const buf = new Uint8Array(16);
+  while (out.length < len) {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(buf);
+    else for (let i = 0; i < buf.length; i += 1) buf[i] = Math.floor(Math.random() * 256);
+    for (const b of buf) {
+      if (b >= 252) continue; // 252 = 36×7，丢弃溢出的字节
+      out += ID_ALPHABET[b % ID_ALPHABET.length];
+      if (out.length === len) break;
+    }
+  }
+  return out;
+}
+
+export function newId(prefix: string): string {
+  return `${prefix}-${randomSuffix()}`;
+}
+
+/**
+ * 节点 id：`<类型首字母>-` + 12 位随机串 —— t/i/v/a/s/p/e（text/image/video/audio/script/previz/enhance）。
+ *
+ * 首字母只是给人一眼看出节点种类的提示，**不是语义来源**：代码要判断类型就读
+ * `node.type` / `data.type`，不得依赖这个前缀（改名/改名类型的代码都不得靠它）。
+ * 真语义（风格图、资产归属、分镜槽位…）一律在 data 字段上。
+ */
+export function newNodeId(nodeType: NodeType): string {
+  return newId(nodeType.charAt(0));
+}
+
+/**
  * 统一创建节点工厂 — 所有节点只走这一套逻辑
+ *
+ * id 不接受覆盖：节点 id 只能由 newNodeId() 产出，这样「线上新建的节点 id 一定同格式」
+ * 是可保证的（过去留过 id 覆盖口，等于允许各处自己拼 id）。
  * @param nodeType 节点类型
  * @param position 画布位置
- * @param overrides 可选覆盖（id / data / style）
+ * @param overrides 可选覆盖（data / style）
  */
 export function createNode(
   nodeType: NodeType,
   position: XYPosition,
   overrides?: {
-    id?: string;
     data?: Partial<LibTVNodeData>;
     style?: React.CSSProperties;
   },
 ): LibTVNode {
   return {
-    id: overrides?.id ?? `${nodeType}-${Date.now()}`,
+    id: newNodeId(nodeType),
     type: nodeType,
     position,
     data: {

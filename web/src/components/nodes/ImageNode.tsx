@@ -31,8 +31,8 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 双击查看大图弹窗（展示原图，不是画布上的缩略图）
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // 是否为风格图片节点
-  const isStyleNode = id.startsWith('style-');
+  // 是否为风格图片节点（按 data.styleId 识别，不看 id 前缀）
+  const isStyleNode = Boolean((data as { styleId?: string }).styleId);
   // 风格节点使用粉色主题
   const styleColor = isStyleNode ? '#ec4899' : undefined;
 

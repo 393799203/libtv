@@ -23,10 +23,12 @@ import {
   VideoCameraOutlined,
   AudioOutlined,
   CloseOutlined,
+  ArrowRightOutlined,
+  DeploymentUnitOutlined,
+  FormatPainterOutlined,
 } from '@ant-design/icons';
 
 import { useCanvasStore } from '@/stores/canvasStore';
-import { useExecutionStore } from '@/stores/executionStore';
 import { useShallow } from 'zustand/react/shallow';
 import { NODE_TYPE_CONFIG } from '@/types/canvas';
 import type { LibTVNode, LibTVEdge, NodeType, ImageNodeData, VideoNodeData, AudioNodeData } from '@/types/canvas';
@@ -45,14 +47,59 @@ import type { UserAsset } from '@/services/assetApi';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 import { canvasApi } from '@/services/canvasApi';
 
-/** 空画布引导卡片的节点入口 */
-const EMPTY_GUIDE_TYPES: { type: NodeType; label: string; desc: string; icon: React.ReactNode }[] = [
-  { type: 'text', label: '文本', desc: '创作剧本/台词', icon: <FileTextOutlined /> },
-  { type: 'script', label: '分镜', desc: '生成分镜剧本', icon: <SnippetsOutlined /> },
-  { type: 'image', label: '图片', desc: '角色/场景/道具图', icon: <PictureOutlined /> },
-  { type: 'video', label: '视频', desc: '生成/导入视频', icon: <VideoCameraOutlined /> },
-  { type: 'audio', label: '音频', desc: '配音/配乐', icon: <AudioOutlined /> },
+/**
+ * 空画布引导卡片的「场景」入口。
+ *
+ * 为什么给场景而不是单节点：原来的 5 个节点按钮只是「新建一个空节点」——
+ * 建完还要自己连线、改名、想清楚该接什么，而真实用法基本都是固定搭配
+ * （剧本→分镜→分镜图→视频）。所以这里直接列出几种成片路径，点一下把整条链路建好。
+ */
+const EMPTY_GUIDE_SCENARIOS: {
+  key: string;
+  title: string;
+  desc: string;
+  /** 要创建的节点链：type + 节点标题（标题写进 data.label，省得建完还要手动改名） */
+  chain: { type: NodeType; label: string }[];
+}[] = [
+  {
+    key: 'story',
+    title: '剧本创作',
+    desc: '写清故事梗概，一键拆成分镜剧本',
+    chain: [{ type: 'text', label: '剧本' }, { type: 'script', label: '分镜' }],
+  },
+  {
+    key: 'storyboard',
+    title: '分镜出图',
+    desc: '按分镜逐镜生成画面，锁定角色一致性',
+    chain: [{ type: 'script', label: '分镜' }, { type: 'image', label: '分镜图' }],
+  },
+  {
+    key: 'i2i',
+    title: '图生图',
+    desc: '基于原图改画面、换风格或换构图',
+    chain: [{ type: 'image', label: '原图' }, { type: 'image', label: '生成图' }],
+  },
+  {
+    key: 'i2v',
+    title: '图生视频',
+    desc: '把静态画面变成动态镜头',
+    chain: [{ type: 'image', label: '首帧图' }, { type: 'video', label: '视频' }],
+  },
 ];
+
+/** 链路预览的小图标（按节点类型静态给出，不做运行时按名查表） */
+const NODE_ICONS: Record<NodeType, React.ReactNode> = {
+  text: <FileTextOutlined />,
+  script: <SnippetsOutlined />,
+  image: <PictureOutlined />,
+  video: <VideoCameraOutlined />,
+  audio: <AudioOutlined />,
+  previz: <DeploymentUnitOutlined />,
+  enhance: <FormatPainterOutlined />,
+};
+
+/** 场景链里相邻两个节点的水平间距（画布坐标；节点宽 + 这个间距 = 中心距） */
+const CHAIN_GAP = 120;
 
 const edgeTypes = {
   dataFlow: DataFlowEdge,
@@ -133,7 +180,7 @@ export const Canvas = memo(function Canvas() {
   const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, removeNodes, projectId, createMediaNodeAt } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -144,6 +191,7 @@ export const Canvas = memo(function Canvas() {
       updateNodeData: s.updateNodeData,
       addNode: s.addNode,
       addEdge: s.addEdge,
+      addNodesAndEdges: s.addNodesAndEdges,
       removeNodes: s.removeNodes,
       createMediaNodeAt: s.createMediaNodeAt,
       projectId: s.projectId,
@@ -154,7 +202,6 @@ export const Canvas = memo(function Canvas() {
   const canRedo = useCanvasStore((s) => s.canRedo);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
-  const isExecuting = useExecutionStore((s) => s.isExecuting);
 
   // 当选中节点变化时，重置之前节点的编辑状态（避免 isEditing 卡住导致提示词框不显示）
   const prevSelectedIdsRef = useRef<string[]>([]);
@@ -345,7 +392,6 @@ export const Canvas = memo(function Canvas() {
     mutable.stale = false;
     if ('isEditing' in mutable) mutable.isEditing = false;
     return createNode(nodeType, position, {
-      id: `${nodeType}-copy-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       data,
       style: { ...(source.style ?? {}) },
     });
@@ -553,21 +599,62 @@ export const Canvas = memo(function Canvas() {
     [handleCanvasDrop]
   );
 
-    // 在画布中心添加节点并自动选中（空画布引导卡 / FAB 共用）
-  const addNodeAtCenter = useCallback(
-    (nodeType: NodeType) => {
+  /**
+   * 场景快捷创建：一次把整条链路建好（节点 + 连线 + 居中布局）。
+   *
+   * 取景不能紧跟着 setState 调 fitView：fitView 读的是 React Flow 内部 store，
+   * 那一份要等 re-render 才同步，立刻调用会按「还没有这些节点」的画面去取景。
+   * 所以这里只置个标记，由下面的 effect 在 nodes 更新后再取景。
+   */
+  const pendingFitRef = useRef(false);
+  useEffect(() => {
+    if (!pendingFitRef.current) return;
+    pendingFitRef.current = false;
+    // maxZoom 防止只有两个节点时被放到巨大
+    fitView({ padding: 0.3, duration: 400, maxZoom: 1 });
+  }, [nodes, fitView]);
+
+  const applyScenario = useCallback(
+    (scenario: (typeof EMPTY_GUIDE_SCENARIOS)[number]) => {
       const el = containerRef.current;
       const rect = el?.getBoundingClientRect();
       const center = rect
         ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
         : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-      const flowPos = screenToFlowPosition(center);
-      const node = createNode(nodeType, flowPos);
-      addNode(node);
-      // 选中新节点 → 自动打开提示词面板
-      onNodesChange([{ type: 'select', id: node.id, selected: true }]);
+      const flowCenter = screenToFlowPosition(center);
+
+      // nodeOrigin 是 [0.5,0.5]，坐标即节点中心；先按各类型默认宽度算出整条链的总宽，
+      // 再从中心往两边排，保证整组落在视口正中（只居中第一个节点会歪到右边去）
+      const widths = scenario.chain.map(
+        (step) => Number(createNode(step.type, { x: 0, y: 0 }).style?.width) || 320
+      );
+      const totalWidth =
+        widths.reduce((sum, w) => sum + w, 0) + CHAIN_GAP * (scenario.chain.length - 1);
+      let cursor = flowCenter.x - totalWidth / 2;
+      const nodes = scenario.chain.map((step, i) => {
+        const node = createNode(
+          step.type,
+          { x: cursor + widths[i] / 2, y: flowCenter.y },
+          { data: { label: step.label } }
+        );
+        cursor += widths[i] + CHAIN_GAP;
+        return node;
+      });
+      const edges: LibTVEdge[] = nodes.slice(1).map((node, i) => ({
+        // 连线 id 统一成 e-{source}-{target}（与 Canvas 其它入口、shotNodeSync 等保持一致）
+        id: `e-${nodes[i].id}-${node.id}`,
+        source: nodes[i].id,
+        target: node.id,
+        type: 'dataFlow',
+      }));
+
+      // 整组一次提交：一次撤销即可整组回退（逐个 addNode/addEdge 会占掉多条历史）
+      addNodesAndEdges(nodes, edges);
+      pendingFitRef.current = true;
+      // 选中链路首节点 → 自动打开提示词面板，用户点完就能直接开始
+      onNodesChange([{ type: 'select', id: nodes[0].id, selected: true }]);
     },
-    [screenToFlowPosition, addNode, onNodesChange]
+    [screenToFlowPosition, addNodesAndEdges, onNodesChange]
   );
 
   const onViewportChange = useCallback((viewport: Viewport) => {
@@ -627,7 +714,7 @@ export const Canvas = memo(function Canvas() {
   const hasPromptPanel = selectedNode
     && !promptSuppressed
     && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type)
-    && !selectedNode.id.startsWith('style-');
+    && !selectedNode.data.styleId;
   const isEditingNode = nodes.some((n) => n.data.isEditing);
 
   // 加载完成后恢复视口位置（仅执行一次）
@@ -771,8 +858,17 @@ export const Canvas = memo(function Canvas() {
         connectionRadius={40}
         minZoom={0.05}
         maxZoom={4}
-        nodesDraggable={!isExecuting}
-        nodesConnectable={!isExecuting}
+        // 生成中不锁画布：拖节点、连线与生成互不影响（过去是 nodesDraggable={!isExecuting}，
+        // 生成一次可能几十秒，期间用户完全没法整理画布，体验很差）。
+        //
+        // 为什么可以放开：
+        //   - 后端在「点生成」那一刻就把画布解析成执行计划（engine.Parse），
+        //     之后再拖动/连线都不会改变正在跑的这一次；
+        //   - 节点位置从不参与执行，产物是按节点 id 回填的（拖动不影响回填，进度浮层跟着节点走）；
+        //   - 平移/缩放本来就没被锁（panOnDrag/zoomOnScroll），被锁的只有「动节点」和「拉线」。
+        // 仍受生成状态影响的只有节点内部的「生成」按钮（防止对同一节点重复下发）。
+        nodesDraggable
+        nodesConnectable
         elementsSelectable
         // ✅ 性能优化属性
         onlyRenderVisibleElements={true}  // 只渲染可见区域的节点（已启用）
@@ -797,10 +893,11 @@ export const Canvas = memo(function Canvas() {
       </div>
       )}
 
-      {/* 空画布引导：融入画布的虚线占位（非弹窗），0 节点且未手动关闭时展示 */}
+      {/* 空画布引导：融入画布的虚线占位（非弹窗），0 节点且未手动关闭时展示。
+            入口给的是「场景」而不是单个节点类型：点一下就把这组节点建好并连好线 */}
       {!dismissedEmptyGuide && !isLoading && nodes.length === 0 && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="relative w-[620px] max-w-[94%] rounded-2xl border-2 border-dashed border-white/15 bg-[rgba(18,19,22,0.5)] backdrop-blur-[2px] px-8 py-9">
+          <div className="relative w-[780px] max-w-[94%] rounded-2xl border-2 border-dashed border-white/15 bg-[rgba(18,19,22,0.5)] backdrop-blur-[2px] px-8 py-8">
             <button
               className="absolute top-3 right-3 text-gray-300 hover:text-gray-500 cursor-pointer pointer-events-auto"
               onClick={() => setDismissedEmptyGuide(true)}
@@ -809,31 +906,40 @@ export const Canvas = memo(function Canvas() {
               <CloseOutlined />
             </button>
             <div className="text-center">
-              <div className="text-[16px] font-medium text-gray-600">从一条素材开始你的第一个镜头</div>
+              <div className="text-[16px] font-medium text-gray-600">选一个场景，直接搭好工作流</div>
               <div className="text-[12px] text-gray-400 mt-1">
-                选择节点开始，或直接把图片 / 视频 / 音频拖进画布
+                点一下即在画布上创建好这组节点并连好线；也可以把图片 / 视频 / 音频直接拖进画布
               </div>
             </div>
-            <div className="flex justify-center gap-3 mt-7">
-              {EMPTY_GUIDE_TYPES.map((t) => (
+            <div className="flex flex-wrap justify-center gap-3 mt-6">
+              {EMPTY_GUIDE_SCENARIOS.map((s) => (
                 <button
-                  key={t.type}
-                  onClick={() => addNodeAtCenter(t.type)}
-                  className="pointer-events-auto flex flex-col items-center gap-1.5 w-[108px] rounded-xl bg-white border border-gray-200 hover:border-blue-400 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer py-3.5"
+                  key={s.key}
+                  onClick={() => applyScenario(s)}
+                  className="pointer-events-auto flex flex-col items-start gap-2 w-[164px] rounded-xl bg-white border border-gray-200 hover:border-blue-400 hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer px-3.5 py-3 text-left"
                 >
-                  <span
-                    className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-[18px]"
-                    style={{ backgroundColor: NODE_TYPE_CONFIG[t.type].color }}
-                  >
-                    {t.icon}
+                  <span className="text-[13px] font-medium text-gray-700">{s.title}</span>
+                  {/* 链路预览：先让用户看清点下去会创建哪几个节点、怎么接 */}
+                  <span className="flex items-center gap-1">
+                    {s.chain.map((step, i) => (
+                      <span key={`${step.type}-${i}`} className="flex items-center gap-1">
+                        {i > 0 && <ArrowRightOutlined className="text-[10px] text-gray-300" />}
+                        <span
+                          className="w-[22px] h-[22px] rounded-md flex items-center justify-center text-white text-[12px]"
+                          style={{ backgroundColor: NODE_TYPE_CONFIG[step.type].color }}
+                          title={step.label}
+                        >
+                          {NODE_ICONS[step.type]}
+                        </span>
+                      </span>
+                    ))}
                   </span>
-                  <span className="text-[13px] font-medium text-gray-700">{t.label}</span>
-                  <span className="text-[11px] text-gray-400 leading-none">{t.desc}</span>
+                  <span className="text-[11px] text-gray-400 leading-snug">{s.desc}</span>
                 </button>
               ))}
             </div>
-            <div className="text-[11px] text-gray-400 mt-6 text-center">
-              右键画布即可随时添加节点
+            <div className="text-[11px] text-gray-400 mt-5 text-center">
+              右键画布可单独添加任意节点
             </div>
           </div>
         </div>

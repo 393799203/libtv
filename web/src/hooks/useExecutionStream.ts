@@ -43,7 +43,6 @@ function createSiblingImageNodes(
     const url = imageUrls[i];
     if (!url) continue;
     const index = i + 1; // 2, 3, 4, ...
-    const newNodeId = `${originalNodeId}-${index}`;
 
     // 计算新节点 label
     const originalLabel = originalData.label || '';
@@ -56,9 +55,14 @@ function createSiblingImageNodes(
       newLabel = `${originalLabel}-${index}`;
     }
 
+    // 派生副本按 data.derivedFrom 找（不再按「原 id-序号」拼名字找）
+    const existingDerived = store.nodes.find(
+      (n) => n.data.derivedFrom?.nodeId === originalNodeId && n.data.derivedFrom?.index === index
+    );
+
     // 如果节点已存在（重复执行场景），只更新 imageUrl
-    if (store.nodes.some((n) => n.id === newNodeId)) {
-      store.updateNodeData(newNodeId, {
+    if (existingDerived) {
+      store.updateNodeData(existingDerived.id, {
         ...mediaFieldsFor('image', { url, width, height }),
         status: 'success' as const,
         stale: false,
@@ -76,17 +80,21 @@ function createSiblingImageNodes(
 
     // 创建新节点（复制原节点 data，但 imageUrl / label / status 不同）
     const newNode = createNode('image', newPos, {
-      id: newNodeId,
       data: {
         ...originalData,
         ...mediaFieldsFor('image', { url, width, height }),
         label: newLabel,
+        // 槽位字段不继承：副本不是分镜的参考图槽位（否则视频会把它当成多出来的一帧）。
+        // 资产/风格归属照旧继承（副本仍然是那个资产、那个风格的图）。
+        refIndex: undefined,
+        derivedFrom: { nodeId: originalNodeId, index },
         status: 'success' as const,
         stale: false,
         error: undefined,
         progressMessage: undefined,
       } as Partial<ImageNodeData>,
     });
+    const newNodeId = newNode.id;
 
     store.addNode(newNode);
 
