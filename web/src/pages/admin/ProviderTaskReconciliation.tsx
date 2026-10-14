@@ -982,6 +982,9 @@ export default function ProviderTaskReconciliation() {
         <Button
           icon={<ReloadOutlined />}
           loading={loading}
+          // 靠右对齐：这一行是 flex-wrap，只加 ml-auto 就能把它顶到筛选行最右侧，
+          // 「立即核对」保持紧跟在筛选条件后面（两者一个是"改数据"一个是"重拉数据"，别挨在一起）
+          className="ml-auto"
           onClick={() => {
             // 关键：把输入框里的当前值提交为筛选条件再拉取。
             // 原来直接 load()，用的是「回车时提交过的旧值」，所以填了项目点刷新列表不动、回车才生效。

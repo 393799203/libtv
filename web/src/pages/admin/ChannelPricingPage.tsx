@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { App } from 'antd';
 import { channelApi, type ChannelName, type ChannelPolicy } from '@/services/channelApi';
 import { pricingApi } from '@/services/pricingApi';
 import { userApi } from '@/services/userApi';
@@ -126,12 +125,9 @@ export default function ChannelPricingPage() {
     loadPolicy();
   }, [loadStats, loadPolicy]);
 
-  // 手动刷新：事件里 setState 不受 set-state-in-effect 限制，所以 loading 在这里开
-  const handleRefresh = () => {
-    setStatsLoading(true);
-    loadStats();
-    loadPolicy();
-  };
+  // 原来这里有个「刷新渠道概览与策略」按钮（手动 handleRefresh）：
+  // 渠道概览进页面就自动加载，页面下方价格区本来也有独立的「刷新」，
+  // 这一行最右边单独飘一个图标按钮没必要，已去掉。
 
   const totalUsers = CHANNELS.reduce((sum, c) => sum + (stats[c.value]?.users ?? 0), 0);
 
@@ -206,15 +202,6 @@ export default function ChannelPricingPage() {
           <span className="text-[11px] text-gray-400">
             渠道决定 AI 请求的走向，价格也按渠道独立配置
           </span>
-          <Button
-            className="ml-auto"
-            size="small"
-            icon={<ReloadOutlined />}
-            title="刷新渠道概览与策略"
-            loading={statsLoading}
-            disabled={policySaving}
-            onClick={handleRefresh}
-          />
         </div>
 
         {/* 两张渠道卡：点卡片即切换下方价格区查看的渠道，与价格区 Tab 是同一个状态 */}
