@@ -7,6 +7,7 @@ import {
   CodeOutlined,
   AudioOutlined,
   CloseOutlined,
+  BlockOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import type { UpstreamInput } from '@/types/prompt';
@@ -31,6 +32,8 @@ const NODE_TYPE_ICON: Record<UpstreamInput['nodeType'], React.ReactNode> = {
   text: <FileTextOutlined className="text-purple-500" />,
   script: <CodeOutlined className="text-amber-500" />,
   audio: <AudioOutlined className="text-emerald-500" />,
+  // 白模（3D 预演）：以前这张表少了这一项，previz 上游节点显示出来是个没有图标的空位
+  previz: <BlockOutlined className="text-cyan-500" />,
 };
 
 export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUpstreamBar({

@@ -232,8 +232,12 @@ interface PrevizState {
   addObject: (type: PrevizObjectType) => void;
   removeObject: (id: string) => void;
   updateObject: (id: string, upd: Partial<Omit<PrevizObject, 'id'>>) => void;
-  /** 批量导入几何体（AI 建白模）：append 追加到现有场景 / replace 清空后重建 */
-  importObjects: (list: Omit<PrevizObject, 'id'>[], mode: 'append' | 'replace') => void;
+  /** 批量导入几何体（AI 建白模 / 场景组合件）：append 追加到现有场景 / replace 清空后重建 */
+  /** color 可省略：省略时按类型取默认色（与手动添加同类型元素一致） */
+  importObjects: (
+    list: Array<Omit<PrevizObject, 'id' | 'color'> & { color?: string }>,
+    mode: 'append' | 'replace'
+  ) => void;
 
   // 角色
   addCharacter: (model?: PrevizModelKind) => void;
@@ -468,7 +472,13 @@ export const usePrevizStore = create<PrevizState>()((set, get) => ({  objects: [
   },
 
   importObjects: (list, mode) => {
-    const items: PrevizObject[] = list.map((o) => ({ ...o, id: genId('obj') }));
+    // 颜色缺失时补默认色：预设里大多不写 color，直接 {...o} 会把 undefined 存进去，
+    // Viewport3D 里 new THREE.Color(undefined) 会退成白色 —— 和手动添加的同类型元素不同色
+    const items: PrevizObject[] = list.map((o) => ({
+      ...o,
+      id: genId('obj'),
+      color: o.color ?? OBJECT_DEFAULTS[o.type]?.color ?? DEFAULT_COLOR,
+    }));
     set((state) => ({
       objects: mode === 'replace' ? items : [...state.objects, ...items],
       selectedId: null,

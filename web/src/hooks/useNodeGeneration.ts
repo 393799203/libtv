@@ -76,15 +76,14 @@ export interface UseNodeGenerationResult {
   isGenerating: boolean;
   /** 进度 0-100 */
   progress: number;
-  /** 错误信息 */
-  error: string | null;
   /** 单节点生成 */
   generate: () => Promise<void>;
   /** 暂存画布（只保存不生成） */
   saveCanvas: () => Promise<void>;
-  /** 手动清掉错误 */
-  clearError: () => void;
 }
+// 说明：这里**不**暴露 error / clearError —— 单节点错误统一放在 executionStore.nodeErrors
+// 里，由节点自己读出来渲染错误态。以前接口上声明了这两个字段而实现从不返回
+// （tsc 一直报 TS2739），删掉比硬造一个没人用的空实现更诚实。
 
 /**
  * 单节点生成 hook — 统一入口
@@ -141,7 +140,7 @@ export function useNodeGeneration(
   }, [projectId]);
 
   const generate: UseNodeGenerationResult['generate'] = useCallback(
-    async (params) => {
+    async () => {
       if (!projectId) return;
 
       // 防重复点击：如果已经在生成中，直接返回

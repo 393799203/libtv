@@ -123,12 +123,17 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     return `${m}:${String(s).padStart(2, '0')}`;
   }, [data.duration]);
 
+  // 视频分辨率标签：宽×高（由视频文件元数据测出来的值，上传/生成后自动回写进节点）。
+  // 只是一个字符串拼接，不用 useMemo（避免 hook 依赖告警）
+  const videoPixelW = (data as { videoWidth?: number }).videoWidth;
+  const videoPixelH = (data as { videoHeight?: number }).videoHeight;
+  const resolutionLabel = videoPixelW && videoPixelH ? `${videoPixelW}×${videoPixelH}` : '';
+
   // 弹窗标题右侧：分辨率 · 时长
-  const previewMeta = useMemo(() => {
-    const vw = (data as { videoWidth?: number }).videoWidth;
-    const vh = (data as { videoHeight?: number }).videoHeight;
-    return [vw && vh ? `${vw} × ${vh}` : '', durationLabel].filter(Boolean).join(' · ');
-  }, [durationLabel, (data as { videoWidth?: number }).videoWidth, (data as { videoHeight?: number }).videoHeight]);
+  const previewMeta = useMemo(
+    () => [resolutionLabel, durationLabel].filter(Boolean).join(' · '),
+    [resolutionLabel, durationLabel]
+  );
 
   // 从资产库选中视频：替换节点视频（清掉旧尺寸/时长，由元数据加载重新计算）
   const handlePickAsset = useCallback(
@@ -149,6 +154,13 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     if (data.videoUrl) {
       return (
         <div className="flex items-center gap-0.5">
+          {/* 分辨率在时长左边（与弹窗标题「分辨率 · 时长」顺序一致）：
+              宽度是整数像素，样式与时长胶囊一致 */}
+          {resolutionLabel && (
+            <span className="px-1.5 py-1 rounded bg-gray-100 text-gray-600 text-[11px] font-medium leading-none">
+              {resolutionLabel}
+            </span>
+          )}
           {durationLabel && (
             <span className="px-1.5 py-1 rounded bg-gray-100 text-gray-600 text-[11px] font-medium leading-none">
               {durationLabel}
@@ -190,7 +202,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
         </button>
       </div>
     );
-  }, [data.videoUrl, uploading, uploadPercent, durationLabel]);
+  }, [data.videoUrl, uploading, uploadPercent, durationLabel, resolutionLabel]);
 
   const phaseLabel = uploadPhase === 'processing' ? '压缩转码中...' : `上传中 ${uploadPercent}%`;
 

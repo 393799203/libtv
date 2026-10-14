@@ -81,9 +81,10 @@ export function pendingNodeIdsOf(nodeIds: Iterable<string>): string[] {
   const nodes = useCanvasStore.getState().nodes;
   const byId = new Map(nodes.map((n) => [n.id, n.data.status]));
   const out: string[] = [];
-  nodeIds.forEach((id) => {
+  // 用 for...of 而不是 forEach：入参是 Iterable<string>，没有 forEach 方法
+  for (const id of nodeIds) {
     const s = byId.get(id);
     if (s === 'running' || s === 'pending') out.push(id);
-  });
+  }
   return out;
 }

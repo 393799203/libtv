@@ -34,7 +34,9 @@ export const workflowApi = {
   // 页面刷新/关闭会丢掉内存里的 executionId，导致无法重连 SSE；
   // 进项目时调这个接口即可恢复"生成中"显示，避免用户误以为没在生成而重复点击。
   getActive: (projectId: string) =>
-    api.get<ApiResponse<{ executions: ActiveExecutionItem[] }>>(
+    // 返回类型就是 payload 本身：api.ts 的响应拦截器已把 {code,msg,data} 拆开、只返回 data。
+    // （以前这里写成 ApiResponse<...>，调用方读 resp.executions 就报类型错）
+    api.get<{ executions: ActiveExecutionItem[] }>(
       `/projects/${projectId}/active-executions`,
     ),
 

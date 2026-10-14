@@ -367,7 +367,7 @@ export default function ForumPostPage() {
           />
         ) : (
           <div>
-            {replies.map((reply, index) => {
+            {decoratedReplies.map((reply, index) => {
               const canDeleteReply = isAuthenticated && (isAdmin || reply.user_id === currentUser?.id);
               return (
                 <div key={reply.id} className={`flex gap-3 py-4 ${index > 0 ? 'border-t border-gray-100' : ''}`}>
