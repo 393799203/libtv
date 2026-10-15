@@ -10,6 +10,7 @@ import {
   FullscreenOutlined,
 } from '@ant-design/icons';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { absolutePositionOf } from '@/utils/canvasGroups';
 
 /**
  * 画布工具条：撤销 / 重做 + 放大缩小 / 适应画布 / 100% 复位。
@@ -52,14 +53,17 @@ export function CanvasToolbar() {
       return;
     }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    // 组合成员的 position 是相对组合的，直接算会让包围盒偏小 → 适应视图框不全
+    const byId = new Map(nodes.map((n) => [n.id, n]));
     for (const node of nodes) {
+      const absPos = absolutePositionOf(node, byId);
       const w = node.measured?.width ?? ((node.style?.width as number) ?? 320);
       const h = node.measured?.height ?? ((node.style?.height as number) ?? 200);
-      // nodeOrigin [0.5, 0.5] → position 是节点中心
-      minX = Math.min(minX, node.position.x - w / 2);
-      minY = Math.min(minY, node.position.y - h / 2);
-      maxX = Math.max(maxX, node.position.x + w / 2);
-      maxY = Math.max(maxY, node.position.y + h / 2);
+      // nodeOrigin [0.5, 0.5] → 绝对坐标是节点中心
+      minX = Math.min(minX, absPos.x - w / 2);
+      minY = Math.min(minY, absPos.y - h / 2);
+      maxX = Math.max(maxX, absPos.x + w / 2);
+      maxY = Math.max(maxY, absPos.y + h / 2);
     }
     const contentCenterX = (minX + maxX) / 2;
     const contentCenterY = (minY + maxY) / 2;

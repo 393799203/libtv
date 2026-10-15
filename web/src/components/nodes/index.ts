@@ -5,6 +5,7 @@ import { AudioNode } from './AudioNode';
 import { ScriptNode } from './ScriptNode';
 import { PrevizNode } from './PrevizNode';
 import { EnhanceNode } from './EnhanceNode';
+import { GroupNode } from './GroupNode';
 
 // 性能优化：nodeTypes 必须在组件外部定义，避免每次渲染重新创建
 export const nodeTypes = {
@@ -15,4 +16,5 @@ export const nodeTypes = {
   script: ScriptNode,
   previz: PrevizNode,
   enhance: EnhanceNode,
+  group: GroupNode,
 } as const;

@@ -17,6 +17,8 @@ const PRODUCES: Record<NodeType, { kind: OutputKind; fields: string[] }> = {
   audio: { kind: 'audio', fields: ['audioUrl'] },
   previz: { kind: 'video', fields: ['videoUrl'] },  // 白模预演未来导出白片视频
   enhance: { kind: 'video', fields: ['videoUrl'] },  // 清晰化输出仍是视频
+  // 组合容器不产出任何东西：它没有 Handle、连不了线，这张表里只是满足穷尽检查
+  group: { kind: 'text', fields: [] },
 };
 
 // 为每个 NodeType 构造 plugin

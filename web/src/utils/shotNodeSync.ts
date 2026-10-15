@@ -10,6 +10,7 @@
 import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
 import { createNode } from '@/utils/nodeFactory';
+import { absolutePositionIn } from '@/utils/canvasGroups';
 import { clearAllStale } from '@/utils/topology';
 import type {
   LibTVNode,
@@ -265,7 +266,8 @@ export function createShotImageNode(
     return existing;
   }
 
-  const scriptPos = scriptNode.position;
+  // 绝对坐标：脚本节点在组合里时 position 是相对的
+  const scriptPos = absolutePositionIn(store.nodes, scriptNode);
   const offsetY = (shot.shotNumber - 1) * 220;
   const imageNode = createNode('image', { x: scriptPos.x + 400 + (index - 1) * SHOT_REF_IMAGE_GAP_X, y: scriptPos.y + offsetY }, {
     data: {
@@ -354,8 +356,11 @@ export function createShotVideoNode(
   // 计算位置：有图片节点则放在其右侧，否则放在图片节点的默认位置
   const offsetY = (shot.shotNumber - 1) * 220;
   // 放在最后一张参考图右侧，避免压住第 2 张
-  const posX = lastImageNode ? lastImageNode.position.x + 400 : scriptNode.position.x + 400;
-  const posY = lastImageNode ? lastImageNode.position.y : scriptNode.position.y + offsetY;
+  // 绝对坐标：这些节点可能挂在组合里
+  const lastImageAbs = lastImageNode ? absolutePositionIn(store.nodes, lastImageNode) : null;
+  const scriptAbs = lastImageAbs ? null : absolutePositionIn(store.nodes, scriptNode);
+  const posX = (lastImageAbs?.x ?? scriptAbs!.x) + 400;
+  const posY = lastImageAbs ? lastImageAbs.y : scriptAbs!.y + offsetY;
 
   const videoNode = createNode('video', { x: posX, y: posY }, {
     data: {

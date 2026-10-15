@@ -4,6 +4,7 @@ import type { ImageNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import type { StyleItem } from '@/services/styleApi';
 import { createNode } from '@/utils/nodeFactory';
+import { absolutePositionIn } from '@/utils/canvasGroups';
 import { StyleMarketModal } from '@/components/style/StyleMarketModal';
 
 interface StyleSelectorProps {
@@ -88,8 +89,10 @@ export const StyleSelector = memo<StyleSelectorProps>(function StyleSelector({
     // 按需读取当前节点位置（不订阅 nodes，避免无关更新触发重渲染）
     const { nodes } = useCanvasStore.getState();
     const current = nodes.find((n) => n.id === targetNodeId);
-    const posX = (current?.position.x ?? 0) - 350;
-    const posY = current?.position.y ?? 0;
+    // 绝对坐标：目标节点若在组合里，position 是相对组合的，风格图会落错位置
+    const currentAbs = current ? absolutePositionIn(nodes, current) : null;
+    const posX = (currentAbs?.x ?? 0) - 350;
+    const posY = currentAbs?.y ?? 0;
 
     // id 由工厂统一生成（不再有 style- 前缀）：风格身份写在 data.styleId 上，
     // 后端与前端所有「是不是风格图」的判断都读这个字段

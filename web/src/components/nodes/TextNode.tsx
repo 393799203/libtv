@@ -18,6 +18,7 @@ import {
 import { BaseNode } from './BaseNode';
 import type { TextNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { absolutePositionIn } from '@/utils/canvasGroups';
 import { useExecutionStore } from '@/stores/executionStore';
 
 type TextNodeType = Node<TextNodeData, 'text'>;
@@ -84,7 +85,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
   const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 0 });
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const nodeError = useExecutionStore((s) => s.nodeErrors[id]);
-  const { getNode, flowToScreenPosition } = useReactFlow();
+  const { getNode, getNodes, flowToScreenPosition } = useReactFlow();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 同步外部 data（编辑时不同步，避免覆盖用户输入）
@@ -98,9 +99,11 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
     const update = () => {
       const node = getNode(id);
       if (!node || !node.measured) return;
+      // 组合成员的 position 是相对的，工具栏会跑位 —— 用绝对坐标
+      const abs = absolutePositionIn(getNodes(), node);
       const screenPos = flowToScreenPosition({
-        x: node.position.x,
-        y: node.position.y - (node.measured.height || 200) / 2,
+        x: abs.x,
+        y: abs.y - (node.measured.height || 200) / 2,
       });
       setToolbarPos({ x: screenPos.x, y: screenPos.y });
     };

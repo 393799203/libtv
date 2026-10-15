@@ -43,6 +43,7 @@ function filterModelsByUsage(models: ModelConfig[], nodeType: NodeType): ModelCo
       audio: ['audio'],
       previz: [],  // 白模预演不使用生成模型
       enhance: [],  // 清晰化不使用生成模型（P0 走本机 ffmpeg，不调用上游）
+      group: [],  // 组合容器不生成任何东西
     };
 
     const keywords = usageKeywords[nodeType] || [];

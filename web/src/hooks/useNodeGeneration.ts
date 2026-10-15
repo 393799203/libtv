@@ -21,7 +21,8 @@ const INPUT_FIELDS = ['prompt', 'content', 'text', 'scriptContent'] as const;
 /**
  * 必须自己写提示词、上游连线替代不了的类型（与后端执行器语义对齐）：
  * - text：TextExecutor 不读上游（只看自己的 prompt/content）；
- * - image：ImageExecutor 没有提示词就直接判失败，上游参考图/风格图只是附加条件；
+ * - image：没有描述就直接判失败（上游参考图/风格图只是附加条件）；但上游连了**文本**节点时
+ *   放行 —— ImageExecutor 会把文本内容并进提示词，文本节点本身就是一段描述；
  * - script：ScriptExecutor 要求提示词里有 @ 引用（或已有剧本内容走透传）。
  * 其余类型（audio 会读上游文本、video 的首尾帧/参考模式可能只靠素材）有连线就算有输入。
  */
@@ -30,7 +31,7 @@ const PROMPT_REQUIRED_TYPES: NodeType[] = ['text', 'image', 'script'];
 /** 各类型的提示语：说清"该补什么"，而不是笼统地都说"请先输入提示词" */
 const EMPTY_INPUT_HINTS: Partial<Record<NodeType, string>> = {
   text: '请先写下要生成的内容（提示词），再点生成',
-  image: '请先描述要生成什么（提示词）；上游参考图/风格图只是附加，不能替代提示词',
+  image: '请先描述要生成什么（提示词），或连一个文本节点当提示词；上游参考图/风格图只是附加，不能替代提示词',
   video: '请先输入提示词再生成；首尾帧 / 参考模式也可以只连上游素材',
   audio: '请先输入要配音的文字，或连一个文本节点作为输入',
   script: '请先输入创作提示词；若要基于上游剧本，请用 @ 引用插入',
@@ -65,6 +66,17 @@ function checkInputBeforeGenerate(nodeId: string): string | null {
 
   // 只有"上游连线能当输入"的类型才把连线算作有输入
   if (!PROMPT_REQUIRED_TYPES.includes(type) && edges.some((e) => e.target === nodeId)) return null;
+
+  // 图片节点另外一条：上游连着**文本**节点时也算有输入（后端 ImageExecutor 会把文本内容并进提示词）。
+  // 要求文本内容非空，与后端 textContentOf 的判定一致 —— 前端放行、后端才不会有"发出去又报错"的空跑。
+  if (type === 'image') {
+    const hasTextUpstream = edges.some((e) => {
+      if (e.target !== nodeId) return false;
+      const src = nodes.find((n) => n.id === e.source);
+      return src?.type === 'text' && typeof src.data?.content === 'string' && (src.data.content as string).trim() !== '';
+    });
+    if (hasTextUpstream) return null;
+  }
 
   return EMPTY_INPUT_HINTS[type] ?? '请先输入提示词再生成';
 }

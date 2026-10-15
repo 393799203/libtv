@@ -26,6 +26,7 @@ import {
   ArrowRightOutlined,
   DeploymentUnitOutlined,
   FormatPainterOutlined,
+  GroupOutlined,
 } from '@ant-design/icons';
 
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -40,9 +41,10 @@ import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
+import { absolutePositionIn, absolutePositionOf } from '@/utils/canvasGroups';
 import { setAssetDropHandler } from '@/components/canvas/assetDnd';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
-import { mediaKindOfFile } from '@/utils/mediaNode';
+import { mediaKindOfFile, mediaFieldsFor, titleFromFileName } from '@/utils/mediaNode';
 import type { UserAsset } from '@/services/assetApi';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 import { canvasApi } from '@/services/canvasApi';
@@ -65,7 +67,7 @@ const EMPTY_GUIDE_SCENARIOS: {
     key: 'story',
     title: '剧本创作',
     desc: '写清故事梗概，一键拆成分镜剧本',
-    chain: [{ type: 'text', label: '剧本' }, { type: 'script', label: '分镜' }],
+    chain: [{ type: 'text', label: '文本' }, { type: 'script', label: '分镜' }],
   },
   {
     key: 'storyboard',
@@ -96,6 +98,7 @@ const NODE_ICONS: Record<NodeType, React.ReactNode> = {
   audio: <AudioOutlined />,
   previz: <DeploymentUnitOutlined />,
   enhance: <FormatPainterOutlined />,
+  group: <GroupOutlined />,
 };
 
 /** 场景链里相邻两个节点的水平间距（画布坐标；节点宽 + 这个间距 = 中心距） */
@@ -169,6 +172,8 @@ export const Canvas = memo(function Canvas() {
   // 拖动起点：用来判断这次到底是"真拖动"还是"手抖的单击"。React Flow 的拖动阈值很小，
   // 单击时手指抖一下也会走 dragStart/dragStop，那种情况不该清掉选中态。
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  /** 组合内拖成员时的起点信息（鼠标屏幕/画布坐标 + 成员当时的绝对中心） */
+  const dragStartPointerRef = useRef<{ pointer: { x: number; y: number }; frame: { rect: DOMRect | null; vp: { x: number; y: number; zoom: number } }; flow: { x: number; y: number }; abs: { x: number; y: number } } | null>(null);
   // 防止 onPaneClick 在连线释放时误关弹窗
   const connectingRef = useRef(false);
   // 拖拽连线中：源节点 ID + 当前悬停的目标节点 ID（目标节点放大 + 高亮 outline）
@@ -177,10 +182,10 @@ export const Canvas = memo(function Canvas() {
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   // 空画布引导卡片：手动关闭后本次会话不再弹出
   const [dismissedEmptyGuide, setDismissedEmptyGuide] = useState(false);
-  const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, setViewport: rfSetViewport } = useReactFlow();
+  const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, getViewport, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, addNode, addEdge, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addEdge, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -189,12 +194,17 @@ export const Canvas = memo(function Canvas() {
       onConnect: s.onConnect,
       selectedNodeIds: s.selectedNodeIds,
       updateNodeData: s.updateNodeData,
+      updateNodeMeta: s.updateNodeMeta,
       addNode: s.addNode,
       addEdge: s.addEdge,
       addNodesAndEdges: s.addNodesAndEdges,
       removeNodes: s.removeNodes,
       createMediaNodeAt: s.createMediaNodeAt,
       projectId: s.projectId,
+      groupSelectedNodes: s.groupSelectedNodes,
+      ungroupNode: s.ungroupNode,
+      syncGroupBounds: s.syncGroupBounds,
+      placeMemberAtAbsolute: s.placeMemberAtAbsolute,
     }))
   );
 
@@ -405,6 +415,12 @@ export const Canvas = memo(function Canvas() {
       message.warning('请先选中一个节点再复制');
       return;
     }
+    // 组合是容器不是素材：复制出来是个没有成员的空框（还得手工往里塞节点，等于没用），
+    // 所以和删除一样不允许 —— 要走「取消组合 → 复制成员 → 重新组合」。
+    if (node.type === 'group') {
+      message.warning('组合节点不支持复制，请先用「取消组合」');
+      return;
+    }
     setClipboardNode(node);
     message.success({ content: `已复制节点「${nodeLabelOf(node)}」`, key: 'node-clip' });
   }, [nodes, selectedNodeIds, nodeLabelOf]);
@@ -419,8 +435,15 @@ export const Canvas = memo(function Canvas() {
       message.warning('剪贴板里还没有节点，先「复制节点」');
       return;
     }
+    if (clipboardNode.type === 'group') {
+      // 兜底：剪贴板里若是组合（历史剪贴板 / 漏网入口），粘贴出来同样是空框
+      message.warning('组合节点不支持复制，请先用「取消组合」');
+      return;
+    }
     const from = (sourceNodeId ? nodes.find((n) => n.id === sourceNodeId) : undefined) ?? clipboardNode;
-    const position = at ?? { x: from.position.x + 40, y: from.position.y + 40 };
+    // 绝对坐标：from 若是组合成员，position 是相对组合的
+    const fromAbs = absolutePositionIn(nodes, from);
+    const position = at ?? { x: fromAbs.x + 40, y: fromAbs.y + 40 };
     const clone = buildClonedNode(clipboardNode, position);
     addNode(clone);
     // 选中新节点：提示词面板会直接跟着它打开，便于继续改
@@ -430,25 +453,124 @@ export const Canvas = memo(function Canvas() {
 
   /** 删除节点：不传 id 时删除当前所有选中的节点（可用 Ctrl/Cmd+Z 撤销） */
   const handleDeleteNodes = useCallback((nodeId?: string) => {
-    const ids = nodeId ? [nodeId] : selectedNodeIds;
+    const ids = (nodeId ? [nodeId] : selectedNodeIds).filter(
+      (id) => nodes.find((n) => n.id === id)?.type !== 'group'
+    );
     if (ids.length === 0) {
-      message.warning('请先选中一个节点再删除');
+      // 菜单里组合已经没有「删除节点」项了，这里兜住快捷键等其它入口
+      message.warning(
+        selectedNodeIds.length > 0 ? '组合节点不能直接删除，请先用「取消组合」' : '请先选中一个节点再删除'
+      );
       return;
     }
     removeNodes(ids);
     message.success(`已删除 ${ids.length} 个节点（Ctrl/Cmd+Z 可撤销）`);
-  }, [selectedNodeIds, removeNodes]);
+  }, [selectedNodeIds, removeNodes, nodes]);
+
+  /**
+   * 组合：把当前框选/多选的节点收进一个组合（拖动时整组一起走）。
+   * 只作用于「当前选中集合」——右键菜单里的项会按选中数量置灰，不会出现作用对象说不清的情况。
+   */
+  const handleGroupNodes = useCallback(() => {
+    if (groupSelectedNodes()) {
+      // 措辞不写 Ctrl/Cmd+Z：画布没有实现这个快捷键（撤销/重做只在画布工具条的按钮上），写了会误导
+      message.success({ content: '已组合选中节点（可用画布工具条的撤销回退）' });
+    } else {
+      message.warning('请先框选至少 2 个节点再组合（也可 Shift / ⌘ / Ctrl + 点击多选）');
+    }
+  }, [groupSelectedNodes]);
+
+  /** 取消组合：成员回到各自的位置并保持选中（组合节点本身被删掉） */
+  const handleUngroupNode = useCallback((groupId: string) => {
+    if (ungroupNode(groupId)) {
+      message.success({ content: '已取消组合（可用画布工具条的撤销回退）' });
+    }
+  }, [ungroupNode]);
+
+  /**
+   * 屏幕坐标 → 画布坐标（**不做网格吸附**）。
+   * 拖动落点校准必须用它：React Flow 的 screenToFlowPosition 默认 snapToGrid=true，
+   * 起止两点各自吸附后相减，位移会莫名少掉十几像素（实测 195px 的鼠标位移只换算出 176）。
+   * 这里只用「容器矩形 + viewport 平移/缩放」做纯线性换算，与画布自身渲染坐标完全一致。
+   */
+  const captureFrame = useCallback(
+    () => ({ rect: containerRef.current?.getBoundingClientRect() ?? null, vp: getViewport() }),
+    [getViewport]
+  );
+  const screenToFlowInFrame = useCallback(
+    (frame: { rect: DOMRect | null; vp: { x: number; y: number; zoom: number } }, clientX: number, clientY: number) => {
+      if (!frame.rect) return { x: clientX, y: clientY };
+      return {
+        x: (clientX - frame.rect.left - frame.vp.x) / frame.vp.zoom,
+        y: (clientY - frame.rect.top - frame.vp.y) / frame.vp.zoom,
+      };
+    },
+    []
+  );
+
+  /**
+   * 键盘 Delete/Backspace 的前置钩子。
+   *
+   * 组合节点**不作为可删除对象**：命中组合时直接不删（与右键菜单一致），只提示一句
+   * 怎么真正拿掉它（先「取消组合」）；成员节点照常可删。
+   *
+   * 顺带挡住了 React Flow 的默认行为「删父节点时连子节点一起删」
+   * （@xyflow/system getElementsToRemove 的 parentHit 规则）：组合根本不进删除集合，
+   * 成员也就不会被容器的删除连坐（成员是用户生成的资产）。
+   *
+   * 这里同时补提示：Delete 键走的是 React Flow 自己的删除（不经过 handleDeleteNodes），
+   * 原来批量删除后**一点反馈都没有** —— 删了几个、能不能撤销都不知道。
+   */
+  const handleBeforeDelete = useCallback(
+    async ({ nodes: toDelete, edges: edgesToDelete }: { nodes: LibTVNode[]; edges: LibTVEdge[] }) => {
+      const groups = toDelete.filter((n) => n.type === 'group');
+      if (groups.length === 0) {
+        if (toDelete.length > 0) {
+          message.success({ content: `已删除 ${toDelete.length} 个节点（Ctrl/Cmd+Z 可撤销）`, key: 'node-batch-delete' });
+        }
+        return { nodes: toDelete, edges: edgesToDelete };
+      }
+      const groupIds = new Set(groups.map((n) => n.id));
+      // React Flow 会把组合的子节点一并塞进删除集合（parentHit 规则）。这些"被连坐"的成员用户
+      // 根本没选（selected=false）：必须摘出来，否则成员被删空后组合会按"空组合自动清理"的规则消失
+      // —— 表现就是"按了 Delete，组合和里面的节点全没了"（正是要避免的那件事）。
+      // 用户显式选中（selected=true）的成员照常删：那是他点名要删的，删完空组合才跟着收掉。
+      const kept = toDelete.filter((n) => {
+        if (n.type === 'group') return false;
+        if (n.parentId && groupIds.has(n.parentId) && !n.selected) return false;
+        return true;
+      });
+      message.warning({ content: '组合节点不能直接删除，请先用「取消组合」', key: 'group-no-delete' });
+      const keptIds = new Set(kept.map((n) => n.id));
+      return {
+        nodes: kept,
+        // 只留下两端都还在的连线，避免删掉一份却被留下的悬空边
+        edges: edgesToDelete.filter((e) => keptIds.has(e.source) && keptIds.has(e.target)),
+      };
+    },
+    []
+  );
 
   // Ctrl/Cmd+C / Ctrl/Cmd+V：画布上快速克隆节点。
-  // 输入场景一律交回浏览器默认行为（焦点在输入框/可编辑区，或页面里有文本被选中）。
+  // Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z 重做：删除提示里写了「可撤销」，这里把它兑现
+  // （批量删除后误删一片节点是最需要撤销的场景）。
+  // 输入场景一律交回浏览器默认行为（焦点在输入框/可编辑区，或页面里有文本被选中）——
+  // 提示词框的 @ 引用编辑器也是可编辑区，它自己要吃 Ctrl+Z。
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const key = e.key.toLowerCase();
-      if (key !== 'c' && key !== 'v') return;
+      if (key !== 'c' && key !== 'v' && key !== 'z') return;
+      if (e.shiftKey && key !== 'z') return; // Shift+Z 才是重做；Shift+C/V 交回浏览器
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       if (window.getSelection()?.toString()) return;
+      if (key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
       if (key === 'c') {
         if (selectedNodeIds.length === 0) return; // 没选中就别抢浏览器默认行为
         e.preventDefault();
@@ -461,7 +583,7 @@ export const Canvas = memo(function Canvas() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedNodeIds, clipboardNode, handleCopyNode, handlePasteNode]);
+  }, [selectedNodeIds, clipboardNode, handleCopyNode, handlePasteNode, undo, redo]);
 
   /**
    * 接收「左侧资产库拖出来的资产」：面板松手时把 (资产, 屏幕坐标) 投递过来，
@@ -481,6 +603,17 @@ export const Canvas = memo(function Canvas() {
    * 但两者的差别只停留在"怎么感知"，一旦拿到「坐标 + 内容」，后面的类型判定、
    * 坐标换算、建节点、选中、提示全部共用。
    */
+  /** 从 URL 末段取文件名（去掉 query/hash），取不到就返回空串 */
+  const fileNameFromUrl = (url: string): string => {
+    try {
+      const path = url.split('?')[0].split('#')[0];
+      const seg = path.split('/').filter(Boolean).pop() || '';
+      return decodeURIComponent(seg);
+    } catch {
+      return '';
+    }
+  };
+
   const handleCanvasDrop = useCallback(
     async (drop: CanvasDrop) => {
       const pos = screenToFlowPosition({ x: drop.x, y: drop.y });
@@ -489,35 +622,64 @@ export const Canvas = memo(function Canvas() {
       if (drop.source === 'asset') {
         const { asset } = drop;
         const nodeType: NodeType = asset.type === 'video' ? 'video' : 'image';
-        createMediaNodeAt(nodeType, pos, { url: asset.url, name: asset.name });
-        message.success({ content: `已放入画布：${asset.name || '未命名'}`, key: 'asset-insert' });
+        // 资产名优先；历史资产里有 name 为空的（入库时就没带名字），退回从 URL 里取文件名，
+        // 总比让节点顶着「图片」这种通用名强（否则几个节点在画布上完全分不清）
+        const name = asset.name?.trim() || fileNameFromUrl(asset.url);
+        createMediaNodeAt(nodeType, pos, { url: asset.url, name });
+        // 提示语用和节点标题同一套规则（去扩展名），否则「提示写 cat.png、节点写 cat」两边对不上
+        message.success({ content: `已放入画布：${titleFromFileName(name) || '未命名'}`, key: 'asset-insert' });
         return;
       }
 
-      // —— 来源：系统文件（先上传拿 URL，再落到画布；多文件按 80px 错开）——
+      // —— 来源：系统文件（**先建节点占位、再上传**；多文件按 80px 错开）——
+      //
+      // 为什么是这个顺序：上传是整条流程里最慢的一步（大图、视频几十秒，视频还要转码），
+      // 以前是「上传完拿到 URL 才 createMediaNodeAt」，用户拖完盯着画布半天没动静，
+      // 分不清是在传还是根本没反应。现在节点立刻出现并显示「上传中 xx%」，
+      // 传完再把 URL 填回同一个节点（走 mediaFieldsFor 这个唯一出口）。
       const items = drop.files
         .map((f) => ({ f, kind: mediaKindOfFile(f) }))
         .filter((x): x is { f: File; kind: 'image' | 'video' | 'audio' } => x.kind !== null);
       if (items.length === 0) return;
 
-      let idx = 0;
-      for (const { f, kind } of items) {
-        const key = `canvas-drop-${f.name}-${Date.now()}-${idx}`;
-        const at = { x: pos.x + idx * 80, y: pos.y + idx * 80 };
+      const pending = items.map(({ f, kind }, i) => {
+        const at = { x: pos.x + i * 80, y: pos.y + i * 80 };
+        const node = createMediaNodeAt(kind, at, {
+          url: '', // 占位：URL 还没有，节点先显示上传态
+          name: f.name,
+          uploading: true,
+          uploadPhase: kind === 'image' ? '图片上传中' : '上传中',
+        });
+        return { f, kind, node };
+      });
+
+      let done = 0;
+      for (const { f, kind, node } of pending) {
+        const key = `canvas-drop-${f.name}-${node.id}`;
+        // 进度只写进节点数据，不进历史、不置脏（updateNodeMeta）——否则一次上传会塞满撤销栈
+        const onProgress = (pct: number, phase?: 'uploading' | 'processing') =>
+          updateNodeMeta(node.id, {
+            uploadProgress: pct,
+            uploadPhase: phase === 'processing' ? '转码中' : '上传中',
+          });
         try {
           if (kind === 'image') {
             const res = await uploadImage(f, projectId || undefined);
-            createMediaNodeAt('image', at, {
-              url: res.url,
-              thumbUrl: res.thumbUrl,
-              width: res.width,
-              height: res.height,
-            });
+            updateNodeData(
+              node.id,
+              mediaFieldsFor('image', {
+                url: res.url,
+                thumbUrl: res.thumbUrl,
+                width: res.width,
+                height: res.height,
+              }) as Partial<LibTVNode['data']>
+            );
           } else if (kind === 'video') {
             message.loading({ content: `上传中「${f.name}」0%`, key, duration: 0 });
             const res = await uploadVideo(
               f,
               (pct, phase) => {
+                onProgress(pct, phase);
                 message.loading({
                   content: phase === 'processing' ? `转码中「${f.name}」${pct}%` : `上传中「${f.name}」${pct}%`,
                   key,
@@ -526,40 +688,57 @@ export const Canvas = memo(function Canvas() {
               },
               projectId || undefined
             );
-            createMediaNodeAt('video', at, { url: res.url });
+            updateNodeData(node.id, mediaFieldsFor('video', { url: res.url }) as Partial<LibTVNode['data']>);
             message.success({ content: `「${f.name}」上传完成`, key, duration: 2 });
           } else {
             message.loading({ content: `上传中「${f.name}」0%`, key, duration: 0 });
             const url = await uploadAudio(
               f,
-              (pct) => message.loading({ content: `上传中「${f.name}」${pct}%`, key, duration: 0 }),
+              (pct) => {
+                onProgress(pct);
+                message.loading({ content: `上传中「${f.name}」${pct}%`, key, duration: 0 });
+              },
               projectId || undefined
             );
-            createMediaNodeAt('audio', at, { url });
+            updateNodeData(node.id, mediaFieldsFor('audio', { url }) as Partial<LibTVNode['data']>);
             message.success({ content: `「${f.name}」上传完成`, key, duration: 2 });
           }
-          idx++;
+          done++;
         } catch (err) {
           message.destroy(key);
           // HTTP 错误已由 axios 拦截器统一提示
           console.error('画布拖拽上传失败:', err);
+          // 节点已经在画布上了：把失败原因写在节点上，别留一个看不出所以然的空白节点
+          updateNodeData(
+            node.id,
+            mediaFieldsFor(kind, {
+              url: '',
+              name: f.name,
+              uploading: false,
+              uploadError: '上传失败，删除该节点后可重试',
+            }) as Partial<LibTVNode['data']>
+          );
         }
       }
 
-      // 上传完成后自动保存画布，避免未手动保存时刷新丢失新增节点
-      if (idx > 0 && projectId) {
+      // 上传结束后自动保存画布：节点是上传前就建出来的，这一步让画布上的状态（含失败节点）真正落盘
+      if (pending.length > 0 && projectId) {
         try {
           const { exportCanvas, setDirty } = useCanvasStore.getState();
           await canvasApi.saveCanvas(projectId, exportCanvas());
           setDirty(false);
-          message.success(`已添加 ${idx} 个节点并自动保存`);
+          message.success(
+            done === pending.length
+              ? `已添加 ${pending.length} 个节点并自动保存`
+              : `已上传 ${done}/${pending.length} 个文件并自动保存（失败的节点上有原因）`
+          );
         } catch (err) {
           // 保存失败：拦截器已提示；节点仍在内存（isDirty=true），可手动保存兜底
           console.error('拖拽上传后自动保存失败:', err);
         }
       }
     },
-    [screenToFlowPosition, createMediaNodeAt, projectId]
+    [screenToFlowPosition, createMediaNodeAt, updateNodeData, updateNodeMeta, projectId]
   );
 
   // 适配器一（资产库资产）：面板松手时投递「资产 + 屏幕坐标」，坐标不在画布内则放弃
@@ -699,6 +878,17 @@ export const Canvas = memo(function Canvas() {
     ? nodes.find((n) => n.id === selectedNodeIds[0])
     : null;
 
+  /**
+   * 菜单里「组合选中的 N 个节点」以 React Flow 的 selected **标记**为准，而不是 selectedNodeIds：
+   * 标记就是画面上蓝色选中框的来源，也是 React Flow 自己按 Delete 时的依据；而 selectedNodeIds
+   * 在撤销/重做之后可能与标记不同步（历史快照恢复的是标记），读它会出现"菜单写 3 个、实际组合 1 个"。
+   */
+  const selectedFlagIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
+
+  /** 当前选中的唯一节点如果是组合 → 右键菜单/空白菜单给「取消组合」 */
+  const selectedGroupId = selectedNodeIds.length === 1
+    ? (nodes.find((n) => n.id === selectedNodeIds[0] && n.type === 'group')?.id ?? null)
+    : null;
   // PromptPanel 的稳定 onUpdate 引用（内联箭头会击穿 memo）：
   // 仅依赖选中节点 id，节点 data 变化不会导致回调引用变化
   const selectedNodeId = selectedNode?.id;
@@ -775,11 +965,14 @@ export const Canvas = memo(function Canvas() {
     // 从 store 取最新节点数据（measured 可能异步更新，selectedNode 可能是旧的）
     const latestNode = getNodes().find((n) => n.id === selectedNode.id);
     const node = latestNode || selectedNode;
-    // nodeOrigin [0.5, 0.5] → position 是中心点，底部 = position.y + height/2
-    const nodeBottomY = node.position.y + (node.measured?.height || 200) / 2;
+    // ⚠️ 组合成员（parentId）的 position 是**相对组合左上角**的，不是绝对坐标：
+    // 直接拿来算，提示词框就会跑到画布中间去（用户报的「组合里的节点选中后提示词框位置不对」）。
+    const abs = absolutePositionIn(getNodes(), node);
+    // nodeOrigin [0.5, 0.5] → 绝对坐标是中心点，底部 = y + height/2
+    const nodeBottomY = abs.y + (node.measured?.height || 200) / 2;
     // ① 先换成页面坐标 ② 再减掉容器原点，才是容器内 left/top 该用的值
     // ③ 间距用固定屏幕像素，避免"面板与节点的缝随缩放变化"
-    const screen = flowToScreenPosition({ x: node.position.x, y: nodeBottomY });
+    const screen = flowToScreenPosition({ x: abs.x, y: nodeBottomY });
     return {
       x: screen.x - containerOffset.x,
       y: screen.y - containerOffset.y + PROMPT_PANEL_GAP_PX,
@@ -816,8 +1009,24 @@ export const Canvas = memo(function Canvas() {
         onConnectEnd={handleConnectEnd}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
-        onNodeDragStart={(_event, node) => {
+        onNodeDragStart={(event, node) => {
           dragStartPosRef.current = { x: node.position.x, y: node.position.y };
+          // 组合内拖单个成员时记下鼠标与成员的位置，松开时按鼠标实际位移校准落点（见 onNodeDragStop）
+          const me = event as MouseEvent | undefined;
+          if (node.parentId && me && typeof me.clientX === 'number') {
+            const byId = new Map(useCanvasStore.getState().nodes.map((n) => [n.id, n]));
+            // ⚠️ 基准帧（容器矩形 + viewport）必须在拖动开始时固定下来：拖动一开始提示词面板会收起，
+            // 画布容器左边缘会平移十几像素，起止各读一次会让鼠标位移换算少掉约 16px。
+            const frame = captureFrame();
+            dragStartPointerRef.current = {
+              pointer: { x: me.clientX, y: me.clientY },
+              frame,
+              flow: screenToFlowInFrame(frame, me.clientX, me.clientY),
+              abs: absolutePositionOf(node, byId),
+            };
+          } else {
+            dragStartPointerRef.current = null;
+          }
           setPromptSuppressed(true);
         }}
         onNodeDragStop={(_event, node, draggedNodes) => {
@@ -828,6 +1037,25 @@ export const Canvas = memo(function Canvas() {
           // 而 React Flow 会把"拖动之后"的 click 吞掉（onNodeClick 不触发），若不复位就会留下
           // 「节点选中着、面板却不出现」的坏状态。真拖动时选中态会被清掉，复位也无副作用。
           setPromptSuppressed(false);
+          // 拖动结束那一帧 React Flow 还会补写一次子节点 position，所以统一延迟一帧再收尾：
+          // ① 组合内拖单个成员 → 先按鼠标实际位移把成员摆回跟手的位置（RF 的父子坐标换算在框
+          //    尺寸变化后有十几像素偏差）；② 再让组合框贴合成员。
+          const info = dragStartPointerRef.current;
+          dragStartPointerRef.current = null;
+          const dropEvent = event as MouseEvent | undefined;
+          if (info && node.parentId && draggedNodes.length === 1 && dropEvent && typeof dropEvent.clientX === 'number') {
+            const stopFlow = screenToFlowInFrame(info.frame, dropEvent.clientX, dropEvent.clientY);
+            const target = {
+              x: info.abs.x + (stopFlow.x - info.flow.x),
+              y: info.abs.y + (stopFlow.y - info.flow.y),
+            };
+            setTimeout(() => {
+              placeMemberAtAbsolute(node.id, target);
+              syncGroupBounds();
+            }, 0);
+          } else {
+            setTimeout(() => syncGroupBounds(), 0);
+          }
           // 只是手抖的单击：选中态保持原样，面板照常打开
           if (!moved) return;
           // 真拖动：拖动开始时面板已经收起，拖动结束后把选中态也一并清掉，
@@ -849,6 +1077,15 @@ export const Canvas = memo(function Canvas() {
         }}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        /* zIndexMode="manual"：不让 React Flow 自动抬 z-index。
+           默认（basic）下它给「组合成员」（有 parentId 的节点）z = 父 + 1 = 1，
+           并且把**连到成员上的连线**也抬到同一个 z（@xyflow/system 的 getElevatedEdgeZIndex 源码注释原话：
+           edges connected to nodes with a parent are rendered above the parent node）。
+           后果就是：从组合里连出来的线会浮在普通节点（文本/图片…）上面，
+           看起来像那些节点变透明了、盖不住线。
+           改成 manual 后连线恒为 z=0（连线图层本就排在节点图层之前 → 永远在节点下面）；
+           "选中的节点浮到最上层"由 index.css 里 .react-flow__node.selected 的 z-index 显式负责。 */
+        zIndexMode="manual"
         nodeOrigin={nodeOrigin}
         defaultEdgeOptions={defaultEdgeOptions}
         proOptions={proOptions}
@@ -883,7 +1120,12 @@ export const Canvas = memo(function Canvas() {
         zoomOnPinch={true}
         zoomOnDoubleClick={false}
         deleteKeyCode={['Backspace', 'Delete']}
-        multiSelectionKeyCode="Shift"
+        onBeforeDelete={handleBeforeDelete}
+        /* 多选键：Shift / ⌘ / Ctrl + 点击都能加选。
+           React Flow 默认只认 Meta（⌘），原来这里写死成 "Shift" 就把默认值顶掉了 ——
+           Windows/Linux 上按 Ctrl 点选没反应。三个都收，跟 Figma/Excalidraw 的习惯一致：
+           空白处拖拽 = 框选（selectionOnDrag，平移已改到中键/右键），Shift/⌘/Ctrl+点击 = 加选。 */
+        multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
         className="react-flow-cursor-default"
       >
         {/* 点阵颜色跟随暗色主题（React Flow 默认是浅灰点，暗底上会看不见/刺眼） */}
@@ -959,6 +1201,11 @@ export const Canvas = memo(function Canvas() {
           onCopy={() => handleCopyNode(nodeMenu.nodeId)}
           onPaste={() => handlePasteNode(undefined, nodeMenu.nodeId)}
           onDelete={() => handleDeleteNodes(nodeMenu.nodeId)}
+          onDeleteSelection={() => handleDeleteNodes()}
+          selectedCount={selectedFlagIds.includes(nodeMenu.nodeId) ? selectedFlagIds.length : 1}
+          isGroup={nodeMenu.nodeType === 'group'}
+          onGroup={handleGroupNodes}
+          onUngroup={() => handleUngroupNode(nodeMenu.nodeId)}
           onClose={() => setNodeMenu(null)}
         />
       )}
@@ -1012,6 +1259,10 @@ export const Canvas = memo(function Canvas() {
             nodeSelectPopup.sourceNodeId ?? undefined,
           )}
           onDelete={() => handleDeleteNodes()}
+          selectedCount={selectedFlagIds.length}
+          selectedGroupId={selectedGroupId}
+          onGroup={handleGroupNodes}
+          onUngroup={() => selectedGroupId && handleUngroupNode(selectedGroupId)}
         />
       )}
 

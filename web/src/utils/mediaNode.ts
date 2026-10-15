@@ -3,12 +3,33 @@ import type { NodeType } from '@/types/canvas';
 
 /** 一份媒体产物的原始信息（拖放/上传/生成都归到这里） */
 export interface MediaPayload {
+  /** 媒体 URL；**空串表示「节点先建出来、上传还没完成」的占位**（见下方 mediaFieldsFor） */
   url: string;
   name?: string;
   /** 服务端已生成的缩略图；没有就按约定从 url 推导 */
   thumbUrl?: string;
   width?: number;
   height?: number;
+  /** 占位态：正在上传（默认 true，除非显式给 false 或带了 uploadError） */
+  uploading?: boolean;
+  uploadProgress?: number;
+  uploadPhase?: string;
+  uploadError?: string;
+}
+
+/**
+ * 节点标题（人看的）从文件名（系统看的）里取：**去掉扩展名**。
+ *
+ * 为什么：拖进来的图/视频/音频，标题顶着 `IMG_2043.HEIC`、`clip.mp4` 这种后缀既长又没用 ——
+ * 卡片上已经用图标和预览说清它是什么类型了，后缀只是噪声（用户明确要求标题不带后缀）。
+ * 只去掉**最后一段**扩展名，`a.tar.gz` → `a.tar`；点文件（`.gitignore`，点在最前）保持原样，
+ * 免得整名被吃掉。真实文件名不受影响：判定媒体类型（mediaKindOfFile）、上传、资产库都仍用原文件名。
+ */
+export function titleFromFileName(name: string): string {
+  const trimmed = name.trim();
+  const dot = trimmed.lastIndexOf('.');
+  if (dot <= 0) return trimmed;
+  return trimmed.slice(0, dot) || trimmed;
 }
 
 /**
@@ -24,7 +45,25 @@ export interface MediaPayload {
  */
 export function mediaFieldsFor(nodeType: NodeType, payload: MediaPayload): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  if (payload.name) fields.label = payload.name;
+  if (payload.name) fields.label = titleFromFileName(payload.name);
+
+  // 还没有 URL = 占位节点（拖入画布时先建节点、再上传，见 Canvas 的 drop 流程）。
+  // 这里只写上传态，**不写** imageUrl: '' 这种半成品 —— 空串会让节点以为自己"有图"，
+  // 于是去渲染一个空 <img>（空白 + 破图），而不是「上传中」。
+  if (!payload.url) {
+    fields.uploading = payload.uploading ?? !payload.uploadError;
+    if (payload.uploadPhase) fields.uploadPhase = payload.uploadPhase;
+    if (payload.uploadProgress != null) fields.uploadProgress = payload.uploadProgress;
+    if (payload.uploadError) fields.uploadError = payload.uploadError;
+    return fields;
+  }
+
+  // URL 到手：清掉占位态，节点立刻换成真正的图/视频/音频。
+  // 显式写 undefined（而不是留着不动）—— 节点数据是浅合并的，不覆盖就永远转圈。
+  fields.uploading = undefined;
+  fields.uploadPhase = undefined;
+  fields.uploadProgress = undefined;
+  fields.uploadError = undefined;
 
   if (nodeType === 'video') {
     fields.videoUrl = payload.url;

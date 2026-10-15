@@ -65,6 +65,9 @@
     box-shadow: none !important;
     outline: none !important;
     border: none !important;
+    /* zIndexMode="manual" 下 React Flow 不再自动抬高选中节点，这里显式抬。
+       用 !important 盖掉它给节点写的内联 z-index（内联非 !important 会输给这里的 !important）。 */
+    z-index: 1000 !important;
   }
 }
 

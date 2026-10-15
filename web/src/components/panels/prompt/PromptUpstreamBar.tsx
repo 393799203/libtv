@@ -88,7 +88,9 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
   if (inputs.length === 0 && !showStyleSelector) return null;
 
   return (
-    <div className="flex items-start gap-2 pb-3 flex-wrap max-h-[104px] overflow-hidden">
+    /* 不换行：上游节点多的时候只保留一行，横向滚动（[&>*]:shrink-0 保证缩略图/标签不被压扁）。
+       换行时上游一多就会把提示词框顶高好几行，把编辑区挤下去。 */
+    <div className="flex items-start gap-2 pb-3 flex-nowrap overflow-x-auto overflow-y-hidden whitespace-nowrap [&>*]:shrink-0 [scrollbar-width:thin]">
       {/* 风格选择器 */}
       {showStyleSelector && (
         <StyleSelector targetNodeId={targetNodeId} />

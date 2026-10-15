@@ -102,6 +102,20 @@ export const ASPECT_RATIO_ROWS: Array<Array<{ value: string; label: string }>> =
 
 // ==================== 各节点类型的面板配置 Map ====================
 
+/**
+ * 提示词输入上限（字符数）。
+ *
+ * 原来各节点类型各写各的：图片/视频 2000、文本 4000、音频 5000、剧本 8000。
+ * 这些数字没有任何注释说明出处，后端也没有对应的长度校验、模型配置里也没有上限字段
+ * （prompt 最终存进画布 JSONB，没有字段长度限制），所以它就是一道前端护栏 ——
+ * 代价是长提示词（尤其粘贴）写到一半被静默截掉，用户以为内容丢了。
+ *
+ * 统一放开到 5 万字符：足够放下长剧本 / 长描述，同时留一个「防误粘贴超大文本把画布撑爆」的上限。
+ * 想彻底不限制：把这里的值改大，或让配置里的 maxLength 传 undefined
+ * （PromptEditor 里 `maxLength == null` 表示不限制，见其 beforeinput / 粘贴分支）。
+ */
+export const PROMPT_MAX_LENGTH = 50000;
+
 export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   image: {
     // previz：白模预演的静帧可作构图参考（锁构图）
@@ -112,7 +126,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     availableModels: [],  // 空数组，由组件从 Store 动态获取
     toolbarControls: ['model', 'aspectRatio', 'negativePrompt', 'count', 'tokenCount'],
     placeholder: '描述你想生成的图像，可 @ 引用上游图片或文本...',
-    maxLength: 2000,
+    maxLength: PROMPT_MAX_LENGTH,
   },
   video: {
     // previz：白模预演的白片可作视频参考（走位/动作/镜头以此为准）
@@ -123,7 +137,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     availableModels: [],
     toolbarControls: ['model', 'aspectRatio', 'camera', 'viewMode', 'duration', 'count', 'tokenCount'],
     placeholder: '描述视频内容、运镜方式、风格，可 @ 引用上游素材...',
-    maxLength: 2000,
+    maxLength: PROMPT_MAX_LENGTH,
   },
   text: {
     acceptedInputs: ['text', 'script', 'image'],
@@ -133,7 +147,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
     placeholder: '写下你想讲的故事、场景或角色设定...',
-    maxLength: 4000,
+    maxLength: PROMPT_MAX_LENGTH,
   },
   audio: {
     acceptedInputs: ['text', 'script'],
@@ -143,7 +157,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     availableModels: [],
     toolbarControls: ['model', 'voice', 'speed'],
     placeholder: '输入要转换为语音的文本...',
-    maxLength: 5000,
+    maxLength: PROMPT_MAX_LENGTH,
   },
   script: {
     acceptedInputs: ['text'],
@@ -153,7 +167,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
     availableModels: [],
     toolbarControls: ['model', 'tokenCount'],
     placeholder: '连接上游文本节点后，点击生成剧本分镜...',
-    maxLength: 8000,
+    maxLength: PROMPT_MAX_LENGTH,
   },
   // 白模预演节点不使用提示词面板，仅占位满足 Record 穷尽检查
   previz: {
@@ -170,6 +184,18 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   // acceptedInputs 仍按真实语义写：它接受视频（含白模白片），供连线校验使用
   enhance: {
     acceptedInputs: ['video', 'previz'],
+    defaultModel: '',
+    defaultResolution: '2K',
+    defaultAspectRatio: 'adaptive',
+    availableModels: [],
+    toolbarControls: [],
+    placeholder: '',
+    maxLength: 0,
+  },
+  // 组合容器不使用提示词面板（Canvas 里靠 hasPromptPanel 的类型白名单放行），
+  // 这里仅占位满足 Record 穷尽检查；也不接受任何上游连线（它没有 Handle）
+  group: {
+    acceptedInputs: [],
     defaultModel: '',
     defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',

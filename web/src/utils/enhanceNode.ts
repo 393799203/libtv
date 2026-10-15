@@ -1,4 +1,5 @@
 import { createNode } from '@/utils/nodeFactory';
+import { absolutePositionIn } from '@/utils/canvasGroups';
 import { useCanvasStore } from '@/stores/canvasStore';
 import type { LibTVEdge, LibTVNode } from '@/types/canvas';
 
@@ -31,9 +32,11 @@ export function addEnhanceNodeAfter(sourceNodeId: string): LibTVNode | null {
   }
 
   // 清晰化节点不需要自定义 id：工厂产出的统一 id 就够（幂等靠 type 判断，不靠 id 前缀）
+  // 绝对坐标：源节点在组合里时 position 是相对的，新节点会落到别处
+  const sourceAbs = absolutePositionIn(store.nodes, source);
   const node = createNode('enhance', {
-    x: source.position.x + ENHANCE_NODE_WIDTH + ENHANCE_NODE_GAP,
-    y: source.position.y,
+    x: sourceAbs.x + ENHANCE_NODE_WIDTH + ENHANCE_NODE_GAP,
+    y: sourceAbs.y,
   });
 
   store.addNode(node);

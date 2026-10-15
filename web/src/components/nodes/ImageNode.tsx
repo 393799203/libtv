@@ -146,7 +146,11 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
       );
     }
     // 图标按钮：上传/重传 + 从资产库导入
-    const iconBtnCls = 'flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer';
+    // 拖入画布的占位节点正在上传时不放行——否则用户点一下会发第二次上传，两次结果互相覆盖
+    const busy = !!data.uploading;
+    const iconBtnCls = `flex items-center justify-center w-6 h-6 rounded text-gray-400 transition-colors ${
+      busy ? 'opacity-50 cursor-wait' : 'hover:text-blue-600 hover:bg-blue-50 cursor-pointer'
+    }`;
     return (
       <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
         {data.imageUrl && imageWidth && imageHeight && (
@@ -157,7 +161,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         <button
           className={iconBtnCls}
           title={data.imageUrl ? '重新上传图片' : '上传图片'}
-          onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+          onClick={(e) => { e.stopPropagation(); if (!busy) fileInputRef.current?.click(); }}
         >
           <UploadOutlined className="text-[12px]" />
         </button>
@@ -170,7 +174,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
         </button>
       </div>
     );
-  }, [data.imageUrl, imageWidth, imageHeight, isStyleNode]);
+  }, [data.imageUrl, imageWidth, imageHeight, isStyleNode, data.uploading]);
 
   // 计算图片容器高度：
   // - 有图片时：使用图片的实际尺寸等比例缩放
@@ -260,6 +264,27 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
                 <span className="text-[11px] text-red-400">图片加载失败</span>
               </div>
             )}
+          </div>
+        ) : data.uploading ? (
+          /* 拖入画布：节点先建出来、文件还在上传（见 Canvas 的 drop 流程） */
+          <div
+            className="w-full rounded-lg bg-transparent flex flex-col items-center justify-center gap-2"
+            style={{ minHeight: `${imageContainerHeight}px` }}
+          >
+            <div className="w-6 h-6 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin" />
+            <span className="text-[11px] text-gray-500">
+              {data.uploadPhase || '图片上传中'}
+              {data.uploadProgress != null ? ` ${data.uploadProgress}%` : '…'}
+            </span>
+          </div>
+        ) : data.uploadError ? (
+          /* 上传失败：原因留在节点上，别只剩一个空白节点 */
+          <div
+            className="w-full rounded-lg bg-transparent flex flex-col items-center justify-center gap-1 px-3"
+            style={{ minHeight: `${imageContainerHeight}px` }}
+          >
+            <PictureOutlined className="text-2xl text-red-400" />
+            <span className="text-[11px] text-red-400 text-center leading-relaxed">{data.uploadError}</span>
           </div>
         ) : (
           <div

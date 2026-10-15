@@ -17,10 +17,23 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectId = useCanvasStore((s) => s.projectId);
   const [showPlayer, setShowPlayer] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadPercent, setUploadPercent] = useState(0);
-  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('uploading');
-  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [localUploading, setLocalUploading] = useState(false);
+  const [localUploadPercent, setLocalUploadPercent] = useState(0);
+  const [localUploadPhase, setLocalUploadPhase] = useState<UploadPhase>('uploading');
+  const [localErrorMsg, setLocalErrorMsg] = useState<string>('');
+
+  /**
+   * 上传态的**两个来源**合并成一套显示：
+   *  - 本地态：节点内点「上传视频」触发的上传；
+   *  - 节点数据：拖入画布时「先建节点、后上传」的占位（见 Canvas 的 drop 流程）。
+   * 两者不会同时发生（占位上传期间节点内的上传按钮是禁用的）。
+   */
+  const uploading = localUploading || !!data.uploading;
+  const uploadPercent = localUploading ? localUploadPercent : (data.uploadProgress ?? 0);
+  const uploadPhase: UploadPhase = localUploading
+    ? localUploadPhase
+    : (data.uploadPhase === '转码中' ? 'processing' : 'uploading');
+  const errorMsg = localErrorMsg || data.uploadError || '';
   // 从资产库导入视频弹窗
   const [showAssetPicker, setShowAssetPicker] = useState(false);
   // 双击弹窗播放
@@ -32,17 +45,17 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
       const file = e.target.files?.[0];
       if (!file) return;
 
-      setUploading(true);
-      setUploadPercent(0);
-      setUploadPhase('uploading');
-      setErrorMsg('');
+      setLocalUploading(true);
+      setLocalUploadPercent(0);
+      setLocalUploadPhase('uploading');
+      setLocalErrorMsg('');
 
       try {
         const res = await uploadVideo(
           file,
           (pct, phase) => {
-            setUploadPercent(pct);
-            if (phase) setUploadPhase(phase);
+            setLocalUploadPercent(pct);
+            if (phase) setLocalUploadPhase(phase);
           },
           projectId || undefined,
         );
@@ -70,10 +83,10 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
       } catch (err) {
         const message = err instanceof Error ? err.message : '视频上传失败';
         console.error('视频上传失败:', err);
-        setErrorMsg(message);
+        setLocalErrorMsg(message);
       } finally {
-        setUploading(false);
-        setUploadPercent(0);
+        setLocalUploading(false);
+        setLocalUploadPercent(0);
       }
 
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -185,7 +198,9 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     }
     return (
       <div className="flex items-center gap-0.5 flex-shrink-0">
-        {uploading && <span className="text-[11px] text-blue-500 mr-1">{uploadPercent}%</span>}
+        {uploading && uploadPercent > 0 && (
+          <span className="text-[11px] text-blue-500 mr-1">{uploadPercent}%</span>
+        )}
         <button
           className={`${iconBtnCls} ${uploading ? 'opacity-50 cursor-wait' : ''}`}
           title="上传视频"
@@ -204,7 +219,8 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     );
   }, [data.videoUrl, uploading, uploadPercent, durationLabel, resolutionLabel]);
 
-  const phaseLabel = uploadPhase === 'processing' ? '压缩转码中...' : `上传中 ${uploadPercent}%`;
+  const phaseLabel =
+    uploadPhase === 'processing' ? '压缩转码中...' : uploadPercent > 0 ? `上传中 ${uploadPercent}%` : '上传中…';
 
   // 根据长宽比动态计算视频容器高度（宽度固定 480px）
   // - 有视频实际尺寸时：按实际比例计算
@@ -327,7 +343,7 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
                   <span className="text-xs text-red-500 leading-relaxed">{errorMsg}</span>
                   <button
                     className="px-3 py-1 text-[11px] bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors cursor-pointer"
-                    onClick={(e) => { e.stopPropagation(); setErrorMsg(''); fileInputRef.current?.click(); }}
+                    onClick={(e) => { e.stopPropagation(); setLocalErrorMsg(''); fileInputRef.current?.click(); }}
                   >
                     重新上传
                   </button>

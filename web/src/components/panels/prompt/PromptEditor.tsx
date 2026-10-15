@@ -9,9 +9,28 @@ interface PromptEditorProps {
   upstreamInputs: UpstreamInput[];
   syncKey?: string | number;
   onChange: (value: string, mentions: MentionMarker[]) => void;
+  /**
+   * 编辑器失焦（焦点离开输入区）：上层用它做"自动暂存"。
+   * 不叫 onSaveDraft 是因为这里只报告"失焦"这个事实，要不要存、存什么由上层决定。
+   */
+  onBlur?: () => void;
   /** 编辑器前缀标签（如 720全景），渲染为不可编辑的内联 span */
   prefixTag?: { label: string; icon?: string };
+  /**
+   * 视觉尺寸：
+   *  - default：跟随节点面板（14px / 最高 EDITOR_MAX_HEIGHT，超过框内滚动）；
+   *  - large：放大查看用（16px、高度由外层容器给满，不再设上限）。
+   */
+  size?: 'default' | 'large';
 }
+
+/**
+ * 面板里提示词框的高度区间（空着一行时不低于 MIN，超过 MAX 后框内滚动）。
+ * 上限一路从 300 收到 160：长提示词去「放大查看」里读（那里是整个提示词框的放大版），
+ * 面板就只管写和改——矮一点少占画布，也少被视口底部裁掉。
+ */
+const EDITOR_MIN_HEIGHT = 64;
+const EDITOR_MAX_HEIGHT = 160;
 
 export interface PromptEditorHandle {
   /** 在光标位置插入文本 */
@@ -70,7 +89,56 @@ function escapeCssString(str: string): string {
     .replace(/\n/g, '\\a ');
 }
 
-/** 从编辑器 DOM 提取纯文本：把 mention span 替换回 [[m:id]] 占位符 */
+/**
+ * 换行结构 → \n 的 DOM 还原。
+ *
+ * 为什么不能直接 textContent：它会**吞掉换行**——<br> 与块级元素边界在 textContent 里都没有
+ * 任何痕迹。表现就是「在框里回车换行看着好好的，存下来再打开全连成一行」。
+ * Enter 在 contenteditable 里产生的是 <div>/<p> 块（同块内软换行才是 <br>），所以两者都要还原。
+ *
+ * 规则：
+ *  - <br>          → 直接补一个 \n（用户明确敲了一次换行）；
+ *  - 块级元素      → 进入/离开都记一个"待补换行"，等下一段真实内容出现时才补 ——
+ *                    这样 <div>a</div> 得到 "a"（而不是 "a\n"），<div>a</div><div>b</div> 得到 "a\nb"。
+ */
+const EDITOR_BLOCK_TAGS = new Set([
+  'DIV', 'P', 'LI', 'PRE', 'BLOCKQUOTE', 'SECTION', 'ARTICLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+]);
+
+function domTextWithBreaks(root: HTMLElement): string {
+  let out = '';
+  let pendingBreak = false;
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      if (text === '') return;
+      if (pendingBreak) {
+        if (out !== '' && !out.endsWith('\n')) out += '\n';
+        pendingBreak = false;
+      }
+      out += text;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    if (el.tagName === 'BR') {
+      out += '\n';
+      pendingBreak = false;
+      return;
+    }
+    const isBlock = EDITOR_BLOCK_TAGS.has(el.tagName);
+    if (isBlock && out !== '') pendingBreak = true;
+    for (const child of Array.from(el.childNodes)) walk(child);
+    if (isBlock) pendingBreak = true;
+  };
+
+  for (const child of Array.from(root.childNodes)) walk(child);
+  // 全是空白（例如空编辑器里残留的 <br>）就当作空内容，别把 "\n" 当成用户写的提示词
+  return out.trim() === '' ? '' : out;
+}
+
+/** 从编辑器 DOM 提取纯文本：把 mention span 替换回 [[m:id]] 占位符，并把换行还原成 \n */
 function extractPlainText(el: HTMLElement): string {
   const clone = el.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('.libtv-mention:not(.libtv-prefix-tag)').forEach((n) => {
@@ -86,7 +154,7 @@ function extractPlainText(el: HTMLElement): string {
     const label = n.getAttribute('data-label') || n.textContent?.match(/\(([^)]+)\)/)?.[1] || '';
     n.replaceWith(`(${label})`);
   });
-  return clone.textContent || '';
+  return domTextWithBreaks(clone);
 }
 
 /** 把 DOM 文本节点中命中的 (语气词) 转为 contenteditable=false 的 span。
@@ -216,7 +284,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   upstreamInputs,
   syncKey,
   onChange,
+  onBlur,
   prefixTag,
+  size = 'default',
 }, ref) {
   const [showMentionMenu, setShowMentionMenu] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
@@ -482,7 +552,9 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     const thumbMap: Record<string, string | undefined> = {};
     for (const u of upstreamInputs) thumbMap[u.nodeId] = u.thumbnail;
 
-    let html = escapeHtml(value);
+    // 值里的 \n 必须还原成 <br>：contenteditable 里的纯 \n 会被折叠成一个空格，
+    // 否则「存了换行、打开又是连在一起」——和取值那头是同一个 bug 的两面。
+    let html = escapeHtml(value).replace(/\n/g, '<br>');
     // 逐个 mention 替换所有出现的占位符（同一 mention 可能在 prompt 中出现多次）
     for (const m of mentions) {
       const marker = escapeHtml(mentionMarker(m.id));
@@ -903,20 +975,28 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     }
   }, [prefixTag]);
 
+  const isLarge = size === 'large';
+
   return (
-    <div className="relative flex-1 min-h-[72px] py-1">
+    <div className={isLarge ? 'relative h-full' : 'relative flex-1 py-1'}>
       <div
         ref={editorRef}
         contentEditable
         suppressContentEditableWarning
         onInput={handleInput}
         onKeyDown={handleKeyDown}
+        // 失焦即触发自动暂存（原来靠右下角的「暂存」按钮，用户经常忘点就切走了）
+        onBlur={onBlur ? () => onBlur() : undefined}
         onBeforeInput={handleBeforeInput}
         onPaste={handlePaste}
-        // 高度上限：提示词可以很长，没有上限时会把这块浮动面板一路撑出视口。
-        // 超过后输入框内部滚动（min 72px，最多约 12 行）。
-        className="w-full text-[14px] text-gray-800 border-0 outline-none resize-none bg-transparent leading-[1.7] min-h-[72px] max-h-[300px] overflow-y-auto"
-        style={{ minHeight: 72, maxHeight: 300 }}
+        // 高度区间见 EDITOR_MIN_HEIGHT / EDITOR_MAX_HEIGHT（写在这里而不是 Tailwind 类里，
+        // 是为了这两个数只存在一处，调高度不用改类名）。
+        className={`w-full text-gray-800 border-0 outline-none resize-none bg-transparent leading-[1.7] overflow-y-auto ${
+          isLarge ? 'h-full text-[16px]' : 'text-[14px]'
+        }`}
+        // 放大视图：给一个实打实的最小高度（百分比在这里会退化成内容高），
+        // 上限放开——总体超过弹窗高度时由弹窗整体滚动，而不是在框里滚。
+        style={isLarge ? { minHeight: '46vh', maxHeight: 'none' } : { minHeight: EDITOR_MIN_HEIGHT, maxHeight: EDITOR_MAX_HEIGHT }}
       />
 
       {/* @ 引用下拉菜单 */}

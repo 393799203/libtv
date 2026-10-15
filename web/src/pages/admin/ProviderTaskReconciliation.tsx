@@ -939,63 +939,67 @@ export default function ProviderTaskReconciliation() {
             { value: 'alert', label: `只看异常${stats?.alerted ? ` (${stats.alerted})` : ''}` },
           ]}
         />
-        <Button
-          icon={<SafetyOutlined />}
-          loading={auditing}
-          onClick={async () => {
-            setAuditing(true);
-            try {
-              const rep = await providerTaskApi.runAudit();
-              // 自检只做标记、不动钱；结果如实汇报（新标记/恢复/无主问题）
-              if (rep.marked > 0) {
-                message.warning(
-                  `发现 ${rep.marked} 条异常数据，已自动标记并写入备注（可在「只看异常」里查看）`
-                );
-              } else {
-                message.success(`一致性核对通过（耗时 ${rep.duration}）`);
+        {/* 两个动作按钮统一靠右、成组（ml-auto 只加在组上：分别加 auto 会让空白被均分，
+            「立即核对」会被推到行中间去）。样式分主次：「立即核对」是这一行的主操作，
+            用主色实心按钮（与渠道页「主操作=带图标的主色按钮」的约定一致）；
+            刷新只留图标 + 悬停提示，别跟主操作抢注意力。 */}
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="primary"
+            icon={<SafetyOutlined />}
+            loading={auditing}
+            onClick={async () => {
+              setAuditing(true);
+              try {
+                const rep = await providerTaskApi.runAudit();
+                // 自检只做标记、不动钱；结果如实汇报（新标记/恢复/无主问题）
+                if (rep.marked > 0) {
+                  message.warning(
+                    `发现 ${rep.marked} 条异常数据，已自动标记并写入备注（可在「只看异常」里查看）`
+                  );
+                } else {
+                  message.success(`一致性核对通过（耗时 ${rep.duration}）`);
+                }
+                // 自检的「无主问题」（orphans）不止一类，**不能写死成一个说法**：
+                //   · 要人工核查的：有扣费流水但对账行没写成；
+                //   · 属正常的：对账行引用的执行/项目已随项目删除而清理（自检原话就写着「属正常，无需处理」）。
+                // 以前这里把文案固定成前者，于是「项目删了」也被报成「有扣费流水但无对账记录」，
+                // 看着像账目出了问题 —— 直接把自检的原话显示出来，管理员不用去翻服务端日志。
+                if (rep.orphans?.length) {
+                  const shown = rep.orphans.slice(0, 3);
+                  const more = rep.orphans.length - shown.length;
+                  message.warning({
+                    content: `自检另有 ${rep.orphans.length} 条提示：${shown.join('；')}${
+                      more > 0 ? `（还有 ${more} 条见服务端日志）` : ''
+                    }`,
+                    duration: 8,
+                  });
+                }
+                load();
+              } catch {
+                // HTTP 错误已由 api.ts 拦截器统一提示
+              } finally {
+                setAuditing(false);
               }
-              // 自检的「无主问题」（orphans）不止一类，**不能写死成一个说法**：
-              //   · 要人工核查的：有扣费流水但对账行没写成；
-              //   · 属正常的：对账行引用的执行/项目已随项目删除而清理（自检原话就写着「属正常，无需处理」）。
-              // 以前这里把文案固定成前者，于是「项目删了」也被报成「有扣费流水但无对账记录」，
-              // 看着像账目出了问题 —— 直接把自检的原话显示出来，管理员不用去翻服务端日志。
-              if (rep.orphans?.length) {
-                const shown = rep.orphans.slice(0, 3);
-                const more = rep.orphans.length - shown.length;
-                message.warning({
-                  content: `自检另有 ${rep.orphans.length} 条提示：${shown.join('；')}${
-                    more > 0 ? `（还有 ${more} 条见服务端日志）` : ''
-                  }`,
-                  duration: 8,
-                });
-              }
-              load();
-            } catch {
-              // HTTP 错误已由 api.ts 拦截器统一提示
-            } finally {
-              setAuditing(false);
-            }
-          }}
-        >
-          立即核对
-        </Button>
-        <Button
-          icon={<ReloadOutlined />}
-          loading={loading}
-          // 靠右对齐：这一行是 flex-wrap，只加 ml-auto 就能把它顶到筛选行最右侧，
-          // 「立即核对」保持紧跟在筛选条件后面（两者一个是"改数据"一个是"重拉数据"，别挨在一起）
-          className="ml-auto"
-          onClick={() => {
-            // 关键：把输入框里的当前值提交为筛选条件再拉取。
-            // 原来直接 load()，用的是「回车时提交过的旧值」，所以填了项目点刷新列表不动、回车才生效。
-            setTaskId(taskIdInput.trim());
-            setProjectId(projectIdInput.trim());
-            setUserId(userIdInput.trim());
-            setPage(1);
-            setRefreshToken((v) => v + 1); // 值没变时也强制刷新一次
-          }}
-          title="刷新列表（会把输入框里的筛选条件一起提交）"
-        />
+            }}
+          >
+            立即核对
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loading}
+            onClick={() => {
+              // 关键：把输入框里的当前值提交为筛选条件再拉取。
+              // 原来直接 load()，用的是「回车时提交过的旧值」，所以填了项目点刷新列表不动、回车才生效。
+              setTaskId(taskIdInput.trim());
+              setProjectId(projectIdInput.trim());
+              setUserId(userIdInput.trim());
+              setPage(1);
+              setRefreshToken((v) => v + 1); // 值没变时也强制刷新一次
+            }}
+            title="刷新列表（会把输入框里的筛选条件一起提交）"
+          />
+        </div>
       </div>
 
       <Table<ProviderTask>

@@ -1,6 +1,8 @@
 import { normalizeAspectRatio } from '../../../configs/promptConfig';
-import { memo, useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { memo, useState, useCallback, useMemo, useRef, useEffect, type Ref } from 'react';
 import { createPortal } from 'react-dom';
+import { Modal } from 'antd';
+import { ExpandOutlined } from '@ant-design/icons';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useNodeGeneration } from '@/hooks/useNodeGeneration';
 import { useModels } from '@/hooks/useModels';
@@ -189,9 +191,18 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   onUpdate,
 }) {
   const [isFullscreen] = useState(false);
+  /**
+   * 放大查看：长提示词在这个 750px 的浮动面板里读起来很挤（框还有高度上限），
+   * 所以给一个整屏级的放大视图。它和面板里那个框是**同一份内容**的两个视图。
+   */
+  const [expanded, setExpanded] = useState(false);
+  /** 面板里的编辑器重建计数：放大视图里改过字之后，靠它让面板那份 DOM 按新值重建 */
+  const [editorEpoch, setEditorEpoch] = useState(0);
 
   // 编辑器 ref，用于快捷导入/提取最新文本
   const editorRef = useRef<PromptEditorHandle>(null);
+  // 放大视图的编辑器 ref（打开时它是"当前活着的那个"，见 buildUpdateData）
+  const expandedEditorRef = useRef<PromptEditorHandle>(null);
 
   // 上游签名订阅：只在面板实际依赖的上游字段变化时才重渲染，
   // 画布上无关节点的拖动 / SSE 进度写回不会触发本面板更新
@@ -527,8 +538,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     const currentModel = availableModels.find(m => m.value === selectedModel);
     const modelIdToSave = currentModel?.modelId || selectedModel;  // 保存实际的 model_id
     const updateData: Partial<LibTVNodeData> = {
-      prompt: editorRef.current?.getValue() ?? promptTextRef.current,
-      mentions: editorRef.current?.getMentions() ?? mentionsRef.current,  // 从 DOM 提取，保证与实际引用一致
+      // 放大视图打开时以它为准：它才是用户此刻看到、正在编辑的那份 DOM
+      prompt: (expandedEditorRef.current ?? editorRef.current)?.getValue() ?? promptTextRef.current,
+      mentions: (expandedEditorRef.current ?? editorRef.current)?.getMentions() ?? mentionsRef.current,  // 从 DOM 提取，保证与实际引用一致
       model: modelIdToSave,
       // 记录本次所选模型的渠道：渠道切换后据此要求用户重新选择
       modelProvider: currentModel?.provider || currentChannel,
@@ -555,19 +567,85 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   }, [availableModels, selectedModel, nodeType, selectedResolution, selectedAspectRatio, selectedQuality, videoMode, selectedDuration, generateAudio, selectedVoice, selectedSpeed, selectedStyle, selectedTone, currentChannel]);
 
   // 暂存：只保存到 zustand store 内存状态，不持久化到后端
-  // 下次点击节点能取到最新内容，刷新页面回到之前后端持久化的状态
-  const [savedFlash, setSavedFlash] = useState(false);
-  const savedFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 卸载时清理暂存闪烁的定时器，避免组件销毁后 setState
-  useEffect(() => () => {
-    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
-  }, []);
+  // 下次点击节点能取到最新内容，刷新页面回到之前后端持久化的状态。
+  //
+  // 触发方式从"右下角按钮"改成"输入区失焦"（用户原来经常写完直接切走，没点按钮，
+  // 那段文字就只留在编辑器 DOM 里；切节点/关面板时编辑器自己也会丢弃未同步的输入）。
+  // 内容没变就不写：否则每点开一次面板再点走都会把画布标脏（"有未保存修改"）。
   const handleSaveDraft = useCallback(() => {
-    onUpdate(buildUpdateData());
-    setSavedFlash(true);
-    if (savedFlashTimerRef.current) clearTimeout(savedFlashTimerRef.current);
-    savedFlashTimerRef.current = setTimeout(() => setSavedFlash(false), 1500);
-  }, [buildUpdateData, onUpdate]);
+    const updateData = buildUpdateData();
+    const cur = data as Record<string, unknown>;
+    const changed = Object.entries(updateData).some(
+      ([k, v]) => JSON.stringify(cur[k] ?? null) !== JSON.stringify(v ?? null)
+    );
+    if (!changed) return;
+    onUpdate(updateData);
+  }, [buildUpdateData, data, onUpdate]);
+
+  /**
+   * 关闭放大视图。
+   *
+   * 三件事，缺一不可：
+   *  1. 把放大视图里的内容写回面板状态（两个视图是两份 DOM，面板那份并不知道这边改了字）；
+   *  2. 暂存（复用面板那套 change-gated 逻辑，内容没变就什么都不写）；
+   *  3. 让面板里的编辑器按新值重建（editorEpoch++）—— 否则关掉后看到的是旧内容，
+   *     接着在面板里编辑就会把放大视图里改的覆盖掉。
+   */
+  const handleCloseExpanded = useCallback(() => {
+    const value = expandedEditorRef.current?.getValue();
+    const nextMentions = expandedEditorRef.current?.getMentions();
+    if (typeof value === 'string') {
+      promptTextRef.current = value;
+      setPromptText(value);
+      if (nextMentions) {
+        mentionsRef.current = nextMentions;
+        setMentions(nextMentions);
+      }
+    }
+    setExpanded(false);
+    setEditorEpoch((n) => n + 1);
+    handleSaveDraft();
+  }, [handleSaveDraft]);
+
+  /**
+   * 点面板外面（最典型的是点画布空白/点另一个节点）时先存再走。
+   *
+   * 为什么不能只挂编辑器的 onBlur：画布上的 mousedown 会 preventDefault（React Flow 防框选/拖拽
+   * 误选文本），焦点根本不会离开 contentEditable —— 实测点画布空白后编辑器仍是 document.activeElement，
+   * blur 不触发；而紧接着选中节点一变，本组件就卸载，那段字就只留在 DOM 里丢了。
+   * 用捕获阶段监听 mousedown：先于 React Flow 处理，此时选中的还是当前这个节点，写回去不会写错节点。
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
+      handleSaveDraft();
+    };
+    document.addEventListener('mousedown', onDocMouseDown, true);
+    return () => document.removeEventListener('mousedown', onDocMouseDown, true);
+  }, [handleSaveDraft]);
+
+  /**
+   * 卸载兜底：面板消失（切节点 / 进内联编辑 / 离开工作区）时再存一次。
+   *
+   * 为什么兜底不嫌多：blur 与"点外面"这两条已经覆盖了所有**点击**、**Tab** 离开的路径，
+   * 但都要求"先有一次输入/焦点事件"；将来若出现不经鼠标、不经失焦就直接换掉选中节点的
+   * 路径（程序化选中、新加的快捷键），编辑器 DOM 会随组件一起消失，那段字就真没了。
+   * 存一次的成本是零：内容没变时 handleSaveDraft 直接返回，不会写 store、不会标脏。
+   *
+   * 两个坑：
+   *  1. 依赖数组必须是空的：handleSaveDraft 随 data 每次输入都换新身份，写进依赖数组会变成
+   *     "每次 render 都当作一次卸载"，等于每敲一个字就往 store 写一次，把暂存语义搞坏。
+   *     所以用 ref 拿最新的闭包（卸载时用的是最后一次渲染的那份）。
+   *  2. 不能在清理函数里读 DOM 引用：React 在 mutation 阶段就把 ref 置空了，此刻 editorRef.current
+   *     是 null —— buildUpdateData 里 `editorRef.current?.getValue() ?? promptTextRef.current` 正好
+   *     回退到 ref（最多滞后一个 150ms 防抖窗口），所以这里不用改 buildUpdateData。
+   */
+  const saveDraftRef = useRef(handleSaveDraft);
+  saveDraftRef.current = handleSaveDraft;
+  useEffect(() => () => {
+    saveDraftRef.current();
+  }, []);
 
   // 发送生成 — 通过 useNodeGeneration 统一入口
   const handleGenerate = useCallback(async (count?: number) => {
@@ -621,14 +699,28 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const panelClass = isFullscreen
     ? 'fixed inset-4 z-50 bg-white rounded-2xl shadow-2xl flex flex-col p-5'
     // 移动端（<768px）跟随外层吸底容器整宽显示：750px 在 390px 视口下会溢出屏幕
-    : 'bg-white rounded-2xl border border-gray-100 ring-1 ring-white/10 shadow-[var(--dv-hairline),var(--dv-elev-3)] w-[750px] max-md:w-full flex flex-col px-2 py-2';
+    // relative：放大按钮绝对定位在整个提示词框的右上角
+    // w-[640px]：原来是 750px，窄一档（750 在画布上占得太宽）；移动端整宽
+    : 'relative bg-white rounded-2xl border border-gray-100 ring-1 ring-white/10 shadow-[var(--dv-hairline),var(--dv-elev-3)] w-[640px] max-md:w-full flex flex-col px-2 py-2';
 
-  return (
-    <div className={panelClass}>
+  /**
+   * 提示词框的内容：上游输入区 + 提示词编辑区 + 底部工具栏。
+   *
+   * 抽成一份是因为「放大」放大的是**整个提示词框**，不是只有提示词那几行：
+   * 放大视图里同样看得见上游素材、能切模型/比例/时长、能点生成。
+   * 两处共用同一份 JSX 与同一份 state；只有编辑器尺寸不同
+   * （编辑器是非受控的，两处各有一份 DOM，见 handleCloseExpanded / expandedEditorRef）。
+   */
+  const renderBody = (
+    editorSize: 'default' | 'large',
+    editorHandleRef: Ref<PromptEditorHandle>,
+    editorSyncKey: string,
+  ) => (
+    <>
 
       {/* 视频节点：模式选择器 + 快捷导入按钮 */}
       {nodeType === 'video' && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pr-7">
           <VideoModeSelector value={videoMode} onChange={setVideoMode} imageCount={upstreamImageCount} videoCount={upstreamVideoCount} />
           <div className="flex items-center gap-1">
             {importablePrompts.length > 0 && !promptImported && (
@@ -650,6 +742,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       )}
 
       {/* 第一层：上游输入区 */}
+      <div className="pr-6">
       <PromptUpstreamBar
         inputs={upstreamInputs}
         onRemoveMention={handleRemoveMention}
@@ -657,34 +750,22 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         showStyleSelector={nodeType === 'image'}
         onChipMouseDown={handleChipMouseDown}
       />
+      </div>
 
-      {/* 第二层：提示词编辑区（暂存按钮悬浮在右下角） */}
-      <div className="flex-1 min-w-0 px-2 relative">
+      {/* 第二层：提示词编辑区（失焦即自动暂存） */}
+      <div className={editorSize === 'large' ? 'min-h-[46vh] px-2' : 'flex-1 min-w-0 px-2 relative'}>
         <PromptEditor
           value={promptText}
           mentions={mentions}
           placeholder={config.placeholder}
           maxLength={config.maxLength}
           upstreamInputs={upstreamInputs}
-          syncKey={nodeId}
+          size={editorSize}
+          syncKey={editorSyncKey}
           onChange={handlePromptChange}
-          ref={editorRef}
+          onBlur={editorSize === 'default' ? handleSaveDraft : undefined}
+          ref={editorHandleRef}
         />
-        <button
-          onClick={handleSaveDraft}
-          title="暂存当前提示词"
-          className={`absolute bottom-2 right-3 flex items-center justify-center w-6 h-6 rounded-md bg-white/80 backdrop-blur-sm transition-colors ${savedFlash ? 'text-green-500' : 'text-gray-400 hover:text-black hover:bg-gray-100'}`}
-        >
-          {savedFlash ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 3.5C3 2.67 3.67 2 4.5 2H10l3 3v7.5c0 .83-.67 1.5-1.5 1.5h-7C3.67 14 3 13.33 3 12.5v-9zM5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-        </button>
       </div>
 
       {/* 第三层：底部工具栏 */}
@@ -720,6 +801,43 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         hasRefVideo={hasRefVideo}
         refVideoSeconds={refVideoSeconds}
       />
+
+    </>
+  );
+
+
+  return (
+    <div className={panelClass} ref={panelRef}>
+      {/* 放大查看：整个提示词框的右上角（贴在卡片角上，不压内容） */}
+      {!expanded && (
+        <button
+          type="button"
+          title="放大查看提示词"
+          aria-label="放大查看提示词"
+          onClick={() => setExpanded(true)}
+          className="absolute right-1.5 top-1.5 z-10 w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+        >
+          <ExpandOutlined className="text-[13px]" />
+        </button>
+      )}
+      {renderBody('default', editorRef, `${nodeId}:${editorEpoch}`)}
+
+      {/* 放大查看：整个提示词框（上游区 + 提示词 + 工具栏）都搬进来，不只是提示词内容 */}
+      {expanded && (
+        <Modal
+          open
+          onCancel={handleCloseExpanded}
+          footer={null}
+          centered
+          width={1000}
+          title="提示词框（放大查看）"
+          styles={{ body: { paddingTop: 4 } }}
+        >
+          <div className="max-h-[78vh] overflow-y-auto">
+            {renderBody('large', expandedEditorRef, `expand:${nodeId}:${editorEpoch}`)}
+          </div>
+        </Modal>
+      )}
 
       {/* 拖拽徽标：绿底圆形白色+号（小尺寸），跟随光标（pointer-events-none 不拦截落点） */}
       {dragActive &&

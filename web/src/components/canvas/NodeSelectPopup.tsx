@@ -8,6 +8,8 @@ import {
   CopyOutlined,
   SnippetsOutlined,
   DeleteOutlined,
+  GroupOutlined,
+  UngroupOutlined,
 } from '@ant-design/icons';
 import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 
@@ -34,6 +36,12 @@ interface NodeSelectPopupProps {
   onCopy?: () => void;
   onPaste?: () => void;
   onDelete?: () => void;
+  /** 当前框选/多选了多少个节点（≥2 才给「组合」项） */
+  selectedCount?: number;
+  /** 当前选中的那个节点是不是组合（是则给「取消组合」项） */
+  selectedGroupId?: string | null;
+  onGroup?: () => void;
+  onUngroup?: () => void;
 }
 
 /**
@@ -50,6 +58,10 @@ export const NodeSelectPopup = memo(function NodeSelectPopup({
   onCopy,
   onPaste,
   onDelete,
+  selectedCount = 0,
+  selectedGroupId = null,
+  onGroup,
+  onUngroup,
 }: NodeSelectPopupProps) {
   const handleSelect = useCallback(
     (nodeType: NodeType) => {
@@ -102,9 +114,21 @@ export const NodeSelectPopup = memo(function NodeSelectPopup({
           <span className="text-[11px] text-gray-300 truncate max-w-[110px]">{selectedLabel}</span>
         )}
       </div>
-      {actionRow('复制节点', <CopyOutlined />, canCopy, onCopy)}
+      {/* 组合节点上不给复制/删除：复制出来是没有成员的空框，删除会带走成员的归属 */}
+      {!selectedGroupId && actionRow('复制节点', <CopyOutlined />, canCopy, onCopy)}
       {actionRow('粘贴节点', <SnippetsOutlined />, canPaste, onPaste)}
-      {actionRow('删除节点', <DeleteOutlined />, canCopy, onDelete, true)}
+      {/* 组合：框选多个节点后出现（只选中 1 个时置灰，避免误点出没有意义的单节点组合） */}
+      {actionRow(
+        selectedCount >= 2 ? `组合选中的 ${selectedCount} 个节点` : '组合选中节点',
+        <GroupOutlined />,
+        selectedCount >= 2,
+        onGroup
+      )}
+      {selectedGroupId && actionRow('取消组合', <UngroupOutlined />, true, onUngroup)}
+      {!selectedGroupId && actionRow('删除节点', <DeleteOutlined />, canCopy, onDelete, true)}
+      {selectedGroupId && (
+        <div className="px-3 py-1 text-[11px] text-gray-300">组合不支持复制 / 删除，请先「取消组合」</div>
+      )}
 
       <div className="px-3 py-1.5 mt-1 mb-0.5 text-xs text-gray-400 font-medium border-t border-b border-gray-100">
         选择节点类型

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
 import { createNode } from '@/utils/nodeFactory';
+import { buildGroupFromSelection, nodeSizeOf, normalizeGroups, releaseGroupMembers } from '@/utils/canvasGroups';
 import { mediaFieldsFor, type MediaPayload } from '@/utils/mediaNode';
 import type { CanvasData, LibTVNode, LibTVEdge, NodeExecutionStatus, ScriptAssetItem, NodeType } from '@/types/canvas';
 import {
@@ -166,6 +167,22 @@ interface CanvasState extends WorkspaceUIState {
    */
   addNodesAndEdges: (nodes: LibTVNode[], edges: LibTVEdge[]) => void;
   removeNodes: (ids: string[]) => void;
+  /**
+   * 把当前选中的节点合成一个组合（框选后右键「组合」走这里）。
+   * 少于 2 个可用节点时什么都不做并返回 false（调用方给提示）；
+   * 选中的旧组合会被摊平成成员（组合只支持一层）。
+   */
+  groupSelectedNodes: () => boolean;
+  /** 解除组合：成员回到绝对坐标并保持选中，组合节点本身删除 */
+  ungroupNode: (groupId: string) => boolean;
+  /**
+   * 把成员摆到指定的**绝对中心**（拖动结束后按鼠标实际位移校准用）。
+   * React Flow 对「父节点 + nodeOrigin=0.5」的子节点坐标换算，在框尺寸变化之后会有十几像素偏差，
+   * 表现为拖成员时落点追不上鼠标；这里按鼠标位移把成员放回它该在的地方。
+   */
+  placeMemberAtAbsolute: (nodeId: string, abs: { x: number; y: number }) => void;
+  /** 让每个组合框重新贴合成员（只改几何、不置脏）：拖动结束/删除节点/加载完成后调用 */
+  syncGroupBounds: () => void;
   updateNodeData: (id: string, data: Partial<LibTVNode['data']>) => void;
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
   /** 只更新执行进度文案（SSE 高频回调专用）：不进历史、不置 isDirty */
@@ -289,12 +306,41 @@ function scheduleFlush(
       const shouldRecord = nChanges.some(isRecordable) || eChanges.some(isRecordable);
 
       if (nChanges.length > 0) {
+        // React Flow 自己的删除（选中后按 Delete 键）也从这里进来：先把被删节点留一份，
+        // 组合归一化换算成员绝对坐标时要用它们（理由同 removeNodes 里的注释）
+        const removedIdSet = new Set(
+          nChanges.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id)
+        );
+        const removedNodes = removedIdSet.size > 0
+          ? data.nodes.filter((n) => removedIdSet.has(n.id))
+          : [];
+
         data.nodes = applyNodeChanges(nChanges, data.nodes);
         syncSelectIds(nChanges, eChanges, data);
         // 清理已删除节点的选中状态（避免残留 ID 导致选中判断异常）
         const currentIds = new Set(data.nodes.map((n) => n.id));
         if (data.selectedNodeIds.some((id) => !currentIds.has(id))) {
           data.selectedNodeIds = data.selectedNodeIds.filter((id) => currentIds.has(id));
+        }
+        // 组合框贴合成员。⚠️ 拖动中的中间帧**不能**动它：那会在拖拽循环里改成员的相对坐标，
+        // 与 React Flow 每帧写回的拖拽位置互相覆盖（表现为框抖/节点跳位）。
+        // 只处理「落点帧」（dragging === false）以及节点增删。
+        const draggingFrame = nChanges.some((c) => c.type === 'position' && c.dragging === true);
+        const touchesGroups = nChanges.some(
+          (c) =>
+            c.type === 'add' ||
+            c.type === 'remove' ||
+            // ⚠️ 这里刻意不含「position 且 dragging=false」这一帧：拖动结束那一帧 React Flow 会在
+            // 同一个 tick 里再补写一次子节点的 position（它按自己的换算重算），会把我们刚算好的
+            // 成员相对坐标覆盖掉，导致被拖的成员最后落到鼠标之外。贴合改由 onNodeDragStop 负责
+            // （延迟一帧执行，等 RF 的迟到写入落地）。add/remove/dimensions 仍然即时贴合。
+
+            // 尺寸回显（React Flow 测出来的 measured）也算：成组时若成员还没测出尺寸，
+            // 框是按兜底尺寸算的，这里顺手按真实尺寸修正一次（幂等，无变化不写）
+            c.type === 'dimensions'
+        );
+        if (touchesGroups && !draggingFrame) {
+          data.nodes = normalizeGroups(data.nodes, removedNodes);
         }
       }
       if (eChanges.length > 0) {
@@ -557,6 +603,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const cache = new Map(state._cache);
       let data = cache.get(pid) || createEmptyProjectData();
 
+      const removedNodes = data.nodes.filter((n) => idSet.has(n.id));
       data.nodes = data.nodes.filter((n) => !idSet.has(n.id));
       data.edges = data.edges.filter((e) => !idSet.has(e.source) && !idSet.has(e.target));
       // 清理被删节点的选中状态
@@ -564,11 +611,115 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       // 清掉脚本资产对被删节点的引用：右键「删除节点」等路径直接走这里、不经过
       // onNodesChange，所以清理必须两边都做（否则删掉资产图节点后资产仍指向悬空 id）
       data.nodes = clearAssetRefsInNodes(data.nodes, findAssetRefsToClear(data.nodes, idSet));
+      // 组合收尾：删掉的是组合 → 成员摘出来回到绝对坐标（否则会画到别处/消失）；
+      // 删掉的是成员 → 组合框重新贴合（成员删光的组合会被顺手删掉）。
+      // 与资产清理同理，这条路不经过 onNodesChange，所以两边都要做。
+      // removedNodes 必须传：成员的绝对坐标要按组合删除前的原点换算。
+      data.nodes = normalizeGroups(data.nodes, removedNodes);
       const hist = saveHistory(data);
       Object.assign(data, hist);
       cache.set(pid, data);
 
       return { _cache: cache, isDirty: true, ...syncFromCache(pid, cache) };
+    });
+  },
+
+  groupSelectedNodes: () => {
+    const built = (() => {
+      const state = get();
+      if (!state.projectId || state.isLoading) return null;
+      return buildGroupFromSelection(state.nodes, state.nodes.filter((n) => n.selected));
+    })();
+    if (!built) return false;
+
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid) || createEmptyProjectData();
+
+      const drop = new Set(built.removedGroupIds);
+      const reparented = new Map(built.members.map((m) => [m.id, m]));
+      const base = data.nodes.filter((n) => !drop.has(n.id)).map((n) => reparented.get(n.id) ?? n);
+      // ⚠️ 组合节点必须排在它的成员**前面**：React Flow 是按数组顺序建父子索引的，
+      // 父节点排在子节点后面时子节点算不出绝对坐标（控制台会报 "Parent node not found"），
+      // 表现就是「拖组合只有框动、成员不动」。
+      const firstMemberIdx = base.findIndex((n) => reparented.has(n.id));
+      data.nodes = firstMemberIdx === -1
+        ? [...base, built.group]
+        : [...base.slice(0, firstMemberIdx), built.group, ...base.slice(firstMemberIdx)];
+      // 成员坐标已按新组合原点换算过，这里再归一化一次兜底（幂等：无变化时不动数组）
+      data.nodes = normalizeGroups(data.nodes);
+      // 选中的旧组合节点没了，选中集合收敛到新组合
+      data.selectedNodeIds = [built.group.id];
+      const hist = saveHistory(data);
+      Object.assign(data, hist);
+      cache.set(pid, data);
+
+      return { _cache: cache, isDirty: true, ...syncFromCache(pid, cache) };
+    });
+    return true;
+  },
+
+  ungroupNode: (groupId) => {
+    const group = get().nodes.find((n) => n.id === groupId && n.type === 'group');
+    if (!group) return false;
+
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid) || createEmptyProjectData();
+
+      const freed = releaseGroupMembers(data.nodes, group);
+      const freedIds = new Set(freed.map((n) => n.id));
+      data.nodes = data.nodes
+        .filter((n) => n.id !== groupId)
+        .map((n) => freed.find((f) => f.id === n.id) ?? n);
+      data.selectedNodeIds = [...freedIds];
+      const hist = saveHistory(data);
+      Object.assign(data, hist);
+      cache.set(pid, data);
+
+      return { _cache: cache, isDirty: true, ...syncFromCache(pid, cache) };
+    });
+    return true;
+  },
+
+  placeMemberAtAbsolute: (nodeId, abs) => {
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid);
+      if (!data) return {};
+      const node = data.nodes.find((n) => n.id === nodeId);
+      const group = node?.parentId ? data.nodes.find((n) => n.id === node.parentId) : undefined;
+      if (!node || !group || group.type !== 'group') return {};
+      const gs = nodeSizeOf(group);
+      const topLeft = { x: group.position.x - gs.w / 2, y: group.position.y - gs.h / 2 };
+      const want = { x: abs.x - topLeft.x, y: abs.y - topLeft.y };
+      if (want.x === node.position.x && want.y === node.position.y) return {};
+      data.nodes = data.nodes.map((n) => (n.id === nodeId ? { ...n, position: want } : n));
+      cache.set(pid, data);
+      return { _cache: cache, ...syncFromCache(pid, cache) };
+    });
+  },
+
+  syncGroupBounds: () => {
+    set((state) => {
+      const pid = state.projectId;
+      if (!pid || state.isLoading) return {};
+      const cache = new Map(state._cache);
+      const data = cache.get(pid);
+      if (!data) return {};
+      const next = normalizeGroups(data.nodes);
+      if (next === data.nodes) return {};   // 幂等：没变化就不写，避免多余的 re-render
+      data.nodes = next;
+      cache.set(pid, data);
+      // 不置脏：这里只修几何（成员自己的位置/尺寸变更早就把画布标脏了），
+      // 组合框本身不落库也能在下次加载时重新算出来
+      return { _cache: cache, ...syncFromCache(pid, cache) };
     });
   },
 
@@ -731,7 +882,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const cache = new Map(state._cache);
 
       const projectData: ProjectCanvasData = {
-        nodes: data.nodes.map((node) => {
+        // 组合容器自愈：老画布/异常数据里可能有「成员悬空、框不贴合、空组合」，
+        // 打开时统一收拾干净（纯几何修正，不置脏、不进历史）
+        nodes: normalizeGroups(data.nodes.map((node) => {
           // 打开画布不恢复上次的选中状态（保存的 JSON 里可能残留 selected:true，
           // 会导致"打开就默认选中某节点"并弹它的编辑面板）
           const base = { ...node, selected: false } as LibTVNode;
@@ -754,7 +907,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             return { ...base, style };
           }
           return base;
-        }),
+        })),
         edges: data.edges,
         selectedNodeIds: [],
         selectedEdgeIds: [],

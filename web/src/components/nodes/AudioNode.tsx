@@ -154,9 +154,18 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(data.duration || 0);
   // 上传状态
-  const [uploading, setUploading] = useState(false);
-  const [uploadPercent, setUploadPercent] = useState(0);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [localUploading, setLocalUploading] = useState(false);
+  const [localUploadPercent, setLocalUploadPercent] = useState(0);
+  const [localErrorMsg, setLocalErrorMsg] = useState('');
+
+  /**
+   * 上传态的两个来源合并成一套显示（同 VideoNode）：
+   *  - 本地态：节点内点「上传音频」；
+   *  - 节点数据：拖入画布「先建节点、后上传」的占位（见 Canvas 的 drop 流程）。
+   */
+  const uploading = localUploading || !!data.uploading;
+  const uploadPercent = localUploading ? localUploadPercent : (data.uploadProgress ?? 0);
+  const errorMsg = localErrorMsg || data.uploadError || '';
 
   // 音频时长（优先使用已加载的 duration）
   const displayDuration = duration > 0 ? duration : (data.duration || 0);
@@ -176,12 +185,12 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
       const file = e.target.files?.[0];
       if (!file) return;
 
-      setUploading(true);
-      setUploadPercent(0);
-      setErrorMsg('');
+      setLocalUploading(true);
+      setLocalUploadPercent(0);
+      setLocalErrorMsg('');
 
       try {
-        const url = await uploadAudio(file, (pct) => setUploadPercent(pct), projectId || undefined);
+        const url = await uploadAudio(file, (pct) => setLocalUploadPercent(pct), projectId || undefined);
         // 从文件名提取名称（去掉扩展名）
         const name = file.name.replace(/\.[^.]+$/, '');
         useCanvasStore.getState().updateNodeData(id, {
@@ -191,10 +200,10 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
       } catch (err) {
         const message = err instanceof Error ? err.message : '音频上传失败';
         console.error('音频上传失败:', err);
-        setErrorMsg(message);
+        setLocalErrorMsg(message);
       } finally {
-        setUploading(false);
-        setUploadPercent(0);
+        setLocalUploading(false);
+        setLocalUploadPercent(0);
       }
 
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -252,7 +261,9 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
     const iconBtnCls = `flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer ${uploading ? 'opacity-50 cursor-wait' : ''}`;
     return (
       <div className="flex items-center gap-0.5 flex-shrink-0">
-        {uploading && <span className="text-[11px] text-emerald-500 mr-1">{uploadPercent}%</span>}
+        {uploading && uploadPercent > 0 && (
+          <span className="text-[11px] text-emerald-500 mr-1">{uploadPercent}%</span>
+        )}
         <button
           className={iconBtnCls}
           title={data.audioUrl ? '重新上传音频' : '上传音频'}
@@ -318,7 +329,9 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
             /* 上传中状态 */
             <div className="flex flex-col items-center justify-center py-6 bg-transparent rounded-xl border border-dashed border-gray-300">
               <div className="w-7 h-7 border-2 border-emerald-200 border-t-emerald-500 rounded-full animate-spin mb-2" />
-              <span className="text-xs text-gray-500">上传中 {uploadPercent}%</span>
+              <span className="text-xs text-gray-500">
+                上传中 {uploadPercent > 0 ? `${uploadPercent}%` : '…'}
+              </span>
               <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden mt-2">
                 <div
                   className="h-full rounded-full transition-all duration-200 bg-emerald-500"
@@ -332,7 +345,7 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
               <span className="text-xs text-red-500 text-center px-4 leading-relaxed">{errorMsg}</span>
               <button
                 className="mt-2 px-3 py-1 text-[11px] bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors cursor-pointer"
-                onClick={(e) => { e.stopPropagation(); setErrorMsg(''); fileInputRef.current?.click(); }}
+                onClick={(e) => { e.stopPropagation(); setLocalErrorMsg(''); fileInputRef.current?.click(); }}
               >
                 重新上传
               </button>

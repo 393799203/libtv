@@ -1523,12 +1523,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 根据nodeId从节点data中提取完整imageUrl，而不是直接使用mentions中的imageUrl（前端预览用）
 	var styleImageURLs []string     // 风格图：只提取画风/色彩/视觉风格
 	var referenceImageURLs []string // 普通参考图：保持主体结构进行修改
-	var mentions []struct {
-		ID       string `json:"id"`
-		NodeID   string `json:"nodeId"`
-		NodeType string `json:"nodeType"`
-		ImageUrl string `json:"imageUrl"` // 前端预览用（后端不使用）
-	}
+	var mentions []promptMention
 
 	// ✅ 详细日志：打印mentions字段内容（用于调试图生图判断逻辑）
 	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（开始） ========== ")
@@ -1676,11 +1671,23 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（结束） ========== ")
 	log.Printf("[ImageExecutor] 最终结果: upstreamImageURLs=%v (是否使用图生图=%v 图片数=%d)", upstreamImageURLs, len(upstreamImageURLs) > 0, len(upstreamImageURLs))
 
+	// 上游文本节点（连上或 @ 引用）→ 作为提示词参考并入本次生成的提示词。
+	// 和视频节点同一套规则，只影响这一次调用（data.Prompt 保持用户自己写的那份，不写回节点）。
+	// 图片节点的语义是"要有描述"，而文本节点本身就是一段描述 —— 所以它既能补充提示词，
+	// 也能单独当提示词用（上游参考图/风格图仍然只是附加条件，不参与这里）。
+	upstreamTexts := collectUpstreamText(node.ID, mentions, execCtx)
+	effectivePrompt := composePromptWithUpstreamText(data.Prompt, upstreamTexts)
+	if effectivePrompt != data.Prompt {
+		log.Printf("[ImageExecutor] 📝 并入上游文本参考: nodeID=%s 文本段=%d 追加字符=%d 提示词 %d→%d",
+			node.ID, len(upstreamTexts), len([]rune(effectivePrompt))-len([]rune(data.Prompt)),
+			len([]rune(data.Prompt)), len([]rune(effectivePrompt)))
+	}
+
 	// 没有提示词就报错。原来这里返回的是 success + 空 imageUrl —— 前端一样没有任何反馈
 	// （节点不红、没有错误信息），用户以为"点了没反应"。
 	// 判定用清掉 @ 引用标记后的文本：只插了 @ 引用、没写实际描述的也算没有提示词
-	// （图片节点的语义是"必须有提示词"，上游参考图/风格图只是附加条件）。
-	if strings.TrimSpace(stripMentionMarkers(data.Prompt)) == "" {
+	// （图片节点的语义是"有描述就行"，现在上游文本节点也算描述的一种）。
+	if strings.TrimSpace(stripMentionMarkers(effectivePrompt)) == "" {
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "failed",
@@ -1718,10 +1725,31 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 使用系统默认尺寸: %dx%d", width, height)
 	}
 
+	// ✅ 图生图 + 自适应：按**原图**的长宽比出图。
+	//
+	// 自适应原先是本地按 16:9 估一个 size 直接发给上游（见 calculateSizeFromResolutionAndRatio），
+	// 等于把参考图的比例覆盖掉了 —— 用户反馈「图生图的自适应应该按原图的长宽比」。
+	// 这里只在「自适应 + 有上游图」时介入，且只解文件头量尺寸；
+	// 量不到（网络/格式/极端比例）就保持原来的 16:9 估算，不让这一步把生成弄失败。
+	// 计费不受影响：档位取用户选的 data.Resolution，不是这个算出来的 size。
+	if isAdaptiveAspectRatio(data.AspectRatio) && len(upstreamImageURLs) > 0 {
+		// 普通参考图优先：风格图只借画风，按它的比例出图反而会怪
+		sourceURL := ""
+		if len(referenceImageURLs) > 0 {
+			sourceURL = referenceImageURLs[0]
+		} else if len(styleImageURLs) > 0 {
+			sourceURL = styleImageURLs[0]
+		}
+		if sw, sh, ok := imageAspectRatioOf(ctx, sourceURL); ok {
+			width, height = calculateSizeFromResolutionAndRatio(data.Resolution, fmt.Sprintf("%d:%d", sw, sh))
+			log.Printf("[ImageExecutor] 🖼️ 图生图自适应：按原图长宽比 %d:%d（原图 %dx%d）出图 -> %dx%d", sw, sh, sw, sh, width, height)
+		}
+	}
+
 	size := fmt.Sprintf("%dx%d", width, height)
 
-	// 清理提示词中的占位符
-	cleanedPrompt := stripMentionMarkers(data.Prompt)
+	// 清理提示词中的占位符（在上游文本并入之后清理）
+	cleanedPrompt := stripMentionMarkers(effectivePrompt)
 
 	// 资产归属读节点 data（前端写入）；不再从节点 id 的「角色-/场景-/道具-」前缀推断
 	assetType := data.AssetType
@@ -1899,7 +1927,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		projectID := execCtx.GetProjectID()
 		if userID != "" && projectID != "" {
 			for _, url := range ownURLs {
-				if err := i.generationHistoryService.RecordGeneration(detachedCtx(ctx), userID, projectID, node.ID, "image", data.Prompt, data.Model, url); err != nil {
+				if err := i.generationHistoryService.RecordGeneration(detachedCtx(ctx), userID, projectID, node.ID, "image", effectivePrompt, data.Model, url); err != nil {
 					log.Printf("[ImageExecutor] 记录生成历史失败: %v", err)
 				}
 			}
@@ -2068,6 +2096,104 @@ func (v *VideoExecutor) recordProviderTask(ctx context.Context, execCtx *Executi
 	_ = v.providerTasks.Record(detachedCtx(ctx), task)
 }
 
+// promptMention 提示词里的 @ 引用（前端 prompt 中留有 [[m:ID]] 标记）。
+// 图片节点与视频节点共用：两边都要按「用户 @ 了谁」来收集上游素材。
+type promptMention struct {
+	ID       string `json:"id"`
+	NodeID   string `json:"nodeId"`
+	NodeType string `json:"nodeType"`
+	// ImageUrl 只有图片节点前端会带（预览用），后端不读，留着避免解析时丢掉字段
+	ImageUrl string `json:"imageUrl"`
+}
+
+// upstreamTextMaxRunes 单个上游文本节点的参考文本上限（按 rune 计）。
+// 上游模型对 prompt 长度有上限，而文本节点里可能是整段剧本 —— 原样整段拼进去容易被上游拒单。
+// 截断会留下 "...[truncated]" 标记，日志里也如实记录字符数，避免"为什么只用了半段"事后查不出来。
+const upstreamTextMaxRunes = 2000
+
+// textContentOf 读某个上游节点的文本内容：非文本节点、没有内容、解析失败都返回空串。
+// 判类型看的是节点 data 里的 type（与音频执行器、ScriptExecutor 的写法一致）。
+func textContentOf(nodeID string, execCtx *ExecutionContext) string {
+	raw, ok := execCtx.GetNodeData(nodeID)
+	if !ok || len(raw) == 0 {
+		return ""
+	}
+	var nd struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &nd); err != nil {
+		return ""
+	}
+	if nd.Type != "text" {
+		return ""
+	}
+	return strings.TrimSpace(nd.Content)
+}
+
+// collectUpstreamText 汇总「可以当图片/视频提示词参考」的上游文本。
+//
+// 取法（与参考图/参考视频一致，也和音频执行器"连上就算输入"的直觉一致）：
+//  1. 用户 @ 引用了文本节点 → 只取被引用的那些（尊重用户选择）；
+//  2. 没有 @ 引用任何文本节点 → 退化为上游连线里连着的文本节点，按连线顺序。
+//
+// 为什么要有这个函数：文本节点连到图片/视频节点上，此前后端完全不读它的 content
+// （mentions 分支只处理 image/video/audio/previz），用户连了等于没连 ——
+// 只有先在面板上点「导入提示词」把文字搬进自己的提示词里才有效果（图片节点连导入都没有）。
+func collectUpstreamText(nodeID string, mentions []promptMention, execCtx *ExecutionContext) []string {
+	var refs []string
+	for _, m := range mentions {
+		if m.NodeType != "text" {
+			continue
+		}
+		if txt := textContentOf(m.NodeID, execCtx); txt != "" {
+			refs = append(refs, txt)
+		}
+	}
+	if len(refs) > 0 {
+		return refs
+	}
+	for _, srcID := range execCtx.GetUpstreamSources(nodeID) {
+		if txt := textContentOf(srcID, execCtx); txt != "" {
+			refs = append(refs, txt)
+		}
+	}
+	return refs
+}
+
+// composePromptWithUpstreamText 把上游文本参考并进图片/视频提示词。
+//
+// 顺序：用户自己写的提示词在前（创作意图优先），参考文本在后并加一行 [上游文本参考] 标记
+// （与 ScriptExecutor 的 [创作方向] 同一套标记风格）。
+//
+// 两个刻意的行为：
+//   - 没有参考文本时**原样返回**（不 trim、不加任何东西）：绝不能因为新增了拼接逻辑，
+//     就把既有节点的提示词改动一个字符；
+//   - 自己提示词里已经包含这段参考文本时不再追加：用户用面板上的「导入提示词」把上游文字
+//     搬进来过，再自动拼一遍就会同一段话出现两次。
+func composePromptWithUpstreamText(ownPrompt string, refs []string) string {
+	if len(refs) == 0 {
+		return ownPrompt
+	}
+	own := strings.TrimSpace(ownPrompt)
+	var uniq []string
+	for _, r := range refs {
+		t := strings.TrimSpace(r)
+		if t == "" || strings.Contains(own, t) {
+			continue
+		}
+		uniq = append(uniq, t)
+	}
+	if len(uniq) == 0 {
+		return ownPrompt
+	}
+	ref := truncateStr(strings.Join(uniq, "\n\n"), upstreamTextMaxRunes)
+	if own == "" {
+		return ref
+	}
+	return own + "\n\n[上游文本参考]\n" + ref
+}
+
 func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
 	var data struct {
 		Mode          string          `json:"mode"`
@@ -2097,11 +2223,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var imageURLs []string
 	var videoURLs []string
 	var audioURLs []string
-	var mentions []struct {
-		ID       string `json:"id"`
-		NodeID   string `json:"nodeId"`
-		NodeType string `json:"nodeType"`
-	}
+	var mentions []promptMention
 	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
 		// 防御：只保留 prompt 中实际存在的 [[m:xxx]] 对应的 mentions
 		// 防止前端残留已删除的 mention 导致错误收集资源
@@ -2212,11 +2334,22 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 	}
 
-	// 完全没有输入就直接报错：既没有提示词，也没有任何参考素材（图/视频/音频）。
+	// 上游文本节点（连上或 @ 引用）→ 作为提示词参考并入本次生成的提示词。
+	// 只影响这一次调用（data.Prompt 保持用户自己写的那份，不写回节点）：
+	// 否则节点上的提示词会越长越长，下次生成再把拼接结果拼一遍。
+	upstreamTexts := collectUpstreamText(node.ID, mentions, execCtx)
+	effectivePrompt := composePromptWithUpstreamText(data.Prompt, upstreamTexts)
+	if effectivePrompt != data.Prompt {
+		log.Printf("[VideoExecutor] 📝 并入上游文本参考: nodeID=%s 文本段=%d 追加字符=%d 提示词 %d→%d",
+			node.ID, len(upstreamTexts), len([]rune(effectivePrompt))-len([]rune(data.Prompt)),
+			len([]rune(data.Prompt)), len([]rune(effectivePrompt)))
+	}
+
+	// 完全没有输入就直接报错：既没有提示词（含上游文本参考），也没有任何参考素材（图/视频/音频）。
 	// 原来这种"空节点"会把空提示词发给上游，换回一条技术性报错 —— 用户白等一趟。
 	// 只在"真空白"时拦：首尾帧 / 参考模式可能只靠素材生成，提示词是可选的，
 	// 各上游对空提示词的容忍度不一样，这里不做过度判断（拦错比放过更糟）。
-	if strings.TrimSpace(stripMentionMarkers(data.Prompt)) == "" &&
+	if strings.TrimSpace(stripMentionMarkers(effectivePrompt)) == "" &&
 		len(imageURLs) == 0 && len(videoURLs) == 0 && len(audioURLs) == 0 {
 		return &NodeOutput{
 			NodeID: node.ID,
@@ -2383,7 +2516,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	videoURL, err := v.videoClient.GenerateVideo(
 		ctx,
 		model,
-		data.Prompt,
+		effectivePrompt,
 		data.Duration,
 		resolution,
 		data.AspectRatio,
@@ -2576,7 +2709,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		userID := execCtx.GetUserID()
 		projectID := execCtx.GetProjectID()
 		if userID != "" && projectID != "" {
-			if err := v.generationHistoryService.RecordGeneration(detachedCtx(ctx), userID, projectID, node.ID, "video", data.Prompt, data.Model, ownVideoURL); err != nil {
+			if err := v.generationHistoryService.RecordGeneration(detachedCtx(ctx), userID, projectID, node.ID, "video", effectivePrompt, data.Model, ownVideoURL); err != nil {
 				log.Printf("[VideoExecutor] 记录生成历史失败: %v", err)
 			}
 		}

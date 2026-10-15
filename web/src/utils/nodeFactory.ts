@@ -10,6 +10,7 @@ const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
   script: { width: 320, minWidth: 320 },
   previz: { width: 480, minWidth: 480 },  // 与视频节点同宽（同为媒体类节点）
   enhance: { width: 480, minWidth: 480 }, // 与视频节点同宽（同为媒体类节点）
+  group: { width: 420, height: 320 },     // 组合容器只是占位默认值：成组时按成员包围盒覆盖
 };
 
 /**
@@ -54,7 +55,8 @@ export function newId(prefix: string): string {
 }
 
 /**
- * 节点 id：`<类型首字母>-` + 12 位随机串 —— t/i/v/a/s/p/e（text/image/video/audio/script/previz/enhance）。
+ * 节点 id：`<类型首字母>-` + 12 位随机串 —— t/i/v/a/s/p/e/g
+ * （text/image/video/audio/script/previz/enhance/group）。
  *
  * 首字母只是给人一眼看出节点种类的提示，**不是语义来源**：代码要判断类型就读
  * `node.type` / `data.type`，不得依赖这个前缀（改名/改名类型的代码都不得靠它）。
@@ -108,7 +110,9 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
       return {
         ...baseData,
         type: 'text',
-        label: '剧本',
+        // 默认名就叫「文本」：这是文本节点，不该顶着「剧本」这种内容名 ——
+        // 剧本是这类节点可能承载的内容之一，名字该由用户自己起。
+        label: '文本',
         content: '',
         prompt: '',
         model: '',
@@ -189,6 +193,14 @@ export function createDefaultNodeData(nodeType: NodeType): LibTVNodeData {
         targetShortSide: 720,
         videoUrl: undefined,
         sourceUrl: undefined,
+      };
+    case 'group':
+      // 组合容器：没有任何生成语义，只有一个名字（成员关系记在成员节点自己的 parentId 上）。
+      // 真实的宽高在成组时按成员包围盒算好覆盖掉这里的默认值。
+      return {
+        ...baseData,
+        type: 'group',
+        label: '组合',
       };
   }
 }

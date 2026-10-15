@@ -2,7 +2,9 @@ import type { Node, Edge } from '@xyflow/react';
 import type { MentionMarker } from './prompt';
 
 // 节点类型枚举
-export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script' | 'previz' | 'enhance';
+// group = 组合容器（框选多个节点后成组）：它不是内容节点，不参与生成/连线，
+// 只是给一批节点一个可见的边界，并把它们绑成「拖动时一起走」的整体。
+export type NodeType = 'text' | 'image' | 'video' | 'audio' | 'script' | 'previz' | 'enhance' | 'group';
 
 // 节点执行状态
 export type NodeExecutionStatus = 'idle' | 'pending' | 'running' | 'success' | 'failed';
@@ -56,8 +58,26 @@ export interface TextNodeData extends BaseNodeFields, Record<string, unknown> {
   isEditing?: boolean;
 }
 
+/**
+ * 媒体节点「先建节点、后上传」的占位态。
+ *
+ * 为什么存在：拖入文件时上传是最慢的一步（大图/视频几十秒），以前是「传完才建节点」，
+ * 用户拖完盯着画布半天没反应。现在节点秒出现、上面显示上传进度，传完再把 URL 填回来。
+ * 这些字段只在这段窗口内有值，URL 一到就被清掉（见 mediaFieldsFor）。
+ */
+export interface MediaUploadState {
+  /** 正在上传：节点上转圈 + 文案，而不是一片空白 */
+  uploading?: boolean;
+  /** 0-100；图片上传拿不到进度就是 undefined（显示「上传中…」而不是假的 0%） */
+  uploadProgress?: number;
+  /** 进度文案，如「图片上传中」「转码中」 */
+  uploadPhase?: string;
+  /** 上传失败的原因：直接写在节点上，不用回头翻提示 */
+  uploadError?: string;
+}
+
 // 图像节点数据
-export interface ImageNodeData extends BaseNodeFields, Record<string, unknown> {
+export interface ImageNodeData extends BaseNodeFields, MediaUploadState, Record<string, unknown> {
   type: 'image';
   label: string;
   prompt: string;
@@ -76,7 +96,7 @@ export interface ImageNodeData extends BaseNodeFields, Record<string, unknown> {
 export type VideoMode = 'text-to-video' | 'universal-ref' | 'first-last-frame' | 'video-ref';
 
 // 视频节点数据
-export interface VideoNodeData extends BaseNodeFields, Record<string, unknown> {
+export interface VideoNodeData extends BaseNodeFields, MediaUploadState, Record<string, unknown> {
   type: 'video';
   label: string;
   prompt: string;
@@ -90,7 +110,7 @@ export interface VideoNodeData extends BaseNodeFields, Record<string, unknown> {
 }
 
 // 音频节点数据
-export interface AudioNodeData extends BaseNodeFields, Record<string, unknown> {
+export interface AudioNodeData extends BaseNodeFields, MediaUploadState, Record<string, unknown> {
   type: 'audio';
   label: string;
   prompt: string;          // 提示词（文本生成音频时使用）
@@ -228,6 +248,17 @@ export interface EnhanceNodeData extends BaseNodeFields, Record<string, unknown>
   enhanceTargetSize?: string;
 }
 
+/**
+ * 组合节点数据：只是个容器，没有任何生成语义。
+ * 成员关系不在 data 上，而是成员节点自己的 React Flow 字段 `parentId`（指向组合 id）。
+ * 组合框的位置/尺寸由 utils/canvasGroups.ts 的 normalizeGroups 按成员包围盒持续贴合。
+ */
+export interface GroupNodeData extends BaseNodeFields, Record<string, unknown> {
+  type: 'group';
+  /** 组合名称（默认「组合」）；成员数由组件从 store 现算，不落库 */
+  label?: string;
+}
+
 // 节点数据联合类型
 export type LibTVNodeData =
   | TextNodeData
@@ -236,7 +267,8 @@ export type LibTVNodeData =
   | AudioNodeData
   | ScriptNodeData
   | PrevizNodeData
-  | EnhanceNodeData;
+  | EnhanceNodeData
+  | GroupNodeData;
 
 // 画布节点类型
 export type LibTVNode = Node<LibTVNodeData, NodeType>;
@@ -276,4 +308,5 @@ export const NODE_TYPE_CONFIG: Record<NodeType, { label: string; color: string; 
   script: { label: '分镜', color: '#f59e0b', icon: 'CodeOutlined' },
   previz: { label: '白模预演', color: '#64748b', icon: 'DeploymentUnitOutlined' },
   enhance: { label: '清晰化', color: '#0ea5e9', icon: 'FormatPainterOutlined' },
+  group: { label: '组合', color: '#a78bfa', icon: 'GroupOutlined' },
 };
