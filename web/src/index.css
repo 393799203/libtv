@@ -69,10 +69,20 @@
        用 !important 盖掉它给节点写的内联 z-index（内联非 !important 会输给这里的 !important）。 */
     z-index: 1000 !important;
   }
+
+  /* 组合例外：组合框必须永远待在成员下面。
+     否则选中组合时上面那条 z-index:1000 会让整块虚线框浮到成员之上 —— 成员被整块盖住，
+     点不到（耳朵拖不出线、提示词框也点不开）。类名由 Canvas 在 displayNodes 里挂上。 */
+  .react-flow__node.selected.libtv-group-node,
+  .react-flow__node.selected.selected.libtv-group-node {
+    z-index: 0 !important;
+  }
 }
 
 /* 节点连接点（左右耳朵）：Handle 元素本身锚定在节点左右边缘中心（连线从边缘中心连出，不脱离节点），
-   视觉圆圈用伪元素绘制，hover 节点时从边缘中心 ease 弹出，停留在节点外侧 12px */
+   视觉圆圈用伪元素绘制，hover 节点时从边缘中心 ease 弹出，停留在节点外侧 12px。
+   注意：Handle 元素自己只有 React Flow 默认的 6px（连线锚点由它算），放大耳朵**只放大伪元素**——
+   伪元素属于同一个元素，命中测试算在它头上，所以视觉更大 = 抓取区更大，而连线起点不受影响。 */
 .react-flow__handle.libtv-handle {
   top: 50%;
   background: transparent !important;
@@ -101,18 +111,19 @@
 }
 .react-flow__handle.libtv-handle::before {
   content: '';
-  width: 24px;
-  height: 24px;
+  width: 34px;
+  height: 34px;
   /* 空心：不填充，只留一圈浅色描边（原为白底 + 灰边，在暗色画布上就是两个白点） */
   background: transparent;
-  border: 2.5px solid rgba(255, 255, 255, 0.55);
+  border: 3px solid rgba(255, 255, 255, 0.6);
   border-radius: 50%;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   transform: translate(-50%, -50%) scale(0.4);
+  /* 34px 圆圈、圆心在节点外 12px → 可抓范围从节点内侧 5px 一直到外侧 29px */
 }
 .react-flow__handle.libtv-handle::after {
   content: '+';
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1;
   color: var(--dv-text-2, #c2cfe4);
@@ -140,6 +151,28 @@
 .react-flow__node:hover .react-flow__handle-right.libtv-handle::after,
 .react-flow__node.selected .react-flow__handle-right.libtv-handle::after {
   transform: translate(-50%, calc(-52% - 1px)) translateX(12px) scale(1);
+}
+
+/* 耳朵的抓取区：一个不可见的命中块，比可见圆圈更大，且整体偏节点外侧 ——
+   这样「好抓」的同时，不会把节点边缘内侧的点击（选中/拖动节点、点提示词框）也吃掉。
+   用真元素而不是伪元素，命中测试更可靠；它不在 handle 自身的布局盒里，
+   所以 React Flow 算出来的连线锚点一点没变（线还是从节点边缘连出）。 */
+.libtv-handle-hit {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 48px;
+  height: 48px;
+  background: transparent;
+  border-radius: 50%;
+  /* 跟着耳朵一起显隐：隐藏态 handle 是 pointer-events:none，这里继承即可 */
+  pointer-events: inherit;
+}
+.react-flow__handle-left.libtv-handle .libtv-handle-hit {
+  transform: translate(-50%, -50%) translateX(-20px);
+}
+.react-flow__handle-right.libtv-handle .libtv-handle-hit {
+  transform: translate(-50%, -50%) translateX(20px);
 }
 
 /* 耳朵自身的 hover 反馈 */

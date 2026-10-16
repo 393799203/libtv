@@ -43,6 +43,7 @@ import { GenerationHistoryModal } from './GenerationHistoryModal';
 import { createNode } from '@/utils/nodeFactory';
 import { absolutePositionIn, absolutePositionOf } from '@/utils/canvasGroups';
 import { setAssetDropHandler } from '@/components/canvas/assetDnd';
+import { GroupConnectionLine } from '@/components/canvas/GroupConnectionLine';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
 import { mediaKindOfFile, mediaFieldsFor, titleFromFileName } from '@/utils/mediaNode';
 import type { UserAsset } from '@/services/assetApi';
@@ -185,7 +186,7 @@ export const Canvas = memo(function Canvas() {
   const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, getViewport, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addEdge, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, connectNodes, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addEdge, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -197,6 +198,7 @@ export const Canvas = memo(function Canvas() {
       updateNodeMeta: s.updateNodeMeta,
       addNode: s.addNode,
       addEdge: s.addEdge,
+      connectNodes: s.connectNodes,
       addNodesAndEdges: s.addNodesAndEdges,
       removeNodes: s.removeNodes,
       createMediaNodeAt: s.createMediaNodeAt,
@@ -258,13 +260,16 @@ export const Canvas = memo(function Canvas() {
   }, []);
 
   // 给拖拽连线悬停的目标节点附加高亮类名（放大 + 蓝色 outline）
+  // 另外给组合节点挂一个 libtv-group-node 类：CSS 里用它把组合排除在「选中就 z-index:1000」
+  // 之外 —— 组合框一旦浮到成员上面，就会整块盖住成员，成员的耳朵/提示词框都点不到了。
   const displayNodes = useMemo(() => {
-    if (!connectTargetId) return nodes;
-    return nodes.map((n) =>
-      n.id === connectTargetId
-        ? { ...n, className: `${n.className || ''} libtv-connect-target`.trim() }
-        : n
-    );
+    return nodes.map((n) => {
+      const extra = [n.type === 'group' ? 'libtv-group-node' : '', n.id === connectTargetId ? 'libtv-connect-target' : '']
+        .filter(Boolean)
+        .join(' ');
+      if (!extra) return n;
+      return { ...n, className: `${n.className || ''} ${extra}`.trim() };
+    });
   }, [nodes, connectTargetId]);
 
   const handleContextMenu = useCallback((event: React.MouseEvent) => {
@@ -325,19 +330,11 @@ export const Canvas = memo(function Canvas() {
       const nodeEl = hitEl instanceof Element ? hitEl.closest('.react-flow__node') : null;
       const targetId = nodeEl?.getAttribute('data-id') || null;
       if (sourceId && targetId && targetId !== sourceId) {
-        const { edges: latestEdges } = useCanvasStore.getState();
-        const duplicated = latestEdges.some(
-          (e) => e.source === sourceId && e.target === targetId
-        );
-        if (!duplicated) {
-          addEdge({
-            id: `e-${sourceId}-${targetId}`,
-            source: sourceId,
-            target: targetId,
-            type: 'dataFlow',
-            sourceHandle: connectionState?.fromHandle?.id ?? undefined,
-          });
-        }
+        // ⚠️ 必须走 connectNodes，不能直接 addEdge：起手是组合时要摊成每个成员一条，
+        // 目标是组合时不该建边（直接 addEdge 会造出「组合 -> 目标」这种半成品边）。
+        connectNodes(sourceId, targetId, {
+          sourceHandle: connectionState?.fromHandle?.id ?? undefined,
+        });
         return;
       }
 
@@ -348,7 +345,7 @@ export const Canvas = memo(function Canvas() {
         sourceHandle: connectionState?.fromHandle?.id ?? null,
       });
     },
-    [addEdge]
+    [connectNodes]
   );
 
   // 从选择菜单选中节点类型后：创建新节点 + 建立连线
@@ -363,17 +360,12 @@ export const Canvas = memo(function Canvas() {
       addNode(newNode);
       // 纯添加（FAB/空画布引导，无来源节点）时不建立连线
       if (sourceNodeId) {
-        addEdge({
-          id: `e-${sourceNodeId}-${newNode.id}`,
-          source: sourceNodeId,
-          target: newNode.id,
-          type: 'dataFlow',
-          sourceHandle: sourceHandle || undefined,
-        });
+        // 同上：来源可能是组合，交给 connectNodes 摊成成员
+        connectNodes(sourceNodeId, newNode.id, { sourceHandle: sourceHandle || undefined });
       }
       setNodeSelectPopup(null);
     },
-    [nodeSelectPopup, screenToFlowPosition, addNode, addEdge]
+    [nodeSelectPopup, screenToFlowPosition, addNode, connectNodes]
   );
 
   /** 节点显示名：label 优先，否则用类型名 */
@@ -1092,7 +1084,8 @@ export const Canvas = memo(function Canvas() {
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         snapToGrid
         snapGrid={[16, 16]}
-        connectionRadius={40}
+        /* 连线拖拽的吸附半径：耳朵放大后同步放大，指针靠近目标节点左耳就容易吸附 */
+        connectionRadius={56}
         minZoom={0.05}
         maxZoom={4}
         // 生成中不锁画布：拖节点、连线与生成互不影响（过去是 nodesDraggable={!isExecuting}，
@@ -1119,6 +1112,8 @@ export const Canvas = memo(function Canvas() {
         zoomOnScroll={true}
         zoomOnPinch={true}
         zoomOnDoubleClick={false}
+        /* 组合起手的连线预览：给组合里每个成员各画一条（默认只画一条"组合 → 指针"） */
+        connectionLineComponent={GroupConnectionLine}
         deleteKeyCode={['Backspace', 'Delete']}
         onBeforeDelete={handleBeforeDelete}
         /* 多选键：Shift / ⌘ / Ctrl + 点击都能加选。

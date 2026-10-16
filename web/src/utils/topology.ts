@@ -1,4 +1,41 @@
 import type { LibTVNode, LibTVEdge } from '@/types/canvas';
+import { membersOf } from '@/utils/canvasGroups';
+
+/**
+ * 把「组合」两端的连线摊成成员两端的连线（用于读上游/下游）。
+ *
+ * 组合只是容器：它自己没内容、也不参与生成，真正有内容的是成员。所以「组合 → 目标」
+ * 这条整体连线，在读取上游时要理解成「组合里每个成员 → 目标」——
+ * 否则目标会拿到一个空节点（提示词框的上游区一片空白、生成时也没有参考图）。
+ *
+ * 双向都摊：
+ * - source 是组合 → 换成它的成员（组合的产出＝成员的产出）
+ * - target 是组合 → 换成它的成员（喂给组合＝喂给每个成员）
+ * 既有的成员级连线原样保留（去重）。
+ */
+export function expandEdgesThroughGroups(nodes: LibTVNode[], edges: LibTVEdge[]): LibTVEdge[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const isGroup = (id: string) => byId.get(id)?.type === 'group';
+  if (!edges.some((e) => isGroup(e.source) || isGroup(e.target))) return edges;
+
+  const out: LibTVEdge[] = [];
+  const seen = new Set<string>();
+  const push = (e: LibTVEdge) => {
+    const key = `${e.source}->${e.target}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(e);
+  };
+  const sides = (id: string) => (isGroup(id) ? membersOf(nodes, id).map((m) => m.id) : [id]);
+
+  for (const e of edges) {
+    const sources = sides(e.source);
+    const targets = sides(e.target);
+    // 两端都是组合时是笛卡尔积；正常情况只有一端是组合
+    for (const s of sources) for (const t of targets) push({ ...e, id: `${e.id}__${s}__${t}`, source: s, target: t });
+  }
+  return out;
+}
 
 /**
  * 获取某节点的所有下游节点 ID（BFS 沿正向邻接表）
@@ -8,6 +45,7 @@ export function getDownstreamOf(
   nodes: LibTVNode[],
   edges: LibTVEdge[],
 ): string[] {
+  edges = expandEdgesThroughGroups(nodes, edges);
   const nodeIds = new Set(nodes.map((n) => n.id));
   const result: string[] = [];
   const visited = new Set<string>([startId]);
@@ -34,6 +72,7 @@ export function getUpstreamOf(
   nodes: LibTVNode[],
   edges: LibTVEdge[],
 ): string[] {
+  edges = expandEdgesThroughGroups(nodes, edges);
   const nodeIds = new Set(nodes.map((n) => n.id));
   const result: string[] = [];
   const visited = new Set<string>([startId]);

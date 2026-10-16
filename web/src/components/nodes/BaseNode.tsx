@@ -207,7 +207,10 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
           type="target"
           position={Position.Left}
           className="libtv-handle libtv-handle-left"
-        />
+        >
+          {/* 不可见的抓取区：比可见圆圈更大、且整体偏节点外侧（CSS 里定义） */}
+          <span className="libtv-handle-hit" aria-hidden />
+        </Handle>
       )}
 
       {/* 输出 Handle（右耳）：锚定在节点右边缘中心 */}
@@ -215,7 +218,9 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
         type="source"
         position={Position.Right}
         className="libtv-handle libtv-handle-right"
-      />
+      >
+        <span className="libtv-handle-hit" aria-hidden />
+      </Handle>
     </div>
   );
 });

@@ -150,6 +150,12 @@ interface CanvasState extends WorkspaceUIState {
   onNodesChange: OnNodesChange<LibTVNode>;
   onEdgesChange: OnEdgesChange<LibTVEdge>;
   onConnect: OnConnect;
+  /** 建立连线的唯一入口（组合会被摊成成员；目标是组合则不建）。所有连线路径都必须走它 */
+  connectNodes: (
+    source: string,
+    target: string,
+    handles?: { sourceHandle?: string | null; targetHandle?: string | null }
+  ) => void;
 
   // 节点操作
   addNode: (node: LibTVNode) => void;
@@ -527,22 +533,65 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   onConnect: (connection: Connection) => {
+    get().connectNodes(connection.source, connection.target, {
+      sourceHandle: connection.sourceHandle,
+      targetHandle: connection.targetHandle,
+    });
+  },
+
+  /**
+   * 建立连线的**唯一**入口。所有连线路径都要走这里 —— 之前画布上有两套：
+   * store 的 onConnect（精确落在连接点上）和 Canvas 的 handleConnectEnd（落在目标节点任意位置，
+   * 且拖到空白处弹菜单新建节点），后者直接 addEdge，于是「从组合拖出去」在那边又变回了
+   * 组合自己被连出去（成员没摊开）。逻辑收在这里就不会再各写一份、各漏一处。
+   *
+   * 规则：
+   * - 组合只有输出耳朵：它的连线在**每个成员**身上各落一条（组合自己没有内容、也不进执行计划）；
+   * - 目标是组合 → 直接不建（组合是虚拟的，别的节点连进来没有意义）；
+   * - 组合连自己的成员 = 自环，不建；已有同向边不重复建。
+   */
+  connectNodes: (source: string, target: string, handles) => {
     set((state) => {
       const pid = state.projectId;
       if (!pid || state.isLoading) return {};
+      if (!source || !target || source === target) return {};
       const cache = new Map(state._cache);
-      let data = cache.get(pid) || createEmptyProjectData();
+      const data = cache.get(pid) || createEmptyProjectData();
 
-      const newEdge: LibTVEdge = {
-        id: `e-${connection.source}-${connection.target}`,
-        source: connection.source,
-        target: connection.target,
-        sourceHandle: connection.sourceHandle,
-        targetHandle: connection.targetHandle,
-        type: 'dataFlow',
-        animated: true,
+      const nodeOf = (id: string) => data.nodes.find((n) => n.id === id);
+      const srcNode = nodeOf(source);
+      const dstNode = nodeOf(target);
+
+      // 目标是组合：不建（虚拟节点只出不进）
+      if (dstNode?.type === 'group') return {};
+      // 自环防线：组合连自己的成员 / 成员连自己的组合
+      const inside = (child?: { parentId?: string }, group?: { id: string; type?: string }) =>
+        !!child?.parentId && !!group && group.type === 'group' && child.parentId === group.id;
+      if (inside(dstNode, srcNode) || inside(srcNode, dstNode)) return {};
+
+      // 起手是组合 → 摊成它的每个成员；否则就是它自己
+      const expand = (id: string): string[] => {
+        const n = nodeOf(id);
+        if (n?.type !== 'group') return [id];
+        return data.nodes.filter((m) => m.parentId === id && m.type !== 'group').map((m) => m.id);
       };
-      data.edges = [...data.edges, newEdge];
+
+      const fresh: LibTVEdge[] = [];
+      for (const s of expand(source)) {
+        if (s === target) continue;
+        if (data.edges.some((e) => e.source === s && e.target === target)) continue;
+        fresh.push({
+          id: `e-${s}-${target}`,
+          source: s,
+          target,
+          sourceHandle: handles?.sourceHandle ?? undefined,
+          targetHandle: handles?.targetHandle ?? undefined,
+          type: 'dataFlow',
+          animated: true,
+        });
+      }
+      if (fresh.length === 0) return {};
+      data.edges = [...data.edges, ...fresh];
       const hist = saveHistory(data);
       Object.assign(data, hist);
       cache.set(pid, data);

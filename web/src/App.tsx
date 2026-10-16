@@ -3,7 +3,7 @@ import { RouterProvider } from 'react-router-dom';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { router } from '@/router';
-import { bindAntdApp } from '@/utils/antdApp';
+import { bindAntdApp, MESSAGE_TOP } from '@/utils/antdApp';
 
 /**
  * 平台主题：高饱和冷色暗底（黑 / 青 / 蓝 / 紫）。
@@ -123,7 +123,7 @@ function App() {
         },
       }}
     >
-      <AntApp>
+      <AntApp message={{ top: MESSAGE_TOP }}>
         <AntdAppBridge>
           <RouterProvider router={router} />
         </AntdAppBridge>

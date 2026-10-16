@@ -1,3 +1,4 @@
+import { expandEdgesThroughGroups } from '@/utils/topology';
 import { normalizeAspectRatio } from '../../../configs/promptConfig';
 import { memo, useState, useCallback, useMemo, useRef, useEffect, type Ref } from 'react';
 import { createPortal } from 'react-dom';
@@ -37,7 +38,8 @@ function getUpstreamInputs(
   nodes: LibTVNode[],
   edges: LibTVEdge[]
 ): UpstreamInput[] {
-  const incomingEdges = edges.filter((e) => e.target === nodeId);
+  // 穿过组合看成员：组合整体连到这里时，真正的内容在成员身上
+  const incomingEdges = expandEdgesThroughGroups(nodes, edges).filter((e) => e.target === nodeId);
 
   // 按类型独立计数，确保"图片1"、"图片2"连续编号
   const typeCounters: Record<string, number> = {};
@@ -164,7 +166,7 @@ function computeUpstreamSignature(nodeId: string, nodes: LibTVNode[], edges: Lib
       `node:${n.id}|${n.type}|${d.type}|${d.label}|${d.imageUrl}|${d.videoUrl}|${d.content}|${d.scriptContent}|${d.audioUrl}`
     );
   };
-  for (const e of edges) {
+  for (const e of expandEdgesThroughGroups(nodes, edges)) {
     if (e.target !== nodeId) continue;
     parts.push(`edge:${e.source}`);
     const src = nodes.find((n) => n.id === e.source);
@@ -209,7 +211,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const upstreamSignature = useCanvasStore((s) => computeUpstreamSignature(nodeId, s.nodes, s.edges));
   // 上游连线是否存在音频节点（直接连线也算参考音频，声音开关需锁定）
   const hasUpstreamAudio = useCanvasStore((s) => {
-    const sources = s.edges.filter((e) => e.target === nodeId).map((e) => e.source);
+    const sources = expandEdgesThroughGroups(s.nodes, s.edges)
+      .filter((e) => e.target === nodeId)
+      .map((e) => e.source);
     return sources.some((srcId) => {
       const n = s.nodes.find((nd) => nd.id === srcId);
       if (!n) return false;
