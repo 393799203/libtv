@@ -91,8 +91,10 @@ function App() {
           controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)', 
         },
         components: {
-          // headerBg 半透明：配合 dark-theme.css 里的 backdrop-filter 做玻璃化头部
-          Layout: { headerBg: 'rgba(18, 19, 22, 0.86)', bodyBg: '#121316', siderBg: 'rgba(18, 19, 22, 0.86)' },
+          // headerBg / siderBg 用**不透明**底色：原来 0.86 半透明是专门配 backdrop-filter 毛玻璃的，
+          // 毛玻璃已去掉（见 dark-theme.css 的说明），半透明反而会透出背后画布的锐利内容。
+          // 取值与 bodyBg / --dv-bg 同色，头部与页面的层次由边框 + 投影承担。
+          Layout: { headerBg: '#121316', bodyBg: '#121316', siderBg: '#121316' },
           Modal: { contentBg: '#232427', headerBg: '#232427' },
           // 主按钮的投影：青色调、柔和下沉，让按钮"浮"在面板上（比默认灰影更贴主题）
           Button: { primaryShadow: '0 6px 18px -6px rgba(34, 211, 238, 0.55)' },
