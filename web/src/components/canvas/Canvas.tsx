@@ -34,6 +34,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { NODE_TYPE_CONFIG } from '@/types/canvas';
 import type { LibTVNode, LibTVEdge, NodeType, ImageNodeData, VideoNodeData, AudioNodeData } from '@/types/canvas';
 import { PromptCompose } from '@/components/panels/prompt';
+import { FlowAnchored } from '@/components/canvas/FlowAnchored';
 
 import { nodeTypes } from '@/components/nodes';
 import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
@@ -180,13 +181,15 @@ export const Canvas = memo(function Canvas() {
   // 拖拽连线中：源节点 ID + 当前悬停的目标节点 ID（目标节点放大 + 高亮 outline）
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [connectTargetId, setConnectTargetId] = useState<string | null>(null);
+  // viewport 的值本身不参与屏幕坐标换算（换算在 FlowAnchored 里按实时 transform 做），
+  // 它只作为"按 100ms 节流的重渲染信号"给依赖它的 memo 用（见 promptFlowAnchor）。
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   // 空画布引导卡片：手动关闭后本次会话不再弹出
   const [dismissedEmptyGuide, setDismissedEmptyGuide] = useState(false);
-  const { fitView, screenToFlowPosition, flowToScreenPosition, getNodes, getViewport, setViewport: rfSetViewport } = useReactFlow();
+  const { fitView, screenToFlowPosition, getNodes, getViewport, setViewport: rfSetViewport } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, connectNodes, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addEdge, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, connectNodes, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -197,7 +200,6 @@ export const Canvas = memo(function Canvas() {
       updateNodeData: s.updateNodeData,
       updateNodeMeta: s.updateNodeMeta,
       addNode: s.addNode,
-      addEdge: s.addEdge,
       connectNodes: s.connectNodes,
       addNodesAndEdges: s.addNodesAndEdges,
       removeNodes: s.removeNodes,
@@ -837,8 +839,11 @@ export const Canvas = memo(function Canvas() {
       viewportRef.current = viewport;
       saveViewport(viewport);
     } else {
-      // 节流窗口内：只记最新值，trailing timer 兜底刷新一次显示，避免每帧 setState
+      // 节流窗口内：只记最新值，trailing timer 兜底刷新一次显示，避免每帧 setState。
+      // ⚠️ 但 ref 必须**立刻**跟上：ref 是给"拖动基准帧"用的（见 captureFrame），
+      // 平移完立刻拖组合成员时，用 100ms 前的旧视口换算就会让成员落点偏掉。
       pendingViewportRef.current = viewport;
+      viewportRef.current = viewport;
       if (viewportTimerRef.current === null) {
         viewportTimerRef.current = setTimeout(() => {
           viewportTimerRef.current = null;
@@ -927,32 +932,18 @@ export const Canvas = memo(function Canvas() {
     }
   }, [isLoading, nodes.length]);
 
-  // 画布容器在页面中的原点。
-  // flowToScreenPosition() 返回的是「页面坐标」，而面板是用 left/top 定位在容器**内部**的，
-  // 两者差一个容器原点（本页容器 top=40px，来自顶部栏），不减掉面板就整块偏低 40px：
-  // 于是"面板顶边到节点底边的缝" = 40 − 20×zoom，48% 缩放下有 30px 的缝（看着没贴合），
-  // 150% 时只剩 10px（看着最贴合）—— 就是"不同缩放档位贴合程度不一样"的真正原因。
-  const [containerOffset, setContainerOffset] = useState({ x: 0, y: 0 });
-  useEffect(() => {
-    const update = () => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setContainerOffset((prev) =>
-        prev.x === rect.left && prev.y === rect.top ? prev : { x: rect.left, y: rect.top },
-      );
-    };
-    update();
-    window.addEventListener('resize', update);
-    const observer = new ResizeObserver(update);
-    if (containerRef.current) observer.observe(containerRef.current);
-    return () => {
-      window.removeEventListener('resize', update);
-      observer.disconnect();
-    };
-  }, []);
+  // 提示词面板的定位不需要"容器原点"：React Flow 的 transform 是相对画布容器的，
+  // 之前那套 getBoundingClientRect 原点换算已经删掉（详见 FlowAnchored 里的说明）。
 
-  // 计算提示词框的位置 — 拖动期间不更新
-  const promptPosition = useMemo(() => {
+
+  // 计算提示词面板的锚点 = 节点底部中心（**画布坐标**）。
+  // 屏幕位置交给 <FlowAnchored> 按 React Flow 的**实时** transform 每帧换算 ——
+  // 这里绝不能自己用那个 100ms 节流的 viewport state 去算屏幕坐标，那正是"平移时一卡一卡"的根因
+  // （实测：面板与节点的偏移在 858~883px 之间摆动，节点动 41 次面板只动 18 次）。
+  // 但依赖数组里**保留** viewport 当"重算信号"：组合成员的绝对坐标要靠"父组合尺寸 + 自己的 measured"，
+  // 这两样是异步就绪的，少了这个 tick，memo 会在几何没就绪时算一次就再也不更新
+  // （实测面板会停在成员的相对坐标 (150,250)）。
+  const promptFlowAnchor = useMemo(() => {
     if (!selectedNode || promptSuppressed) return null;
     // 从 store 取最新节点数据（measured 可能异步更新，selectedNode 可能是旧的）
     const latestNode = getNodes().find((n) => n.id === selectedNode.id);
@@ -961,15 +952,9 @@ export const Canvas = memo(function Canvas() {
     // 直接拿来算，提示词框就会跑到画布中间去（用户报的「组合里的节点选中后提示词框位置不对」）。
     const abs = absolutePositionIn(getNodes(), node);
     // nodeOrigin [0.5, 0.5] → 绝对坐标是中心点，底部 = y + height/2
-    const nodeBottomY = abs.y + (node.measured?.height || 200) / 2;
-    // ① 先换成页面坐标 ② 再减掉容器原点，才是容器内 left/top 该用的值
-    // ③ 间距用固定屏幕像素，避免"面板与节点的缝随缩放变化"
-    const screen = flowToScreenPosition({ x: abs.x, y: nodeBottomY });
-    return {
-      x: screen.x - containerOffset.x,
-      y: screen.y - containerOffset.y + PROMPT_PANEL_GAP_PX,
-    };
-  }, [selectedNode?.id, promptSuppressed, flowToScreenPosition, viewport, getNodes, containerOffset]);
+    return { x: abs.x, y: abs.y + (node.measured?.height || 200) / 2 };
+  }, [nodes, selectedNode?.id, promptSuppressed, getNodes, viewport]);
+
 
   return (
     <div ref={containerRef} className="w-full h-full relative bg-[var(--dv-canvas-bg)]" onContextMenu={handleContextMenu}>
@@ -1262,21 +1247,21 @@ export const Canvas = memo(function Canvas() {
       )}
 
       {/* 选中节点时的提示词编辑组件 */}
-      {hasPromptPanel && promptPosition && !selectedNode!.data.isEditing && (
-        <div
-          /* 桌面：跟随节点锚定（内联 left/top + 水平居中）。
+      {hasPromptPanel && promptFlowAnchor && !selectedNode!.data.isEditing && (
+        <FlowAnchored
+          /* 桌面：跟随节点锚定（left/top 由 FlowAnchored 按实时视口直接写 DOM + 水平居中）。
              移动端（<768px）改为吸底整宽面板：视口只有 390px 时 750px 的卡片实测左溢 270px、
              右溢 90px，屏幕上只露 ~120px，等于没法用。用 max-md: + ! 覆盖内联定位，
              桌面那套锚定逻辑一行不改。 */
+          flow={promptFlowAnchor}
+          gap={PROMPT_PANEL_GAP_PX}
+          centerX
           className="absolute pointer-events-none
             max-md:!fixed max-md:!inset-x-2 max-md:!top-auto max-md:!bottom-2 max-md:!transform-none
             max-md:!max-h-[60vh] max-md:!overflow-y-auto max-md:!pointer-events-auto"
-          style={{
-            left: promptPosition.x,
-            top: promptPosition.y,
-            transform: 'translateX(-50%)',
-            zIndex: 1000,
-          }}
+          /* 水平居中的 translateX(-50%) 由 FlowAnchored 写进 transform 里：
+             位置每帧都在变，交给 React 的 style 会和直接写 DOM 打架 */
+          style={{ zIndex: 1000 }}
         >
           {/* 箭头（移动端是吸底面板，箭头指向节点已无意义） */}
           <div
@@ -1300,7 +1285,7 @@ export const Canvas = memo(function Canvas() {
               onUpdate={handlePromptUpdate}
             />
           </div>
-        </div>
+        </FlowAnchored>
       )}
     </div>
   );
