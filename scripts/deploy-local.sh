@@ -67,6 +67,17 @@ fi
 
 # 编排与配置文件：改了 redis/backend 等服务定义或配置项时必须一并同步，
 # 否则线上 compose 与仓库不一致（例如 Redis 密码只改了远端）
+# web/ 下的 nginx 配置与 Dockerfile 都是前端镜像构建上下文的一部分：
+# 改了不一起同步，线上就会拿旧配置重建镜像（改动静默丢失）。
+# 教训两则：① 曾漏同步 COPY libtv-app.conf 那行，前端重启循环 52 秒不可用；
+#          ② 2026-10-16 all 分支漏同步 libtv-app.conf，sitemap/noindex 规则上线后没生效。
+sync_web() {
+  sync_dir web/nginx.conf /opt/libtv/web/nginx.conf
+  sync_dir web/libtv-app.conf /opt/libtv/web/libtv-app.conf
+  sync_dir web/libtv-acme.conf /opt/libtv/web/libtv-acme.conf
+  sync_dir web/Dockerfile /opt/libtv/web/Dockerfile
+}
+
 sync_infra() {
   sync_dir docker-compose.yml /opt/libtv/docker-compose.yml
   sync_dir server/configs/ /opt/libtv/server/configs/
@@ -78,14 +89,7 @@ echo "▶ 同步代码到服务器…"
 case "$TARGET" in
   frontend)
     sync_dist
-    # nginx 配置随前端镜像一起重建：不在这里同步的话，线上会用旧配置重建镜像
-    # （TLS/端口/代理改动会静默丢失）
-    sync_dir web/nginx.conf /opt/libtv/web/nginx.conf
-    sync_dir web/libtv-app.conf /opt/libtv/web/libtv-app.conf
-    sync_dir web/libtv-acme.conf /opt/libtv/web/libtv-acme.conf
-    # Dockerfile 也是构建上下文的一部分：漏同步会导致镜像缺文件、容器起不来
-    # （曾漏同步 COPY libtv-app.conf 那一行，前端直接重启循环约 52 秒不可用）
-    sync_dir web/Dockerfile /opt/libtv/web/Dockerfile
+    sync_web
     # 端口映射、证书挂载都在 compose 里，必须一起同步
     sync_infra
     ;;
@@ -97,8 +101,10 @@ case "$TARGET" in
     sync_infra
     ;;
   *)
+    # all：后端 + 前端一起，两侧的同步都要做
     sync_server
     sync_infra
+    sync_web
     [ -d web/dist ] && sync_dist
     ;;
 esac

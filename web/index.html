@@ -7,10 +7,93 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>漫蛙 - 视频创作工作台</title>
+
+    <title>漫蛙 - AI 视频创作工作台 | 文生视频 · 图生视频 · AI 分镜</title>
+    <meta
+      name="description"
+      content="漫蛙是一款 AI 视频创作工作台：一句话或一张图就能生成分镜脚本、连续镜头与成片，支持文生视频、图生视频、首尾帧与参考图生成，还能一键做视频清晰化。作品可公开发布，在社区看别人的创作过程。"
+    />
+    <meta
+      name="keywords"
+      content="AI视频生成,文生视频,图生视频,AI分镜,分镜脚本生成,AI短剧,AI漫剧,视频清晰化,漫蛙"
+    />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />
+
+    <!--
+      搜索引擎站长平台的所有权验证标签。
+      必须放在**静态 HTML** 里：百度/必应/谷歌的验证抓取都不执行 JS，
+      前端动态注入的标签它们看不到（这也正是 robots.txt / sitemap.xml 必须做成真实文件的原因）。
+    -->
+    <meta name="baidu-site-verification" content="codeva-rQ6w7ZfmDc" />
+    <meta name="theme-color" content="#121316" />
+
+    <!--
+      canonical / og:url 故意**不写**在静态 HTML 里：全站共用这一份 HTML，
+      写死就等于把 /forum/xxx、/videos/xxx 都声明成首页，会把子页面从索引里摘掉。
+      改由前端按路由注入（见 web/src/hooks/usePageMeta.ts）。
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="漫蛙" />
+    <meta property="og:title" content="漫蛙 - AI 视频创作工作台" />
+    <meta
+      property="og:description"
+      content="一句话或一张图生成分镜脚本与成片：文生视频、图生视频、首尾帧、参考图生成与视频清晰化。"
+    />
+    <meta property="og:image" content="https://manwa.yunqueai.cloud/favicon-512x512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="漫蛙 - AI 视频创作工作台" />
+    <meta
+      name="twitter:description"
+      content="一句话或一张图生成分镜脚本与成片：文生视频、图生视频、首尾帧、参考图生成与视频清晰化。"
+    />
+    <meta name="twitter:image" content="https://manwa.yunqueai.cloud/favicon-512x512.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://manwa.yunqueai.cloud/#website",
+            "url": "https://manwa.yunqueai.cloud/",
+            "name": "漫蛙",
+            "alternateName": "漫蛙 AI 视频创作工作台",
+            "inLanguage": "zh-CN",
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": "https://manwa.yunqueai.cloud/forum?keyword={search_term_string}",
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://manwa.yunqueai.cloud/#organization",
+            "name": "漫蛙",
+            "url": "https://manwa.yunqueai.cloud/",
+            "logo": "https://manwa.yunqueai.cloud/favicon-512x512.png"
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      不执行 JS 的爬虫（百度、搜狗等）只会看到这一小段：给它一句能说明"这是什么站"的话，
+      而不是一片空白。真正的内容仍由 SPA 渲染 —— 这不是给爬虫看特殊内容，
+      人肉打开页面看到的也是同一个产品介绍。
+    -->
+    <noscript>
+      <h1>漫蛙 · AI 视频创作工作台</h1>
+      <p>
+        漫蛙是一款 AI 视频创作工作台：输入一句话或一张图，就能生成分镜脚本、连续镜头与成片，
+        支持文生视频、图生视频、首尾帧与参考图生成，以及视频清晰化。
+      </p>
+      <p>
+        浏览公开作品：<a href="/">作品广场</a> ｜ 交流创作经验：<a href="/forum">漫蛙社区</a>
+      </p>
+      <p>本站需要开启 JavaScript 才能使用完整功能。</p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

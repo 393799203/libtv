@@ -309,6 +309,8 @@ func main() {
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
 	commentHandler := handler.NewCommentHandler(commentService)
 	forumHandler := handler.NewForumHandler(forumService)
+	// SEO：动态 sitemap（只收录公开可读的作品/帖子，见 handler/seo_handler.go）
+	seoHandler := handler.NewSeoHandler(showService, forumService)
 	bannerHandler := handler.NewBannerHandler(bannerService, fileUploadService)
 	// 清晰化渠道配置（configs/enhance.yaml）：渠道/档位/运维旋钮。
 	// 读不到或读坏了都**不阻塞启动** —— 退回内置默认配置（本机 FFmpeg 两档），
@@ -402,6 +404,9 @@ func main() {
 
 	// 保留旧的静态文件路由（兼容）
 	r.Static("/uploads", config.C.Storage.Local.BasePath)
+
+	// sitemap.xml：由后端按库里公开内容动态生成（robots.txt 在前端静态文件里）
+	r.GET("/sitemap.xml", seoHandler.Sitemap)
 
 	// 公开路由
 	auth := r.Group("/api/auth")

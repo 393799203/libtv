@@ -19,6 +19,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { decorateForumContent } from '@/utils/thumbUrl';
 import { EmptyState } from '@/components/common/EmptyState';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 function formatTime(iso: string): string {
   const time = new Date(iso).getTime();
@@ -52,6 +53,14 @@ export default function ForumPostPage() {
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
 
   const [post, setPost] = useState<ForumPostItem | null>(null);
+  usePageMeta({
+    title: post?.title || '社区帖子',
+    // 正文是清洗过的 HTML，取纯文本前 100 字当摘要
+    description: post
+      ? post.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100)
+      : undefined,
+    type: 'article',
+  });
   const [replies, setReplies] = useState<ForumReplyItem[]>([]);
   const [replyTotal, setReplyTotal] = useState(0);
   const [loading, setLoading] = useState(true);

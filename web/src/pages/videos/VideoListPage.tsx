@@ -25,6 +25,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { ProjectCard, CreateProjectCard } from '@/components/project/ProjectCard';
 import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const { Title, Text } = Typography;
 
@@ -246,6 +247,12 @@ function useIntersectionObserver(threshold = 0.1) {
 }
 
 export default function VideoListPage() {
+  // 首页是公开作品广场，是最主要的收录入口
+  usePageMeta({
+    title: 'AI 视频创作工作台',
+    description:
+      '一句话或一张图，生成分镜脚本与成片。在漫蛙浏览公开作品、看别人的创作参数与提示词：文生视频、图生视频、首尾帧、参考图生成与视频清晰化。',
+  });
   const { message, modal } = App.useApp();
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');

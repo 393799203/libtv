@@ -5,6 +5,7 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const { Title, Text } = Typography;
 
@@ -111,6 +112,8 @@ const columns = [
 ];
 
 export default function AIModelsPage() {
+  // 应用内页：不被搜索引擎收录（nginx 的 add_header 到不了这里，见 web/libtv-app.conf 说明）
+  usePageMeta({ title: 'AI 模型', noindex: true });
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">

@@ -23,6 +23,7 @@ import { showApi } from '@/services/showApi';
 import { useAuthStore } from '@/stores/authStore';
 import CommentPanel from '@/components/show/CommentPanel';
 import type { Video } from '@/types/video';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const { Text } = Typography;
 
@@ -47,6 +48,13 @@ export default function VideoDetailPage() {
   const [buffered, setBuffered] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [videoInfo, setVideoInfo] = useState<Video | null>(null);
+  usePageMeta({
+    title: videoInfo?.title ? `${videoInfo.title} - AI 生成视频作品` : 'AI 生成视频作品',
+    description: videoInfo?.title
+      ? `漫蛙作品《${videoInfo.title}》：AI 生成的视频作品，可查看画面与创作过程，并一键做同款。`
+      : '漫蛙公开作品详情：AI 生成的视频作品与创作过程。',
+    type: 'article',
+  });
   const [isLiked, setIsLiked] = useState(false);
   const [likeLoading, setLikeLoading] = useState(false);
   const [showCommentPanel, setShowCommentPanel] = useState(false); // 右侧评论面板

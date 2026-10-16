@@ -251,11 +251,8 @@ export const EnhanceNode = memo<NodeProps<EnhanceNodeType>>(function EnhanceNode
           </div>
         )}
 
-        {data.status === 'failed' && data.error ? (
-          /* 失败原因常常是可行动的（如「源视频超过本地档上限，请先剪切」），
-             直接摊在节点上，而不是只藏在小红点的 tooltip 里 */
-          <span className="text-[11px] leading-relaxed text-red-500 break-words">{String(data.error)}</span>
-        ) : null}
+        {/* 失败原因不再在这里显示：BaseNode 已统一摊一条翻译后的「人话」，
+            并保留原始报错在悬浮详情里，避免同一段文案在节点上出现两次 */}
 
         <Tooltip title={selectedChannel?.description}>
           <span className="text-[10px] text-gray-400 leading-tight cursor-help">

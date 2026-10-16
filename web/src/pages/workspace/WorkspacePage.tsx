@@ -28,6 +28,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { showApi, type ShowCategoryItem } from '@/services/showApi';
 import { refreshCredits } from '@/utils/refreshCredits';
 import { useCreditsSync } from '@/hooks/useCreditsSync';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 /** 画布是否"效果为空"：无节点，或所有节点都是空内容（未填输入、无产出） */
 function isEffectivelyEmptyCanvas(nodes: { data?: Record<string, unknown> }[]): boolean {
@@ -360,5 +361,7 @@ function WorkspaceInner() {
 }
 
 export default function WorkspacePage() {
+  // 应用内页：给个正常标题（否则切进来还留着上一个公开页的标题），并明确 noindex
+  usePageMeta({ title: '创作画布', noindex: true });
   return <WorkspaceInner />;
 }

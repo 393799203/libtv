@@ -39,10 +39,13 @@ import PointsPackageManagement from './PointsPackageManagement';
 import ChannelPricingPage from './ChannelPricingPage';
 import ProviderTaskReconciliation from './ProviderTaskReconciliation';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'reconcile' | 'channels' | 'packages';
 
 export default function AdminPage() {
+  // 应用内页：不被搜索引擎收录（nginx 的 add_header 到不了这里，见 web/libtv-app.conf 说明）
+  usePageMeta({ title: '管理后台', noindex: true });
   const navigate = useNavigate();
   const { tab = 'banners' } = useParams<{ tab: string }>();
   const activeTab: AdminTab = (tab as AdminTab) || 'banners';

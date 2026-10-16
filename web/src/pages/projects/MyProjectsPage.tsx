@@ -6,6 +6,7 @@ import { projectApi } from '@/services/projectApi';
 import { useAuthStore } from '@/stores/authStore';
 import type { ProjectListItem } from '@/types/project';
 import { ProjectCard } from '@/components/project/ProjectCard';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const { Title, Text } = Typography;
 
@@ -16,6 +17,8 @@ const PAGE_SIZE = 20;
  * 首页「最近项目」最多展示两行，超出部分引导到本页
  */
 export default function MyProjectsPage() {
+  // 应用内页：不被搜索引擎收录（nginx 的 add_header 到不了这里，见 web/libtv-app.conf 说明）
+  usePageMeta({ title: '我的项目', noindex: true });
   const navigate = useNavigate();
   const { message, modal } = App.useApp();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);

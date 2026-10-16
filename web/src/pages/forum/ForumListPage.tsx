@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
 import { EmptyState } from '@/components/common/EmptyState';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const PAGE_SIZE = 10;
 
@@ -37,6 +38,11 @@ function formatTime(iso: string): string {
  * 站内链接会走 react-router 跳转（见 VideoListPage 的 banner 点击处理）。
  */
 export default function ForumListPage() {
+  usePageMeta({
+    title: '漫蛙社区论坛',
+    description:
+      '漫蛙社区的创作交流区：AI 视频生成经验、提示词技巧、活动公告与常见问题，未登录也能浏览，可直接发帖提问。',
+  });
   const navigate = useNavigate();
   const { message } = App.useApp();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);

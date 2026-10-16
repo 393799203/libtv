@@ -1,12 +1,13 @@
-import { memo, useState, useRef, useCallback } from 'react';
+import { memo, useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { Tooltip } from 'antd';
-import { LoadingOutlined } from '@ant-design/icons';
+import { LoadingOutlined, WarningOutlined } from '@ant-design/icons';
 import type { LibTVNodeData } from '@/types/canvas';
 import { NODE_TYPE_CONFIG, type NodeType } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { NodeLoadingState } from './NodeLoadingState';
+import { describeNodeError, refundText, type DescribedNodeError } from '@/utils/nodeErrorText';
 
 /**
  * 「生成中」的等待预期文案（按节点类型）。
@@ -17,6 +18,32 @@ import { NodeLoadingState } from './NodeLoadingState';
 const WAIT_HINTS: Partial<Record<NodeType, string>> = {
   video: '请耐心等待：通常需要 3–10 分钟，长镜头或高清晰度可能十几分钟\n可以先去做别的，页面开着就行，完成后会自动出现',
 };
+
+/**
+ * 错误的「详情」悬浮内容：人话在上，给运营看的原始文案在下。
+ * 原始文案（含上游字段路径、错误码、JSON）不丢，但不占节点上的位置 —— 用户看的是上面两行。
+ */
+function NodeErrorDetail({ info }: { info: DescribedNodeError }) {
+  const refund = refundText(info.refund);
+  return (
+    <div className="max-w-[420px] text-xs">
+      <div className="font-medium text-red-500">{info.title}</div>
+      {info.hint ? <div className="mt-1 leading-snug">{info.hint}</div> : null}
+      {refund ? <div className="mt-1 text-[11px] opacity-80">{refund}</div> : null}
+      <div className="mt-2 border-t border-current/20 pt-2 text-[11px] opacity-80">
+        <div className="mb-0.5">详情（排查用，可直接复制）：</div>
+        <div className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug">
+          {info.detail}
+        </div>
+        {info.detail !== info.raw ? (
+          <div className="mt-1 max-h-[160px] overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-snug opacity-70">
+            {info.raw}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 interface BaseNodeProps {
   id: string;
@@ -54,6 +81,31 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
   const effectiveColor = headerColor || config.color;
   const status = data.status;
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+
+  /**
+   * 失败原因翻译成用户能看懂的话。
+   * 后端原样透传的错误里混着上游字段路径与错误码（如 content[6].image_url.url、
+   * InvalidParameter.WidthTooSmall），用户看不懂；这里只保留"我该改什么 + 钱退没退"。
+   * 尺寸类错误还会顺着节点引用的素材查出具体是哪一张太小（见 nodeErrorText.ts）。
+   */
+  const nodeError = useMemo(() => {
+    if (status !== 'failed' || !data.error) return null;
+    const raw = String(data.error);
+    let smallRefs: { label: string; size: string }[] = [];
+    if (/WidthTooSmall|宽度和高度需在|Width must be between/i.test(raw)) {
+      const mentions = (data as { mentions?: { nodeId: string; label?: string }[] }).mentions ?? [];
+      const all = useCanvasStore.getState().nodes;
+      smallRefs = mentions.flatMap((m) => {
+        const ref = all.find((n) => n.id === m.nodeId);
+        const w = Number((ref?.data as { width?: number } | undefined)?.width ?? 0);
+        const h = Number((ref?.data as { height?: number } | undefined)?.height ?? 0);
+        if (!w || !h) return [];
+        if (w >= 300 && h >= 300) return [];
+        return [{ label: m.label || (ref?.data.label as string) || '引用图', size: `${w}×${h}` }];
+      });
+    }
+    return describeNodeError(raw, { smallRefs });
+  }, [status, data]);
 
   // 是否已有上一次的产出。用来区分两种情况：
   // - 首次生成（无旧结果）：显示统一加载态
@@ -137,9 +189,9 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
           {status !== 'idle' && (
             status === 'failed' && data.error ? (
               <Tooltip
-                title={data.error}
+                title={nodeError ? <NodeErrorDetail info={nodeError} /> : String(data.error)}
                 placement="bottom"
-                overlayInnerStyle={{ maxWidth: 400, width: 'auto' }}
+                overlayInnerStyle={{ maxWidth: 460, width: 'auto' }}
               >
                 <span className="inline-block w-3 h-3 rounded-full bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.6)] cursor-help" />
               </Tooltip>
@@ -200,6 +252,33 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
           children
         )}
       </div>
+
+      {/* 失败原因：直接摊在节点上（只藏在小红点 tooltip 里用户根本看不到）。
+          显示的是翻译后的「人话」，原始报错在悬浮详情里，不占这里的版面。 */}
+      {nodeError && (
+        <Tooltip
+          title={<NodeErrorDetail info={nodeError} />}
+          placement="bottom"
+          overlayInnerStyle={{ maxWidth: 460, width: 'auto' }}
+        >
+          <div className="mx-3 mb-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 cursor-help">
+            <div className="flex items-start gap-1.5">
+              <WarningOutlined className="mt-[2px] shrink-0 text-[11px] text-red-500" />
+              <div className="min-w-0">
+                <div className="text-[11px] font-medium leading-snug text-red-600">{nodeError.title}</div>
+                {nodeError.hint ? (
+                  <div className="mt-0.5 text-[10px] leading-snug text-red-500/90">{nodeError.hint}</div>
+                ) : null}
+                {refundText(nodeError.refund) ? (
+                  <div className="mt-0.5 text-[10px] leading-snug text-gray-500">
+                    {refundText(nodeError.refund)}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </Tooltip>
+      )}
 
       {/* 输入 Handle（左耳）：锚定在节点左边缘中心（连线从边框连出），hover 节点时 ease 弹出 */}
       {!hideInputHandle && (
