@@ -1093,7 +1093,10 @@ export const Canvas = memo(function Canvas() {
         selectionOnDrag={true}
         panOnDrag={[1, 2]}
         panOnScroll={true}
-        panOnScrollSpeed={0.5}
+        // 滚轮/触摸板平移的跟手比例。React Flow 默认 0.5 —— 手势划 200px 画布只走 100px，
+        // 手感又慢又沉（实测：滚轮 0.50×，而中键拖动是 1.00×，两者不一致更显得"滑不动"）。
+        // 调成 1 让两者一致、手势与画布 1:1；嫌太快改回 0.5 即可。
+        panOnScrollSpeed={1}
         zoomOnScroll={true}
         zoomOnPinch={true}
         zoomOnDoubleClick={false}
