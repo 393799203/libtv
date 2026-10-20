@@ -239,9 +239,20 @@
   background: #9ca3af;
 }
 
-/* Ant Design 主题变量覆盖 */
+/* Ant Design 主题变量覆盖
+ *
+ * 注意：antd 6 默认走 CSS 变量，这里定义的 :root 变量会作用到**所有 antd 组件**，
+ * 包括 portal 到 body 的那些（下拉菜单、message、Modal）——它们不在 App 的
+ * ConfigProvider 包裹范围内，读到的就是这里的值。
+ *
+ * 所以这里必须与 App.tsx 的 colorPrimary 保持一致（青色 #22d3ee）。
+ * 曾经写的是 antd 默认蓝 #3b82f6，结果画布上那条 portal 出去的工具条里，
+ * 下拉框 hover/聚焦的边框是蓝的，跟整站青色主色打架。
+ */
 :root {
-  --ant-color-primary: #3b82f6;
+  --ant-color-primary: #22d3ee;
+  --ant-color-primary-hover: #67e8f9;
+  --ant-color-primary-border: rgba(34, 211, 238, 0.55);
 }
 
 /* ---------------------------------------------------------------------------
@@ -574,4 +585,45 @@
 }
 @media (min-width: 1280px) {
   .recent-projects-grid > :nth-child(n + 11) { display: none; }  /* 5 列 → 10 个 */
+}
+
+
+/* ---------------------------------------------------------------------------
+ * 图片节点工具条（portal 到 body）里的表单控件
+ *
+ * 这条横条在 App 的 ConfigProvider 之外，antd 的主题变量对它不完全生效，
+ * 曾经出现"下拉框 hover/聚焦是蓝色边框"这种跟横条不搭的情况。
+ * 这里按横条的色阶钉死边框与文字，作用域限定在 [data-image-node-toolbar] 内。
+ * ------------------------------------------------------------------------- */
+[data-image-node-toolbar] .ant-select-selector {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: #26272c !important;
+  box-shadow: none !important;
+}
+
+[data-image-node-toolbar] .ant-select:not(.ant-select-disabled):hover .ant-select-selector,
+[data-image-node-toolbar] .ant-select-focused .ant-select-selector,
+[data-image-node-toolbar] .ant-select-open .ant-select-selector {
+  border-color: rgba(34, 211, 238, 0.6) !important;
+  box-shadow: none !important;
+}
+
+/* 聚焦时也不要点出原生蓝色聚焦环 */
+[data-image-node-toolbar] .ant-select input,
+[data-image-node-toolbar] .ant-select-focused input,
+[data-image-node-toolbar] input:focus,
+[data-image-node-toolbar] button:focus,
+[data-image-node-toolbar] button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+[data-image-node-toolbar] .ant-select-selection-item,
+[data-image-node-toolbar] .ant-select-selection-placeholder,
+[data-image-node-toolbar] .ant-select-arrow {
+  color: #f6f6f7 !important;
+}
+
+[data-image-node-toolbar] .ant-select-arrow {
+  color: #aaacb1 !important;
 }

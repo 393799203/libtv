@@ -31,11 +31,13 @@ export async function reconcileNodesOnTerminal(
   if (finalStatus === 'failed') {
     const store = useCanvasStore.getState();
     nodeIds.forEach((id) => {
+      // transient：失败没有产物、画布内容没变，不该占一格撤销；
+      // 成功分支（下面）仍然记录 —— 那一格正是"生成后"的内容态。
       store.updateNodeData(id, {
         status: 'failed',
         error: errorMsg,
         progressMessage: undefined,
-      } as never);
+      } as never, { transient: true });
     });
   } else {
     for (const id of nodeIds) {

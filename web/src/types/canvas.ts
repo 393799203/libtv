@@ -90,10 +90,62 @@ export interface ImageNodeData extends BaseNodeFields, MediaUploadState, Record<
   thumbUrl?: string;     // 640px webp 缩略图（画布展示用；老数据为空时回退原图）
   width?: number;       // 实际图片宽度（从后端生成结果获取）
   height?: number;      // 实际图片高度（从后端生成结果获取）
+  /**
+   * 这张图是由哪种视图模板生成的（'character3' | 'character4' | 'scene4' | 'prop6'）。
+   * 只用于"切分宫格"时自动预选行列：角色 1×4 / 场景 2×2 / 道具 2×3，
+   * 让"生成视图 → 切分"这条链路不用用户自己回忆刚才是几宫格。
+   */
+  viewKind?: string;
+  /**
+   * 元素编辑（局部重绘）指令，**一次性**：只属于紧接着的那一次生成。
+   *
+   * 语义：baseUrl 是"要改的原图"（也是模型参考图），maskUrl 是选区蒙版
+   * （白=允许改、黑=保持原样），prompt 是用户在选区上写的那句话。
+   * 后端按它走"生成后把结果贴回原图"的路（engine/element_edit.go），
+   * 执行成功后自己会把这个字段从画布数据里删掉（mergeNodeOutputData 的 clearFields）。
+   */
+  elementEdit?: {
+    baseUrl: string;
+    maskUrl: string;
+    prompt: string;
+    /**
+     * 点选识别出的物体名（如"自动售货机"）。
+     * 后端把它写进改图指令（"把「自动售货机」去掉"）—— 模型对"这个"没有指代，对名字有。
+     */
+    target?: string;
+  };
 }
 
 // 视频生成模式
 export type VideoMode = 'text-to-video' | 'universal-ref' | 'first-last-frame' | 'video-ref';
+
+/**
+ * 「片段重拍」节点上记着的区间状态。
+ *
+ * 为什么要落在节点数据里（而不是只写在提示词文本里）：
+ *  - 片段条的两个把手要有一个**可拖的轴**，轴就是这条视频的时长（durationSeconds）；
+ *  - 用户随时可能改提示词里那句话（甚至删掉时间），区间仍要能在片段条上看回来；
+ *  - 保存/刷新后区间必须还在，否则重开项目区间就丢了。
+ */
+export interface VideoReshootState {
+  /** 被重拍的源视频节点 */
+  sourceNodeId: string;
+  /** 源视频地址（片段条只需读时长；节点被删了也能自己撑起坐标轴） */
+  sourceUrl?: string;
+  /** 区间起止（秒，整秒） */
+  start: number;
+  end: number;
+  /** 源视频总时长（秒）；探测失败时为空 —— 此时片段条会明说读不到 */
+  durationSeconds?: number;
+  /**
+   * 缩略图条地址（后端一次 ffmpeg tile 出的整条视频拼图）。
+   * 缓存在节点数据里：它是按源视频算出来的，重开项目不该再算一遍。
+   * 读不到只是条退化成灰底，不影响拖区间。
+   */
+  filmstripUrl?: string;
+  /** 按区间裁出来的片段地址（点了"裁出这一段"才有） */
+  clipUrl?: string;
+}
 
 // 视频节点数据
 export interface VideoNodeData extends BaseNodeFields, MediaUploadState, Record<string, unknown> {
@@ -107,6 +159,8 @@ export interface VideoNodeData extends BaseNodeFields, MediaUploadState, Record<
   videoMode?: VideoMode;       // 视频生成模式
   referenceImages?: string[];   // 参考图片 URL 列表（全能参考/首尾帧模式）
   generateAudio?: boolean;      // 是否生成音频（默认 true）
+  /** 片段重拍：本节点是对某个视频片段的"重拍"（有它才显示片段选择条） */
+  reshoot?: VideoReshootState;
 }
 
 // 音频节点数据

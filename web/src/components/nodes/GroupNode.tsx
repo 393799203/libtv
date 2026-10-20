@@ -3,6 +3,7 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { GroupOutlined } from '@ant-design/icons';
 import type { GroupNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 
 type GroupNodeType = Node<GroupNodeData, 'group'>;
 
@@ -41,8 +42,9 @@ export const GroupNode = memo(function GroupNode({ id, data, selected }: NodePro
   }, [draft, id, updateNodeData]);
 
   return (
-    <div
-      className={[
+    <>
+      <div
+        className={[
         'w-full h-full rounded-2xl border-2 border-dashed transition-colors',
         selected
           ? 'border-cyan-400 bg-cyan-400/[0.07]'
@@ -90,6 +92,12 @@ export const GroupNode = memo(function GroupNode({ id, data, selected }: NodePro
       <Handle type="source" position={Position.Right} className="libtv-handle libtv-handle-right">
         <span className="libtv-handle-hit" aria-hidden />
       </Handle>
-    </div>
+      </div>
+
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+    </>
   );
 });

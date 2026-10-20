@@ -80,6 +80,42 @@ func (mm *ModelManager) load() error {
 	return nil
 }
 
+// FallbackImageModelID 图像模型的最后兜底（models.yaml 里 image 分类标了 default: true 的那个，
+// 同时也是 ImageClient.model 的初值，见 image.go）——三处必须同名，改默认模型时一起改。
+const FallbackImageModelID = "doubao-seedream-5.0-lite"
+
+// DefaultImageModelID 返回指定渠道下的默认图像模型，供「节点没填模型」时兜底。
+//
+// 为什么读配置而不是直接写死常量：默认模型是运营在 models.yaml 上标的（default: true），
+// 渠道不同可以用不同模型；写死常量会在换默认模型时悄悄和配置分叉。
+// 配置缺失（manager 为 nil / 该渠道没有 image 分类 / 没有任何 default 标记）时退回
+// FallbackImageModelID，保证兜底一定拿得到一个可用的模型 ID。
+func (mm *ModelManager) DefaultImageModelID(channel string) string {
+	// 允许 nil receiver：执行器里的 modelManager 可能是 nil（测试/降级装配），
+	// 调用方不必先判空，兜底逻辑只有一条路径
+	if mm == nil {
+		return FallbackImageModelID
+	}
+
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	if mm.config == nil {
+		return FallbackImageModelID
+	}
+	// 空渠道按华数处理：与 ListModelsForChannel 的约定保持一致
+	if channel == "" {
+		channel = "wasu"
+	}
+	// 注意不要调 ListModelsForChannel：它自己会 RLock，递归读锁在有待写者时会死锁
+	for _, m := range mm.config.Models[channel]["image"] {
+		if m.Default && m.ID != "" {
+			return m.ID
+		}
+	}
+	return FallbackImageModelID
+}
+
 // ListModels 返回所有渠道合并的模型配置（按类型分组，供价格管理/计费使用）
 // 注意：不同渠道的模型 ID 独立，合并后 ID 不冲突（如 deepseek-v4-flash 与 deepseek-v4.1-flash）
 func (mm *ModelManager) ListModels() map[string][]ModelConfig {

@@ -146,12 +146,18 @@ type VisionMessage struct {
 	Content interface{} `json:"content"`
 }
 
+// VisionThinkingOption 上游思考开关（OpenAI 兼容协议之外的扩展字段，见 WithThinkingDisabled）
+type VisionThinkingOption struct {
+	Type string `json:"type"` // "disabled" = 不思考
+}
+
 // VisionChatRequest 视觉聊天补全请求（独立于 ChatRequest，不影响纯文本调用）
 type VisionChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []VisionMessage `json:"messages"`
-	Temperature float64         `json:"temperature,omitempty"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Model       string                `json:"model"`
+	Messages    []VisionMessage       `json:"messages"`
+	Temperature float64               `json:"temperature,omitempty"`
+	MaxTokens   int                   `json:"max_tokens,omitempty"`
+	Thinking    *VisionThinkingOption `json:"thinking,omitempty"`
 }
 
 // ChatWithImages 发起带图片的聊天补全请求（视觉模型）
@@ -184,6 +190,9 @@ func (c *Client) ChatWithImages(ctx context.Context, model, systemPrompt, userTe
 		},
 		Temperature: reqOpts.Temperature,
 		MaxTokens:   reqOpts.MaxTokens,
+	}
+	if reqOpts.DisableThinking {
+		body.Thinking = &VisionThinkingOption{Type: "disabled"}
 	}
 
 	payload, err := json.Marshal(body)
@@ -265,6 +274,8 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 type chatOptions struct {
 	Temperature float64
 	MaxTokens   int
+	// DisableThinking 关闭模型思考（部分上游支持，且是必须的，见 WithThinkingDisabled）
+	DisableThinking bool
 }
 
 type Option func(*chatOptions)
@@ -275,6 +286,19 @@ func WithTemperature(t float64) Option {
 
 func WithMaxTokens(n int) Option {
 	return func(o *chatOptions) { o.MaxTokens = n }
+}
+
+/**
+ * WithThinkingDisabled 关闭上游模型的思考过程。
+ *
+ * 为什么必须有这个开关（实测，2026-10-17）：华数渠道的 doubao-seed-2.1-turbo 做图片识别时，
+ * 不关思考会一直推理到网关 60s 断连（connection reset by peer，整次调用作废）；
+ * 关掉后 4.7s 返回、reasoning_tokens=0。
+ * 但**不是所有上游都收这个参数**：电信渠道的 glm-5.3-flash 传它会直接报 InvalidParameter，
+ * 所以这里只提供开关，传不传由调用方按渠道决定（见 handler.ObjectRecognizeHandler）。
+ */
+func WithThinkingDisabled() Option {
+	return func(o *chatOptions) { o.DisableThinking = true }
 }
 
 // ---- 提示词生成方法 ----

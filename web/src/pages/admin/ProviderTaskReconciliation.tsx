@@ -329,6 +329,7 @@ const KIND_LABEL: Record<string, string> = {
   'ai.script': '剧本',
   'ai.audio': '音频',
   'ai.previz_analyze': '白模解析',
+  'ai.recognize': '点选识别',
   'prompt.generate': '提示词',
 };
 
@@ -771,9 +772,11 @@ export default function ProviderTaskReconciliation() {
       dataIndex: 'exec_id',
       width: 176,
       render: (_: number, r) =>
-        r.exec_id > 0 ? (
+        // 有执行号（跑工作流的节点）或有节点号（点选识别这类直连接口会被前端带上节点）就显示。
+        // 拿不到节点信息的老行仍然显示「-」，不编内容。
+        r.exec_id > 0 || r.node_id ? (
           <div className="text-[11px] leading-5 text-gray-500">
-            <div className="text-gray-700">exec {r.exec_id}</div>
+            {r.exec_id > 0 && <div className="text-gray-700">exec {r.exec_id}</div>}
             {/* 节点名由后端按 node_id 从项目画布实时解析（node_name）：
                 管理员看 id 认不出这是哪个节点。解析不到（节点已删除的历史行、
                 或画布里确实没有这个 id）时退回显示原始 id，不编名字。
@@ -880,6 +883,7 @@ export default function ProviderTaskReconciliation() {
             { value: 'ai.script', label: '剧本' },
             { value: 'ai.audio', label: '音频' },
             { value: 'ai.previz_analyze', label: '白模解析' },
+            { value: 'ai.recognize', label: '点选识别' },
           ]}
         />
         <Input

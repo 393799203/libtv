@@ -31,6 +31,7 @@ const (
 	ActionVideo           = "ai.video"          // 视频生成（视频节点）
 	ActionAudio           = "ai.audio"          // 音频生成（音频节点）
 	ActionPrevizAnalyze   = "ai.previz_analyze" // 白模场景解析（previz 节点）
+	ActionRecognizeObject = "ai.recognize"      // 点选识别（元素编辑：认出框里是什么，一次点击一次调用）
 )
 
 // ErrInsufficientCredits 积分不足（HTTP 402，前端可用 code=4002 区分提示充值）
@@ -38,37 +39,40 @@ var ErrInsufficientCredits = apperror.New(4002, 402, "积分不足，请先充�
 
 // actionRemarks 计费动作的账单描述（展示给用户看的文案）
 var actionRemarks = map[string]string{
-	ActionPromptGenerate: "提示词生成",
-	ActionStory:          "故事生成",
-	ActionScript:         "分镜剧本生成",
-	ActionImage:          "图片生成",
-	ActionVideo:          "视频生成",
-	ActionAudio:          "音频生成",
-	ActionPrevizAnalyze:  "白模场景解析",
+	ActionPromptGenerate:  "提示词生成",
+	ActionStory:           "故事生成",
+	ActionScript:          "分镜剧本生成",
+	ActionImage:           "图片生成",
+	ActionVideo:           "视频生成",
+	ActionAudio:           "音频生成",
+	ActionPrevizAnalyze:   "白模场景解析",
+	ActionRecognizeObject: "点选识别",
 }
 
 // defaultPrices 动作级兜底策略表（仅 EnsureBalance 前置校验用，当前全部为 0 即放行）
 // 真实扣费单价以 model_prices 表（运营后台价格管理）为准，按（节点 + 模型）维度计费
 var defaultPrices = map[string]int64{
-	ActionPromptGenerate: 0,
-	ActionStory:          0,
-	ActionScript:         0,
-	ActionImage:          0,
-	ActionVideo:          0,
-	ActionAudio:          0,
-	ActionPrevizAnalyze:  0,
+	ActionPromptGenerate:  0,
+	ActionStory:           0,
+	ActionScript:          0,
+	ActionImage:           0,
+	ActionVideo:           0,
+	ActionAudio:           0,
+	ActionPrevizAnalyze:   0,
+	ActionRecognizeObject: 0,
 }
 
 // actionNodeTypes 扣费 action → 定价节点映射：价格按（节点 + 模型）维度配置，
 // 同一模型在不同节点可设不同价格（如 llm 模型在文本 / 剧本节点分开定价）
 var actionNodeTypes = map[string]string{
-	ActionPromptGenerate: "text", // 提示词生成使用文本节点的模型列表
-	ActionStory:          "text",
-	ActionScript:         "script",
-	ActionImage:          "image",
-	ActionVideo:          "video",
-	ActionAudio:          "audio",
-	ActionPrevizAnalyze:  "previz", // 白模解析独立定价维度（价格管理页「白模解析」分组）
+	ActionPromptGenerate:  "text", // 提示词生成使用文本节点的模型列表
+	ActionStory:           "text",
+	ActionScript:          "script",
+	ActionImage:           "image",
+	ActionVideo:           "video",
+	ActionAudio:           "audio",
+	ActionPrevizAnalyze:   "previz",    // 白模解析独立定价维度（价格管理页「白模解析」分组）
+	ActionRecognizeObject: "recognize", // 点选识别独立定价维度（价格管理页「点选识别」分组）
 }
 
 // RefVideoPriceDiscount 带参考视频输入的预设折扣：只对 models.yaml 里

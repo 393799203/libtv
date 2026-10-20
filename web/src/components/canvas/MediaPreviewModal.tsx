@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, type CSSProperties } from 'react';
 import { Modal, Spin } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
+import { Z } from '@/utils/zLayers';
 
 interface MediaPreviewModalProps {
   open: boolean;
@@ -82,6 +83,9 @@ export const MediaPreviewModal = memo(function MediaPreviewModal({
   return (
     <Modal
       open
+      // 沉浸式预览必须压在所有画布浮层之上（画布工具条 900、右键菜单/其他弹窗 1000），
+      // 显式给值而不是依赖 antd 默认的 1000，避免以后又冒出"工具条盖在大图上"
+      zIndex={Z.overlay}
       onCancel={onClose}
       footer={null}
       closable={false}

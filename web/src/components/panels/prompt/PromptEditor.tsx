@@ -8,6 +8,17 @@ interface PromptEditorProps {
   maxLength?: number;
   upstreamInputs: UpstreamInput[];
   syncKey?: string | number;
+  /**
+   * 上游封面版本号：某个 @引用 的上游视频刚拿到首帧封面 → 把标签里的类型图标**就地**换成缩略图。
+   * 为什么不走 syncKey 重建：重建会丢光标、也会把用户正在写的那句冲掉；换图标只是换一个 <img>。
+   */
+  thumbVersion?: number;
+  /**
+   * 需要显示成"标签"的区间文案（例如 `00:00 - 00:05`）。
+   * 只对「片段重拍」节点的编辑器传，且传**精确字符串**：
+   * 用正则会误伤剧本里正经的 "12:30 - 13:00" 之类的时刻。
+   */
+  rangeChip?: string;
   onChange: (value: string, mentions: MentionMarker[]) => void;
   /**
    * 编辑器失焦（焦点离开输入区）：上层用它做"自动暂存"。
@@ -197,6 +208,65 @@ function applyToneTags(el: HTMLElement): void {
   }
 }
 
+/**
+ * 把提示词里的时间区间包成标签样子（「片段重拍」用）。
+ *
+ * 两个刻意的决定：
+ *  1. **只包一层 span，不设 contenteditable=false**：它仍然是普通文字 —— 光标能进去、退格照常、
+ *     用户想手改时间也改得动。@引用那种必须原子化的东西才用 contenteditable=false。
+ *     代价是用户若在标签内部编辑，span 可能被浏览器拆开，但那只是外观，下次重建会自动复原。
+ *  2. **底层文字一个字都不改**：序列化（extractPlainText）、存盘、发给模型看到的仍是
+ *     `00:00 - 00:05` 这串明文，所以后端行为完全不变，标签纯粹是"看起来像一段可选的东西"。
+ *  只遍历文本节点（跳过 @引用/音频标签/已有标签内部），避免在序列化 HTML 上做正则破坏结构。
+ */
+function applyRangeTags(el: HTMLElement, text: string | undefined): void {
+  if (!text) return;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  const targets: Text[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const t = node as Text;
+    if (t.parentElement?.closest('.libtv-mention, .libtv-audio-tag, .libtv-range-chip')) continue;
+    if ((t.textContent || '').includes(text)) targets.push(t);
+  }
+  for (const t of targets) {
+    const body = t.textContent || '';
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let idx = body.indexOf(text);
+    while (idx !== -1) {
+      if (idx > last) frag.appendChild(document.createTextNode(body.slice(last, idx)));
+      const span = document.createElement('span');
+      span.className = 'libtv-range-chip';
+      span.setAttribute('data-range', text);
+      /**
+       * 和 @引用 / 语气词 标签一样：**整体不可编辑**。
+       *
+       * 线上反馈："光标在时间的标签内部，又不能改" —— 就是因为这里是个普通 span，
+       * 光标能钻进标签里面，而里面的字又改不动（时间是片段条算出来的，改了也会在下次同步时被覆盖）。
+       * 设成 contentEditable=false 后：光标只会停在标签前后、不会落进去；
+       * 点一下能整块选中、退格能整块删掉；序列化仍然是纯文本（extractPlainText 照旧取它的文字）。
+       * 要改区间就在节点下面的片段条上拖 —— 那里是源，这里只是它的显示。
+       */
+      span.contentEditable = 'false';
+      // 属性也显式写上：浏览器认属性，属性写死了别人改代码时也不会误删掉这个语义
+      span.setAttribute('contenteditable', 'false');
+      span.setAttribute('title', '片段区间：在节点下方的片段条上拖动调整');
+      span.textContent = text;
+      // color:inherit + 中性灰底：亮色面板和暗色主题下都读得清，也不用色相（用户不喜欢青色系高亮）
+      // nowrap：`00:00 - 00:05` 是一段整体，不能被折行拆成两半
+      span.style.cssText =
+        'background:rgba(148,163,184,0.18);border:1px solid rgba(148,163,184,0.42);border-radius:4px;' +
+        'padding:0 4px;margin:0 1px;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default;';
+      frag.appendChild(span);
+      last = idx + text.length;
+      idx = body.indexOf(text, last);
+    }
+    if (last < body.length) frag.appendChild(document.createTextNode(body.slice(last)));
+    t.replaceWith(frag);
+  }
+}
+
 /** 获取当前光标前一个可见字符（不修改 DOM，使用 TreeWalker 向前遍历） */
 /** 计算 @ 引用菜单的跟随位置：光标（@ 输入位置）下方的容器内坐标。
  *  必须用 getBoundingClientRect 差值（transform 感知）而不是 fixed/viewport 坐标——
@@ -283,6 +353,8 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   maxLength,
   upstreamInputs,
   syncKey,
+  rangeChip,
+  thumbVersion,
   onChange,
   onBlur,
   prefixTag,
@@ -346,6 +418,14 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     flushChange();
   }, [flushChange]);
 
+  /** 只取消挂起的防抖通知，不发给父组件（程序化重建专用） */
+  const cancelPendingEmit = useCallback(() => {
+    if (emitTimerRef.current) {
+      clearTimeout(emitTimerRef.current);
+      emitTimerRef.current = null;
+    }
+  }, []);
+
   /** 防抖通知父组件数据变化（避免每次按键都 cloneNode） */
   const emitChangeDebounced = useCallback(() => {
     if (emitTimerRef.current) clearTimeout(emitTimerRef.current);
@@ -369,10 +449,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   const buildMentionSpan = useCallback(
     (id: string, input: { nodeId: string; label: string; nodeType: string }): HTMLSpanElement => {
       const thumbUrl = upstreamInputsRef.current.find((u) => u.nodeId === input.nodeId)?.thumbnail;
-      const iconPart =
-        input.nodeType === 'image' && thumbUrl
-          ? `<img src="${escapeHtml(thumbUrl)}" class="libtv-mention-thumb" />`
-          : NODE_TYPE_ICON_TEXT[input.nodeType] || '';
+      // 有缩略图就显示缩略图：图片是原图缩略、视频是首帧封面 ——
+      // 只有真的没有图（文本/剧本/音频）才退回类型图标
+      const iconPart = thumbUrl
+        ? `<img src="${escapeHtml(thumbUrl)}" class="libtv-mention-thumb" />`
+        : NODE_TYPE_ICON_TEXT[input.nodeType] || '';
       const span = document.createElement('span');
       span.className = 'libtv-mention';
       span.contentEditable = 'false';
@@ -562,7 +643,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
 
       const thumbUrl = thumbMap[m.nodeId];
       const iconPart =
-        m.nodeType === 'image' && thumbUrl
+        thumbUrl
           ? `<img src="${escapeHtml(thumbUrl)}" class="libtv-mention-thumb" />`
           : NODE_TYPE_ICON_TEXT[m.nodeType] || '';
 
@@ -923,13 +1004,48 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     if (!el) return;
     el.innerHTML = buildHtml();
     applyToneTags(el);
+    applyRangeTags(el, rangeChip);
     if (isFirstSyncRef.current) {
       isFirstSyncRef.current = false;
       return;
     }
-    // syncKey 变化导致的重建：清掉挂起的防抖并同步一次父组件状态
-    commitNow();
+    /**
+     * ⚠️ 这里**不能**调 commitNow()（把内容 emit 给父组件）。
+     *
+     * 这次重建的内容正是父组件刚推下来的（父组件自己知道），emit 回去只会被当成
+     * "用户正在输入"——父组件会置上 pendingInputRef，于是**之后所有外部改动**都会被
+     * "别覆盖用户正在写的字"这条规则挡在门外。
+     * 线上表现就是：拖区间只有**第一次**同步到了提示词框，后面再拖就再也不变了。
+     * 只取消挂起的防抖即可：DOM 刚被重建成画布上的内容，没有任何"还没通知的输入"。
+     */
+    cancelPendingEmit();
   }, [syncKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * 上游封面到位后就地补图：把 mention 标签里那个类型图标（🎬 等）换成首帧缩略图。
+   *
+   * 为什么必须就地换、而不是等下一次重建：面板打开时封面通常还没到（后端要取一次首帧），
+   * 标签先渲染成图标；封面几百毫秒后回来，如果不补图，用户会一直看着那个"默认视频图标"
+   * ——正是线上反馈的那一条。就地替换只动标签内的图标节点，正文一个字不动，也不重建 DOM（不丢光标）。
+   */
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    // 用 prop 而不是 upstreamInputsRef：ref 是渲染之后的 effect 才同步的，
+    // 封面到位那一帧里 ref 还是旧值（没有缩略图），补图会静默不生效。
+    const thumbs = new Map(upstreamInputs.map((u) => [u.nodeId, u.thumbnail]));
+    el.querySelectorAll<HTMLElement>('.libtv-mention[data-node-id]').forEach((chip) => {
+      const url = thumbs.get(chip.getAttribute('data-node-id') || '');
+      if (!url || chip.querySelector('img.libtv-mention-thumb')) return;
+      const img = document.createElement('img');
+      img.src = url;
+      img.className = 'libtv-mention-thumb';
+      img.alt = '';
+      const first = chip.firstChild;
+      if (first && first.nodeType === Node.TEXT_NODE) chip.replaceChild(img, first);
+      else chip.insertBefore(img, first);
+    });
+  }, [thumbVersion, upstreamInputs]);
 
   // prefixTag 变化时（如切换全景模式），动态插入/移除前缀标签
   const prevPrefixTagRef = useRef(prefixTag);

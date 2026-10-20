@@ -8,6 +8,7 @@ import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showAp
 import { userApi, type UserItem } from '@/services/userApi';
 import { uploadVideo } from '@/services/uploadApi';
 import { useAuthStore } from '@/stores/authStore';
+import { Z } from '@/utils/zLayers';
 
 export interface AddShowDialogProps {
   open: boolean;
@@ -479,7 +480,8 @@ export default function AddShowDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+    <div style={{ zIndex: Z.modalTop }}
+    className="fixed inset-0 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
       {/* 宽度 640px（原 520px）：内容区 472px 时，"视频+封面图"那一行的两栏各只有 230px ——
           标题右侧的「截当前帧/自动挑帧/换封面/换视频」四个小按钮加起来约 250px，挤在一行里必然溢出；

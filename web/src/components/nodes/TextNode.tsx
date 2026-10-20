@@ -20,6 +20,8 @@ import type { TextNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { absolutePositionIn } from '@/utils/canvasGroups';
 import { useExecutionStore } from '@/stores/executionStore';
+import { Z } from '@/utils/zLayers';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 
 type TextNodeType = Node<TextNodeData, 'text'>;
 
@@ -35,8 +37,9 @@ const Toolbar = memo(function Toolbar({
 }) {
   return createPortal(
     <div
-      className="fixed flex items-center gap-0.5 px-1.5 py-1 bg-white rounded border border-gray-200 shadow-md z-[9999]"
+      className="fixed flex items-center gap-0.5 px-1.5 py-1 bg-white rounded border border-gray-200 shadow-md"
       style={{
+        zIndex: Z.canvasFloat,
         left: position.x,
         top: position.y - 36,
         transform: 'translateX(-50%)',
@@ -221,6 +224,11 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
           )}
         </div>
       </BaseNode>
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+
 
       {/* 编辑工具栏 */}
       {isEditing && (

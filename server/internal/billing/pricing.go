@@ -40,6 +40,10 @@ var priceNodeDefs = []priceNodeDef{
 	{NodeType: "video", NodeName: "视频节点", ModelGroup: "video", BillingType: BillingTypePerSecond, Usage: "video"},
 	{NodeType: "audio", NodeName: "语音节点", ModelGroup: "audio", BillingType: BillingTypePerChar, Usage: "audio"},
 	{NodeType: "previz", NodeName: "白模解析", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"doubao-seed-2.1-turbo", "doubao-seed-2.1-pro", "glm-5.3-flash", "deepseek-v4.1-flash"}},
+	// 点选识别：元素编辑里"点一下认出框里是什么"，一次点击就真调一次视觉模型。
+	// 与白模解析同样是"一次调用一次计费"的直连接口，但单价要小得多（它只是一个辅助步骤），
+	// 模型白名单就是视觉识别实际会用的那几个（见 handler.ObjectRecognizeHandler.pickVisionModel）
+	{NodeType: "recognize", NodeName: "点选识别", ModelGroup: "llm", BillingType: BillingTypePerCall, Usage: "script", ModelIDs: []string{"glm-5.3-flash", "doubao-seed-2.1-turbo", "deepseek-v4.1-flash"}},
 }
 
 // ErrInvalidPriceConfig 价格配置参数非法（HTTP 400）
@@ -355,6 +359,62 @@ func (s *PricingService) SeedRefVideoPrices(ctx context.Context) error {
 		return err
 	}
 	log.Printf("[Pricing] 已补齐「带参考视频」默认价 %d 条（= 无参考视频单价 6 折）", len(rows))
+	return nil
+}
+
+// RecognizeDefaultPrice 点选识别的默认单价（积分/次）。
+//
+// 为什么是 2：识别是一次真实的视觉模型调用，缩图后约 1~1.8k tokens（实测 905+360 ~
+// 1449+37），成本量级远小于一次图片生成，但它也不是零成本。取 2 积分让这一步
+// "看得见、不心疼"；运营随时可以在价格管理页的「点选识别」分组里改（改完立即生效）。
+const RecognizeDefaultPrice = 2
+
+// SeedRecognizePrices 给「点选识别」维度补默认价：
+// 只要该渠道下这个模型还没有这一维度的价，就补一条 RecognizeDefaultPrice。
+// 已有配置（含运营手改过的价，哪怕改成 0=免费）一律不动，可重复执行。
+//
+// 为什么必须补：ChargeByModel 查不到价时 cost=0 —— 既不扣费也不校验余额
+// （见 modelUnitPrice 的注释），识别就会变成"静默免费"，成本只能靠日志发现。
+func (s *PricingService) SeedRecognizePrices(ctx context.Context) error {
+	rows := make([]model.ModelPrice, 0)
+	for _, channel := range s.modelManager.ListChannels() {
+		existing, err := s.priceRepo.ListAll(ctx, channel)
+		if err != nil {
+			return err
+		}
+		configured := make(map[priceKey]bool, len(existing))
+		for _, r := range existing {
+			configured[priceKey{nodeType: r.NodeType, modelID: r.ModelID, resolution: r.Resolution, refVideo: r.HasReferenceVideo}] = true
+		}
+		// 只给"会真的被识别调用"的模型补价：与价格管理页的分组白名单保持一致
+		for _, def := range priceNodeDefs {
+			if def.NodeType != "recognize" {
+				continue
+			}
+			for _, modelID := range def.ModelIDs {
+				// 该渠道没有这个模型就跳过（各渠道模型清单彼此独立）
+				if cfg := s.modelManager.FindModelByIDForChannel(channel, modelID); cfg == nil {
+					continue
+				}
+				if configured[priceKey{nodeType: "recognize", modelID: modelID}] {
+					continue
+				}
+				rows = append(rows, model.ModelPrice{
+					Channel:  channel,
+					NodeType: "recognize",
+					ModelID:  modelID,
+					Price:    RecognizeDefaultPrice,
+				})
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	if err := s.priceRepo.BatchUpsert(ctx, rows); err != nil {
+		return err
+	}
+	log.Printf("[Pricing] 已补齐「点选识别」默认价 %d 条（%d 积分/次，可在价格管理页调整）", len(rows), RecognizeDefaultPrice)
 	return nil
 }
 

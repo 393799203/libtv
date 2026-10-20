@@ -1,19 +1,15 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"image"
-	// 只解文件头（DecodeConfig）也要注册解码器；这三个是上传链路会产出的格式
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"libtv/internal/service"
 )
 
 // imageHeaderMaxBytes 量一张图的长宽只要文件头，别把整张图（可能几 MB）下回来。
@@ -46,11 +42,13 @@ func aspectRatioOfImageHeader(data []byte) (int, int, bool) {
 	if len(data) == 0 {
 		return 0, 0, false
 	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+	// 走 service.DecodeConfigAny：标准库只有 PNG/JPEG/GIF，WebP/AVIF 靠 ffmpeg 兜底。
+	// 以前这里读不了就当"没有长宽比"，元素编辑则直接判格式不支持 → 用户点生成整条失败。
+	w, h, ok := service.DecodeConfigAny(data)
+	if !ok || w <= 0 || h <= 0 {
 		return 0, 0, false
 	}
-	return cfg.Width, cfg.Height, true
+	return w, h, true
 }
 
 // fetchImageHeaderBytes 取一张图的前若干 KB。

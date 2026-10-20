@@ -7,6 +7,7 @@ import (
 	"libtv/internal/billing"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -32,6 +33,24 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+// imageOpsAllowedHosts 图片派生服务允许抓取的域名白名单。
+//
+// 输入是对象存储的访问地址（appStorage.GetURL 的结果），只取它的 host，
+// 再加运维通过 IMAGE_OPS_ALLOWED_HOSTS 追加的域名（逗号分隔）。
+// 画布图片本来就存在对象存储里，所以默认这一条就够；换存储/CDN 域名时不必改代码。
+func imageOpsAllowedHosts(storageBaseURL string) []string {
+	hosts := make([]string, 0, 4)
+	if u, err := url.Parse(storageBaseURL); err == nil && u.Hostname() != "" {
+		hosts = append(hosts, u.Hostname())
+	}
+	for _, h := range strings.Split(os.Getenv("IMAGE_OPS_ALLOWED_HOSTS"), ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
+}
 
 // getPublicDir 根据环境返回 public 目录路径
 // Docker 环境：使用绝对路径 /app/public
@@ -225,6 +244,11 @@ func main() {
 	if err := pricingService.SeedRefVideoPrices(context.Background()); err != nil {
 		log.Printf("warning: seed ref video prices failed: %v", err)
 	}
+	// 补齐「点选识别」维度默认价（2 积分/次）：不补的话 ChargeByModel 查不到价 = 静默免费，
+	// 而这条接口每次点击都真花钱（见 SeedRecognizePrices）
+	if err := pricingService.SeedRecognizePrices(context.Background()); err != nil {
+		log.Printf("warning: seed recognize prices failed: %v", err)
+	}
 
 	// 支付宝支付服务（积分超市充值；configs/config.yaml payment.alipay 未配置时支付功能关闭）
 	paymentService, err := service.NewPaymentService(db, billingService, config.C.Payment.Alipay)
@@ -305,6 +329,16 @@ func main() {
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, projectRepo, eng, registry)
 	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService, projectRepo, userRepo)
+
+	// 画布图片派生处理（宫格切分 / 尺寸放大 / 蒙版擦除）。
+	// 白名单 = 对象存储公网域名 + IMAGE_OPS_ALLOWED_HOSTS：本服务会按请求里的 URL 下载图片，
+	// 不限制域名等于给登录用户开了个 SSRF 口子（借服务器访问内网）。
+	imageOpsHosts := imageOpsAllowedHosts(appStorage.GetURL("probe.png"))
+	log.Printf("[ImageOps] 允许抓取的图片域名: %v", imageOpsHosts)
+	imageOpsService := service.NewImageOpsService(fileUploadService, imageOpsHosts)
+	imageOpsHandler := handler.NewImageOpsHandler(imageOpsService)
+	// 点选识别：用户点一下 → 视觉模型说出"那是什么" + 外接框（见 handler.ObjectRecognizeHandler）
+	objectRecognizeHandler := handler.NewObjectRecognizeHandler(llmClient, modelManager, channelService, imageOpsService, billingService, providerTaskService)
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
 	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
 	commentHandler := handler.NewCommentHandler(commentService)
@@ -472,6 +506,17 @@ func main() {
 	{
 		// 删除项目 canvas 文件夹（需认证）
 		api.DELETE("/upload/canvas/:projectId", uploadHandler.DeleteCanvasDir)
+
+		// 画布图片派生处理（需认证：会占用服务端 CPU 与对象存储）
+		api.POST("/images/split", imageOpsHandler.Split)         // 宫格切分：一张九宫格/四宫格图 → N 张单图
+		api.POST("/images/scale", imageOpsHandler.Scale)         // 尺寸放大：短边 lanczos 放大到目标（不缩小）
+		api.POST("/images/erase", imageOpsHandler.Erase)         // 蒙版擦除：按蒙版做模糊/马赛克/纯色填充
+		api.POST("/videos/frame", imageOpsHandler.CaptureFrame)  // 视频截帧：取首帧/尾帧/指定时刻存成图片（本机 ffmpeg，不扣积分）
+		api.POST("/videos/trim", imageOpsHandler.TrimVideo)      // 视频裁剪：把用户选的区间裁成新视频（片段重拍用；本机 ffmpeg，不扣积分）
+		api.POST("/videos/filmstrip", imageOpsHandler.Filmstrip) // 视频缩略图条：整条视频拼成一张图，给片段选择条当底图（本机 ffmpeg，不扣积分）
+		api.POST("/videos/demux", imageOpsHandler.DemuxVideo)    // 音视频分离：拆成无声视频 + 音频两份产物（本机 ffmpeg，不扣积分）
+		// 点选识别：元素编辑里"点一下自动认出是什么、并框住它"（视觉模型，5~16s，结果缓存 10 分钟）
+		api.POST("/images/recognize-object", objectRecognizeHandler.RecognizeObject)
 		// 存储同步（管理员专用）
 		api.POST("/storage/sync", uploadHandler.SyncStorage)           // 同步本地存储到MinIO
 		api.POST("/storage/sync-volume", uploadHandler.SyncFromVolume) // 从Docker volume同步

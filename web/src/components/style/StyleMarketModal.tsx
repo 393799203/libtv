@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HeartFilled, HeartOutlined } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
+import { Z } from '@/utils/zLayers';
 
 /**
  * 风格市场弹窗（广场 / 我的收藏 + 分类 + 搜索 + 收藏）
@@ -124,7 +125,8 @@ export function StyleMarketModal({
   }, [onPick, onClose]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+    <div style={{ zIndex: Z.modalTop }}
+    className="fixed inset-0 flex items-center justify-center">
       {/* 遮罩 */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 

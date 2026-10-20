@@ -5,6 +5,7 @@ import { MailOutlined, LockOutlined, UserOutlined, VideoCameraOutlined, CloseOut
 import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/services/authApi';
 import type { LoginRequest, RegisterRequest } from '@/types/api';
+import { Z } from '@/utils/zLayers';
 
 export function LoginModal() {
   const { message } = App.useApp();
@@ -73,8 +74,8 @@ export function LoginModal() {
   return (
     <div
       /* 移动端：加纵向滚动兜底（小屏/键盘弹起时卡片不会顶部被裁掉） */
-      className="fixed inset-0 z-[1000] flex items-center justify-center overflow-y-auto py-4"
-      style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
+      className="fixed inset-0 flex items-center justify-center overflow-y-auto py-4"
+      style={{ zIndex: Z.modalInline, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget) closeLoginModal(); }}
     >
       <div

@@ -13,6 +13,7 @@ import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { type NodeType } from '@/types/canvas';
 import { createNode } from '@/utils/nodeFactory';
+import { Z } from '@/utils/zLayers';
 
 interface ContextMenuProps {
   position: { x: number; y: number };
@@ -106,7 +107,7 @@ export const CanvasContextMenu = memo(function CanvasContextMenu({
         position: 'fixed',
         left: position.x,
         top: position.y,
-        zIndex: 1000,
+        zIndex: Z.canvasMenu,
       }}
     >
       <Menu

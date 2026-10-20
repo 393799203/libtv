@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { userApi } from '@/services/userApi';
 import { uploadAvatar } from '@/services/uploadApi';
 import { getUserAvatarSrc } from '@/utils/avatar';
+import { Z } from '@/utils/zLayers';
 
 interface ProfileSettingsModalProps {
   onClose: () => void;
@@ -111,8 +112,8 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
+      className="fixed inset-0 flex items-center justify-center"
+      style={{ zIndex: Z.modalInline, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
     >
       <div

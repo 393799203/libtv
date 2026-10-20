@@ -15,6 +15,7 @@ import { downloadFile } from '@/utils/download';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
 import { emitAssetDrop, setDraggingAsset } from '@/components/canvas/assetDnd';
 import { EmptyState } from '@/components/common/EmptyState';
+import { Z } from '@/utils/zLayers';
 
 /**
  * 个人资产库（画布左侧停靠面板）
@@ -382,8 +383,9 @@ export function AssetPanel({ onClose }: AssetPanelProps) {
       {/* 拖拽预览：正中压在光标上（之前偏到右下，和"落点＝光标"对不上） */}
       {dragPreview && (
         <div
-          className="fixed z-[9999] pointer-events-none"
+          className="fixed pointer-events-none"
           style={{
+            zIndex: Z.canvasFloat,
             left: dragPreview.x,
             top: dragPreview.y,
             transform: 'translate(-50%, -50%)',

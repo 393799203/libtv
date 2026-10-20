@@ -8,6 +8,11 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import { uploadVideo } from '@/services/uploadApi';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
+import { VideoSegmentBar } from './VideoSegmentBar';
+import { applyRangeToPrompt, clampRange, probeVideoDuration, refVideoLimitWarning } from '@/utils/reshootPrompt';
+import { findFilmstripFor, patchReshoot, readReshoot } from '@/utils/reshootPatch';
+import { imageOpsApi } from '@/services/imageOpsApi';
 
 type VideoNodeType = Node<VideoNodeData, 'video'>;
 
@@ -271,6 +276,92 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
     video.src = data.videoUrl;
   }, [data.videoUrl, id]);
 
+  /**
+   * 片段条的区间变更：
+   *  - 拖动中 transient=true：只预览，不进撤销历史（否则拖一次灌几十条历史，⌘Z 要按到手酸）
+   *  - 松手 transient=false：一次提交，⌘Z 一步回到拖动前
+   * 提示词只改**第一处**时间区间，用户自己写的内容原样保留（见 reshootPrompt.ts）。
+   */
+  const commitReshootRange = useCallback(
+    (start: number, end: number, transient: boolean) => {
+      const state = data.reshoot;
+      if (!state) return;
+      // 提示词**在拖动过程中就跟着改**（用户要的是"上面一动、下面立刻变"），
+      // 拖动全程走 transient：不进撤销历史，松手时那一次才留档。
+      // 用此刻画布上的 prompt 做基准，而不是闭包里的（拖动中它每帧都在变）。
+      const fresh = useCanvasStore.getState().nodes.find((n) => n.id === id);
+      const cur = (fresh?.data as VideoNodeData | undefined) ?? data;
+      if (cur.reshoot && cur.reshoot.start === start && cur.reshoot.end === end) return;
+      const prompt = applyRangeToPrompt(cur.prompt || '', start, end);
+      useCanvasStore.getState().updateNodeData(
+        id,
+        { reshoot: { ...(cur.reshoot ?? state), start, end }, prompt } as never,
+        { transient }
+      );
+    },
+    [data, id]
+  );
+
+  /**
+   * 重拍节点到了画布上之后，把片段条需要的东西补齐（只做一次，缺什么补什么）：
+   *  - durationSeconds：源视频总时长 —— 拖动的横轴。工具栏创建时就探过一次，
+   *    但重开项目/别人协作时节点可能是"没探到时长"的状态存下来的，这里补探。
+   *  - filmstripUrl：整条视频的缩略拼图 —— 剪映那种条要有画面才看得出"这一段是什么"。
+   * 两者都写回节点数据（走 updateNodeMeta：这是素材元信息，不该进撤销历史）。
+   * 用 ref 挡住重复请求：setData 会触发重渲染，没有这道闸就会变成无限循环打接口。
+   */
+  const hydratedRef = useRef<string | null>(null);
+  const [filmstripLoading, setFilmstripLoading] = useState(false);
+  const reshoot = data.reshoot;
+  useEffect(() => {
+    if (!reshoot || hydratedRef.current === id) return;
+    const url = reshoot.sourceUrl;
+    if (!url) return;
+    hydratedRef.current = id;
+
+    /**
+     * 时长到了就写回，并把区间夹到片长内、提示词跟着改。
+     * ⚠️ 一律走 patchReshoot / 读最新数据：这个回调可能在"用户已经拖过区间"之后才回来，
+     * 用闭包里的旧区间会把用户的拖动结果冲掉。
+     */
+    const applyDuration = (d: number) => {
+      const cur = readReshoot(id);
+      if (!cur || cur.durationSeconds) return;
+      const clamped = clampRange(cur.start, cur.end, d);
+      const fresh = useCanvasStore.getState().nodes.find((n) => n.id === id);
+      if (!fresh) return;
+      useCanvasStore.getState().updateNodeData(id, {
+        reshoot: { ...cur, start: clamped.start, end: clamped.end, durationSeconds: d },
+        prompt: applyRangeToPrompt((fresh.data as VideoNodeData).prompt || '', clamped.start, clamped.end),
+      } as never);
+    };
+
+    // 浏览器侧探测：快（只读元数据），但可能被源站拦；失败也不要紧，下面那支接口会带回真实时长
+    void probeVideoDuration(url).then((d) => { if (d) applyDuration(d); });
+
+    if (!reshoot.filmstripUrl) {
+      // 同一支源视频已经算过就直接抄（见 findFilmstripFor）：不用再等那 30 秒
+      const reused = findFilmstripFor(url, id);
+      if (reused) {
+        patchReshoot(id, { filmstripUrl: reused });
+        return;
+      }
+      // 8 格够看（条宽 480 时每格 60px）
+      setFilmstripLoading(true);
+      void imageOpsApi
+        .videoFilmstrip({ videoUrl: url, count: 8 })
+        .then((res) => {
+          // 接口顺带带回 ffprobe 实测时长 —— 比前端探的准，且浏览器探测失败时它就是唯一来源
+          if (res.duration && res.duration > 0) applyDuration(res.duration);
+          patchReshoot(id, { filmstripUrl: res.url });
+        })
+        .catch(() => {
+          // 读不到缩略图不是致命问题：条退化成灰底，区间照样能拖
+        })
+        .finally(() => setFilmstripLoading(false));
+    }
+  }, [id, reshoot]);
+
   return (
     <>
       <BaseNode
@@ -301,6 +392,9 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
               muted
               controls
               autoPlay
+              // 「截取当前帧」要读播放进度（见 components/canvas/videoPlayhead.ts）：
+              // 只标注真正在播放的这个元素，缩略图那个（preload=metadata）不算
+              data-video-playhead={id}
             />
           ) : data.videoUrl ? (
             <div
@@ -354,7 +448,36 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
             </div>
           )}
         </div>
+        {data.reshoot && (
+          <VideoSegmentBar
+            start={data.reshoot.start}
+            end={data.reshoot.end}
+            duration={data.reshoot.durationSeconds}
+            // 真缩略图没到之前，用节点自己的封面先顶住：条一出现就有画面，等图到了再换
+            filmstripUrl={data.reshoot.filmstripUrl || (data as { stillUrl?: string; thumbUrl?: string }).stillUrl || (data as { thumbUrl?: string }).thumbUrl}
+            // 条驱动播放器：拖把手/拖整段/按在条上擦洗/方向键，视频都会跳到那一刻
+            playerNodeId={id}
+            hint={
+              filmstripLoading
+                ? '缩略图生成中（不影响拖区间）…'
+                : '拖把手改起止 · 拖中间整段平移 · 点条上任意位置跳到那一刻'
+            }
+            onDrag={(s, e) => commitReshootRange(s, e, true)}
+            onCommit={(s, e) => commitReshootRange(s, e, false)}
+            // 参考视频送的是整条源视频，所以这里要用 source 的总时长算，不是选中的区间长度
+            warning={refVideoLimitWarning({
+              refSeconds: data.reshoot.durationSeconds,
+              genSeconds: data.duration,
+              model: data.model,
+            })}
+          />
+        )}
       </BaseNode>
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+
 
       {/* 隐藏的文件 input */}
       <input

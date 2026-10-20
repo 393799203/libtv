@@ -26,6 +26,7 @@ import { ProjectCard, CreateProjectCard } from '@/components/project/ProjectCard
 import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
 import { usePageMeta } from '@/hooks/usePageMeta';
+import { Z } from '@/utils/zLayers';
 
 const { Title, Text } = Typography;
 
@@ -172,7 +173,8 @@ const VideoCard = memo(function VideoCard({
       {tipOn && item.description && createPortal(
         <div
           ref={tipRef}
-          className="pointer-events-none fixed left-0 top-0 z-[9999] will-change-transform"
+          className="pointer-events-none fixed left-0 top-0 will-change-transform"
+          style={{ zIndex: Z.canvasFloat }}
         >
           <div className="line-clamp-4 max-w-[280px] rounded-lg bg-[var(--dv-canvas-bg)] px-2.5 py-1.5 text-[12px] leading-5 text-white shadow-lg">
             {item.description}

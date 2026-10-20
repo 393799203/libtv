@@ -35,6 +35,11 @@ import { NODE_TYPE_CONFIG } from '@/types/canvas';
 import type { LibTVNode, LibTVEdge, NodeType, ImageNodeData, VideoNodeData, AudioNodeData } from '@/types/canvas';
 import { PromptCompose } from '@/components/panels/prompt';
 import { FlowAnchored } from '@/components/canvas/FlowAnchored';
+// 选中图片工具（切分/元素编辑/画质/视图）时要收起节点自己的提示词面板（规则见该模块）
+import { useOpsState } from '@/components/canvas/imageops/opsStore';
+import { shouldShowPromptPanel } from '@/components/canvas/promptPanelRule';
+import { useNodeActionStore } from '@/components/canvas/nodeActionStore';
+import { copyNodeToClipboard, deleteNodesByIds } from '@/components/canvas/nodeActions';
 
 import { nodeTypes } from '@/components/nodes';
 import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
@@ -50,6 +55,8 @@ import { mediaKindOfFile, mediaFieldsFor, titleFromFileName } from '@/utils/medi
 import type { UserAsset } from '@/services/assetApi';
 import { uploadImage, uploadVideo, uploadAudio } from '@/services/uploadApi';
 import { canvasApi } from '@/services/canvasApi';
+import { Z } from '@/utils/zLayers';
+import { nextZoomFromWheel, shouldCaptureZoomWheel, zoomIntentFromKey } from '@/utils/zoomShortcut';
 
 /**
  * 空画布引导卡片的「场景」入口。
@@ -129,6 +136,10 @@ type CanvasDrop =
   | { source: 'files'; x: number; y: number; files: File[] }
   | { source: 'asset'; x: number; y: number; asset: UserAsset };
 
+/** 画布缩放边界：<ReactFlow minZoom/maxZoom> 与"画布外的 ⌘+滚轮缩放"共用同一对值 */
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 4;
+
 export const Canvas = memo(function Canvas() {
   const viewportRef = useRef<Viewport | null>(null);
   const lastViewportUpdate = useRef(0);
@@ -148,13 +159,13 @@ export const Canvas = memo(function Canvas() {
   /** 画布容器（用于判断拖放落点是否在画布内） */
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   // 节点剪贴板：右键「复制节点」后「粘贴节点」克隆出一个全新 id 的节点
-  const [clipboardNode, setClipboardNode] = useState<LibTVNode | null>(null);
+  // 剪贴板与「生成历史弹窗看哪个节点」都放在共享 store：图片节点工具条里也有
+  // 复制/看历史的入口，它长在节点 DOM 里，拿不到这里的 useState（见 nodeActionStore）
+  const clipboardNode = useNodeActionStore((s) => s.clipboard);
+  const historyModal = useNodeActionStore((s) => s.historyTarget);
+  const closeHistory = useNodeActionStore((s) => s.closeHistory);
+  const openHistory = useNodeActionStore((s) => s.openHistory);
   // 生成历史弹窗状态
-  const [historyModal, setHistoryModal] = useState<{
-    nodeId: string;
-    nodeType: 'image' | 'video';
-    currentUrl: string;
-  } | null>(null);
   const [nodeSelectPopup, setNodeSelectPopup] = useState<{
     position: { x: number; y: number };
     sourceNodeId: string;
@@ -186,10 +197,19 @@ export const Canvas = memo(function Canvas() {
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   // 空画布引导卡片：手动关闭后本次会话不再弹出
   const [dismissedEmptyGuide, setDismissedEmptyGuide] = useState(false);
-  const { fitView, screenToFlowPosition, getNodes, getViewport, setViewport: rfSetViewport } = useReactFlow();
+  const {
+    fitView,
+    screenToFlowPosition,
+    getNodes,
+    getViewport,
+    setViewport: rfSetViewport,
+    zoomIn,
+    zoomOut,
+    zoomTo,
+  } = useReactFlow();
 
   // ✅ 性能优化：使用useShallow避免数组引用变化触发重渲染
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, connectNodes, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addNodesAndEdges, removeNodes, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, connectNodes, selectedNodeIds, updateNodeData, updateNodeMeta, addNode, addNodesAndEdges, projectId, createMediaNodeAt, groupSelectedNodes, ungroupNode, syncGroupBounds, placeMemberAtAbsolute } = useCanvasStore(
     useShallow((s) => ({
       nodes: s.nodes,
       edges: s.edges,
@@ -291,6 +311,19 @@ export const Canvas = memo(function Canvas() {
     event.preventDefault();
     event.stopPropagation();
     setNodeSelectPopup(null);
+    /**
+     * 右键**不会**选中节点（React Flow 的默认行为），但节点工具条只在**唯一选中**时出现 ——
+     * 不补这一步就会出现空档：菜单把 复制/删除/下载… 交给工具条了，而工具条根本没出现。
+     * 已经在多选选区里的节点保持选区不变，否则「删除选中的 N 个」「组合选中的 N 个」就点不出来了。
+     */
+    if (!node.selected) {
+      onNodesChange([
+        ...selectedNodeIds
+          .filter((id) => id !== node.id)
+          .map((id) => ({ type: 'select' as const, id, selected: false })),
+        { type: 'select' as const, id: node.id, selected: true },
+      ]);
+    }
     const url = node.type === 'image'
       ? (node.data.imageUrl as string)
       : node.type === 'video'
@@ -304,7 +337,7 @@ export const Canvas = memo(function Canvas() {
       name: (node.data.label as string) || '',
       nodeId: node.id,
     });
-  }, []);
+  }, [onNodesChange, selectedNodeIds]);
 
   // 连线释放：落在对方节点任意位置即完成连线（无需精确对准连接点）；
   // 释放在空白区域时弹出节点选择菜单（参考官方 add-node-on-edge-drop 示例）
@@ -415,8 +448,7 @@ export const Canvas = memo(function Canvas() {
       message.warning('组合节点不支持复制，请先用「取消组合」');
       return;
     }
-    setClipboardNode(node);
-    message.success({ content: `已复制节点「${nodeLabelOf(node)}」`, key: 'node-clip' });
+    copyNodeToClipboard(node, nodeLabelOf(node));
   }, [nodes, selectedNodeIds, nodeLabelOf]);
 
   /**
@@ -446,20 +478,14 @@ export const Canvas = memo(function Canvas() {
   }, [clipboardNode, nodes, buildClonedNode, addNode, onNodesChange]);
 
   /** 删除节点：不传 id 时删除当前所有选中的节点（可用 Ctrl/Cmd+Z 撤销） */
-  const handleDeleteNodes = useCallback((nodeId?: string) => {
-    const ids = (nodeId ? [nodeId] : selectedNodeIds).filter(
-      (id) => nodes.find((n) => n.id === id)?.type !== 'group'
-    );
-    if (ids.length === 0) {
-      // 菜单里组合已经没有「删除节点」项了，这里兜住快捷键等其它入口
-      message.warning(
-        selectedNodeIds.length > 0 ? '组合节点不能直接删除，请先用「取消组合」' : '请先选中一个节点再删除'
-      );
-      return;
-    }
-    removeNodes(ids);
-    message.success(`已删除 ${ids.length} 个节点（Ctrl/Cmd+Z 可撤销）`);
-  }, [selectedNodeIds, removeNodes, nodes]);
+  // 实现在 nodeActions：图片节点工具条里也有「删除节点」，两边必须同一套
+  // （含"组合节点不能直接删除"的兜底提示）
+  const handleDeleteNodes = useCallback(
+    (nodeId?: string) => {
+      deleteNodesByIds(nodeId ? [nodeId] : selectedNodeIds);
+    },
+    [selectedNodeIds]
+  );
 
   /**
    * 组合：把当前框选/多选的节点收进一个组合（拖动时整组一起走）。
@@ -578,6 +604,50 @@ export const Canvas = memo(function Canvas() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedNodeIds, clipboardNode, handleCopyNode, handlePasteNode, undo, redo]);
+
+  /**
+   * ⌘/Ctrl + `+` `-` `0`：**拦下浏览器的页面缩放，改成缩放画布**。
+   *
+   * 浏览器默认会把整个工作台一起缩放（顶栏、侧栏、提示词框全变大），可用户按下这三个键时
+   * 想放大的显然是画布里的节点。所以这里 preventDefault 掉浏览器行为，转成画布的缩放：
+   *   ⌘+ / ⌘= → 放大     ⌘- → 缩小     ⌘0 → 回到 100%（对应浏览器"实际大小"）
+   *
+   * 判定逻辑在 utils/zoomShortcut.ts（纯函数，已断言 `=`/`+`/小键盘/0 这些都认）。
+   * 只认这三个键，⌘C/⌘V/⌘Z 等仍然由下面那个 handler 处理，互不干扰。
+   */
+  useEffect(() => {
+    const onZoomKey = (e: KeyboardEvent) => {
+      const intent = zoomIntentFromKey(e);
+      if (!intent) return;
+      // 必须 preventDefault：否则浏览器先动手，页面和画布一起被缩放，等于没拦
+      e.preventDefault();
+      if (intent === 'reset') zoomTo(1, { duration: 160 });
+      else if (intent === 'in') zoomIn({ duration: 160 });
+      else zoomOut({ duration: 160 });
+    };
+    window.addEventListener('keydown', onZoomKey);
+    return () => window.removeEventListener('keydown', onZoomKey);
+  }, [zoomIn, zoomOut, zoomTo]);
+
+  /**
+   * ⌘/Ctrl + 滚轮（mac 上就是触控板双指捏合）：同样拦成画布缩放。
+   *
+   * 画布**内部**不拦 —— React Flow 自己处理滚轮缩放，两边都拦就变成一次滚轮缩两倍。
+   * 只处理画布外面那些区域（顶栏/侧栏/节点外圈），这样"在任何地方捏合都是缩画布"手感一致。
+   * 用 passive:false 才能 preventDefault（wheel 默认是 passive，不写就拦不住）。
+   */
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement | null;
+      const insideCanvas = !!target?.closest?.('.react-flow');
+      if (!shouldCaptureZoomWheel(e, insideCanvas)) return;
+      e.preventDefault();
+      const vp = getViewport();
+      rfSetViewport({ ...vp, zoom: nextZoomFromWheel(vp.zoom, e.deltaY, MIN_ZOOM, MAX_ZOOM) }, { duration: 0 });
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [getViewport, rfSetViewport]);
 
   /**
    * 接收「左侧资产库拖出来的资产」：面板松手时把 (资产, 屏幕坐标) 投递过来，
@@ -897,11 +967,17 @@ export const Canvas = memo(function Canvas() {
     [selectedNodeId, updateNodeData],
   );
 
-  // 支持提示词面板的节点类型（排除风格图片节点、拖动/框选操作）
-  const hasPromptPanel = selectedNode
-    && !promptSuppressed
-    && ['text', 'image', 'video', 'audio', 'script'].includes(selectedNode.data.type)
-    && !selectedNode.data.styleId;
+  // 选中的工具（切分宫格/元素编辑/画质提升/多视图）：非 null 说明用户正在用图片工具
+  const { mode: opsMode, targetId: opsTargetId } = useOpsState();
+  // 支持提示词面板的节点类型（排除风格图片节点、拖动/框选操作、以及"选中了工具"）
+  const hasPromptPanel = shouldShowPromptPanel({
+    nodeType: selectedNode?.data.type,
+    // 注意可选链要一路带到底：写成 (selectedNode?.data as ...).styleId 的话，
+    // selectedNode 为空时是 undefined.styleId —— 类型断言骗过了 tsc，线上直接白屏（已踩过）
+    styleId: selectedNode?.data.styleId,
+    suppressed: promptSuppressed,
+    opsMode,
+  });
   const isEditingNode = nodes.some((n) => n.data.isEditing);
 
   // 加载完成后恢复视口位置（仅执行一次）
@@ -1071,8 +1147,8 @@ export const Canvas = memo(function Canvas() {
         snapGrid={[16, 16]}
         /* 连线拖拽的吸附半径：耳朵放大后同步放大，指针靠近目标节点左耳就容易吸附 */
         connectionRadius={56}
-        minZoom={0.05}
-        maxZoom={4}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
         // 生成中不锁画布：拖节点、连线与生成互不影响（过去是 nodesDraggable={!isExecuting}，
         // 生成一次可能几十秒，期间用户完全没法整理画布，体验很差）。
         //
@@ -1117,6 +1193,9 @@ export const Canvas = memo(function Canvas() {
       </ReactFlow>
       </div>
       )}
+
+      {/* 图片节点悬浮工具栏：全画布单例，跟着鼠标悬停/唯一选中的图片节点走。
+          组件内部自己 portal 到 body 并按屏幕坐标定位（画布缩放时按钮尺寸不跟着缩）。 */}
 
       {/* 空画布引导：融入画布的虚线占位（非弹窗），0 节点且未手动关闭时展示。
             入口给的是「场景」而不是单个节点类型：点一下就把这组节点建好并连好线 */}
@@ -1178,11 +1257,20 @@ export const Canvas = memo(function Canvas() {
           url={nodeMenu.url || undefined}
           name={nodeMenu.name}
           nodeId={nodeMenu.nodeId}
+          onShowHistory={(nid, nt, curUrl) => openHistory({ nodeId: nid, nodeType: nt, currentUrl: curUrl })}
+          /**
+           * 工具条此刻是否正显示**动作图标**（= 唯一选中这个节点，且没被图片工具的配置条占着）。
+           * 菜单据此决定要不要显示 复制/删除 —— 关键是右键**不会**选中节点，
+           * 所以不能拿"右键的这个节点"当依据：那样在未选中的节点上右键，
+           * 工具条根本没出现、菜单又把复制/删除藏了，鼠标就真的没有入口了。
+           */
+          toolbarShowsActions={
+            selectedNodeIds.length === 1 &&
+            selectedNodeIds[0] === nodeMenu.nodeId &&
+            !(opsMode && opsTargetId === nodeMenu.nodeId)
+          }
           onUpdateNode={updateNodeData}
-          onShowHistory={(nid, nt, curUrl) => setHistoryModal({ nodeId: nid, nodeType: nt, currentUrl: curUrl })}
-          canPaste={!!clipboardNode}
           onCopy={() => handleCopyNode(nodeMenu.nodeId)}
-          onPaste={() => handlePasteNode(undefined, nodeMenu.nodeId)}
           onDelete={() => handleDeleteNodes(nodeMenu.nodeId)}
           onDeleteSelection={() => handleDeleteNodes()}
           selectedCount={selectedFlagIds.includes(nodeMenu.nodeId) ? selectedFlagIds.length : 1}
@@ -1224,7 +1312,7 @@ export const Canvas = memo(function Canvas() {
               });
             }
           }}
-          onClose={() => setHistoryModal(null)}
+          onClose={closeHistory}
         />
       )}
 
@@ -1234,9 +1322,8 @@ export const Canvas = memo(function Canvas() {
           onSelect={handleNodeSelect}
           onClose={() => setNodeSelectPopup(null)}
           selectedLabel={selectedNode ? nodeLabelOf(selectedNode) : null}
-          canCopy={selectedNodeIds.length > 0}
+          canDelete={selectedNodeIds.length > 0}
           canPaste={!!clipboardNode}
-          onCopy={() => handleCopyNode()}
           onPaste={() => handlePasteNode(
             screenToFlowPosition(nodeSelectPopup.position),
             nodeSelectPopup.sourceNodeId ?? undefined,
@@ -1264,7 +1351,7 @@ export const Canvas = memo(function Canvas() {
             max-md:!max-h-[60vh] max-md:!overflow-y-auto max-md:!pointer-events-auto"
           /* 水平居中的 translateX(-50%) 由 FlowAnchored 写进 transform 里：
              位置每帧都在变，交给 React 的 style 会和直接写 DOM 打架 */
-          style={{ zIndex: 1000 }}
+          style={{ zIndex: Z.canvasMenu }}
         >
           {/* 箭头（移动端是吸底面板，箭头指向节点已无意义） */}
           <div

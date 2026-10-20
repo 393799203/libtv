@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { userApi, type UserItem } from '@/services/userApi';
+import { Z } from '@/utils/zLayers';
 
 interface StyleManagerModalProps {
   open: boolean;
@@ -197,7 +198,8 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+    <div style={{ zIndex: Z.modalTop }}
+          className="fixed inset-0 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
       <div className="relative w-[1200px] max-h-[88vh] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200">
@@ -421,7 +423,8 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
 
         {/* ========== 添加图片弹窗（一次性完成选图 + 填信息）========== */}
         {showAddDialog && createPortal(
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+          <div style={{ zIndex: Z.modalTopAbove }}
+          className="fixed inset-0 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} />
 
             <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150">
@@ -516,7 +519,8 @@ export function StyleManagerModal({ open, onClose }: StyleManagerModalProps) {
 
         {/* ========== 新建分类弹窗 ========== */}
         {showNewCatDialog && createPortal(
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+          <div style={{ zIndex: Z.modalTopAbove }}
+          className="fixed inset-0 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewCatDialog(false)} />
             <div className="relative w-[380px] bg-white rounded-xl shadow-xl border border-gray-200 p-6 z-10 animate-in fade-in zoom-in-95 duration-150">
               <h3 className="text-[15px] font-semibold text-gray-800 mb-4">新建分类</h3>

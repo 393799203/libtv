@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import type { UpstreamInput } from '@/types/prompt';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { StyleSelector } from './StyleSelector';
+import { Z } from '@/utils/zLayers';
 
 interface PromptUpstreamBarProps {
   inputs: UpstreamInput[];
@@ -173,8 +174,9 @@ export const PromptUpstreamBar = memo<PromptUpstreamBarProps>(function PromptUps
       {/* hover 预览浮层（Portal 渲染到 body） */}
       {createPortal(
         <div
-          className="fixed z-[9999] transition-opacity duration-150"
+          className="fixed transition-opacity duration-150"
           style={{
+            zIndex: Z.canvasFloat,
             left: hoverPos.mouseX,
             top: hoverPos.thumbTop - 8,
             transform: 'translate(-50%, -100%)',

@@ -11,8 +11,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"libtv/internal/middleware"
 	"libtv/internal/pkg/response"
@@ -164,6 +169,68 @@ func (h *UploadHandler) UploadCanvas(c *gin.Context) {
 	})
 }
 
+// ffprobePath 找一次 ffprobe 就缓存：生产镜像里在 PATH 上（/usr/bin/ffprobe），
+// 开发机多半是 brew 装的、没链接进 PATH（在 Cellar 下），所以也认几个常见位置。
+var (
+	ffprobeOnce sync.Once
+	ffprobeBin  string
+)
+
+func ffprobePath() string {
+	ffprobeOnce.Do(func() {
+		if p, err := exec.LookPath("ffprobe"); err == nil {
+			ffprobeBin = p
+			return
+		}
+		candidates := []string{
+			"/usr/bin/ffprobe", "/usr/local/bin/ffprobe", "/opt/homebrew/bin/ffprobe",
+			"/usr/local/Cellar/ffmpeg/*/bin/ffprobe", "/opt/homebrew/Cellar/ffmpeg/*/bin/ffprobe",
+		}
+		for _, c := range candidates {
+			if matches, err := filepath.Glob(c); err == nil {
+				for _, m := range matches {
+					if st, err := os.Stat(m); err == nil && !st.IsDir() {
+						ffprobeBin = m
+						return
+					}
+				}
+			}
+		}
+	})
+	return ffprobeBin
+}
+
+// probeImageSizeFFprobe 用镜像里已有的 ffprobe 读图片尺寸（覆盖 WebP/AVIF/HEIC/BMP 等标准库不认的格式）。
+// 与 thumbnail.go 一样走 stdin 管道，不落盘、不加新依赖。找不到 ffprobe 或探不出来时返回 false。
+func probeImageSizeFFprobe(data []byte) (int, int, bool) {
+	bin := ffprobePath()
+	if bin == "" {
+		return 0, 0, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin,
+		"-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height", "-of", "csv=p=0", "pipe:0")
+	cmd.Stdin = bytes.NewReader(data)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return 0, 0, false
+	}
+	parts := strings.Split(strings.TrimSpace(out.String()), ",")
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	w, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	h, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+		return 0, 0, false
+	}
+	return w, h, true
+}
+
 // UploadImage 通用图片上传（哈希去重）
 // 如果传递 project_id 参数，存储到 users/<userID>/canvas/项目ID/ 目录
 // 如果不传递 project_id，存储到 images/ 目录
@@ -309,10 +376,17 @@ func (h *UploadHandler) uploadImageToDir(c *gin.Context, dir, projectID string) 
 	var width, height int
 	imgConfig, format, err := image.DecodeConfig(bytes.NewReader(imageData))
 	if err != nil {
-		// 解码失败时记录错误，使用默认尺寸（不应该影响上传流程）
-		log.Printf("[UploadImage] 图片解码失败: filename=%s size=%d bytes err=%v, 使用默认尺寸 1024×1024", header.Filename, len(imageData), err)
-		width = 1024
-		height = 1024
+		// 标准库只注册了 png/jpeg/gif，WebP/AVIF/HEIC 一律解不出来。
+		// 这里**不能**编造一个"看起来合理"的尺寸：历史实现写了 1024×1024（正方形），
+		// 于是这类图片的节点元数据是正方形 —— 画布上的涂抹/擦除覆盖层和蒙版都按它算，
+		// 长方形图只剩下一个正方形能下笔（2026 年用户反馈：标记擦除被限制在正方形，9:16 尤其明显）。
+		// 改为用镜像里本来就有的 ffprobe 探真实尺寸；探不到就留 0，让前端去量原图（ImageNode 有回退）。
+		if w, h, ok := probeImageSizeFFprobe(imageData); ok {
+			width, height = w, h
+			log.Printf("[UploadImage] 标准库解码失败(%v)，ffprobe 探到真实尺寸 %d×%d: filename=%s", err, w, h, header.Filename)
+		} else {
+			log.Printf("[UploadImage] 图片解码失败且 ffprobe 也探不到尺寸: filename=%s size=%d bytes err=%v（尺寸留 0，由前端量原图）", header.Filename, len(imageData), err)
+		}
 	} else {
 		width = imgConfig.Width
 		height = imgConfig.Height

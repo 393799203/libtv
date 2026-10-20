@@ -8,6 +8,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
 import { createNode } from '@/utils/nodeFactory';
 import type { PrevizNodeData } from '@/types/canvas';
+import { Z } from '@/utils/zLayers';
 
 // 导出分辨率选项
 const RESOLUTION_OPTIONS = [
@@ -403,7 +404,8 @@ export function ExportPanel({ projectId, nodeId }: { projectId: string; nodeId: 
 
       {/* 导出遮罩：录制 / 静帧渲染 / 上传期间禁止其他操作 */}
       {busy && (
-        <div className="fixed inset-0 z-[1000] bg-black/60 flex flex-col items-center justify-center gap-3">
+        <div className="fixed inset-0 bg-black/60 flex flex-col items-center justify-center gap-3"
+        style={{ zIndex: Z.overlay }}>
           {stillPhase === 'capturing' ? (
             <>
               <div className="text-white text-sm font-medium">渲染静帧中…</div>

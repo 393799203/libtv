@@ -40,6 +40,7 @@ import ChannelPricingPage from './ChannelPricingPage';
 import ProviderTaskReconciliation from './ProviderTaskReconciliation';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { usePageMeta } from '@/hooks/usePageMeta';
+import { Z } from '@/utils/zLayers';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'reconcile' | 'channels' | 'packages';
 
@@ -1477,7 +1478,8 @@ export default function AdminPage() {
           )}
           {/* 管理员充值弹窗 */}
           {rechargeUserId && (
-            <div className="fixed inset-0 z-[1050] flex items-center justify-center" onClick={() => setRechargeUserId(null)}>
+            <div style={{ zIndex: Z.modalTop }}
+          className="fixed inset-0 flex items-center justify-center" onClick={() => setRechargeUserId(null)}>
               <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
               <div className="relative bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 {/* 弹窗头部 */}
@@ -1672,7 +1674,8 @@ export default function AdminPage() {
 
       {/* ========== 首页管理：新建标签弹窗 ========== */}
       {showNewShowCatDialog && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+        <div style={{ zIndex: Z.modalTop }}
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewShowCatDialog(false)} />
           <div className="relative w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-10 p-6">
             <h3 className="text-[14px] font-semibold text-gray-800 mb-4">新建标签</h3>
@@ -1709,7 +1712,8 @@ export default function AdminPage() {
 
       {/* ========== 新建分类小弹窗 ========== */}
       {showNewCatDialog && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+        <div style={{ zIndex: Z.modalTop }}
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewCatDialog(false)} />
           <div className="relative w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-10 p-6">
             <h3 className="text-[14px] font-semibold text-gray-800 mb-4">新建分类</h3>
@@ -1733,7 +1737,8 @@ export default function AdminPage() {
 
       {/* ========== 添加图片弹窗 ========== */}
       {showAddDialog && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center">
+        <div style={{ zIndex: Z.modalTopAbove }}
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} />
           <div className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
             <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">
@@ -1790,7 +1795,8 @@ export default function AdminPage() {
 
       {/* ========== 版图管理：添加/编辑Banner弹窗 ========== */}
       {showAddBannerDialog && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+        <div style={{ zIndex: Z.modalTop }}
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddBannerDialog(false)} />
           <div className="relative w-[500px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
             <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">

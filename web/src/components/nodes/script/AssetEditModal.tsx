@@ -7,6 +7,7 @@ import type {
   ScriptScene,
   ScriptProp,
 } from '@/types/canvas';
+import type { MentionMarker } from '@/types/prompt';
 import { uploadImage } from '@/services/uploadApi';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useExecutionStore } from '@/stores/executionStore';
@@ -14,13 +15,39 @@ import { workflowApi } from '@/services/workflowApi';
 import { canvasApi } from '@/services/canvasApi';
 import { useModels } from '@/hooks/useModels';
 import { PROMPT_PANEL_CONFIGS } from '@/configs/promptConfig';
+import { buildAssetReferenceLine } from '@/utils/imageViewPrompts';
 import {
   getAssetImageNodeId,
   createAssetImageNode,
+  ensureAssetReferenceNode,
 } from '@/utils/assetImageSync';
 
 type AssetType = 'character' | 'scene' | 'prop';
 type Asset = ScriptCharacter | ScriptScene | ScriptProp;
+
+/**
+ * 资产类型 → 视图名。
+ *
+ * 口径以**代码实际生成的东西**为准（本次统一）：脚本节点给资产描述追加的视图要求块是
+ * 【角色四视图】/【场景四视图】/【道具六视图】（server/internal/llm/prompt.go 的
+ * ScriptSystemPrompt），也就是角色 1×4（正脸近景特写 + 正面/侧面/背面全身）、场景 2×2、
+ * 道具 2×3；资产描述原样进提示词，所以这里出的就是这几种宫格图。
+ * 文案原来对角色写"三视图"——那是图片节点上「生成视图」里的**另一个可选档**（1×3），
+ * 与资产流程实际产出的 1×4 不是一回事：用户会按"三视图"去切 1×3，切出来每格都不对。
+ * 名字统一用 imageViewPrompts 里 VIEW_PRESETS 的标签，同一个产物不给两个叫法。
+ */
+const ASSET_VIEW_NAME: Record<AssetType, string> = {
+  character: '角色四视图',
+  scene: '场景四视图',
+  prop: '道具六视图',
+};
+
+/** 资产类型 → viewKind：切分宫格 / 生成视图据此预选宫格行列（对应 VIEW_PRESETS 的行列） */
+const ASSET_VIEW_KIND: Record<AssetType, string> = {
+  character: 'character4',
+  scene: 'scene4',
+  prop: 'prop6',
+};
 
 // 从 hook 动态获取图像生成模型选项
 // IMAGE_MODEL_OPTIONS 将在组件中使用 useModels hook 获取
@@ -28,11 +55,17 @@ type Asset = ScriptCharacter | ScriptScene | ScriptProp;
 // ==================== 资产生成状态监听（模块级，与弹窗生命周期解耦）====================
 // loading 消息跟随画布图片节点的生成状态（SSE 驱动 canvasStore 节点 status 变化），
 // 节点 success / failed / 超时 时才销毁；关闭资产弹窗不影响监听
+//
+// 注意这里**不再回填资产**（生成结果 URL 不再写进资产的 imageUrl / 不再走
+// AssetPreparationPanel 的上传路径）：上传路径会把 URL 记成"用户原图"，
+// 生成结果从那里过一遍，下一次生成就会拿生成结果当参考图、真原图被顶掉。
+// 资产的 imageUrl 语义是"用户上传的参考图"（见 ScriptSystemPrompt 的字段说明），
+// 生成结果落在画布节点上（卡片、分镜参考图都按 nodeId 读节点），
+// 落库由后端 persistNodeOutputs 负责。
 const assetGenWatchers = new Map<string, () => void>(); // imageNodeId -> cancel
 
 function watchAssetGeneration(
   imageNodeId: string,
-  onSuccess: (imageUrl: string) => void,
   onSettled: () => void,
 ) {
   const msgKey = `asset-gen-${imageNodeId}`;
@@ -51,11 +84,7 @@ function watchAssetGeneration(
     if (status === 'success') {
       cancel();
       message.destroy(msgKey);
-      const url = (node.data as { imageUrl?: string })?.imageUrl;
-      if (url) {
-        onSuccess(url);
-        message.success('图像生成成功');
-      }
+      message.success('图像生成成功');
       onSettled();
     } else if (status === 'failed') {
       cancel();
@@ -227,12 +256,7 @@ export const AssetEditModal = memo<AssetEditModalProps>(
 
       setGenerating(true);
 
-      const viewText =
-        assetType === 'character'
-          ? '三视图'
-          : assetType === 'scene'
-            ? '四视图'
-            : '六视图';
+      const assetView = ASSET_VIEW_NAME[assetType];
 
       // 资产对应的图片节点：先看资产自己的 nodeId 引用，没有就建一个（id 不再按格式拼）
       const linkedId = getAssetImageNodeId(scriptNodeId, assetType, asset.name);
@@ -242,7 +266,7 @@ export const AssetEditModal = memo<AssetEditModalProps>(
       const msgKey = `asset-gen-${imageNodeId ?? asset.name}`;
       const modelName = IMAGE_MODEL_OPTIONS.find(m => m.modelId === selectedModel)?.label || selectedModel;
       message.loading({
-        content: `正在使用 ${modelName} 生成${viewText}…`,
+        content: `正在使用 ${modelName} 生成${assetView}…`,
         key: msgKey,
         duration: 0,
       });
@@ -253,13 +277,52 @@ export const AssetEditModal = memo<AssetEditModalProps>(
           throw new Error('创建图片节点失败');
         }
 
-        // Step 2: 把抽屉状态（模型、提示词等）写入图片节点，并重置运行状态
-        // 重置 status='running' 确保订阅能检测到后续 success/failed 变化（避免第二次生成时 status 不变导致 loading 不消失）
-        useCanvasStore.getState().updateNodeData(imageNodeId, {
+        // Step 1.5: 把**用户上传的原图**接成参考图。
+        //
+        // 改造前这条路只写 prompt = asset.description（纯文生图），用户上传的原图从来没被
+        // 当参考图用过 —— 生成结果跟原图对不上，这是必然的。参考图必须凑齐三件套，
+        // 少一样后端就静默丢掉（与 utils/imageOpsNodes.ts 文件头写的是同一套约定）：
+        //   ① prompt 里有 `[[m:<参考图节点id>]]` 占位符（executor.go 按 marker 过滤 mentions）
+        //   ② data.mentions 里有对应条目（标记用的是 mention.id，不是 nodeId）
+        //   ③ 一条 参考图节点 → 本节点 的 dataFlow 边（上游没有它，后端取不到图）
+        //
+        // 原图为什么落在**单独的参考图节点**而不是资产图片节点自己：生成结果会覆盖资产
+        // 图片节点的 imageUrl（SSE 回写 + 回填），原图留在这里就没了；
+        // 参考图节点由上传路径写入、生成过程永不碰，用户原图因此不会被弄丢
+        //（详见 assetImageSync.ts 里 ensureAssetReferenceNode 的说明）。
+        const reference = ensureAssetReferenceNode(imageNodeId);
+        const description = asset.description || '';
+        const prompt = reference
+          ? `${description}${buildAssetReferenceLine(`[[m:${reference.nodeId}]]`)}`
+          : description;
+        const mentions: MentionMarker[] = reference
+          ? [{
+              // 占位符里的 id 就用参考图节点 id（同 shotNodeSync 的资产引用约定），
+              // prompt、mentions、边三者指向同一个节点，不会各说各话
+              id: reference.nodeId,
+              nodeId: reference.nodeId,
+              label: reference.label,
+              nodeType: 'image',
+            }]
+          : [];
+
+        // Step 2: 把抽屉状态（模型、提示词等）写入图片节点，并重置运行状态。
+        // 拆成两次写，是因为这两部分对"撤销"的意义不同：
+        //   - 模型/提示词/视图是**用户改的内容** → 走正常写，能撤销；
+        //   - status='running' 是过渡态 → transient，不能占一格撤销（否则撤销会停在"生成中"）。
+        // status 仍然要写：订阅靠 running→success/failed 的变化收口，不写的话第二次生成
+        // 时状态没变化，loading 不会消失。
+        const canvasStore = useCanvasStore.getState();
+        canvasStore.updateNodeData(imageNodeId, {
           model: selectedModel,
-          prompt: asset.description || '',
-          status: 'running',
+          prompt,
+          // mentions 与 prompt 里的占位符一一对应（PromptEditor 靠它把占位符渲染成 @标签）；
+          // 没有参考图时写空数组，免得留下上一次的悬空 mention
+          mentions,
+          // 写清这套图是什么视图：图节点工具条的「切分宫格」/「生成视图」据此自动预选宫格行列
+          viewKind: ASSET_VIEW_KIND[assetType],
         } as any);
+        canvasStore.updateNodeData(imageNodeId, { status: 'running' }, { transient: true });
 
         // Step 3: 保存画布（让后端能读到最新节点数据）
         const currentStore = useCanvasStore.getState();
@@ -285,10 +348,9 @@ export const AssetEditModal = memo<AssetEditModalProps>(
         });
 
         // 模块级监听画布节点生成状态：跟随 SSE 状态变化，生成结束才销毁 loading 消息
-        // 弹窗关闭不影响监听与资产回填
+        // 弹窗关闭不影响监听（生成结果不回填资产，回填会把原图顶掉，见 watchAssetGeneration 上方注释）
         watchAssetGeneration(
           imageNodeId,
-          (url) => onUpload(asset.name, url),
           () => setGenerating(false),
         );
 
@@ -302,7 +364,8 @@ export const AssetEditModal = memo<AssetEditModalProps>(
         }
         setGenerating(false);
       }
-    }, [asset, assetType, selectedModel, scriptNodeId, onUpload, generating, IMAGE_MODEL_OPTIONS]);
+    // 依赖里不再有 onUpload：生成结果不回填资产（回填会把原图顶掉，见文件上方说明）
+    }, [asset, assetType, selectedModel, scriptNodeId, generating, IMAGE_MODEL_OPTIONS]);
 
     /** 描述输入 */
     const handleDescriptionChange = useCallback(
@@ -348,7 +411,9 @@ export const AssetEditModal = memo<AssetEditModalProps>(
     const getDescriptionPlaceholder = () => {
       switch (assetType) {
         case 'character':
-          return '请输入角色描述，例如：年龄、性别、发型、服装、性格、三视图要求等';
+          // 与脚本模板的【角色四视图】对齐（原来写"三视图"，那个档位只在图片节点的
+          // 「生成视图」里，资产流程出的其实是 1×4 的四视图）
+          return '请输入角色描述，例如：年龄、性别、发型、服装、性格、四视图要求等';
         case 'scene':
           return '请输入场景描述，包含：空间布局、环境氛围、主要元素、风格特征、四视图要求等';
         case 'prop':
@@ -460,7 +525,9 @@ export const AssetEditModal = memo<AssetEditModalProps>(
                     {uploading || generating ? (
                       <LoadingOutlined className="text-2xl animate-spin" />
                     ) : (
-                      <span className="text-xs">生成或上传参考图</span>
+                      // 文案说清"上传原图有什么用"：上传的这张图会作为 AI生成的参考图
+                      //（生成前由 ensureAssetReferenceNode 接成 @引用 + 数据流边）
+                      <span className="text-xs">上传原图（生成时作为参考图）</span>
                     )}
                   </div>
                 )}
@@ -550,7 +617,11 @@ export const AssetEditModal = memo<AssetEditModalProps>(
                     onClick={() => handleGenerate()}
                     disabled={generating || uploading}
                     className="flex-1 h-8 rounded-md bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-medium flex items-center justify-center gap-1 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-cyan-500/25"
-                    title={`基于描述生成${assetType === 'character' ? '三视图' : assetType === 'scene' ? '四视图' : '六视图'}`}
+                    title={`基于描述生成${ASSET_VIEW_NAME[assetType]}${
+                      // 有图（上传的原图 / 已生成的图）时，生成会把它接成参考图，title 里说清，
+                      // 用户才知道"先上传一张原图再生成"是有用的
+                      imageUrl ? '（参考图 = 这张原图）' : '（还没有原图：纯文生图）'
+                    }`}
                   >
                     {generating ? (
                       <LoadingOutlined className="text-xs animate-spin" />

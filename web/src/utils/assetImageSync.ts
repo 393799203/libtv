@@ -6,7 +6,9 @@
 
 import { useCanvasStore } from '@/stores/canvasStore';
 import { createNode } from '@/utils/nodeFactory';
-import type { LibTVNode } from '@/types/canvas';
+import { absolutePositionIn } from '@/utils/canvasGroups';
+import { deriveThumbUrl } from '@/utils/thumbUrl';
+import type { ImageNodeData, LibTVEdge, LibTVNode } from '@/types/canvas';
 
 type AssetType = 'character' | 'scene' | 'prop';
 
@@ -253,6 +255,12 @@ export function updateAssetImageNodeUrl(
     status: 'success',
   } as any);
 
+  // 走到这里说明这张图是**用户提供的原图**（本函数只被上传/导入/关联资产这些路径调用；
+  // 生成结果是从 SSE 回写节点 data 的，不经过这里）。记一笔并把原图落到参考图节点上，
+  // 否则「资产卡片 AI生成」这条路的提示词里没有 @ 引用，后端拿不到参考图 = 纯文生图，
+  // 生成结果跟用户上传的原图对不上（详见 ensureAssetReferenceNode 的说明）。
+  rememberAssetSourceImage(imageNodeId, imageUrl);
+
   console.log('[AssetImageSync] 更新图片节点 URL 成功:', {
     imageNodeId,
     imageUrl,
@@ -448,3 +456,214 @@ function clearAssetImageNodeId(
 
 // ✅ 旧的 updateAssetImageMapping 和 clearAssetImageMapping 函数已删除
 // 现在直接使用资产的 nodeId 字段，不需要额外的 mapping 表
+
+// ==================== 资产「原图」参考图节点 ====================
+//
+// 为什么要有这么一类节点：
+//
+// 「资产卡片 → AI生成」这条路是**写回资产自己的图片节点**的：生成结果由 SSE 回写
+// node.data.imageUrl，AssetPreparationPanel 的上传路径（updateAssetImageNodeUrl）
+// 在回填时也会覆盖同一个字段。而参考图只能由后端从**某个节点的 data.imageUrl** 里取
+// （executor.go 的 mentions 分支：按 mentions[].nodeId 查 nodeDataByID 再读 imageUrl）。
+// 也就是说：生成一次，用户上传的原图就从这个节点上没了 —— 再想让「以原图为参考」
+// 生效，原图必须另存到一个生成永远不会碰的节点上。这个节点就是本节的「参考图节点」。
+//
+// 两条约定（都是"弄错就等于丢用户原图/参考图静默失效"的）：
+//  1. **参考图节点只由上传/导入/关联路径写入**（rememberAssetSourceImage），生成路径一律不碰它；
+//  2. 参考图节点**不能**带 scriptNodeId/assetType/assetName 那套资产归属字段 ——
+//     findAssetImageNode 的第二级判据正是按这三个字段反查「这个资产用哪个图片节点」，
+//     带上就会被当成资产图片节点（线上出过同款：一个资产两个图片节点，有结果的那个没人认领）。
+
+/**
+ * 参考图节点的 data 标记：值是它备份的**资产图片节点 id**（反向找参考图节点用）。
+ * 刻意不用资产归属字段，理由见本节开头第 2 条。
+ */
+const ASSET_REF_MARKER = 'assetRefOf';
+
+/**
+ * 资产图片节点上记录「用户提供的原图 URL」的字段名。
+ *
+ * 为什么不直接拿节点当前的 imageUrl 当原图：生成结果会覆盖 imageUrl，
+ * 下一次生成就分不清"当前这张是原图还是上一次的生成结果"了 —— 判成原图就等于
+ * 把生成结果当参考图喂回去、同时把真原图丢掉。这里记的是**上传/导入/关联时**那份，与生成无关。
+ */
+const ASSET_SOURCE_URL_FIELD = 'assetSourceImageUrl';
+
+/** 参考图节点的 data 结构（字段是动态写的，读的时候窄取一次） */
+function refMarkerOf(node: LibTVNode): string | undefined {
+  const v = (node.data as Record<string, unknown> | undefined)?.[ASSET_REF_MARKER];
+  return typeof v === 'string' ? v : undefined;
+}
+
+/** 参考图节点要备份的原图 URL（没记过就是空） */
+function sourceUrlOf(imageNode: LibTVNode): string {
+  const v = (imageNode.data as Record<string, unknown> | undefined)?.[ASSET_SOURCE_URL_FIELD];
+  return typeof v === 'string' ? v : '';
+}
+
+/**
+ * 找某个资产图片节点的参考图节点（按节点 data 上的 assetRefOf 反查）。
+ * 一个资产图理论上只有一个参考图节点；异常情况下留下多个时优先取有图的那个。
+ */
+export function findAssetReferenceNode(imageNodeId: string): LibTVNode | null {
+  const store = useCanvasStore.getState();
+  // n.id !== imageNodeId：排除「参考图节点自己被关联成了资产图片节点」这种极端情况 ——
+  // 不排除它就等于"自己给自己当参考图"，而生成会把结果写回这个节点，原图就没了；
+  // 排除后走首次建节点那条分支，会另建一个参考图节点装原图，原图仍然安全。
+  const matches = store.nodes.filter(n => refMarkerOf(n) === imageNodeId && n.id !== imageNodeId);
+  if (matches.length === 0) return null;
+  return matches.find(n => Boolean((n.data as { imageUrl?: string })?.imageUrl)) ?? matches[0];
+}
+
+/** 补一条 dataFlow 边（方向：**参考图节点 → 资产图片节点**，与 imageOpsNodes 的派生节点一致） */
+function ensureReferenceEdge(refNodeId: string, imageNodeId: string): void {
+  const store = useCanvasStore.getState();
+  const edgeId = `e-${refNodeId}-${imageNodeId}`;
+  if (store.edges.some(e => e.id === edgeId)) return;
+  const edge: LibTVEdge = {
+    id: edgeId,
+    source: refNodeId,
+    target: imageNodeId,
+    type: 'dataFlow',
+  };
+  store.addEdge(edge);
+}
+
+/**
+ * 记下「这张图是这个资产的**用户原图**」（上传 / 从资产库导入 / 关联已有节点三条路径调用），
+ * 并把它同步到参考图节点上。
+ *
+ * 为什么在写入时就把原图镜像出去、而不是等到生成时再判断：写入这一刻是**唯一**
+ * 确知"这张图来自用户"的时刻。等到生成时再看节点上的图，就只能靠猜（见 ASSET_SOURCE_URL_FIELD 注释）。
+ *
+ * 参考图节点此刻还不存在就只记字段（不在上传时就往画布上塞节点，避免每个上传过的资产都多一个节点）；
+ * 真正建节点在生成前由 ensureAssetReferenceNode 完成。
+ */
+export function rememberAssetSourceImage(imageNodeId: string, url: string): void {
+  if (!imageNodeId || !url) return;
+  const store = useCanvasStore.getState();
+  const imageNode = store.nodes.find(n => n.id === imageNodeId);
+  if (!imageNode) {
+    console.warn('[AssetImageSync] 记录资产原图失败：图片节点不存在:', imageNodeId);
+    return;
+  }
+
+  if (sourceUrlOf(imageNode) !== url) {
+    store.updateNodeData(imageNodeId, { [ASSET_SOURCE_URL_FIELD]: url } as never);
+  }
+
+  // 已有参考图节点：跟着换成新原图（用户重传/换了一张），并补回可能被删掉的边 ——
+  // 没有边，后端就拿不到这张参考图（executor.go 只在有 mentions 时才按 @ 引用取图，
+  // 边是 fallback 通道，两条都留着才稳，与 imageOpsNodes 的约定一致）
+  const existing = findAssetReferenceNode(imageNodeId);
+  if (existing) {
+    if ((existing.data as { imageUrl?: string })?.imageUrl !== url) {
+      store.updateNodeData(existing.id, { imageUrl: url } as never);
+    }
+    ensureReferenceEdge(existing.id, imageNodeId);
+  }
+}
+
+/** ensureAssetReferenceNode 的返回值：提示词占位符、mentions、@ 标签要用的三样东西 */
+export interface AssetReferenceNodeInfo {
+  /** 参考图节点 id：prompt 里的 `[[m:<nodeId>]]` 与 mentions[].nodeId 都用它 */
+  nodeId: string;
+  /** 参考图节点上的图 URL */
+  imageUrl: string;
+  /** @ 标签的显示文本 */
+  label: string;
+}
+
+/**
+ * 生成前确保「资产原图」有一个生成不会覆盖的落点，返回参考图节点信息。
+ *
+ * 三种情形：
+ *  1. 记过原图（ASSET_SOURCE_URL_FIELD 有值）→ 建节点 / 刷新图（用户可以重传原图）；
+ *  2. 没记过原图、但已经有参考图节点 → **直接沿用，绝不拿节点当前的图去覆盖它**。
+ *     这条是"安全第一"的兜底：参考图节点的内容只可能来自用户（第 1 条），
+ *     而节点当前的图可能是上一次的生成结果，覆盖就等于把原图换成生成结果 —— 丢原图；
+ *  3. 没记过原图、也没有参考图节点 → 首次生成，此时节点上这张图只能来自用户
+ *     （本流程还没有往这个节点生成过），把它当原图收下，老画布（本次改动前上传的）也能受益。
+ *
+ * @returns 没有原图可依据时返回 null（调用方就按纯文生图走，不要拼参考图占位符）
+ */
+export function ensureAssetReferenceNode(imageNodeId: string): AssetReferenceNodeInfo | null {
+  const store = useCanvasStore.getState();
+  const imageNode = store.nodes.find(n => n.id === imageNodeId);
+  if (!imageNode) {
+    console.warn('[AssetImageSync] 建参考图节点失败：资产图片节点不存在:', imageNodeId);
+    return null;
+  }
+
+  const existing = findAssetReferenceNode(imageNodeId);
+  const recorded = sourceUrlOf(imageNode);
+  const currentUrl = ((imageNode.data as { imageUrl?: string })?.imageUrl) || '';
+
+  // 情形 2：已有参考图节点又没有新的原图记录 —— 原样沿用（这一步拦住的正是"丢原图"）
+  if (!recorded && existing) {
+    const existingUrl = ((existing.data as { imageUrl?: string })?.imageUrl) || '';
+    // 参考图节点上没有图（用户清过/换过）就没有参考图可用，别给 prompt 里留个指向空节点的 @ 引用
+    if (!existingUrl) return null;
+    ensureReferenceEdge(existing.id, imageNodeId);
+    return {
+      nodeId: existing.id,
+      imageUrl: existingUrl,
+      label: ((existing.data as { label?: string })?.label) || '原图',
+    };
+  }
+
+  // 情形 3：首次收到原图（这里是唯一"看一眼节点当前这张图"的地方）。
+  // currentUrl 为空（用户没上传过）就直接放弃，不建空节点
+  const url = recorded || currentUrl;
+  if (!url) return null;
+
+  if (existing) {
+    if (((existing.data as { imageUrl?: string })?.imageUrl) !== url) {
+      store.updateNodeData(existing.id, { imageUrl: url } as never);
+    }
+    ensureReferenceEdge(existing.id, imageNodeId);
+    return {
+      nodeId: existing.id,
+      imageUrl: url,
+      label: ((existing.data as { label?: string })?.label) || '原图',
+    };
+  }
+
+  // 建节点：摆在资产图片节点左侧一屏（与资产图节点 ← 脚本节点的排布同向，一眼看出"这张是参考图"）。
+  // 位置按**绝对坐标**算：资产图节点在组合里时 position 是相对组合的，直接减会把它放到别处。
+  const origin = absolutePositionIn(store.nodes, imageNode);
+  const label = `${(imageNode.data as { label?: string })?.label || '图片'}·原图`;
+  const refNode = createNode(
+    'image',
+    { x: origin.x - 360, y: origin.y },
+    {
+      data: {
+        label,
+        prompt: '',
+        imageUrl: url,
+        // 缩略图按约定推到 .thumb.webp（推不出来时 undefined，ImageNode 会回退原图）
+        thumbUrl: deriveThumbUrl(url),
+        status: 'success',
+        [ASSET_REF_MARKER]: imageNodeId,
+      } as Partial<ImageNodeData>,
+    },
+  );
+
+  const edge: LibTVEdge = {
+    id: `e-${refNode.id}-${imageNodeId}`,
+    source: refNode.id,
+    target: imageNodeId,
+    type: 'dataFlow',
+  };
+  // 一次 addNodesAndEdges = 一条撤销历史（canvasStore 里一个 set 调一次 saveHistory），
+  // 用户按一次 ⌘Z 就把"参考图节点 + 边"整体退掉，与 imageOpsNodes 的派生节点同一套约定
+  store.addNodesAndEdges([refNode], [edge]);
+
+  console.log('[AssetImageSync] 创建资产参考图节点成功:', {
+    imageNodeId,
+    refNodeId: refNode.id,
+    url,
+  });
+
+  return { nodeId: refNode.id, imageUrl: url, label };
+}

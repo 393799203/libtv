@@ -10,6 +10,7 @@ import { BaseNode } from './BaseNode';
 import type { AudioNodeData } from '@/types/canvas';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { uploadAudio } from '@/services/uploadApi';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 
 type AudioNodeType = Node<AudioNodeData, 'audio'>;
 
@@ -359,6 +360,11 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
         }
         </div>
       </BaseNode>
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+
 
       {/* 隐藏的 audio 元素用于实际播放 */}
       {data.audioUrl && (

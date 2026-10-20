@@ -401,6 +401,13 @@ func ImageExts() map[string]bool {
 	}
 }
 
+// AudioExts 通用音频扩展名白名单（与 ContentTypeForAudio 的键保持一致）
+func AudioExts() map[string]bool {
+	return map[string]bool{
+		".mp3": true, ".m4a": true, ".wav": true, ".ogg": true, ".flac": true,
+	}
+}
+
 // VideoExts 通用视频扩展名白名单
 func VideoExts() map[string]bool {
 	return map[string]bool{

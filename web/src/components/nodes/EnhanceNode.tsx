@@ -16,6 +16,7 @@ import {
   FALLBACK_ENHANCE_CHANNELS,
   type EnhanceChannelsResult,
 } from '@/services/enhanceApi';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 
 type EnhanceNodeType = Node<EnhanceNodeData, 'enhance'>;
 
@@ -114,7 +115,8 @@ export const EnhanceNode = memo<NodeProps<EnhanceNodeType>>(function EnhanceNode
   const displayUrl = showSource ? data.sourceUrl : data.videoUrl;
 
   return (
-    <BaseNode id={id} data={data} selected={selected}>
+    <>
+      <BaseNode id={id} data={data} selected={selected}>
       <div className="w-full flex flex-col gap-2">
         {/* 工具条：渠道 + 档位 + 运行，全部压在一行。
             竖着堆三行会把节点撑得很高，画布上一屏看不到几个节点；
@@ -263,6 +265,11 @@ export const EnhanceNode = memo<NodeProps<EnhanceNodeType>>(function EnhanceNode
           </span>
         </Tooltip>
       </div>
-    </BaseNode>
+      </BaseNode>
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+    </>
   );
 });

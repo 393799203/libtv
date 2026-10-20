@@ -18,7 +18,9 @@ import {
   getAssetImageNodeId,
   associateExistingImageNode,
   mergeAssetFieldsInStore,
+  rememberAssetSourceImage,
 } from '@/utils/assetImageSync';
+import { stripViewRequirement } from '@/utils/assetDescription';
 
 type AssetType = 'character' | 'scene' | 'prop';
 
@@ -247,11 +249,7 @@ function AssetSection<
           {items.map((item) => (
             <div key={item.name}>
               <strong>{item.name}</strong>：
-              {item.description
-                .replace(/【三视图要求】[^\n]*/g, '')
-                .replace(/【四视图要求】[^\n]*/g, '')
-                .replace(/【六视图要求】[^\n]*/g, '')
-                .trim()}
+              {stripViewRequirement(item.description)}
             </div>
           ))}
         </div>
@@ -354,6 +352,9 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
                 imageUrl: url,
                 prompt: character.description,
               } as any);
+              // 这条路没走 updateAssetImageNodeUrl（节点是刚建的），原图登记要在这里补上：
+              // 漏了它，"资产卡片 AI生成"就没有参考图可用（见 assetImageSync 的参考图节点说明）
+              rememberAssetSourceImage(created.id, url);
             }
           }
         }
@@ -376,6 +377,9 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
         const node = useCanvasStore.getState().nodes.find(n => n.id === nodeId);
         const nodeImageUrl = (node?.data as { imageUrl?: string })?.imageUrl;
         if (nodeImageUrl) {
+          // 用户指定这张已有节点当资产图 = 它就是"用户原图"，登记下来供生成时当参考图用
+          // （生成会覆盖资产图节点的 imageUrl，所以登记时必须把 URL 另外记一份）
+          rememberAssetSourceImage(nodeId, nodeImageUrl);
           const typeMap = { character: 'characters', scene: 'scenes', prop: 'props' } as const;
           const key = typeMap[assetType];
           const scriptNode = useCanvasStore.getState().nodes.find(n => n.id === scriptNodeId);
@@ -427,6 +431,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
                 imageUrl: url,
                 prompt: scene.description,
               } as any);
+              // 同 handleCharacterUpload：新建节点这条路要自己登记原图
+              rememberAssetSourceImage(created.id, url);
             }
           }
         }
@@ -470,6 +476,8 @@ export const AssetPreparationPanel = memo<AssetPreparationPanelProps>(
                 imageUrl: url,
                 prompt: prop.description,
               } as any);
+              // 同 handleCharacterUpload：新建节点这条路要自己登记原图
+              rememberAssetSourceImage(created.id, url);
             }
           }
         }

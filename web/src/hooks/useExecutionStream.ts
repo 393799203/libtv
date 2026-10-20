@@ -407,11 +407,12 @@ export function useExecutionStream(
           // ✅ executor 返回 Status=failed 但 err=nil 时，data 带 error 字段（图片/视频节点）
           if (data.error) {
             message.error(data.error);
+            // transient：失败没有产物、画布内容没变 → 不占历史
             useCanvasStore.getState().updateNodeData(event.nodeId, {
               status: 'failed',
               error: data.error,
               stale: false,
-            } as never);
+            } as never, { transient: true });
             return;
           }
           const updates: Record<string, unknown> = {};
@@ -466,10 +467,11 @@ export function useExecutionStream(
             (event.data as { message?: string } | undefined)?.message ||
             '节点执行失败';
           message.error(errMsg);
+          // transient：同上，失败态不进历史
           useCanvasStore.getState().updateNodeData(event.nodeId, {
             status: 'failed',
             error: errMsg,
-          } as never);
+          } as never, { transient: true });
         } else if (event.type === 'execution_failed') {
           // ✅ 处理execution_failed事件（整体执行失败）
           // ✅ 兼容两种字段名：error（WorkflowEvent格式）和errorMsg（GetExecution API格式）
@@ -484,11 +486,12 @@ export function useExecutionStream(
             if (!seenNodeIds.has(n.id)) return;
             const s = n.data.status;
             if (s === 'running' || s === 'pending') {
+              // transient：失败是终态但没有产物，画布内容没变 —— 不该占一格撤销
               store.updateNodeData(n.id, {
                 status: 'failed',
                 error: errMsg,
                 progressMessage: undefined,
-              } as never);
+              } as never, { transient: true });
             }
           });
         } else if (event.type === 'execution_completed') {
@@ -504,11 +507,12 @@ export function useExecutionStream(
             reconcilePromise = reconcileNodesOnTerminal(projectId, executionId, pending, 'success');
           }
         } else if (event.type === 'node_started' && event.nodeId) {
+          // transient：生成中不占历史（撤销要停就停在"生成前"那一帧）
           useCanvasStore.getState().updateNodeData(event.nodeId, {
             status: 'running',
             error: undefined,
             progressMessage: undefined,
-          } as never);
+          } as never, { transient: true });
         } else if (event.type === 'node_progress' && event.nodeId) {
           const pd = event.data as { elapsed?: number; elapsedMs?: number; message?: string } | undefined;
           // 高频进度更新走专用通道：只写 progressMessage（"已运行 10s"），不进历史、不置脏标记

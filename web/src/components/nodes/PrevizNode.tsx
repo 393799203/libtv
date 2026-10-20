@@ -6,6 +6,7 @@ import { BaseNode } from './BaseNode';
 import type { PrevizNodeData } from '@/types/canvas';
 import type { PrevizScene } from '@/pages/previz/types';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 
 type PrevizNodeType = Node<PrevizNodeData, 'previz'>;
 
@@ -44,7 +45,8 @@ export const PrevizNode = memo<NodeProps<PrevizNodeType>>(function PrevizNode({ 
   );
 
   return (
-    <BaseNode id={id} data={data} selected={selected} hideInputHandle>
+    <>
+      <BaseNode id={id} data={data} selected={selected} hideInputHandle>
       <div className="w-full flex flex-col gap-2">
         {data.stillUrl ? (
           /* 已导出静帧：优先展示白模图（锁构图参考，完整显示不裁切） */
@@ -86,6 +88,11 @@ export const PrevizNode = memo<NodeProps<PrevizNodeType>>(function PrevizNode({ 
           打开预演编辑器
         </button>
       </div>
-    </BaseNode>
+      </BaseNode>
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+    </>
   );
 });

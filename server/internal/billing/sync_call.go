@@ -36,7 +36,12 @@ type SyncCall struct {
 	// ProjectID 可选：直连接口（提示词/白模解析）由前端带上项目，对账页才能显示项目名。
 	// 不带也能跑，只是对账行里项目为空（界面显示「-」）。
 	ProjectID string
-	Charged   int64
+	// NodeID / ExecID 可选：直连接口不跑工作流，本来没有节点——
+	// 点选识别是用户在**某个图片节点**上点出来的，前端把节点号带上，
+	// 对账页就能按项目+节点实时解析出节点名（node_name），管理员一眼看出这是哪张图上的操作。
+	NodeID  string
+	ExecID  string
+	Charged int64
 	// Resolution / Seconds 计费口径（可选，仅作展示，退费时原样回传保证账单口径一致）
 	Resolution string
 	Seconds    int
@@ -57,6 +62,7 @@ func (c SyncCall) Write(ctx context.Context, status, note string, refunded int64
 		Model:            c.Model,
 		UserID:           c.UserID,
 		ProjectID:        c.ProjectID,
+		NodeID:           c.NodeID,
 		Status:           status,
 		ChargedAmount:    c.Charged,
 		RefundedAmount:   refunded,

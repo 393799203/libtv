@@ -130,11 +130,24 @@ func (c *ImageClient) GenerateImageWithModel(ctx context.Context, model string, 
 
 // GenerateImageFromImage 图生图：基于参考图生成新图像（使用默认model）
 func (c *ImageClient) GenerateImageFromImage(ctx context.Context, imageURL string, prompt string, size string) ([]string, error) {
-	return c.GenerateImageFromImageWithGuidance(ctx, c.model, []string{imageURL}, prompt, size, 7.5, 1)
+	return c.GenerateImageFromImageWithModel(ctx, c.model, []string{imageURL}, prompt, size, 1)
 }
 
-// GenerateImageFromImageWithGuidance 图生图：基于参考图生成新图像，可指定model和guidance_scale
-func (c *ImageClient) GenerateImageFromImageWithGuidance(ctx context.Context, model string, imageURLs []string, prompt string, size string, guidanceScale float64, n int) ([]string, error) {
+// GenerateImageFromImageWithModel 图生图：基于参考图生成新图像，可指定model与张数。
+//
+// 这里**刻意没有** guidance_scale：
+//  1. 它是「硅基流动扩展格式」的遗留物（旧实现里 SiliconFlowImageRequest 才有该字段），
+//     迁到 OpenAI 兼容的 /images/generations 后（见下面 doRequest），请求体只剩
+//     model/prompt/size/n/image/watermark，形参 guidanceScale 从此再没被引用过 ——
+//     留着它等于「以为传了其实没传」，比删掉更容易误导后来的人。
+//  2. 实测上游也不接受：2026-10 对默认图像模型 doubao-seedream-5.0-lite 直接打
+//     POST https://token.wasu.cn/v1/images/generations 带 guidance_scale=12，返回
+//     400 InvalidParameter「the parameter `guidance_scale` is not supported by the
+//     current model」（该渠道是 new-api 网关，会把该字段原样转发给火山 Ark）。
+//     也就是说一旦真的写进请求体，图生图会**全量失败**。
+//
+// 将来若某个图像模型确实支持该参数，必须按模型/渠道灰度下发，不能无条件带上。
+func (c *ImageClient) GenerateImageFromImageWithModel(ctx context.Context, model string, imageURLs []string, prompt string, size string, n int) ([]string, error) {
 	if size == "" {
 		size = "1920x1080"
 	}

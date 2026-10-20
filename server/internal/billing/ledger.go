@@ -181,13 +181,14 @@ func SceneOf(action string) string {
 }
 
 var actionScenes = map[string]string{
-	ActionVideo:          "视频生成",
-	ActionImage:          "图片生成",
-	ActionStory:          "故事生成",
-	ActionScript:         "分镜剧本生成",
-	ActionAudio:          "音频生成",
-	ActionPrevizAnalyze:  "白模场景解析",
-	ActionPromptGenerate: "提示词生成",
+	ActionVideo:           "视频生成",
+	ActionImage:           "图片生成",
+	ActionStory:           "故事生成",
+	ActionScript:          "分镜剧本生成",
+	ActionAudio:           "音频生成",
+	ActionPrevizAnalyze:   "白模场景解析",
+	ActionPromptGenerate:  "提示词生成",
+	ActionRecognizeObject: "点选识别",
 }
 
 // State 读一行对账（按编号）。用于两个「钱」上的判断：

@@ -1462,8 +1462,19 @@ func truncateStr(s string, max int) string {
 	return string(runes[:max]) + "\n...[truncated]"
 }
 
-// mentionMarkerRe 匹配前端 @ 引用占位符 [[m:<id>]]，id 是字母数字随机串
-var mentionMarkerRe = regexp.MustCompile(`\[\[m:[A-Za-z0-9_]+\]\]`)
+// mentionMarkerRe 匹配前端 @ 引用占位符 [[m:<id>]]。
+//
+// id 是**不透明标识符**（nodeFactory 里已明令"id 不承载语义"），前端有两种写法，正则必须都认：
+//   - PromptEditor 的 @ 菜单生成的短随机串（纯字母数字，如 `k3f9z1`）；
+//   - 程序化写入的引用用**节点 id 派生**：imageOpsNodes 的 `mk-<节点id>-<随机>`，
+//     以及 shotNodeSync / 资产流程（AssetEditModal）直接用节点 id —— 节点 id 形如
+//     `i-abc123…`，**带连字符**。
+//
+// 原来写死 [A-Za-z0-9_]+，上面第二类根本匹配不上：占位符不会被剥掉，`[[m:i-xxx]]`
+// 会原样发给图像/视频模型（模型看到一串莫名其妙的方括号文本）。顺带影响"没有提示词"的
+// 判定——只写了 @ 引用、没写实际描述的提示词本该算空，旧正则下却算非空。
+// 改成"不含方括号就算一个 id"：不再假设 id 的字符集，也不会把同一行的两个 `[[m:` 并成一段。
+var mentionMarkerRe = regexp.MustCompile(`\[\[m:[^\[\]]+\]\]`)
 
 // stripMentionMarkers 把 prompt 文本里的 [[m:ID]] 占位符去掉（它们是前端渲染标记，
 // LLM 看了会当成垃圾文本）。
@@ -1501,20 +1512,35 @@ func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, f
 	}
 }
 
+// imageNodeData 图片节点的 data 字段（前端画布 JSON 里的 node.data）。
+// 单独提成命名类型是为了能写单测直接断言「前端写的字段后端真的读得到」——
+// 匿名结构体没法从测试里构造同一个类型。
+type imageNodeData struct {
+	Mode        string `json:"mode"`
+	Prompt      string `json:"prompt"`
+	Model       string `json:"model"`
+	Resolution  string `json:"resolution"`  // 清晰度：1K/2K/4K
+	AspectRatio string `json:"aspectRatio"` // 比例：16:9/9:16/1:1等
+	Quality     string `json:"quality"`     // 画质：低画质/标准画质/高画质
+	Count       int    `json:"count"`       // 生成数量
+	// 资产归属（character/scene/prop）：前端写在节点 data 上。
+	// 历史上靠节点 id 前缀「角色-」等推断，id 不再承载语义，故改为读字段。
+	AssetType string `json:"assetType"`
+	// 多视图类型（character3/character4/scene4/prop6）：前端「生成视图」时写在节点 data 上
+	// （web/src/components/canvas/imageops/ViewConfig.tsx → utils/imageOpsNodes.ts），
+	// 随画布 JSON 一起落库、再由工作流计划原样带到这里（parser.go 直接透传 node.Data）。
+	// 非空即代表「这是一次多视图设定表生成」，图生图包装句必须换话术（见 buildImageToImagePrompt）。
+	ViewKind string `json:"viewKind"`
+	// 元素编辑（局部重绘）一次性指令：{baseUrl, maskUrl, prompt}。
+	// 前端「元素编辑」写进来（web/src/components/canvas/imageops/ElementEditConfig.tsx），
+	// 非空即代表"这次只重画蒙版选区里的内容，然后把结果贴回原图"，
+	// 走一条与 @ 引用/上游边都不同的路（原因见 element_edit.go 文件头）。
+	ElementEdit json.RawMessage `json:"elementEdit"`
+	Mentions    json.RawMessage `json:"mentions"` // ✅ 添加 Mentions 字段，用于用户明确@引用的上游节点
+}
+
 func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *ExecutionContext) (*NodeOutput, error) {
-	var data struct {
-		Mode        string          `json:"mode"`
-		Prompt      string          `json:"prompt"`
-		Model       string          `json:"model"`
-		Resolution  string          `json:"resolution"`  // 清晰度：1K/2K/4K
-		AspectRatio string          `json:"aspectRatio"` // 比例：16:9/9:16/1:1等
-		Quality     string          `json:"quality"`     // 画质：低画质/标准画质/高画质
-		Count       int             `json:"count"`       // 生成数量
-		// 资产归属（character/scene/prop）：前端写在节点 data 上。
-		// 历史上靠节点 id 前缀「角色-」等推断，id 不再承载语义，故改为读字段。
-		AssetType   string          `json:"assetType"`
-		Mentions    json.RawMessage `json:"mentions"`    // ✅ 添加 Mentions 字段，用于用户明确@引用的上游节点
-	}
+	var data imageNodeData
 	if err := json.Unmarshal(node.Data, &data); err != nil {
 		return nil, fmt.Errorf("parse image node data: %w", err)
 	}
@@ -1524,6 +1550,9 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var styleImageURLs []string     // 风格图：只提取画风/色彩/视觉风格
 	var referenceImageURLs []string // 普通参考图：保持主体结构进行修改
 	var mentions []promptMention
+
+	// 元素编辑（局部重绘）指令：非空就说明这次是"只重画选区"（见 element_edit.go）
+	element := parseElementEdit(data.ElementEdit)
 
 	// ✅ 详细日志：打印mentions字段内容（用于调试图生图判断逻辑）
 	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（开始） ========== ")
@@ -1667,6 +1696,23 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		upstreamImageURLs = append(styleImageURLs, referenceImageURLs...)
 	}
 
+	// 元素编辑：把**节点自己的原图**当参考图（也是"要改的那张图"）。
+	// 必须在下面"最终判断"之前并入，否则 upstreamImageURLs 为空 → 走文生图，
+	// 整张图从零画起，跟原图毫无关系。
+	//
+	// 这里**独占**参考图（丢掉 @ 引用的参考图与上游风格图，只留这一张）：
+	// 上游的图像接口是把多张图一起当"素材"喂进去的（llm.ImageRequest.Image 是数组），
+	// 局部重绘时多喂一张，模型很可能把那张图的内容也画进选区（"把外套换成红色"，
+	// 结果贴回的一块里出现了风格图里的东西）。原图本身的画风/风格已经定死在像素里，
+	// 这一次生成唯一要参考的就是它。
+	//
+	// 赋值点在下面（拿到 compositor 之后）：元素编辑喂给模型的通常是"选区+周边"的裁剪图
+	// （见 element_edit.go 的 elementCropRect），裁剪要先把原图拉下来才知道裁哪儿。
+	// 这里只丢掉风格图，免得中间有别的逻辑又把它加回来。
+	if element != nil {
+		styleImageURLs = nil
+	}
+
 	// ✅ 最终判断结果
 	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（结束） ========== ")
 	log.Printf("[ImageExecutor] 最终结果: upstreamImageURLs=%v (是否使用图生图=%v 图片数=%d)", upstreamImageURLs, len(upstreamImageURLs) > 0, len(upstreamImageURLs))
@@ -1675,19 +1721,35 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 和视频节点同一套规则，只影响这一次调用（data.Prompt 保持用户自己写的那份，不写回节点）。
 	// 图片节点的语义是"要有描述"，而文本节点本身就是一段描述 —— 所以它既能补充提示词，
 	// 也能单独当提示词用（上游参考图/风格图仍然只是附加条件，不参与这里）。
-	upstreamTexts := collectUpstreamText(node.ID, mentions, execCtx)
-	effectivePrompt := composePromptWithUpstreamText(data.Prompt, upstreamTexts)
-	if effectivePrompt != data.Prompt {
-		log.Printf("[ImageExecutor] 📝 并入上游文本参考: nodeID=%s 文本段=%d 追加字符=%d 提示词 %d→%d",
-			node.ID, len(upstreamTexts), len([]rune(effectivePrompt))-len([]rune(data.Prompt)),
-			len([]rune(data.Prompt)), len([]rune(effectivePrompt)))
+	//
+	// 元素编辑是例外：提示词就是用户在选区上写的那一句，节点自己的提示词与上游文本节点
+	// 都不参与 —— 那句短提示词（"把这个杯子换成红色"）混进整图提示词后，
+	// 模型会照着两份要求重画整张图，局部重绘就白做了。
+	var effectivePrompt string
+	if element != nil {
+		// 只要这次是元素编辑，就**只**用指令自带的那句 —— 哪怕它是空的（移动模式可以什么都不写：
+		// "把它搬到那里"本身就是完整要求，改图指令由 elementCompositor 生成）。
+		// 以前条件是 Prompt != ""，空的时候会掉进下面的分支、把节点自己那份整图提示词混进来，
+		// 结果模型同时收到"整图要怎么画"和"只改这一块"两份要求（注释里早就写过这个坑）。
+		effectivePrompt = element.Prompt
+		log.Printf("[ImageExecutor] 🖌️ 元素编辑：提示词取指令自带的那句（不并入节点提示词/上游文本）: %q", element.Prompt)
+	} else {
+		upstreamTexts := collectUpstreamText(node.ID, mentions, execCtx)
+		effectivePrompt = composePromptWithUpstreamText(data.Prompt, upstreamTexts)
+		if effectivePrompt != data.Prompt {
+			log.Printf("[ImageExecutor] 📝 并入上游文本参考: nodeID=%s 文本段=%d 追加字符=%d 提示词 %d→%d",
+				node.ID, len(upstreamTexts), len([]rune(effectivePrompt))-len([]rune(data.Prompt)),
+				len([]rune(data.Prompt)), len([]rune(effectivePrompt)))
+		}
 	}
 
 	// 没有提示词就报错。原来这里返回的是 success + 空 imageUrl —— 前端一样没有任何反馈
 	// （节点不红、没有错误信息），用户以为"点了没反应"。
 	// 判定用清掉 @ 引用标记后的文本：只插了 @ 引用、没写实际描述的也算没有提示词
 	// （图片节点的语义是"有描述就行"，现在上游文本节点也算描述的一种）。
-	if strings.TrimSpace(stripMentionMarkers(effectivePrompt)) == "" {
+	// 移动模式允许不写提示词："把它移到那里"已经是完整要求（指令由后端生成）。
+	// 其余情况仍然要求有描述 —— 空着让模型自由发挥等于白扣一次积分。
+	if strings.TrimSpace(stripMentionMarkers(effectivePrompt)) == "" && !movingElementEdit(element) {
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "failed",
@@ -1708,6 +1770,79 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				"imageUrls": []string{},
 			},
 		}, nil
+	}
+
+	// 元素编辑：把原图与蒙版拉下来（本次生成的多张结果共用这一份缓存）。
+	// 放在这里的原因：上面的空提示词检查已经过了（不至于白下载几十 MB），
+	// 而下面的尺寸计算需要原图的真实长宽比。失败**直接让整次执行失败**，
+	// 不退回普通生成 —— 那会整图重画一遍、白扣一次积分（详见 element_edit.go）。
+	var compositor *elementCompositor
+	if element != nil {
+		c, cerr := newElementCompositor(ctx, element)
+		if cerr != nil {
+			log.Printf("[ImageExecutor] ❌ 元素编辑准备失败: %v", cerr)
+			return &NodeOutput{
+				NodeID: node.ID,
+				Status: "failed",
+				Data:   map[string]interface{}{"error": cerr.Error()},
+			}, nil
+		}
+		compositor = c
+
+		// 参考图 = 送给模型的那张（裁剪图，或整张原图）。裁剪图的字节要落一次对象存储
+		// 才能作为上游的参考图地址；用 UploadFromReader 走标准管线（哈希去重 + URL）。
+		//
+		// 不裁剪时原本直接把我们 CDN 上的原图地址给上游 —— 但原图可能是 WebP/AVIF（实测有），
+		// 上游认不认这个格式不由我们决定。所以非标准格式先自己转成 PNG 再上传，
+		// 把"上游能不能读"这件事变成我们可控的（标准格式仍然直传，不多一次上传）。
+		refURL := element.BaseURL
+		if !compositor.cropped() && service.NeedsTranscode(compositor.base) {
+			converted, cerr := service.ToPNG(compositor.base)
+			if cerr != nil {
+				log.Printf("[ImageExecutor] ❌ 元素编辑：原图转 PNG 失败（上游读不了这个格式）: %v", cerr)
+				return &NodeOutput{
+					NodeID: node.ID,
+					Status: "failed",
+					Data:   map[string]interface{}{"error": fmt.Sprintf("元素编辑：原图格式转换失败（%v）", cerr)},
+				}, nil
+			}
+			name := fmt.Sprintf("element-base-%d.png", time.Now().UnixNano())
+			up, uerr := i.fileUploadService.UploadFromReader(bytes.NewReader(converted), int64(len(converted)), name, service.UploadOptions{
+				Dir:            execCtx.GetCanvasDir(),
+				ProjectID:      execCtx.GetProjectID(),
+				DefaultExt:     ".png",
+				ContentTypeFor: service.ContentTypeForImage,
+			})
+			if uerr != nil {
+				log.Printf("[ImageExecutor] ❌ 元素编辑：原图转 PNG 后上传失败: %v", uerr)
+				return &NodeOutput{
+					NodeID: node.ID,
+					Status: "failed",
+					Data:   map[string]interface{}{"error": fmt.Sprintf("元素编辑：原图格式转换后上传失败（%v）", uerr)},
+				}, nil
+			}
+			refURL = up.URL
+			log.Printf("[ImageExecutor] 🖌️ 元素编辑：原图非 PNG/JPEG（%d 字节）→ 已转 PNG 上传 %s", len(compositor.base), up.URL)
+		}
+		if compositor.cropped() {
+			cropURL, uerr := i.uploadElementCrop(compositor, execCtx.GetCanvasDir(), execCtx.GetProjectID())
+			if uerr != nil {
+				// 上传失败没有任何"退路"：退回整张原图就是把用户不接受的行为再演一遍
+				// （整图重画 + 只贴回一块碎片），所以直接失败，费用在扣费之前不算数。
+				log.Printf("[ImageExecutor] ❌ 元素编辑：裁剪图上传失败: %v", uerr)
+				return &NodeOutput{
+					NodeID: node.ID,
+					Status: "failed",
+					Data:   map[string]interface{}{"error": fmt.Sprintf("元素编辑：局部图准备失败（%v）", uerr)},
+				}, nil
+			}
+			refURL = cropURL
+		}
+		referenceImageURLs = []string{refURL}
+		upstreamImageURLs = []string{refURL}
+		log.Printf("[ImageExecutor] 🖌️ 元素编辑：参考图=%s（裁剪=%v 选区=[%d,%d %d,%d]）",
+			refURL, compositor.cropped(),
+			compositor.selection.Min.X, compositor.selection.Min.Y, compositor.selection.Max.X, compositor.selection.Max.Y)
 	}
 
 	// ✅ 尺寸参数：从 resolution + aspectRatio 计算
@@ -1746,6 +1881,18 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 	}
 
+	// 元素编辑**强制**按"模型这次要画的那块"的长宽比出图（不看 data.aspectRatio）：
+	// 裁剪模式下那块是"选区+周边"的裁剪图，不裁剪时就是原图本身。比例必须与它一致，
+	// 否则贴回去的那块会被拉伸变形。尺寸已经在上面量好了，不再多拉一次。
+	// 计费档位仍取用户选的 data.Resolution，不受这里影响。
+	if compositor != nil {
+		if ratio := compositor.aspectRatioString(); ratio != "" {
+			width, height = calculateSizeFromResolutionAndRatio(data.Resolution, ratio)
+			log.Printf("[ImageExecutor] 🖌️ 元素编辑：按%s长宽比 %s 出图 -> %dx%d（贴回时不会拉伸）",
+				elementEditScopeName(compositor), ratio, width, height)
+		}
+	}
+
 	size := fmt.Sprintf("%dx%d", width, height)
 
 	// 清理提示词中的占位符（在上游文本并入之后清理）
@@ -1761,8 +1908,15 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 普通图片节点: nodeID=%s", node.ID)
 	}
 
-	// 确定使用的模型 ID（前端已按用户渠道选择，直接使用）
-	apiModelID := data.Model
+	// 确定使用的模型 ID（前端已按用户渠道选择，直接使用）；空模型兜底默认图像模型
+	rawModel := data.Model
+	apiModelID := resolveImageModel(rawModel, execCtx.GetChannel(), i.modelManager)
+	if apiModelID != rawModel {
+		log.Printf("[ImageExecutor] ⚠️ 节点没有模型（多为「上传图片」派生的节点），兜底默认图像模型: %s", apiModelID)
+		// 回写 data.Model：下游生成历史（RecordGeneration）与对账都用它记「实际用了哪个模型」，
+		// 继续留空会记成一半空白的记录，事后无从追溯
+		data.Model = apiModelID
+	}
 
 	// 华数TokenHub部分模型有最小像素要求，自动提升分辨率
 	minPixels := getModelMinPixels(apiModelID)
@@ -1829,20 +1983,22 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	var generatedURLs []string
 
 	if len(upstreamImageURLs) > 0 {
-		// 根据风格图/参考图组合构建不同的提示词
+		// 根据风格图/参考图组合构建不同的提示词（多视图单独一套话术，见 buildImageToImagePrompt）
+		//
+		// 元素编辑走**专用话术**，不进 buildImageToImagePrompt：
+		//  1. 通用参考图分支写的是"请保持参考图中的主体结构、细节特征和整体风格"，
+		//     而元素编辑要的恰恰是把那一处的东西改掉/去掉 —— 两句话对着干，
+		//     模型会老老实实保留目标（线上实测"选块内的东西并没有修改"）；
+		//  2. 通用话术还会按 viewKind 走多视图分支，节点上留着 viewKind（资产设定表）时
+		//     会变成"扩展成多视角设定表"，与"只改这一处"直接冲突。
 		var imageToImagePrompt string
-		if len(styleImageURLs) > 0 && len(referenceImageURLs) > 0 {
-			// 既有风格图又有参考图：参考风格图的画风，基于参考图内容修改
-			imageToImagePrompt = fmt.Sprintf("参考风格图的画风、色彩和视觉风格，基于参考图的内容进行修改：%s。请保持参考图的主体结构，同时采用风格图的艺术风格。", finalPrompt)
-		} else if len(styleImageURLs) > 0 {
-			// 只有风格图：仅提取风格元素，严禁复制内容
-			imageToImagePrompt = fmt.Sprintf("仅从风格图中提取以下艺术元素：画风（如油画/水彩/赛博朋克等）、色彩色调、光影氛围、笔触纹理、构图风格。严格禁止复制风格图中的任何具体内容，包括但不限于：人物、角色、物体、场景、建筑、背景。根据用户描述生成全新的画面：%s。生成结果应具有与风格图相同的艺术风格，但内容完全不同。", finalPrompt)
+		if compositor != nil {
+			imageToImagePrompt = compositor.buildRequestPrompt(finalPrompt)
 		} else {
-			// 只有普通参考图：基于参考图修改
-			imageToImagePrompt = fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
+			imageToImagePrompt = buildImageToImagePrompt(finalPrompt, data.ViewKind, len(styleImageURLs) > 0, len(referenceImageURLs) > 0)
 		}
-		log.Printf("[ImageExecutor] 使用图生图模式: styleCount=%d refCount=%d prompt=%s", len(styleImageURLs), len(referenceImageURLs), imageToImagePrompt)
-		generatedURLs, err = i.imageClient.GenerateImageFromImageWithGuidance(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, 12.0, count)
+		log.Printf("[ImageExecutor] 使用图生图模式: styleCount=%d refCount=%d elementEdit=%v prompt=%s", len(styleImageURLs), len(referenceImageURLs), compositor != nil, imageToImagePrompt)
+		generatedURLs, err = i.imageClient.GenerateImageFromImageWithModel(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, count)
 		if err != nil {
 			// 上游明确报错→自动退费；超时/没拿到结果→不自动退，交人工
 			return nil, imgTask.settleFailure(ctx, i.biller, execCtx, node.ID, err)
@@ -1867,7 +2023,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		var imageInfo *imageInfo
 		var dlErr error
 		for attempt := 1; attempt <= 3; attempt++ {
-			imageInfo, dlErr = i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID(), width, height)
+			imageInfo, dlErr = i.downloadAndUpload(ctx, generatedURL, node.ID, execCtx.GetCanvasDir(), execCtx.GetProjectID(), width, height, compositor)
 			if dlErr == nil {
 				break
 			}
@@ -1944,8 +2100,21 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 			"thumbUrls": thumbURLs,     // ✅ 全部缩略图
 			"width":     width,         // ✅ 返回实际图片宽度
 			"height":    height,        // ✅ 返回实际图片高度
+			// 元素编辑是**一次性指令**：这一跑已经按它合成完了，画布数据里必须删掉，
+			// 否则用户下次从这个节点的提示词面板直接点生成，会又按这个旧蒙版合成一遍
+			// （看着"选区外没动"就以为生成坏了，还白扣一次积分）。
+			// 失败时不删：重试还得用同一份蒙版（见 mergeNodeOutputData 的 clearFields）。
+			"clearFields": elementEditClearFields(compositor),
 		},
 	}, nil
+}
+
+// elementEditClearFields 执行成功后要从画布节点数据里删掉的字段（元素编辑指令）
+func elementEditClearFields(compositor *elementCompositor) []string {
+	if compositor == nil {
+		return nil
+	}
+	return []string{"elementEdit"}
 }
 
 // imageInfo 包含图片URL和尺寸信息
@@ -1956,9 +2125,13 @@ type imageInfo struct {
 	height   int
 }
 
-// downloadAndUpload 下载图片并使用 FileUploadService 上传（复用哈希去重等逻辑）
-func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, nodeID string, canvasDir string, projectID string, width int, height int) (*imageInfo, error) {
-	log.Printf("[ImageExecutor] 开始下载图片: url=%s dir=%s projectID=%s nodeID=%s", imageURL, canvasDir, projectID, nodeID)
+// downloadAndUpload 下载图片并使用 FileUploadService 上传（复用哈希去重等逻辑）。
+//
+// compositor 非空 = 本次是「元素编辑」：下载到的是模型重画过的整图，先按选区蒙版
+// 贴回原图，再上传合成结果 —— 所以节点最终拿到的是"只有选区变了"的那张图，
+// 尺寸也按合成结果（= 原图尺寸）回写，而不是请求上游的 size。
+func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, nodeID string, canvasDir string, projectID string, width int, height int, compositor *elementCompositor) (*imageInfo, error) {
+	log.Printf("[ImageExecutor] 开始下载图片: url=%s dir=%s projectID=%s nodeID=%s elementEdit=%v", imageURL, canvasDir, projectID, nodeID, compositor != nil)
 
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
@@ -1980,6 +2153,20 @@ func (i *ImageExecutor) downloadAndUpload(ctx context.Context, imageURL string, 
 	}
 
 	log.Printf("[ImageExecutor] 图片下载成功: size=%d bytes, 使用生成尺寸: %dx%d", len(imageData), width, height)
+
+	// 元素编辑：把模型结果按蒙版贴回原图（这一步失败就整张回退到模型原图？不行 ——
+	// 贴不回去意味着"选区外的像素已经被改掉了"，那正是用户不接受的。所以这里直接报错，
+	// 由上面的重试机制再试，仍失败则回退上游 URL，交给人工核查）
+	if compositor != nil {
+		composited, cerr := compositor.apply(imageData)
+		if cerr != nil {
+			return nil, fmt.Errorf("元素编辑合成失败: %w", cerr)
+		}
+		log.Printf("[ImageExecutor] 🖌️ 元素编辑合成完成: %d -> %d 字节（选区外保留原图 %dx%d，羽化 %dpx）",
+			len(imageData), len(composited), compositor.w, compositor.h, compositor.feather)
+		imageData = composited
+		width, height = compositor.size()
+	}
 
 	// 扩展名按真实字节判定：上游网关返回的 Content-Type 不可信
 	// （常见把 JPEG 声明成 image/png），照声明落盘会得到与内容不符的后缀与 Content-Type
@@ -3077,6 +3264,55 @@ func calculateSizeFromResolutionAndRatio(resolution, aspectRatio string) (int, i
 	return width, height
 }
 
+// resolveImageModel 决定本次实际调用的图像模型：节点填了就用节点的，空则兜底默认图像模型。
+//
+// 为什么必须兜底：**上传的图片**节点本身没有模型（web/src/utils/nodeFactory.ts 里
+// image 节点的默认 data.model 是空串），从它派生的参考图节点会把空串一起带过来
+// （web/src/utils/imageOpsNodes.ts 直接 `model: source.data.model || ”`），
+// 提交到后端就成了 "model":""。空模型有两个后果，两个都不报错、极难发现：
+//  1. 上游收到 "model":"" 直接判无效参数（用户只看到「生成失败」）；
+//  2. 计费侧查价以 modelID 为空直接返回 0（billing/service.go 的 modelUnitPrice /
+//     lookupPrice 都是 `modelID == "" → 0`），于是这一单**静默免费**。
+//
+// 兜底放在后端而非前端，理由：执行入口不止「图片能力集」一处（画布里已存了空 model 的
+// 老节点、失败重投/续跑、直接调 execute 接口都是同一条路径），后端是唯一的收口点；
+// 而且前端再兜也救不了已经落库的空 model，两处都写反而多一份「默认模型名」的真源。
+func resolveImageModel(model, channel string, mm *llm.ModelManager) string {
+	if model != "" {
+		return model
+	}
+	// mm 为 nil 时 DefaultImageModelID 内部会退回 llm.FallbackImageModelID
+	return mm.DefaultImageModelID(channel)
+}
+
+// buildImageToImagePrompt 组装图生图包装句。
+//
+// 多视图（data.viewKind 非空）必须与「局部改图」分开写话术，原因：
+// 前端「生成视图」的模板要求「每一格严格按写明的相机角度单独绘制，严禁沿用参考图的
+// 相机角度与构图」（web/src/utils/imageViewPrompts.ts 的 VIEW_REBUILD），而后者的固定
+// 包装句是「基于参考图修改……请保持参考图中的主体结构……只进行用户指定的修改」——
+// 两句直接冲突，模型会被拉回参考图的机位，用户看到的就是「该俯视的不是俯视」。
+// 所以多视图这里改为显式声明「这不是局部修改、也不是照抄参考图相机角度」。
+//
+// 多视图只可能是「角色/场景/道具是某个图片节点」这一种来源（ViewConfig 只 @ 了那一张
+// 参考图），但为稳妥起见，只要 viewKind 非空就用多视图话术，不依赖风格图/参考图的分支判断。
+func buildImageToImagePrompt(finalPrompt, viewKind string, hasStyleImage, hasReferenceImage bool) string {
+	if viewKind != "" {
+		return fmt.Sprintf("以参考图为素材，把同一主体扩展成多视角设定表：这不是在原图上做局部修改，也不是照抄参考图的相机角度。%s。参考图只提供主体的外观、配色、材质与画风；画面布局与每一格的相机角度以文字说明为准。", finalPrompt)
+	}
+	switch {
+	case hasStyleImage && hasReferenceImage:
+		// 既有风格图又有参考图：参考风格图的画风，基于参考图内容修改
+		return fmt.Sprintf("参考风格图的画风、色彩和视觉风格，基于参考图的内容进行修改：%s。请保持参考图的主体结构，同时采用风格图的艺术风格。", finalPrompt)
+	case hasStyleImage:
+		// 只有风格图：仅提取风格元素，严禁复制内容
+		return fmt.Sprintf("仅从风格图中提取以下艺术元素：画风（如油画/水彩/赛博朋克等）、色彩色调、光影氛围、笔触纹理、构图风格。严格禁止复制风格图中的任何具体内容，包括但不限于：人物、角色、物体、场景、建筑、背景。根据用户描述生成全新的画面：%s。生成结果应具有与风格图相同的艺术风格，但内容完全不同。", finalPrompt)
+	default:
+		// 只有普通参考图：基于参考图修改（回归默认，行为与改动前完全一致）
+		return fmt.Sprintf("基于参考图修改：%s。请保持参考图中的主体结构、细节特征和整体风格，只进行用户指定的修改。", finalPrompt)
+	}
+}
+
 // getModelMinPixels 返回模型要求的最小像素数（0表示无限制）
 // 华数TokenHub的 doubao-seedream 系列要求至少 3,686,400 像素
 func getModelMinPixels(modelID string) int {
@@ -3164,4 +3400,9 @@ func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, vid
 	// 也是 P1（腾讯云 MPS / 火山）云端超分与补帧的落点。
 	registry.Register("enhance", NewEnhanceExecutor(fileUploadService))
 	return registry
+}
+
+// movingElementEdit 这次是不是"把选区里的东西搬到别处"（纯移动可以没有文字提示词）
+func movingElementEdit(spec *elementEditSpec) bool {
+	return spec != nil && spec.MoveTo != nil
 }

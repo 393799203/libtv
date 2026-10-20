@@ -643,7 +643,10 @@ func (h *WorkflowHandler) persistNodeOutput(ctx context.Context, projectID strin
 //   - success：清掉历史 error，写入 content/imageUrl/videoUrl/thumbUrl、width/height、imageUrls；
 //   - failed：写入 error（前端 BaseNode 读 data.error 才显示红框与原因）；
 //   - 绝不删除既有产物字段：失败/重跑都不能把上一次已交付的 URL 抹掉（宁可留着旧结果，
-//     也不能让用户手里正在看的视频因为一次失败而消失）。
+//     也不能让用户手里正在看的视频因为一次失败而消失）；
+//   - clearFields：执行器点名要删的**一次性指令**字段（唯一的用例是元素编辑的 elementEdit，
+//     见 executor.go 里 elementEditClearFields）—— 只有 success 才删，失败时留着好让重试
+//     用同一份蒙版。指令类字段与产物字段相反：留着会改变下一次生成的行为，必须删干净。
 func mergeNodeOutputData(existing map[string]json.RawMessage, out *engine.NodeOutput) {
 	if out.Status != "" {
 		b, _ := json.Marshal(out.Status)
@@ -676,6 +679,15 @@ func mergeNodeOutputData(existing map[string]json.RawMessage, out *engine.NodeOu
 			if urls, ok := out.Data[field].([]string); ok && len(urls) > 0 {
 				b, _ := json.Marshal(urls)
 				existing[field] = b
+			}
+		}
+		// 一次性指令用完即删（元素编辑的 elementEdit）：留着会让用户下次直接点生成时
+		// 又按旧蒙版合成一遍 —— 界面上看就是"点了生成但画面几乎没变"，还白扣一次积分。
+		if fields, ok := out.Data["clearFields"].([]string); ok {
+			for _, f := range fields {
+				if f != "" {
+					delete(existing, f)
+				}
 			}
 		}
 	} else if out.Error != "" {

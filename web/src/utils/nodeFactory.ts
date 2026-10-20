@@ -2,7 +2,10 @@ import type { NodeType, LibTVNodeData, LibTVNode } from '@/types/canvas';
 import type { XYPosition } from '@xyflow/react';
 
 // 各类型节点的默认尺寸
-const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
+//
+// 导出给「派生节点摆位」用：新节点必须摆在**源节点真实宽度**之后，
+// 写死一个间距就会出现"视频节点 480 宽、间距却按 320 算"这种重叠（线上就是这么回事）。
+export const DEFAULT_STYLE: Record<NodeType, React.CSSProperties> = {
   text: { width: 320, height: 300, minWidth: 320, minHeight: 200 },
   image: { width: 320, minWidth: 320, minHeight: 190 },
   video: { width: 480 },

@@ -180,7 +180,8 @@ export function useNodeGeneration(
         await persistCanvas();
 
         // 3) 设置节点运行状态（只跑这一个节点，直接置运行中）
-        updateNodeData(nodeId, { status: 'running' } as Partial<LibTVNodeData>);
+        // transient：生成中是过渡态，不进撤销历史（历史只记生成前 / 生成后两个内容态）
+        updateNodeData(nodeId, { status: 'running' } as Partial<LibTVNodeData>, { transient: true });
         updateNodeStatus(nodeId, 'running');
       } catch (e) {
         console.error('[useNodeGeneration] 生成前置步骤失败（画布存盘/置状态）:', e);

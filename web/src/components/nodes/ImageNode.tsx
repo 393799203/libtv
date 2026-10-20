@@ -13,8 +13,11 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { BaseNode } from './BaseNode';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 import { uploadImage } from '@/services/uploadApi';
 import { deriveThumbUrl } from '@/utils/thumbUrl';
+import { SplitOverlay } from '@/components/canvas/imageops/SplitOverlay';
+import { ElementEditOverlay } from '@/components/canvas/imageops/ElementEditOverlay';
 
 type ImageNodeType = Node<ImageNodeData, 'image'>;
 
@@ -26,6 +29,7 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectId = useCanvasStore((s) => s.projectId);
+  const updateNodeMeta = useCanvasStore((s) => s.updateNodeMeta);
   // 从资产库导入图片弹窗
   const [showAssetPicker, setShowAssetPicker] = useState(false);
   // 双击查看大图弹窗（展示原图，不是画布上的缩略图）
@@ -36,10 +40,27 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
   // 风格节点使用粉色主题
   const styleColor = isStyleNode ? '#ec4899' : undefined;
 
+  // 工具栏出现/消失统一跟"节点选中状态"走（见 components/canvas/NodeToolbar.tsx），
+// 这里不再做悬停上报：同一个画布上"选中"只有一套状态，用户不用学两种唤出方式。
+
   // 原图尺寸：右上角尺寸标签与容器高度都用它。
   // 必须只由**原图**测得 —— 画布上渲染的是缩略图（640px webp），
   // 若拿渲染图的 naturalWidth 覆盖，标签就会显示缩略图尺寸（2560×1440 显示成 640×360）。
   const [originalSize, setOriginalSize] = useState<{ width: number; height: number } | null>(null);
+
+  // 实测尺寸与节点里存的尺寸**比例不一致**时，把真实尺寸回写进节点。
+  // 修的是存量坏数据：上传 WebP/AVIF 时后端曾写死 1024×1024（正方形），
+  // 而元素编辑覆盖层与选区蒙版都读节点元数据 —— 方形元数据会把长方形图的选区算歪。
+  // 比例一致（只差几像素）就不写：不值得动画布，免得"刚进来就显示未保存"。与 VideoNode 同款做法。
+  useEffect(() => {
+    if (!originalSize) return;
+    const dw = data.width;
+    const dh = data.height;
+    if (dw === originalSize.width && dh === originalSize.height) return;
+    const sameRatio = Boolean(dw && dh) && Math.abs(dw / dh - originalSize.width / originalSize.height) < 0.01;
+    if (sameRatio) return;
+    updateNodeMeta(id, { width: originalSize.width, height: originalSize.height });
+  }, [originalSize, data.width, data.height, id, updateNodeMeta]);
 
   // 图片懒加载状态：loading（灰底+转圈）→ loaded / error
   const [imgStatus, setImgStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
@@ -69,13 +90,18 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
     setThumbFailed(false);
   }, [data.imageUrl, data.thumbUrl]);
 
-  // 最终尺寸：后端回写的 data.width/height 优先，缺失时才回落到原图实测
-  const imageWidth = data.width || originalSize?.width;
-  const imageHeight = data.height || originalSize?.height;
+  // 最终尺寸以**原图实测**为准：后端回写的 data.width/height 历史上有假值
+  // （上传时标准库解不出 WebP/AVIF 就写死 1024×1024，是正方形），
+  // 而元素编辑覆盖层（选区坐标、笔刷圆）与导出的蒙版都按这个尺寸算 ——
+  // 信任假值就会把长方形图当成正方形，9:16 这类竖图尤其圈不准。
+  // 实测拿不到时才回落到元数据。
+  const imageWidth = originalSize?.width || data.width;
+  const imageHeight = originalSize?.height || data.height;
 
-  // Fallback：data 中没有 width/height 时，加载**原图**测尺寸（不能用缩略图测）
+  // 一律加载**原图**实测尺寸（不能用缩略图测）。历史上这里只在不带 width/height 时才量，
+  // 于是带假值的节点永远拿着错尺寸跑，改成无条件实测。
   useEffect(() => {
-    if (data.imageUrl && !data.width && !data.height) {
+    if (data.imageUrl) {
       const img = new window.Image();
       img.onload = () => {
         setOriginalSize({ width: img.naturalWidth, height: img.naturalHeight });
@@ -257,6 +283,18 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
                 }
               }}
             />
+            {/* 就地操作层：切分分割线 / 元素编辑选区直接作用在这张图上（不再弹窗）。
+                都是 pointer-events-none 的骨架 + 稀疏的可交互区，
+                所以不影响图片本身的双击看大图。 */}
+            {/* 传"最终尺寸"而不是 data.width：后端没回写尺寸的节点（生成/旧数据）
+                要回落到原图实测值，否则覆盖层里的尺寸读数会算成 NaN */}
+            <SplitOverlay nodeId={id} imageWidth={imageWidth} imageHeight={imageHeight} />
+            <ElementEditOverlay
+              nodeId={id}
+              imageUrl={data.imageUrl}
+              imageWidth={imageWidth}
+              imageHeight={imageHeight}
+            />
             {/* 加载失败：提示 + 占位 */}
             {imgStatus === 'error' && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-gray-50 z-10">
@@ -304,6 +342,10 @@ export const ImageNode = memo<NodeProps<ImageNodeType>>(function ImageNode({
           onChange={handleUpload}
         />
       </BaseNode>
+
+      {/* 工具条：作为 BaseNode 的**兄弟**渲染 —— 父级就是 .react-flow__node，
+          所以 `absolute bottom-full` 是"贴在整个节点上方"，而不是贴在内容区里 */}
+      <NodeToolbar nodeId={id} />
 
       {/* 双击查看大图：展示 imageUrl 原图（画布上渲染的是缩略图） */}
       <MediaPreviewModal

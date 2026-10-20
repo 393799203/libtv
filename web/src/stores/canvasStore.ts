@@ -189,7 +189,12 @@ interface CanvasState extends WorkspaceUIState {
   placeMemberAtAbsolute: (nodeId: string, abs: { x: number; y: number }) => void;
   /** 让每个组合框重新贴合成员（只改几何、不置脏）：拖动结束/删除节点/加载完成后调用 */
   syncGroupBounds: () => void;
-  updateNodeData: (id: string, data: Partial<LibTVNode['data']>) => void;
+  /**
+   * 写节点 data。
+   * opts.transient = true：**不进撤销历史**（也不清空 redo）——
+   * 生成中/失败这类"过渡态"用；历史里只该有内容态（生成前 / 生成后）。
+   */
+  updateNodeData: (id: string, data: Partial<LibTVNode['data']>, opts?: { transient?: boolean }) => void;
   updateNodeStatus: (id: string, status: NodeExecutionStatus) => void;
   /** 只更新执行进度文案（SSE 高频回调专用）：不进历史、不置 isDirty */
   updateNodeProgress: (id: string, progressMessage: string | undefined) => void;
@@ -772,7 +777,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 
-  updateNodeData: (id: string, upd: Partial<LibTVNode['data']>) => {
+  updateNodeData: (id: string, upd: Partial<LibTVNode['data']>, opts?: { transient?: boolean }) => {
     set((state) => {
       const pid = state.projectId;
       if (!pid || state.isLoading) return {};
@@ -800,8 +805,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
         return { ...node, data: { ...node.data, ...next } as LibTVNode['data'] };
       });
-      const hist = saveHistory(data);
-      Object.assign(data, hist);
+      // 过渡态不进历史：撤销应该是"生成前 → 生成后"两个**内容态**，
+      // 中间那句"生成中"、以及失败回写的错误文案都不是用户做出来的东西，
+      // 记进去只会让撤销多出几步"点了没反应"的空操作（线上反馈）。
+      // 顺带 reserve redo：过渡态写入若清了 future，用户撤销一次后就再也重做不回来了。
+      // isDirty 仍然置位（与原来一致）：这些状态照旧会被自动保存，
+      // 刷新后由 active-executions 重建，行为不变。
+      if (!opts?.transient) {
+        const hist = saveHistory(data);
+        Object.assign(data, hist);
+      }
       cache.set(pid, data);
 
       return { _cache: cache, isDirty: true, ...syncFromCache(pid, cache) };

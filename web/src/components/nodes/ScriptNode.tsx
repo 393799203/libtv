@@ -8,6 +8,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { canvasApi } from '@/services/canvasApi';
 import { clearAllStale } from '@/utils/topology';
 import type { ScriptNodeData } from '@/types/canvas';
+import { NodeToolbar } from '@/components/canvas/NodeToolbar';
 
 type ScriptNodeType = Node<ScriptNodeData, 'script'>;
 
@@ -68,6 +69,11 @@ export const ScriptNode = memo<NodeProps<ScriptNodeType>>(function ScriptNode({ 
       <BaseNode id={id} data={data} selected={selected} noContentPadding className="!w-[320px]">
         <ScriptCard data={cardData} onOpen={handleOpenDetail} />
       </BaseNode>
+      {/* 节点工具条（所有节点通用：复制/删除/下载/存资产/看历史）：
+          作为 BaseNode 的**兄弟**渲染 —— 父级是 .react-flow__node，
+          所以 absolute bottom-full 是贴在整个节点上方，不会被内容区的 overflow 裁掉 */}
+      <NodeToolbar nodeId={id} />
+
 
       {/* 条件渲染 Portal：关闭时不创建 DOM，减少节点数 */}
       {detailOpen &&

@@ -17,11 +17,17 @@ import type {
 } from '@/types/prompt';
 import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canvas';
 import { PromptUpstreamBar } from './PromptUpstreamBar';
+import { applyRangeToPrompt, reshootRangeText } from '@/utils/reshootPrompt';
+import { ensureVideoPoster, getCachedVideoPoster } from '@/utils/videoPoster';
+
+/** 拖动区间时提示词框的刷新节流间隔（毫秒） */
+const RESHOOT_SYNC_THROTTLE_MS = 140;
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { PromptToolbar } from './PromptToolbar';
 import { VideoModeSelector } from './VideoPromptControls';
 import type { VideoMode, ScriptNodeData, ScriptShot } from '@/types/canvas';
 import type { AudioNodeData } from '@/types/canvas';
+import { Z } from '@/utils/zLayers';
 
 interface PromptPanelProps {
   nodeId: string;
@@ -72,7 +78,9 @@ function getUpstreamInputs(
             nodeId: sourceNode.id,
             nodeType: 'video',
             label: d.label || `视频${num}`,
-            thumbnail: undefined,
+            // 首帧封面：节点数据里存过就用它，没有就看看模块缓存（VideoNode 会取一次并缓存）。
+            // 都拿不到才退回图标 —— 用户明确说不要默认的视频图标。
+            thumbnail: d.thumbUrl ?? d.stillUrl ?? getCachedVideoPoster(d.videoUrl),
             previewUrl: d.videoUrl,
           };
         case 'text':
@@ -288,6 +296,13 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 从后端 API 动态获取模型列表
   const availableModels = useModels(nodeType);
 
+  /**
+   * 封面版本号：某个上游视频的首帧封面刚拿到 → 通知编辑器**就地**把图标换成缩略图。
+   * 为什么不用 editorEpoch 重建：重建会丢光标、也会把用户正在写的字冲掉；
+   * 换图标只是换一个 <img>，原地替换最稳。
+   */
+  const [posterVersion, setPosterVersion] = useState(0);
+
   // 上游输入 + 可导入提示词：签名不变时按需读 store（不订阅），useMemo 不重算
   const { upstreamInputs, importablePrompts } = useMemo(() => {
     const { nodes, edges } = useCanvasStore.getState();
@@ -298,7 +313,27 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     };
     // upstreamSignature 已覆盖这两个函数读到的所有字段（作为重算门控，eslint 认为它"多余"是有意为之）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, nodeType, upstreamSignature]);
+    // posterVersion：某个视频的首帧封面刚拿到 → 重新算一遍上游（这次就带上缩略图了）
+  }, [nodeId, nodeType, upstreamSignature, posterVersion]);
+
+  /**
+   * 上游里有视频、而它还没有封面（首帧缩略图）时，去取一次。
+   *
+   * 只在这一刻取：面板打开、且提示词里确实要引用这个视频时才需要那张图 ——
+   * 换成"每个视频节点一渲染就取"会让每次打开项目都为所有视频拉一遍源文件（源站限速，代价很大）。
+   * 取到后 bump posterVersion，编辑器会把这一个标签的图标就地换成缩略图（不重建、不动光标）。
+   */
+  useEffect(() => {
+    const need = upstreamInputs.filter((i) => i.nodeType === 'video' && !i.thumbnail && i.previewUrl);
+    if (need.length === 0) return;
+    let alive = true;
+    void Promise.all(need.map((i) => ensureVideoPoster(i.previewUrl))).then((urls) => {
+      if (alive && urls.some(Boolean)) setPosterVersion((v) => v + 1);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [upstreamInputs]);
 
   // 导入提示词（填充后隐藏按钮）
   const [promptImported, setPromptImported] = useState(false);
@@ -327,6 +362,15 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const initialMentions = ('mentions' in data && Array.isArray((data as { mentions?: unknown }).mentions)
     ? ((data as { mentions: MentionMarker[] }).mentions || [])
     : []);
+  // 画布上的值（外部改写的来源；和框里的本地 state 对比用）
+  const externalPrompt = initialPrompt;
+  /**
+   * 「片段重拍」节点：把当前区间作为**标签文案**传给编辑器，让提示词里的 `00:00 - 00:05`
+   * 显示成一个标签（和 @引用 一个观感），并且跟着上面拖条实时变。
+   * 传的是**精确字符串**而不是正则：不然剧本里"12:30 - 13:00"这种正经时间也会被套上标签。
+   */
+  const reshootState = (data as { reshoot?: { start: number; end: number } }).reshoot;
+  const rangeChipText = reshootState ? reshootRangeText(reshootState.start, reshootState.end) : undefined;
   const [promptText, setPromptText] = useState(initialPrompt);
   const [mentions, setMentions] = useState<MentionMarker[]>(initialMentions);
   // refs 与 state 同步，供暂存/生成的 useCallback 兜底读取
@@ -433,7 +477,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const upstreamImageCount = useMemo(
     () =>
       upstreamInputs.filter(
-        (i) => i.nodeType === 'image' || (i.nodeType === 'previz' && !!i.thumbnail)
+        // 有缩略图就显示缩略图（图片、白模、视频的首帧封面都算）
+        (i) => !!i.thumbnail
       ).length,
     [upstreamInputs]
   );
@@ -517,6 +562,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     nodeType === 'audio' ? (((data as any).tone as string) || '') : ''
   );
 
+  /** 用户正在输入（防抖未落库）：这期间不要用画布上的值覆盖框里内容 */
+  const pendingInputRef = useRef(false);
+  /** 上一次把画布的值同步进编辑器的时刻（节流用：拖动区间时每帧都在变，不能每帧都重排 DOM） */
+  const lastSyncAtRef = useRef(0);
+
   // 提示词文本变化
   const handlePromptChange = useCallback(
     (value: string, newMentions: MentionMarker[]) => {
@@ -524,9 +574,66 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       mentionsRef.current = newMentions;
       setPromptText(value);
       setMentions(newMentions);
+      // 用户正在输入：这期间不要用画布上的值覆盖框里的内容
+      pendingInputRef.current = true;
     },
     []
   );
+
+  /**
+   * 画布把提示词**改了**（不是用户在框里打字）时，把编辑器同步过来。
+   *
+   * 为什么必须有这一段：PromptEditor 是**非受控**的 —— value 只在挂载和 syncKey 变化时生效，
+   * 之后 DOM 是唯一事实来源。所以「片段重拍」拖区间把 00:00 - 00:05 改成 00:00 - 00:08 之后，
+   * 节点数据变了、框里还显示旧的 00:00 - 00:05（线上反馈就是这个）。
+   * 解法：发现画布的值和框里的不一致时，同步本地 state 并 editorEpoch++ 让编辑器按新值重建
+   * （不能直接调 setValue：那是纯文本赋值，会把 @引用 的标签打回 [[m:xxx]] 原文）。
+   *
+   * pendingInputRef 是防打架用的：用户刚敲的字还在防抖里没落库时，别把他的输入冲掉；
+   * 等防抖落库（约 300ms）后两者自然一致，之后的同步就不会误判。
+   */
+  useEffect(() => {
+    if (externalPrompt === promptTextRef.current) {
+      // 已经完全一致：没有任何待同步的东西，顺手清掉"用户正在输入"标记
+      pendingInputRef.current = false;
+      return;
+    }
+
+    const sync = () => {
+      const cur = promptTextRef.current;
+      if (externalPrompt === cur) return;
+      let next = externalPrompt;
+      if (pendingInputRef.current) {
+        // 用户刚敲的字还压在防抖里没落库：不能在框里用画布的值盖掉他正在写的那句。
+        // 但**区间**是外部刚改的（拖了片段条），必须跟上 ——
+        // 于是只把新区间套到他正在写的那句上，两边的改动都保住。
+        const r = reshootState;
+        if (!r) return;
+        next = applyRangeToPrompt(cur, r.start, r.end);
+        if (next === cur) return;
+      }
+      lastSyncAtRef.current = Date.now();
+      promptTextRef.current = next;
+      setPromptText(next);
+      // 让编辑器重建（它就是靠这个 key 重新读 value 的），@引用 的标签也会一起重建
+      setEditorEpoch((e) => e + 1);
+    };
+
+    /**
+     * 用**节流**而不是防抖。
+     *
+     * 拖动区间时画布每一帧都在改提示词。防抖会在"手一直没停"时不停重置计时器 → 一直不刷新，
+     * 表现就是拖动过程中下面不动、松手才变。节流保证至少每 140ms 跟一次：手不停也跟着走。
+     * 140ms 也避免每个 pointermove 都重排一次编辑器 DOM。
+     */
+    const since = Date.now() - lastSyncAtRef.current;
+    if (since >= RESHOOT_SYNC_THROTTLE_MS) {
+      sync();
+      return;
+    }
+    const timer = window.setTimeout(sync, RESHOOT_SYNC_THROTTLE_MS - since);
+    return () => window.clearTimeout(timer);
+  }, [externalPrompt, reshootState]);
 
   // 移除 @ 引用（删除上游连线时自动清理），直接删编辑器 DOM 中的 mention span
   const handleRemoveMention = useCallback(
@@ -719,6 +826,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     editorSize: 'default' | 'large',
     editorHandleRef: Ref<PromptEditorHandle>,
     editorSyncKey: string,
+    editorThumbVersion: number,
   ) => (
     <>
 
@@ -766,6 +874,8 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           upstreamInputs={upstreamInputs}
           size={editorSize}
           syncKey={editorSyncKey}
+          rangeChip={rangeChipText}
+          thumbVersion={editorThumbVersion}
           onChange={handlePromptChange}
           onBlur={editorSize === 'default' ? handleSaveDraft : undefined}
           ref={editorHandleRef}
@@ -824,7 +934,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           <ExpandOutlined className="text-[13px]" />
         </button>
       )}
-      {renderBody('default', editorRef, `${nodeId}:${editorEpoch}`)}
+      {renderBody('default', editorRef, `${nodeId}:${editorEpoch}`, posterVersion)}
 
       {/* 放大查看：整个提示词框（上游区 + 提示词 + 工具栏）都搬进来，不只是提示词内容 */}
       {expanded && (
@@ -838,7 +948,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           styles={{ body: { paddingTop: 4 } }}
         >
           <div className="max-h-[78vh] overflow-y-auto">
-            {renderBody('large', expandedEditorRef, `expand:${nodeId}:${editorEpoch}`)}
+            {renderBody('large', expandedEditorRef, `expand:${nodeId}:${editorEpoch}`, posterVersion)}
           </div>
         </Modal>
       )}
@@ -848,8 +958,9 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         createPortal(
           <div
             ref={badgeRef}
-            className="fixed z-[9999] pointer-events-none"
-            style={{ left: dragInfo?.startX ?? 0, top: dragInfo?.startY ?? 0, transform: 'translate(-50%, -50%)' }}
+            className="fixed pointer-events-none"
+            style={{
+              zIndex: Z.canvasFloat, left: dragInfo?.startX ?? 0, top: dragInfo?.startY ?? 0, transform: 'translate(-50%, -50%)' }}
           >
             <div className="w-[18px] h-[18px] rounded-full bg-green-600 flex items-center justify-center shadow-md">
               <span className="text-white text-[12px] font-bold leading-none">+</span>
