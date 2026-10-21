@@ -11,6 +11,7 @@ import type {
   VideoReshootState,
 } from '@/types/canvas';
 import { reshootNodeData } from './reshootPrompt';
+import { frameLabel, uniqueFrameLabel } from './frameCapture';
 import type { MentionMarker } from '@/types/prompt';
 import type { OpsTile } from '@/services/imageOpsApi';
 
@@ -161,10 +162,16 @@ export function createVideoFrameNode(
   source: LibTVNode,
   tile: OpsTile,
   mode: 'first' | 'last' | 'at',
+  opts?: { time?: number },
 ): LibTVNode {
   const origin = absolutePosition(source);
-  const suffix = mode === 'first' ? '首帧' : mode === 'last' ? '尾帧' : '当前帧';
-  const label = `${source.data.label || '视频'}·${suffix}`;
+  // 名字：首帧/尾帧用固定词，at（指定时刻）带时间码，重名自动加序号 ——
+  // 弹窗里可以连着截好几张，都叫「当前帧」的话画布上分不清谁是谁。
+  // opts.time 只用于命名，取哪一帧由后端按 mode 决定。
+  const label = uniqueFrameLabel(
+    frameLabel(source.data.label || '视频', mode, opts?.time ?? 0),
+    useCanvasStore.getState().nodes.map((n) => n.data.label || ''),
+  );
   return createNode(
     'image',
     { x: derivedX(source), y: origin.y },

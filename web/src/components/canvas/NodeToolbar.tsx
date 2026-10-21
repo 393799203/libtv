@@ -15,14 +15,12 @@ import {
   ThunderboltOutlined,
   UngroupOutlined,
 } from '@ant-design/icons';
-import { Dropdown } from 'antd';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { imageOpsApi } from '@/services/imageOpsApi';
 import {
   commitDerivedNodes,
   createDemuxNodes,
   createReshootVideoNode,
-  createVideoFrameNode,
   demuxFillPatch,
 } from '@/utils/imageOpsNodes';
 import {
@@ -31,7 +29,6 @@ import {
   initialReshootState,
   probeVideoDuration,
 } from '@/utils/reshootPrompt';
-import { readPlayheadSeconds } from './videoPlayhead';
 import { defaultViewKindForAsset, VIEW_PRESETS } from '@/utils/imageViewPrompts';
 import { message } from '@/utils/antdApp';
 import { ops, useOpsState, type OpsMode } from './imageops/opsStore';
@@ -143,12 +140,13 @@ export const NodeToolbar = memo(function NodeToolbar({ nodeId }: { nodeId: strin
   };
 
   /**
-   * 视频截帧（首帧/尾帧/当前帧）→ 右侧生成一个**图片节点**。
+   * 视频截帧（首帧/尾帧/当前帧）：**打开「截取画面」弹窗**，在大画面里截。
    *
-   * 状态放在外层而不是横条里：横条会在"点到别处"时消失，而一次截帧要下载视频 + ffmpeg，
-   * 可能要几秒 —— 不能因为横条没了就把这次操作丢掉（节点照样要建出来）。
+   * 这里只负责"打开"：弹窗本体由 Canvas 渲染（和生成历史弹窗同一个套路），
+   * 因为工具条会随节点取消选中而卸载 —— 取帧要下载视频 + ffmpeg，得几秒，
+   * 不能用户点一下别处就把这次操作连弹窗一起弄没了。
    */
-  const [capturing, setCapturing] = useState(false);
+  const openFrameCapture = useNodeActionStore((s) => s.openFrameCapture);
 
   /**
    * 「片段重拍」：新建一个视频节点（引用这条视频 + 提示词里带区间 00:00 - 00:05）。
@@ -194,60 +192,6 @@ export const NodeToolbar = memo(function NodeToolbar({ nodeId }: { nodeId: strin
       message.info(`这条视频只有 ${Math.round(duration)} 秒，区间已收窄到 00:00 - ${String(clamped.end).padStart(2, '0')}`);
     }
   }, [nodeId]);
-  const captureFrame = useCallback(
-    async (mode: 'first' | 'last' | 'at') => {
-      const store = useCanvasStore.getState();
-      const source = store.nodes.find((n) => n.id === nodeId);
-      const url = (source?.data as { videoUrl?: string } | undefined)?.videoUrl;
-      if (!source || !url || capturing) return;
-
-      let at = 0;
-      if (mode === 'at') {
-        const t = readPlayheadSeconds(nodeId);
-        if (t === null) {
-          // 明确拒绝，不退回首帧：否则用户以为截的是当前帧，实际拿到第一帧
-          message.warning('先在节点里播放到你要的那一帧（或拖动进度条），再「截取当前帧」');
-          return;
-        }
-        at = t;
-      }
-
-      setCapturing(true);
-      try {
-        const res = await imageOpsApi.videoFrame({
-          videoUrl: url,
-          mode,
-          time: at,
-          projectId: store.projectId || undefined,
-        });
-        const tile = res?.tile;
-        if (!tile?.url) {
-          message.error('截帧失败：服务端没有返回图片');
-          return;
-        }
-        // 重新取一次节点：截帧期间用户可能改过标签等
-        const fresh = useCanvasStore.getState().nodes.find((n) => n.id === nodeId) || source;
-        const created = createVideoFrameNode(fresh, tile, mode);
-        commitDerivedNodes([created], []);
-        // 设为**唯一选中**：新节点的工具条/提示词面板立刻可用，可以直接接着图生视频
-        const now = useCanvasStore.getState();
-        now.onNodesChange([
-          ...now.selectedNodeIds
-            .filter((sid) => sid !== created.id)
-            .map((sid) => ({ type: 'select' as const, id: sid, selected: false })),
-          { type: 'select' as const, id: created.id, selected: true },
-        ]);
-        const what = mode === 'first' ? '首帧' : mode === 'last' ? '尾帧' : `当前帧（${at.toFixed(1)}s）`;
-        message.success(`已截取${what}，画面已作为图片节点放在右侧`);
-      } catch (err) {
-        message.error(err instanceof Error ? err.message : '截帧失败，请稍后重试');
-      } finally {
-        setCapturing(false);
-      }
-    },
-    [nodeId, capturing]
-  );
-
   /**
    * 「音视频分离」：把这条视频拆成无声视频 + 音频两个节点（自动打成一个组合）。
    *
@@ -365,11 +309,10 @@ export const NodeToolbar = memo(function NodeToolbar({ nodeId }: { nodeId: strin
       onDelete={deleteThis}
       onUngroup={ungroupThis}
       onShowHistory={showHistory}
-      onCaptureFrame={captureFrame}
+      onOpenFrameCapture={() => openFrameCapture(nodeId)}
       onReshoot={startReshoot}
       onDemux={startDemux}
       demuxing={demuxing}
-      capturing={capturing}
       onSelect={select}
     />
   );
@@ -396,11 +339,10 @@ const ToolbarBar = memo(function ToolbarBar({
   onDelete,
   onUngroup,
   onShowHistory,
-  onCaptureFrame,
+  onOpenFrameCapture,
   onReshoot,
   onDemux,
   demuxing,
-  capturing,
   onSelect,
 }: {
   nodeId: string;
@@ -416,38 +358,22 @@ const ToolbarBar = memo(function ToolbarBar({
   onDelete: () => void;
   onUngroup: () => void;
   onShowHistory: () => void;
-  onCaptureFrame: (mode: 'first' | 'last' | 'at') => void;
+  /** 打开「截取画面」弹窗（首帧/尾帧/拖到某一帧再截，都在弹窗里做） */
+  onOpenFrameCapture: () => void;
   onReshoot: () => void;
   /** 音视频分离：拆成无声视频 + 音频两个节点 */
   onDemux: () => void;
   demuxing: boolean;
-  capturing: boolean;
   onSelect: (mode: Exclude<OpsMode, null>) => void;
 }) {
   // 只取原始值：useViewport() 每次平移都会换对象引用，会让每个实例都重渲染
   const zoom = useStore((s) => s.transform[2]);
   const activeTool = IMAGE_TOOLS.find((t) => t.mode === mode);
-  /** 选了一项：先收起菜单（受控模式下必须自己收），再去截帧 */
-  const pickFrame = (mode: 'first' | 'last' | 'at') => {
-    setFrameMenuOpen(false);
-    onCaptureFrame(mode);
-  };
-
   /** 图片工具只在"确实有图"时才给：没图时切分/画质/元素编辑都没有意义 */
   const showImageTools = isImage && !!data?.imageUrl;
   /** 视频类节点（视频/白片/清晰化）：有视频地址就给「截取画面」——它就是这个类型的工具 */
   const showFrameTool = showsFrameTool(mediaInfo);
 
-  /**
-   * 「截取画面」的三选一菜单**由按钮自己开合**，不靠 Dropdown 的 trigger。
-   *
-   * 踩过的坑（线上实测：点了没反应）：ToolButton 的 onClick 里有 e.stopPropagation()
-   * （为了让点击不冒泡到画布、不误触拖拽/框选），而 antd Dropdown 的默认 trigger 是
-   * 监听**包裹元素**上的 click —— 事件被按钮吞掉，trigger 永远收不到，菜单就不弹。
-   * 所以这里用受控 open + trigger={[]}：开关完全由按钮自己的 onClick 决定，
-   * 与冒泡无关（Dropdown 只负责定位和渲染菜单）。
-   */
-  const [frameMenuOpen, setFrameMenuOpen] = useState(false);
   /** 通用动作的可用性（统一图标 + 不适用置灰），唯一出处见 actionAvailability */
   const avail = actionAvailability(mediaInfo, isGroup);
 
@@ -513,33 +439,14 @@ const ToolbarBar = memo(function ToolbarBar({
             </>
           )}
           {showFrameTool && (
-            <Dropdown
-              open={frameMenuOpen}
-              onOpenChange={setFrameMenuOpen}
-              // trigger=[]：完全受控，开关只由下面按钮的 onClick 决定（见上面的说明）
-              trigger={[]}
-              // 往上弹：横条本身贴在节点上方，往下弹会盖住节点内容
-              placement="top"
-              menu={{
-                items: [
-                  { key: 'at', label: '截取当前帧', onClick: () => pickFrame('at') },
-                  { key: 'first', label: '截取首帧', onClick: () => pickFrame('first') },
-                  { key: 'last', label: '截取尾帧', onClick: () => pickFrame('last') },
-                ],
-              }}
-            >
-              {/* Dropdown 需要一个能接 ref 的元素来定位，包一层 span */}
-              <span>
-                <ToolButton
-                  icon={capturing ? <LoadingOutlined /> : <CameraOutlined />}
-                  label={capturing ? '截取中…' : '截取画面'}
-                  hint="把这一帧取下来，作为图片节点放在右侧（首/尾帧可直接接图生视频；本机 ffmpeg，不扣积分）"
-                  active={frameMenuOpen}
-                  disabled={capturing}
-                  onClick={() => setFrameMenuOpen((v) => !v)}
-                />
-              </span>
-            </Dropdown>
+            <ToolButton
+              icon={<CameraOutlined />}
+              label="截取画面"
+              hint="打开大画面取帧：首帧/尾帧/拖到某一帧再截当前帧，可逐帧微调（本机 ffmpeg，不扣积分）"
+              active={false}
+              disabled={false}
+              onClick={onOpenFrameCapture}
+            />
           )}
           {showFrameTool && (
             <ToolButton

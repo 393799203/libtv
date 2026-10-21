@@ -237,13 +237,18 @@ export const AudioNode = memo<NodeProps<AudioNodeType>>(function AudioNode({ id,
   }, []);
 
   const handleLoadedMetadata = useCallback(() => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration);
-      useCanvasStore.getState().updateNodeData(id, {
-        duration: Math.round(audioRef.current.duration),
-      } as Partial<AudioNodeData>);
-    }
-  }, [id]);
+    if (!audioRef.current) return;
+    const real = audioRef.current.duration;
+    setDuration(real);
+    // ⚠️ 时长是**文件本身测出来的元信息**，不是用户编辑，必须走 updateNodeMeta
+    // （不置 isDirty、不进撤销历史）。原先这里是 updateNodeData：
+    // 浏览器一加载音频元数据（打开项目就会发生，用户什么都没碰）就把画布标脏，
+    // 表现为"刷新进来右上角立刻亮着未保存红点"；把音频节点删掉红点就消失。
+    // 另外只在值真的变了才写：同一个值每次打开都写一遍，只会白白重渲染。
+    const rounded = Math.round(real);
+    if (!Number.isFinite(rounded) || (data.duration ?? 0) === rounded) return;
+    useCanvasStore.getState().updateNodeMeta(id, { duration: rounded } as Partial<AudioNodeData>);
+  }, [id, data.duration]);
 
   const handleEnded = useCallback(() => {
     setIsPlaying(false);

@@ -330,7 +330,10 @@ export const VideoNode = memo<NodeProps<VideoNodeType>>(function VideoNode({ id,
       const clamped = clampRange(cur.start, cur.end, d);
       const fresh = useCanvasStore.getState().nodes.find((n) => n.id === id);
       if (!fresh) return;
-      useCanvasStore.getState().updateNodeData(id, {
+      // ⚠️ 走 updateNodeMeta 而不是 updateNodeData：这是**探测回来的素材元信息**补齐
+      // （区间夹到片长内 + 提示词跟着改），不是用户编辑。用 updateNodeData 会在打开项目、
+      // 用户什么都没动的时候把画布标脏（时长探测是挂载时自动跑的）—— 上面那段注释说的也是走它。
+      useCanvasStore.getState().updateNodeMeta(id, {
         reshoot: { ...cur, start: clamped.start, end: clamped.end, durationSeconds: d },
         prompt: applyRangeToPrompt((fresh.data as VideoNodeData).prompt || '', clamped.start, clamped.end),
       } as never);

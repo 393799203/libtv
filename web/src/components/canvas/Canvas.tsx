@@ -46,6 +46,7 @@ import { DataFlowEdge } from '@/components/edges/DataFlowEdge';
 import { NodeContextMenu } from './NodeContextMenu';
 import { NodeSelectPopup } from './NodeSelectPopup';
 import { GenerationHistoryModal } from './GenerationHistoryModal';
+import { FrameCaptureModal } from './FrameCaptureModal';
 import { createNode } from '@/utils/nodeFactory';
 import { absolutePositionIn, absolutePositionOf } from '@/utils/canvasGroups';
 import { setAssetDropHandler } from '@/components/canvas/assetDnd';
@@ -165,6 +166,10 @@ export const Canvas = memo(function Canvas() {
   const historyModal = useNodeActionStore((s) => s.historyTarget);
   const closeHistory = useNodeActionStore((s) => s.closeHistory);
   const openHistory = useNodeActionStore((s) => s.openHistory);
+  // 「截取画面」弹窗的目标节点：只存 id，弹窗自己从画布 store 现读视频地址/标签/fps。
+  // 挂在 Canvas 上而不是节点工具条里：工具条会随节点取消选中而卸载，而取帧要等好几秒。
+  const frameCaptureNodeId = useNodeActionStore((s) => s.frameCaptureNodeId);
+  const closeFrameCapture = useNodeActionStore((s) => s.closeFrameCapture);
   // 生成历史弹窗状态
   const [nodeSelectPopup, setNodeSelectPopup] = useState<{
     position: { x: number; y: number };
@@ -1279,6 +1284,13 @@ export const Canvas = memo(function Canvas() {
           onUngroup={() => handleUngroupNode(nodeMenu.nodeId)}
           onClose={() => setNodeMenu(null)}
         />
+      )}
+
+      {/* 「截取画面」弹窗：大画面 + 进度条 + 首帧/尾帧/当前帧（本机 ffmpeg，不扣积分）。
+          条件渲染而不是 destroyOnClose：整个子树随关闭卸载，里面有 video 元素，
+          卸载才能真的把播放停下来 */}
+      {frameCaptureNodeId && (
+        <FrameCaptureModal nodeId={frameCaptureNodeId} onClose={closeFrameCapture} />
       )}
 
       {/* 生成历史弹窗 */}
