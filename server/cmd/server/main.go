@@ -122,7 +122,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}, &model.PasswordResetToken{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -222,6 +222,9 @@ func main() {
 		log.Printf("[Mail] 未启用 SMTP（smtp.enabled=false 或缺少 host/from），注册欢迎邮件不会发送")
 	}
 	userService := service.NewUserService(userRepo, appStorage, mailSender)
+	// 找回密码：独立于 UserService（未登录流程），令牌存库不依赖 Redis，
+	// 邮件复用上面同一个 mailSender，因此 SMTP 一配上这个功能就跟着可用
+	passwordResetService := service.NewPasswordResetService(userRepo, repository.NewPasswordResetRepo(db), mailSender)
 	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
 	canvasService := service.NewCanvasService(canvasRepo)
 	showService := service.NewShowService(showRepo, userRepo, commentRepo, appStorage)
@@ -273,6 +276,10 @@ func main() {
 
 	llmClient := llm.NewScriptClient(config.C.AI, channelRouter)
 	imageClient := llm.NewImageClient(config.C.AI, "wasu", channelRouter)
+	// 注入模型管理器：ImageClient 靠它按 (渠道, 模型) 解析接口协议（models.yaml 的 api_style），
+	// 决定走 OpenAI 兼容的 /images/generations 还是 DashScope 多模态生成
+	// （Qwen-Image 2.0 Pro 属于后者）。不注入也能跑，只是一律按 OpenAI 兼容处理。
+	imageClient.SetModelManager(modelManager)
 	// 上游视频任务轮询预算（config.yaml 的 video 段）：必须显著小于执行超时，
 	// 否则执行 ctx 先到期，失败退费与收尾会被 deadline 掐掉
 	videoClient := llm.NewVideoClient(config.C.AI, "wasu", llm.VideoPollConfig{
@@ -325,6 +332,7 @@ func main() {
 
 	// 初始化 Handler
 	userHandler := handler.NewUserHandler(userService, billingService)
+	passwordResetHandler := handler.NewPasswordResetHandler(passwordResetService)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, projectRepo, eng, registry)
@@ -447,6 +455,10 @@ func main() {
 	{
 		auth.POST("/register", userHandler.Register)
 		auth.POST("/login", userHandler.Login)
+		// 找回密码：两条都是未登录可访问的公开接口。
+		// 频次靠 service 层按 IP + 邮箱限流（middleware.RateLimit 只对已登录用户生效，不适用）
+		auth.POST("/forgot-password", passwordResetHandler.ForgotPassword)
+		auth.POST("/reset-password", passwordResetHandler.ResetPassword)
 	}
 
 	// 公开首页展示接口（无需登录）

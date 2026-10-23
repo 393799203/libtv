@@ -97,8 +97,12 @@ function WorkspaceInner() {
 
   const [projectName, setProjectName] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [isPreparingPublish, setIsPreparingPublish] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const projectNameLoadedRef = useRef(false);
+  const persistedProjectNameRef = useRef('');
+  const cancelNameEditRef = useRef(false);
 
   // 提交视频发布弹窗
   const [showPublishDialog, setShowPublishDialog] = useState(false);
@@ -122,34 +126,55 @@ function WorkspaceInner() {
       projectNameLoadedRef.current = true;
       projectApi.getProject(urlProjectId).then((project) => {
         setProjectName(project.name);
+        persistedProjectNameRef.current = project.name;
       }).catch(() => {
         setProjectName('未命名项目');
+        persistedProjectNameRef.current = '未命名项目';
       });
     }
   }, [urlProjectId]);
 
   // 编辑项目名称
   const handleNameClick = useCallback(() => {
+    cancelNameEditRef.current = false;
     setIsEditingName(true);
     setTimeout(() => nameInputRef.current?.select(), 0);
   }, []);
 
   const handleNameBlur = useCallback(async () => {
     setIsEditingName(false);
-    if (!urlProjectId || !projectName.trim()) return;
+    if (cancelNameEditRef.current) {
+      cancelNameEditRef.current = false;
+      setProjectName(persistedProjectNameRef.current);
+      return;
+    }
+    const nextName = projectName.trim();
+    if (!nextName) {
+      setProjectName(persistedProjectNameRef.current);
+      message.warning('项目名称不能为空');
+      return;
+    }
+    if (!urlProjectId || nextName === persistedProjectNameRef.current) {
+      setProjectName(nextName);
+      return;
+    }
     try {
-      await projectApi.updateProject(urlProjectId, { name: projectName.trim() });
+      await projectApi.updateProject(urlProjectId, { name: nextName });
+      persistedProjectNameRef.current = nextName;
+      setProjectName(nextName);
+      message.success('项目名称已更新');
     } catch {
       // HTTP 错误已由 api.ts 拦截器统一 message.error()
     }
-  }, [urlProjectId, projectName]);
+  }, [message, projectName, urlProjectId]);
 
   const handleNameKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       nameInputRef.current?.blur();
     } else if (e.key === 'Escape') {
-      setProjectName('');
-      setIsEditingName(false);
+      cancelNameEditRef.current = true;
+      setProjectName(persistedProjectNameRef.current);
+      nameInputRef.current?.blur();
     }
   }, []);
 
@@ -161,6 +186,10 @@ function WorkspaceInner() {
     const { projectId, exportCanvas, setSaving, setDirty } = useCanvasStore.getState();
     if (!projectId) {
       message.warning('项目ID为空，无法保存');
+      return;
+    }
+    if (!isDirty) {
+      message.info('当前画布已是最新状态');
       return;
     }
     const exportData = exportCanvas();
@@ -175,7 +204,7 @@ function WorkspaceInner() {
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [isDirty, message]);
 
   // Ctrl+S 快捷键保存
   useEffect(() => {
@@ -198,13 +227,17 @@ function WorkspaceInner() {
       ))}
 
       {/* 顶部栏 */}
-      <div className="h-10 bg-white border-b border-gray-200 flex items-center px-3 gap-2 shrink-0 overflow-hidden">
+      <div className="workspace-topbar flex h-11 shrink-0 items-center gap-2 overflow-hidden border-b border-white/[0.06] bg-white px-3">
         <Tooltip title="返回项目列表">
           <Button
             type="text"
             size="small"
+            aria-label="返回项目列表"
             icon={<ArrowLeftOutlined />}
+            loading={isLeaving}
             onClick={async () => {
+              if (isLeaving) return;
+              setIsLeaving(true);
               // 空画布（无节点，或所有节点都是空内容）返回时自动删除当前项目
               const { nodes, projectId } = useCanvasStore.getState();
               if (projectId && isEffectivelyEmptyCanvas(nodes)) {
@@ -222,7 +255,7 @@ function WorkspaceInner() {
         {isEditingName ? (
           <input
             ref={nameInputRef}
-            className="text-sm text-gray-800 bg-gray-50 border border-gray-300 rounded px-2 py-0.5 outline-none focus:border-purple-400 w-48"
+            className="w-48 rounded-lg border border-cyan-300/30 bg-cyan-400/[0.06] px-2 py-1 text-sm text-gray-100 outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)]"
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             onBlur={handleNameBlur}
@@ -231,7 +264,7 @@ function WorkspaceInner() {
           />
         ) : (
           <span
-            className="text-sm text-gray-600 cursor-pointer hover:text-purple-600 hover:bg-gray-50 rounded px-1.5 py-0.5 transition-colors"
+            className="workspace-project-name cursor-pointer rounded-lg px-2 py-1 text-sm text-gray-300 transition-all hover:bg-cyan-400/[0.07] hover:text-cyan-100"
             onClick={handleNameClick}
             title="点击编辑项目名称"
           >
@@ -250,6 +283,7 @@ function WorkspaceInner() {
                 size="small"
                 icon={<SaveOutlined />}
                 loading={isSaving}
+                aria-label="保存画布"
                 onClick={handleSave}
               />
               {isDirty && (
@@ -267,14 +301,16 @@ function WorkspaceInner() {
             type="text"
             size="small"
             icon={<ShopOutlined />}
+            aria-label="打开积分超市"
             onClick={() => setShowPointsMall(true)}
             className="!text-amber-500"
           />
         </Tooltip>
         <Tooltip title="查看积分明细（扣费 / 退款 / 充值）">
           <button
+            type="button"
             onClick={() => setShowBillingRecords(true)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-medium text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer shrink-0"
+            className="tech-credit-badge flex shrink-0 cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium text-amber-300 transition-all hover:border-amber-300/30 hover:bg-amber-300/10 active:scale-[0.97]"
           >
             <GoldOutlined />
             <span>{user?.credits ?? 0}</span>
@@ -286,7 +322,11 @@ function WorkspaceInner() {
             type="text"
             size="small"
             icon={<VideoCameraOutlined />}
+            aria-label="提交视频发布"
+            loading={isPreparingPublish}
             onClick={async () => {
+              if (isPreparingPublish) return;
+              setIsPreparingPublish(true);
               // 若当前选中了已生成视频的节点，默认带入其视频 URL
               const { nodes, selectedNodeIds } = useCanvasStore.getState();
               const selectedVideoUrl = nodes.find(
@@ -300,6 +340,7 @@ function WorkspaceInner() {
                 setPublishCategories(cats || []);
               } catch {}
               setShowPublishDialog(true);
+              setIsPreparingPublish(false);
             }}
           />
         </Tooltip>
@@ -318,8 +359,9 @@ function WorkspaceInner() {
             <div className="absolute left-0 top-1/3 -translate-y-1/2 z-20 flex flex-col gap-2">
               <Tooltip title="个人资产库：点一下从左侧展开" placement="right">
                 <button
+                  type="button"
                   onClick={() => setShowAssetPanel(true)}
-                  className="flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-r-lg bg-white/95 border border-l-0 border-gray-200 shadow-md text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors cursor-pointer"
+                  className="tech-side-tab flex cursor-pointer flex-col items-center gap-1.5 rounded-r-lg border border-l-0 border-gray-200 bg-white/95 px-1.5 py-3 text-gray-500 shadow-md transition-all hover:border-cyan-300/40 hover:text-cyan-200 active:translate-x-0.5"
                 >
                   <FolderOutlined className="text-[14px]" />
                   <span className="text-[11px] tracking-wider [writing-mode:vertical-rl]">资产库</span>

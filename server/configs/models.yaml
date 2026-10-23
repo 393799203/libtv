@@ -270,6 +270,24 @@ models:
         temperature: 0.7
         description: "Seedream 5.0 Pro，画质与细节更强（支持文生图与图生图）"
 
+      # 阿里 Qwen-Image 2.0 Pro：**协议与上面两个模型不同**，
+      # 走 DashScope 多模态生成（api_style 见下），不是 OpenAI 兼容的 /images/generations。
+      #
+      # 只给 1K/2K 两个档：上游限制单张图面积 262144(512x512)~4194304(2048x2048) 像素，
+      # 而 4K 档 = 3840x2160 = 829万像素，必然被上游 400 拒单 —— 列出来等于给用户一个
+      # 点了就失败的按钮。image.go 里另有兜底缩放，防老画布残留 4K。
+      - id: qwen-image-2.0-pro
+        name: "Qwen Image 2.0 Pro"
+        provider: dianxin
+        model_id: "qwen-image-2.0-pro"
+        usage: [image, character, scene, prop]
+        resolutions: ["1K", "2K"]
+        max_tokens: 2048
+        temperature: 0.7
+        # 协议风格：空 = OpenAI 兼容 /images/generations；dashscope-multimodal = 多模态生成接口
+        api_style: dashscope-multimodal
+        description: "通义千问图像2.0专业版，支持多参考图融合与指令编辑（最高 2K）"
+
     # ---------- video ----------
     video:
       - id: cdance2.0-0807

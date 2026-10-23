@@ -5,8 +5,8 @@ import {
   Outlet,
   type RouteObject,
 } from 'react-router-dom';
-import { Spin } from 'antd';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { BrandLogo } from '@/components/layout/BrandLogo';
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { GlobalComponents } from '@/components/GlobalComponents';
 
@@ -20,10 +20,17 @@ const AdminPage = lazy(() => import('@/pages/admin/AdminPage'));
 const PrevizEditor = lazy(() => import('@/pages/previz/PrevizEditor'));
 const ForumListPage = lazy(() => import('@/pages/forum/ForumListPage'));
 const ForumPostPage = lazy(() => import('@/pages/forum/ForumPostPage'));
+const ResetPasswordPage = lazy(() => import('@/pages/auth/ResetPasswordPage'));
 
 const Loading = () => (
   <div className="w-full h-screen flex items-center justify-center">
-    <Spin size="large" />
+    <div className="tech-boot" role="status" aria-live="polite">
+      <div className="tech-boot-core">
+        <BrandLogo size={28} wordClass="h-[18px]" />
+      </div>
+      <p>正在载入创作环境</p>
+      <span>LOADING MODULE</span>
+    </div>
   </div>
 );
 
@@ -46,6 +53,17 @@ export const routes: RouteObject[] = [
         element: (
           <LazyLoad>
             <VideoDetailPage />
+          </LazyLoad>
+        ),
+      },
+      // 重置密码页（全屏，公开，无需登录）：找回密码邮件里的链接指向这里。
+      // 与 /videos/:id 一样挂在外层，不套 AppLayout —— 用户是从邮件点进来的，
+      // 此时未登录，套上带导航的后台外壳反而更让人迷惑（见页面内注释）
+      {
+        path: 'reset-password',
+        element: (
+          <LazyLoad>
+            <ResetPasswordPage />
           </LazyLoad>
         ),
       },

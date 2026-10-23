@@ -626,3 +626,35 @@ type Setting struct {
 }
 
 func (Setting) TableName() string { return "settings" }
+
+// ========== 找回密码 ==========
+
+// PasswordResetToken 「忘记密码」用的一次性重置令牌。
+//
+// 表里**只存令牌的 SHA-256 哈希，不存明文**——明文只出现在发往用户邮箱的链接里。
+// 理由与「密码只存 bcrypt、不存明文」完全一致：数据库一旦被拖库，攻击者拿到的
+// 哈希无法反推出可用令牌，因此无法据此重置任何人的密码。令牌本身是 crypto/rand
+// 出来的 32 字节高熵随机串，不存在被枚举的可能，所以无盐 SHA-256 已经足够，无需 bcrypt。
+//
+// 生命周期：签发时先删掉该用户此前所有令牌（同一个「忘记密码」入口反复点，
+// 只有最新一封邮件里的链接有效，避免多封邮件同时在手都能改密）→ 30 分钟后过期 →
+// 使用一次后写 UsedAt 永久失效。过期记录在签发新令牌时顺带清理，不占查询路径。
+type PasswordResetToken struct {
+	ID     string `gorm:"primaryKey;size:36" json:"id"`
+	UserID string `gorm:"index;size:36;not null" json:"user_id"`
+	// TokenHash 令牌明文的 SHA-256 十六进制串（64 字符），唯一索引便于按哈希直查
+	TokenHash string    `gorm:"uniqueIndex;size:64;not null" json:"-"`
+	ExpiresAt time.Time `gorm:"index;not null" json:"expires_at"`
+	// UsedAt 为空表示尚未使用；非空表示已用过，「一次性」语义靠它保证
+	UsedAt    *time.Time `json:"used_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+func (PasswordResetToken) TableName() string { return "password_reset_tokens" }
+
+func (t *PasswordResetToken) BeforeCreate(tx *gorm.DB) error {
+	if t.ID == "" {
+		t.ID = uuid.New().String()
+	}
+	return nil
+}

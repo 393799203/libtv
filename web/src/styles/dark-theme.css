@@ -30,8 +30,9 @@
      首页最上面一截被 Banner 盖住，所以把最亮的那档放在 Banner 下沿附近，
      肉眼能看到的部分正好落在变化区间里；底部与 body 同色，滚到底不会出现色差接缝。 */
   --dv-home-gradient:
-    radial-gradient(1100px 520px at 15% 16%, rgba(46, 48, 53, 0.22) 0%, rgba(46, 48, 53, 0) 62%),
-    linear-gradient(168deg, #17191e 0%, #14161a 34%, #0d0e11 100%);
+    radial-gradient(820px 420px at 76% -8%, rgba(34, 211, 238, 0.075) 0%, rgba(34, 211, 238, 0) 68%),
+    radial-gradient(700px 420px at 12% 18%, rgba(139, 92, 246, 0.06) 0%, rgba(139, 92, 246, 0) 66%),
+    linear-gradient(168deg, #151a21 0%, #10141a 38%, #090c11 100%);
   /* 全站页面大背景（非首页）：不做纯色 —— 左上角一层柔光（模拟顶光落在背景上），
      再纵向从偏亮压到偏暗，大面积暗底就有了"明暗关系"而不是一块死板的黑。
      这里刻意【不】用 background-attachment: fixed：Chrome 下 fixed 背景走"视口固定"的
@@ -41,8 +42,9 @@
      注意整条渐变都压在卡片色（--dv-surface-1）之下：明暗关系靠"页面内部的明暗"表达，
      不让页面某一段亮过卡片 —— 否则那一块里的卡片会反过来显得比背景暗（"浮"不起来）。 */
   --dv-page-gradient:
-    radial-gradient(1200px 560px at 16% -10%, rgba(46, 48, 53, 0.22) 0%, rgba(46, 48, 53, 0) 62%),
-    linear-gradient(180deg, #15171b 0%, #101216 52%, #0b0c0f 100%);
+    radial-gradient(1000px 500px at 78% -12%, rgba(34, 211, 238, 0.055) 0%, rgba(34, 211, 238, 0) 64%),
+    radial-gradient(760px 460px at 12% -8%, rgba(139, 92, 246, 0.045) 0%, rgba(139, 92, 246, 0) 62%),
+    linear-gradient(180deg, #11161d 0%, #0d1117 52%, #080b10 100%);
   /* 画布工作区底色：独立于页面最底层。
      画布是"工作台"，不是页面背景，用面色才不显得像一块纯黑；
      取值与画布加载态(bg-gray-50 → surface-2)一致，加载前后不会突然变色。 */
@@ -105,6 +107,7 @@
   --dv-cyan-border-hover: rgba(34, 211, 238, 0.55);
   --dv-cyan-text: #a5f3fc;
   --dv-cyan-text-strong: #cffafe;
+  --dv-tech-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   background-color: var(--dv-bg);
   color: var(--dv-text-1);
@@ -655,6 +658,606 @@ html.theme-dark-root #root {
   100% { background-position: 0 50%; }
 }
 
+/* ========== 第七批：科技感界面语言 ==========
+   统一「深色玻璃面 + 细网格 + 青色信号线 + 紫青环境光」。
+   视觉亮点只给可操作区域和状态，不把正文变成霓虹色，保证长时间创作的易读性。 */
+
+.theme-dark .tech-header {
+  position: relative;
+  background-image:
+    linear-gradient(90deg, rgba(34, 211, 238, 0.025), transparent 28%, transparent 72%, rgba(139, 92, 246, 0.025)),
+    linear-gradient(180deg, #141920 0%, #101419 100%) !important;
+}
+
+.tech-header-scan {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 6%, rgba(34, 211, 238, 0.7) 32%, rgba(96, 165, 250, 0.58) 58%, rgba(139, 92, 246, 0.46) 78%, transparent 94%);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.3);
+}
+
+.theme-dark .tech-nav-item {
+  position: relative;
+}
+
+.theme-dark .tech-nav-item::after {
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  width: 0;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, transparent, #67e8f9, transparent);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: width 0.18s ease, opacity 0.18s ease;
+}
+
+.theme-dark .tech-nav-item:hover::after,
+.theme-dark .tech-nav-item[aria-current='page']::after {
+  width: 62%;
+  opacity: 1;
+}
+
+.theme-dark .tech-credits {
+  border: 1px solid rgba(245, 158, 11, 0.14);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.055), rgba(245, 158, 11, 0.018));
+}
+
+.theme-dark .tech-login-button {
+  border: 1px solid rgba(103, 232, 249, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 48%),
+    linear-gradient(135deg, #155e75 0%, #164e63 56%, #312e81 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 8px 24px -12px rgba(34, 211, 238, 0.7);
+}
+
+.theme-dark .tech-login-button:hover {
+  border-color: rgba(165, 243, 252, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 10px 28px -10px rgba(34, 211, 238, 0.8);
+}
+
+.theme-dark .home-bg {
+  background-image: var(--dv-home-gradient);
+}
+
+.theme-dark .tech-hero {
+  isolation: isolate;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.1);
+  background:
+    radial-gradient(700px 300px at 50% -25%, rgba(34, 211, 238, 0.12), transparent 70%),
+    linear-gradient(180deg, #0e1823 0%, #0b1119 58%, #090d13 100%);
+}
+
+.theme-dark .tech-hero::before,
+.theme-dark .tech-hero::after {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 3;
+  height: 1px;
+  content: '';
+  pointer-events: none;
+}
+
+.theme-dark .tech-hero::before {
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.22) 24%, rgba(103, 232, 249, 0.55) 50%, rgba(139, 92, 246, 0.25) 76%, transparent);
+}
+
+.theme-dark .tech-hero::after {
+  bottom: -16px;
+  height: 18px;
+  background: radial-gradient(40% 100% at 50% 0%, rgba(34, 211, 238, 0.09), transparent 76%);
+}
+
+.tech-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid rgba(165, 243, 252, 0.11);
+  border-radius: 999px;
+  background: rgba(5, 12, 18, 0.72);
+  color: rgba(236, 254, 255, 0.68);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.tech-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #67e8f9;
+  box-shadow: 0 0 10px rgba(103, 232, 249, 0.9);
+}
+
+.theme-dark .tech-arrow:hover,
+.theme-dark .tech-arrow:focus-visible {
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.16);
+  /* 只叠加 scale，不动位移。
+     Tailwind 4 的 -translate-y-1/2 走独立的 `translate` 属性，
+     如果这里再写 transform: translateY(-50%)，两套位移会叠加成上移 100%，
+     鼠标一移入按钮就会跳到上方（表现为抖动）。 */
+  transform: scale(1.04);
+}
+
+.theme-dark .tech-arrow:active {
+  transform: scale(0.94);
+}
+
+.theme-dark .tech-filter {
+  min-height: 30px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.theme-dark .tech-filter[aria-pressed='true'] {
+  background:
+    linear-gradient(180deg, rgba(103, 232, 249, 0.1), rgba(34, 211, 238, 0.035)),
+    rgba(34, 211, 238, 0.1);
+}
+
+.theme-dark .tech-search::after {
+  position: absolute;
+  right: 12%;
+  bottom: 0;
+  left: 12%;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, transparent, #67e8f9, transparent);
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition: opacity 0.18s ease, transform 0.22s var(--dv-tech-ease);
+}
+
+.theme-dark .tech-search:focus-within::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.theme-dark .tech-search-input {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.035);
+  box-shadow: none;
+}
+
+.theme-dark .tech-search-input:hover {
+  border-color: rgba(165, 243, 252, 0.2);
+  background-color: rgba(255, 255, 255, 0.045);
+}
+
+.theme-dark .tech-search-input:focus {
+  border-color: #67e8f9 !important;
+  background-color: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    0 0 0 3px rgba(34, 211, 238, 0.09),
+    0 0 24px -10px rgba(34, 211, 238, 0.48) !important;
+}
+
+.theme-dark :is(.tech-card, .tech-video-card) {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 0.26s var(--dv-tech-ease),
+    box-shadow 0.26s ease,
+    border-color 0.2s ease;
+}
+
+.theme-dark :is(.tech-card, .tech-video-card):hover,
+.theme-dark :is(.tech-card, .tech-video-card):focus-visible {
+  border-color: rgba(103, 232, 249, 0.32);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.08),
+    0 18px 42px -18px rgba(0, 0, 0, 0.88),
+    0 0 30px -12px rgba(34, 211, 238, 0.32);
+  transform: translateY(-3px);
+}
+
+.theme-dark :is(.tech-card, .tech-video-card):active {
+  transform: translateY(-1px) scale(0.985);
+  transition-duration: 0.08s;
+}
+
+.theme-dark .project-card-media,
+.theme-dark .video-card-media {
+  transition: transform 0.5s var(--dv-tech-ease), filter 0.35s ease;
+}
+
+.theme-dark .project-card:hover .project-card-media,
+.theme-dark .project-card:focus-visible .project-card-media,
+.theme-dark .video-card:hover .video-card-media,
+.theme-dark .video-card:focus-visible .video-card-media {
+  filter: saturate(1.08) brightness(1.04);
+  transform: scale(1.045);
+}
+
+.theme-dark .video-card:hover .video-card-overlay,
+.theme-dark .video-card:focus-visible .video-card-overlay {
+  opacity: 1;
+}
+
+.video-card-overlay {
+  transition: opacity 0.2s ease, background-color 0.2s ease;
+}
+
+.theme-dark .video-card:hover .video-card-overlay,
+.theme-dark .video-card:focus-visible .video-card-overlay {
+  background-color: rgba(3, 10, 16, 0.34);
+}
+
+.video-card-play {
+  transform: scale(0.78);
+  transition: transform 0.25s var(--dv-tech-ease), border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.theme-dark .video-card:hover .video-card-play,
+.theme-dark .video-card:focus-visible .video-card-play {
+  border-color: rgba(165, 243, 252, 0.7);
+  background-color: rgba(8, 47, 73, 0.64);
+  transform: scale(1);
+}
+
+.tech-skeleton {
+  background-image: linear-gradient(100deg, rgba(31, 39, 49, 0.95) 20%, rgba(52, 68, 82, 0.95) 38%, rgba(31, 39, 49, 0.95) 56%);
+  background-size: 240% 100%;
+  animation: dv-shimmer 1.4s ease infinite;
+}
+
+.theme-dark .tech-create-card > .ant-card {
+  background:
+    radial-gradient(220px 110px at 50% 90%, rgba(34, 211, 238, 0.08), transparent 70%),
+    rgba(15, 22, 29, 0.72) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transition: border-color 0.2s ease, box-shadow 0.24s ease, transform 0.24s var(--dv-tech-ease);
+}
+
+.theme-dark .tech-create-card:hover > .ant-card,
+.theme-dark .tech-create-card:focus-visible > .ant-card {
+  border-color: rgba(103, 232, 249, 0.38) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 16px 38px -18px rgba(0, 0, 0, 0.82),
+    0 0 28px -12px rgba(34, 211, 238, 0.28);
+  transform: translateY(-2px);
+}
+
+.theme-dark .workspace-topbar {
+  position: relative;
+  background-image: linear-gradient(90deg, rgba(34, 211, 238, 0.035), transparent 35%, rgba(139, 92, 246, 0.025));
+  box-shadow: 0 8px 24px -20px rgba(0, 0, 0, 0.85);
+}
+
+.theme-dark .workspace-topbar::after {
+  position: absolute;
+  right: 16px;
+  bottom: 0;
+  left: 16px;
+  height: 1px;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.22) 30%, rgba(34, 211, 238, 0.08) 70%, transparent);
+}
+
+.theme-dark .workspace-project-name {
+  font-weight: 500;
+}
+
+.theme-dark .tech-credit-badge {
+  border: 1px solid rgba(245, 158, 11, 0.14);
+  background: rgba(245, 158, 11, 0.045);
+}
+
+.theme-dark .tech-side-tab:hover {
+  box-shadow: 0 0 20px -8px rgba(34, 211, 238, 0.45);
+}
+
+/* ========== 登录 / 注册：雨夜林间小屋 ==========
+   3D 场景只在弹窗打开时懒加载。右侧表单使用高不透明度暗面，
+   既能透出一点场景运动，又保证输入内容始终清晰。 */
+.forest-auth-overlay {
+  background:
+    radial-gradient(900px 560px at 30% 48%, rgba(18, 48, 57, 0.18), transparent 70%),
+    rgba(1, 4, 7, 0.86);
+}
+
+.forest-auth-dialog {
+  background: #05080b;
+  box-shadow:
+    0 40px 110px -35px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(255, 255, 255, 0.025);
+  animation: forest-auth-enter 0.38s var(--dv-tech-ease);
+}
+
+.forest-auth-vignette {
+  background:
+    linear-gradient(90deg, rgba(2, 6, 9, 0.08) 0%, rgba(2, 6, 9, 0) 34%, rgba(3, 7, 10, 0.32) 63%, rgba(5, 8, 11, 0.9) 100%),
+    linear-gradient(180deg, rgba(2, 5, 8, 0.38) 0%, transparent 28%, transparent 68%, rgba(2, 5, 8, 0.62) 100%);
+}
+
+.forest-auth-close {
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, transform 0.12s ease;
+}
+
+.forest-auth-close:hover {
+  border-color: rgba(253, 230, 138, 0.3);
+  background: rgba(120, 53, 15, 0.24);
+  color: #fef3c7;
+}
+
+.forest-auth-close:active {
+  transform: scale(0.92);
+}
+
+.forest-auth-scene-fallback {
+  background:
+    radial-gradient(280px 190px at 38% 67%, rgba(251, 146, 60, 0.18), transparent 70%),
+    linear-gradient(180deg, #071016 0%, #080b0d 58%, #050607 100%);
+}
+
+.forest-auth-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(2, 6, 9, 0.46);
+  color: rgba(255, 255, 255, 0.46);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.forest-auth-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #fbbf24;
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.72);
+}
+
+.forest-auth-story-title {
+  color: #fff7e7;
+  font-size: clamp(24px, 2.15vw, 32px);
+  font-weight: 450;
+  line-height: 1.28;
+  letter-spacing: -0.035em;
+  text-shadow: 0 5px 30px rgba(0, 0, 0, 0.72);
+}
+
+.forest-auth-scene-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: min(100%, 470px);
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  background: rgba(3, 8, 11, 0.58);
+}
+
+.forest-auth-panel {
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  background:
+    radial-gradient(420px 300px at 100% 0%, rgba(180, 83, 9, 0.075), transparent 68%),
+    linear-gradient(180deg, rgba(11, 15, 19, 0.965), rgba(7, 10, 13, 0.985));
+}
+
+.forest-auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.forest-auth-tabs button {
+  height: 36px;
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+  transition: color 0.15s ease, background-color 0.15s ease, box-shadow 0.18s ease;
+}
+
+.forest-auth-tabs button:hover {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.forest-auth-tabs button.is-active {
+  background: rgba(255, 255, 255, 0.075);
+  color: #fff7e7;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 16px -10px rgba(0, 0, 0, 0.9);
+}
+
+.forest-auth-form .ant-form-item {
+  margin-bottom: 17px;
+}
+
+.forest-auth-form .ant-form-item-label {
+  padding-bottom: 7px;
+}
+
+.forest-auth-form .ant-form-item-label > label {
+  height: auto;
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.forest-auth-form .ant-input-affix-wrapper {
+  height: 49px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.18s ease;
+}
+
+.forest-auth-form .ant-input-affix-wrapper:hover {
+  border-color: rgba(253, 230, 138, 0.22) !important;
+  background: rgba(255, 255, 255, 0.048) !important;
+}
+
+.forest-auth-form .ant-input-affix-wrapper-focused {
+  border-color: rgba(251, 191, 36, 0.56) !important;
+  background: rgba(255, 255, 255, 0.052) !important;
+  box-shadow:
+    0 0 0 3px rgba(245, 158, 11, 0.075),
+    0 0 24px -12px rgba(251, 191, 36, 0.48) !important;
+}
+
+.forest-auth-form .ant-input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #fff7e7 !important;
+  font-size: 13px;
+}
+
+.forest-auth-form .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.24) !important;
+}
+
+.forest-auth-form .ant-input-prefix {
+  margin-inline-end: 10px;
+  color: rgba(253, 230, 138, 0.48);
+}
+
+.forest-auth-form .ant-input-password-icon {
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.forest-auth-form .ant-form-item-explain-error {
+  margin-top: 5px;
+  color: #fda4af;
+  font-size: 11px;
+}
+
+.forest-auth-submit {
+  border: 1px solid rgba(253, 230, 138, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 45%),
+    linear-gradient(135deg, #fcd34d 0%, #f59e0b 48%, #ea580c 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 10px 30px -14px rgba(245, 158, 11, 0.72);
+  transition: transform 0.14s ease, box-shadow 0.18s ease, filter 0.16s ease;
+}
+
+.forest-auth-submit:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 14px 34px -13px rgba(245, 158, 11, 0.82);
+  transform: translateY(-1px);
+}
+
+.forest-auth-submit:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.forest-auth-submit:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+@keyframes forest-auth-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 767.98px) {
+  .forest-auth-dialog {
+    min-height: calc(100dvh - 16px);
+    border-radius: 18px;
+  }
+
+  .forest-auth-vignette {
+    background:
+      linear-gradient(180deg, rgba(2, 5, 8, 0.24), rgba(4, 7, 10, 0.42) 24%, rgba(5, 8, 11, 0.94) 58%),
+      radial-gradient(300px 180px at 50% 14%, rgba(251, 146, 60, 0.12), transparent 70%);
+  }
+
+  .forest-auth-panel {
+    border-left: 0;
+    background: linear-gradient(180deg, rgba(8, 12, 16, 0.86), rgba(6, 9, 12, 0.98) 44%);
+  }
+}
+
+/* 全局/路由懒加载占位：只保留品牌标与状态文字。
+   不要外层卡片：早先用过一圈 126px 的环形描边 + 固定内边距，
+   在深色整屏里会读成一个"长方形 loading 盒子"。 */
+.tech-boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--dv-text-2);
+}
+
+.tech-boot-core {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tech-boot p {
+  margin: 14px 0 3px;
+  color: var(--dv-text-2);
+  font-size: 13px;
+}
+
+.tech-boot > span {
+  color: rgba(103, 232, 249, 0.5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+}
+
+
+/* 只给本轮涉及的高频控件统一状态节奏，避免给画布内所有按钮常驻 transition 监听。 */
+.theme-dark :is(.tech-nav-item, .tech-credits, .tech-login-button, .tech-arrow,
+                .tech-filter, .tech-search-input, .tech-credit-badge, .tech-side-tab,
+                .project-card, .video-card) {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.18s ease,
+    opacity 0.15s ease,
+    transform 0.12s var(--dv-tech-ease);
+}
+
+.theme-dark :is(.tech-nav-item, .tech-credits, .tech-login-button, .tech-filter,
+                .tech-credit-badge, .tech-side-tab):active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-dark *,
+  .theme-dark *::before,
+  .theme-dark *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ============================================================
    富文本编辑器（wangEditor 5：发帖 / 回帖 / 编辑帖子 / 编辑回复）
    ------------------------------------------------------------
@@ -739,4 +1342,390 @@ html.theme-dark-root #root {
   background-image:
     linear-gradient(45deg, #26282c 25%, transparent 0, transparent 75%, #26282c 0, #26282c),
     linear-gradient(45deg, #26282c 25%, #1b1c1f 0, #1b1c1f 75%, #26282c 0, #26282c);
+}
+
+/* ============================================================
+   第八批：电影感排版与公共面收口（Impeccable 精修）
+   ------------------------------------------------------------
+   1) 11px 成为「功能性小字」的硬下限：标签、时间码、计数、导航辅助字
+      不再出现 9/10px。9px 只允许留在纯装饰分隔符上。
+   2) 英文微标签（Working set / Explore / Init canvas）改为一枚编号 +
+      中文小标题，像片场场记单一样有秩序，也少一层「AI 味」。
+   3) 主操作从「青→蓝→紫渐变 + 白字」（对比度只有 2.4~3.1）改成
+      「亮青底 + 近黑字」：对比 11:1，更像电影海报上的信号色，渐变只
+      留给品牌标与扫描线。
+   4) 首屏加银幕暗角与细颗粒，标题放大到可读的「字幕」尺寸。
+   ============================================================ */
+
+.theme-dark {
+  --ui-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ui-hairline: rgba(103, 232, 249, 0.16);
+  --ui-cyan-ink: #67e8f9;
+  /* 亮青底上的墨色：不用纯黑，带一点冷调，和深色主题同一色温 */
+  --ui-on-bright: #04121a;
+}
+
+/* ---- 编辑式标题：编号 + 中文标题 + 渐隐细线 ---- */
+.ui-technical {
+  font-family: var(--ui-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(165, 243, 252, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--ui-mono);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(165, 243, 252, 0.7);
+}
+
+.ui-kicker::before {
+  width: 18px;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, rgba(103, 232, 249, 0.85), rgba(103, 232, 249, 0));
+}
+
+.ui-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.ui-section-index {
+  font-family: var(--ui-mono);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  color: rgba(103, 232, 249, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-section-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--dv-text-1);
+}
+
+.ui-section-rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(103, 232, 249, 0.22), rgba(103, 232, 249, 0));
+}
+
+.ui-page-title {
+  margin: 0;
+  font-size: clamp(26px, 3.1vw, 34px);
+  line-height: 1.14;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: var(--dv-text-1);
+}
+
+.ui-page-sub {
+  margin: 8px 0 0;
+  max-width: 52ch;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--dv-text-3);
+}
+
+.ui-meta {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dv-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 主操作：亮青底 + 近黑字（对比 11:1） ----
+   只接管「实心主按钮」；ghost / link / danger 各有语义，保持原样。 */
+.theme-dark .ant-btn-primary:not(:disabled):not(.ant-btn-background-ghost):not(.ant-btn-dangerous) {
+  border-color: transparent;
+  background-image: none;
+  background-color: var(--dv-cyan);
+  color: var(--ui-on-bright);
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 10px 26px -16px rgba(34, 211, 238, 0.6);
+}
+
+.theme-dark .ant-btn-primary:not(:disabled):not(.ant-btn-background-ghost):not(.ant-btn-dangerous):hover {
+  background-color: #67e8f9;
+  color: var(--ui-on-bright);
+}
+
+.theme-dark .ant-btn-primary:not(:disabled):not(.ant-btn-background-ghost):not(.ant-btn-dangerous):active {
+  background-color: #06b6d4;
+  color: var(--ui-on-bright);
+}
+
+.theme-dark .ant-btn-primary:disabled {
+  color: rgba(4, 18, 26, 0.55);
+}
+
+/* ---- 统一的键盘焦点环：只在键盘操作时出现，鼠标点击不闪 ---- */
+.theme-dark :is(button, a, [role='button'], [tabindex]):focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.78);
+  outline-offset: 2px;
+}
+
+/* ---- 首屏银幕：暗角 + 上下字幕带 ---- */
+.tech-hero-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background:
+    radial-gradient(118% 88% at 50% 44%, transparent 42%, rgba(3, 7, 12, 0.52) 100%),
+    linear-gradient(180deg, rgba(3, 7, 12, 0.5) 0%, transparent 16%, transparent 74%, rgba(3, 7, 12, 0.74) 100%);
+}
+
+.tech-hero-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+}
+
+.tech-hero-kicker {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+/* 首屏字幕：标题是「作品名」，不是说明文字 */
+.tech-banner-caption {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 56px 22px 22px;
+  background: linear-gradient(180deg, transparent 0%, rgba(3, 7, 12, 0.55) 46%, rgba(3, 7, 12, 0.9) 100%);
+}
+
+.tech-banner-index {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  font-family: var(--ui-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(165, 243, 252, 0.82);
+  font-variant-numeric: tabular-nums;
+}
+
+.tech-banner-title {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.28;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .tech-banner-title {
+    font-size: 23px;
+  }
+
+  .tech-banner-caption {
+    padding: 72px 28px 26px;
+  }
+}
+
+.tech-banner-sub {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.72);
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+/* 轮播指示器：视觉仍是小横条，命中区放大到 28px（移动端 32px） */
+.tech-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tech-dot::before {
+  width: 12px;
+  height: 2px;
+  content: '';
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  transition: width 0.22s var(--dv-tech-ease), background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.tech-dot[aria-current='true']::before {
+  width: 22px;
+  background: #a5f3fc;
+  box-shadow: 0 0 12px rgba(103, 232, 249, 0.55);
+}
+
+@media (max-width: 767.98px) {
+  .tech-dot {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* ---- 移动端可点区域统一到 44px ---- */
+@media (max-width: 767.98px) {
+  .tech-tap {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ---- 公共面细节 ---- */
+.theme-dark .tech-header {
+  border-bottom-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+.theme-dark .tech-login-button {
+  /* 与主按钮同一套「亮面 + 墨字」，只是亮度低一档，避免和页面里的主 CTA 抢 */
+  border-color: rgba(103, 232, 249, 0.32);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 52%),
+    linear-gradient(135deg, #155e75 0%, #164e63 56%, #312e81 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 8px 22px -14px rgba(34, 211, 238, 0.55);
+}
+
+/* 社区帖行：hover 时左侧亮起一条 2px 的信号线，比整行换底色更克制 */
+.theme-dark .forum-row {
+  position: relative;
+}
+
+.theme-dark .forum-row::before {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 0;
+  width: 2px;
+  content: '';
+  background: linear-gradient(180deg, #67e8f9, rgba(103, 232, 249, 0));
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity 0.18s ease, transform 0.22s var(--dv-tech-ease);
+}
+
+.theme-dark .forum-row:hover::before,
+.theme-dark .forum-row:focus-within::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+/* 帖子阅读面：中文正文 16px / 1.95，标题阶梯拉开（h1 34 → h2 26 → h3 20） */
+.theme-dark .forum-content {
+  font-size: 16px;
+  line-height: 1.95;
+}
+
+.theme-dark .forum-content h1 { font-size: 30px; }
+.theme-dark .forum-content h2 { font-size: 25px; }
+.theme-dark .forum-content h3 { font-size: 20px; }
+.theme-dark .forum-content h4 { font-size: 17px; }
+.theme-dark .forum-content--compact {
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* 帖子正文里的引用：用青色信号线代替灰色的侧边条 */
+.theme-dark .forum-content blockquote {
+  border-left-color: rgba(103, 232, 249, 0.45);
+  background: rgba(34, 211, 238, 0.05);
+  color: var(--dv-text-2);
+}
+
+/* 视频详情：作品信息叠在画面上，像片尾字幕 */
+.tech-video-caption {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 25;
+  padding: 120px 24px 96px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 0%, rgba(3, 7, 12, 0.5) 55%, rgba(3, 7, 12, 0.92) 100%);
+}
+
+.tech-video-title {
+  margin: 0;
+  max-width: 22ch;
+  font-size: clamp(24px, 2.6vw, 34px);
+  line-height: 1.18;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.8);
+}
+
+.tech-video-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.tech-video-desc {
+  display: -webkit-box;
+  margin: 8px 0 0;
+  max-width: 58ch;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.62);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+@media (max-width: 767.98px) {
+  .tech-video-caption {
+    padding: 96px 16px 112px;
+  }
+
+  .tech-video-desc {
+    -webkit-line-clamp: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tech-dot::before,
+  .theme-dark .forum-row::before {
+    transition: none;
+  }
 }

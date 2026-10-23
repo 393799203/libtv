@@ -34,6 +34,18 @@ export interface RegisterRequest {
   channel?: string;
 }
 
+// 找回密码：申请发送重置邮件
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+// 找回密码：凭邮件里的令牌设置新密码
+export interface ResetPasswordRequest {
+  /** 邮件链接里的明文令牌（后端只存哈希） */
+  token: string;
+  password: string;
+}
+
 // 认证响应
 export interface AuthResponse {
   token: string;

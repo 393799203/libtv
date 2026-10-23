@@ -85,7 +85,13 @@ export function AppLayout() {
   if (!isInitialized) {
     return (
       <Layout className="h-screen flex items-center justify-center">
-        <div className="text-gray-400">加载中...</div>
+        <div className="tech-boot" role="status" aria-live="polite">
+          <div className="tech-boot-core">
+            <BrandLogo size={28} wordClass="h-[18px]" />
+          </div>
+          <p>正在同步创作空间</p>
+          <span>INITIALIZING WORKSPACE</span>
+        </div>
       </Layout>
     );
   }
@@ -94,9 +100,15 @@ export function AppLayout() {
     <Layout className="h-screen">
       {/* 底色不再写死 !bg-white（Tailwind 的 ! 强制类会绕过主题映射，导致"白底白字"），
             改由 ConfigProvider 的暗色 headerBg 提供；再压深一档，让导航文字对比更强 */}
-        <AntHeader className="!py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
+        <AntHeader className="tech-header !py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
+        <span className="tech-header-scan" aria-hidden="true" />
         <div className="flex items-center gap-1.5 md:gap-3">
-          <button onClick={() => navigate('/')} className="flex items-center gap-2 md:gap-3 text-gray-800 hover:opacity-80 transition-opacity cursor-pointer">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            aria-label="返回首页"
+            className="group flex cursor-pointer items-center gap-2 rounded-lg transition-all hover:brightness-110 active:scale-[0.98] md:gap-3"
+          >
             {/* 品牌标：矢量描摹标（见 BrandMarkTraced.tsx，从用户提供的那张图描摹而来），替掉原来那颗通用相机图标 ——
                 antd 的 VideoCameraFilled 是"通用图标库里的相机"，谁都能用，配一行普通字重的文字
                 读起来就是"干燥的文字"，不像一枚品牌标。
@@ -105,6 +117,7 @@ export function AppLayout() {
                 另外三个候选方向见 web/public/logo-lab.html。
                 H5 上标缩到 24px、字缩到 15px，跟头部的紧凑尺寸对齐。 */}
             <BrandLogo size={28} wordClass="h-[17px] md:h-[18px]" markClass="max-sm:h-5 max-sm:w-auto" />
+            <span className="tech-brand-pulse hidden h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_10px_#22d3ee] md:block" aria-hidden="true" />
           </button>
           {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
@@ -114,11 +127,13 @@ export function AppLayout() {
               移动端保留入口但不显示图标（只留文字） */}
           <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
           <button
+            type="button"
             onClick={() => navigate('/forum')}
-            className={`flex flex-row items-center justify-center gap-0.5 md:gap-1.5 w-auto h-10 md:h-auto rounded-lg px-2.5 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none cursor-pointer transition-colors ${
+            aria-current={location.pathname.startsWith('/forum') ? 'page' : undefined}
+            className={`tech-nav-item flex h-10 w-auto cursor-pointer flex-row items-center justify-center gap-0.5 rounded-lg px-2.5 py-0 text-[12px] leading-none transition-all md:h-auto md:gap-1.5 md:px-3 md:py-1.5 md:text-[13px] ${
               location.pathname.startsWith('/forum')
-                ? 'bg-blue-50 text-blue-600'
-                : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
+                ? 'bg-cyan-400/10 text-cyan-200'
+                : 'text-gray-400 hover:bg-cyan-400/[0.07] hover:text-cyan-100'
             }`}
           >
             {/* 移动端不显示图标。这里必须用外层 span 控制显隐：
@@ -133,11 +148,12 @@ export function AppLayout() {
 
         {/* 使用指南入口：放在导航正中间（左组与右组之间） */}
         <button
+          type="button"
           onClick={() => navigate(`/forum/${GUIDE_POST_ID}`)}
-          className={`hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors md:flex ${
+          className={`tech-nav-item hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-all md:flex ${
             location.pathname === `/forum/${GUIDE_POST_ID}`
-              ? 'bg-blue-50 text-blue-600'
-              : 'text-gray-600 hover:bg-blue-50 hover:text-blue-600'
+              ? 'bg-cyan-400/10 text-cyan-200'
+              : 'text-gray-400 hover:bg-cyan-400/[0.07] hover:text-cyan-100'
           }`}
         >
           <ReadOutlined />
@@ -149,11 +165,12 @@ export function AppLayout() {
             {/* 系统管理入口（仅管理员）。移动端隐藏：390px 头部装不下，且运营管理本身是为 PC 设计的 */}
             {user?.role === 'admin' && (
               <button
+                type="button"
                 onClick={() => navigate('/admin')}
-                className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 text-[13px] rounded-lg transition-colors cursor-pointer ${
+                className={`tech-nav-item hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-all md:flex ${
                   location.pathname.startsWith('/admin')
-                    ? 'text-blue-600 bg-blue-50'
-                    : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50'
+                    ? 'bg-cyan-400/10 text-cyan-200'
+                    : 'text-gray-400 hover:bg-cyan-400/[0.07] hover:text-cyan-100'
                 }`}
               >
                 <ControlOutlined />
@@ -163,8 +180,9 @@ export function AppLayout() {
 
             {/* 积分超市入口（移动端也要显示，内边距收窄以便和社区入口并排） */}
             <button
+              type="button"
               onClick={() => setShowPointsMall(true)}
-              className="hidden md:flex md:flex-row items-center justify-center gap-0.5 md:gap-1.5 w-14 h-12 md:w-auto md:h-auto rounded-xl md:rounded-lg px-0 md:px-3 py-0 md:py-1.5 text-[12px] md:text-[13px] leading-none text-amber-500 transition-colors cursor-pointer hover:text-amber-400 hover:bg-amber-50"
+              className="tech-credits hidden h-12 w-14 cursor-pointer items-center justify-center gap-0.5 rounded-xl px-0 py-0 text-[12px] leading-none text-amber-300 transition-all hover:border-amber-300/30 hover:bg-amber-300/10 hover:text-amber-200 md:flex md:h-auto md:w-auto md:flex-row md:gap-1.5 md:rounded-lg md:px-3 md:py-1.5 md:text-[13px]"
             >
               <ShopOutlined className="text-[18px] md:text-[14px]" />
               积分超市
@@ -204,12 +222,9 @@ export function AppLayout() {
           </div>
         ) : (
           <button
+            type="button"
             onClick={() => openLoginModal()}
-            className="px-4 py-1.5 text-sm text-white rounded-lg transition-all duration-200 hover:shadow-lg hover:scale-105 active:scale-95"
-            style={{
-              background: 'linear-gradient(135deg, #33353a 0%, #26282c 50%, #1a1b1e 100%)',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
+            className="tech-login-button rounded-lg px-4 py-1.5 text-sm font-medium text-cyan-50 transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.97]"
           >
             登录
           </button>

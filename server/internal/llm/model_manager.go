@@ -3,6 +3,7 @@ package llm
 import (
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -31,6 +32,17 @@ type ModelConfig struct {
 	// 电信 cdance2.0-0807 / cdance2.0-fast-0807 / cdance2.5-0807）；
 	// wan3.0 系列不开：仍按「常规单价 × 输出时长」计费，参考视频不影响扣费
 	RefVideoBilling bool `yaml:"ref_video_billing"`
+	// APIStyle 该模型使用的上游接口协议风格；空字符串 = 该类型的各家默认协议。
+	//
+	// 目前只有图像模型需要显式指定（见 image.go 的 generate 分派）：
+	//   "dashscope-multimodal" → DashScope 多模态生成
+	//     POST {base_url}/services/aigc/multimodal-generation/generation
+	//     请求 input.messages[].content[] 里混排 {image}/{text}，
+	//     图片从 output.choices[].message.content[].image 取（**不是** data[]）
+	//   ""（默认）→ OpenAI 兼容的 POST {base_url}/images/generations
+	//
+	// 做成配置项而不是在代码里按模型名硬判：新增同类模型只改 models.yaml
+	APIStyle string `yaml:"api_style"`
 }
 
 // ModelsConfig models.yaml 的完整结构
@@ -84,6 +96,15 @@ func (mm *ModelManager) load() error {
 // 同时也是 ImageClient.model 的初值，见 image.go）——三处必须同名，改默认模型时一起改。
 const FallbackImageModelID = "doubao-seedream-5.0-lite"
 
+// 图像模型的上游协议风格（对应 models.yaml 的 api_style 字段）。
+// 判定入口是 ImageAPIStyle，分派点在 image.go 的 generate。
+const (
+	// ImageStyleOpenAI OpenAI 兼容的 /images/generations（默认；api_style 留空即此档）
+	ImageStyleOpenAI = ""
+	// ImageStyleDashScopeMultimodal DashScope 多模态生成（Qwen-Image 2.0 系列）
+	ImageStyleDashScopeMultimodal = "dashscope-multimodal"
+)
+
 // DefaultImageModelID 返回指定渠道下的默认图像模型，供「节点没填模型」时兜底。
 //
 // 为什么读配置而不是直接写死常量：默认模型是运营在 models.yaml 上标的（default: true），
@@ -114,6 +135,21 @@ func (mm *ModelManager) DefaultImageModelID(channel string) string {
 		}
 	}
 	return FallbackImageModelID
+}
+
+// ImageAPIStyle 返回图像模型的上游协议风格（models.yaml 的 api_style）。
+//
+// 查不到模型（管理未装配 / 模型不在该渠道 / 模型未注册）一律返回 ImageStyleOpenAI，
+// 即改动前的 OpenAI 兼容行为 —— 让「查不到」退化成老路径，而不是让生成失败。
+func (mm *ModelManager) ImageAPIStyle(channel, modelID string) string {
+	if mm == nil || modelID == "" {
+		return ImageStyleOpenAI
+	}
+	m := mm.FindModelByIDForChannel(channel, modelID)
+	if m == nil {
+		return ImageStyleOpenAI
+	}
+	return strings.TrimSpace(m.APIStyle)
 }
 
 // ListModels 返回所有渠道合并的模型配置（按类型分组，供价格管理/计费使用）

@@ -3,18 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   Typography,
-  Tag,
   App,
   Spin,
 } from 'antd';
 import {
   ArrowRightOutlined,
   CloseCircleOutlined,
-  DeleteOutlined,
   DesktopOutlined,
   HeartOutlined,
   PlayCircleOutlined,
-  PlusOutlined,
   SearchOutlined,
   VideoCameraOutlined,
 } from '@ant-design/icons';
@@ -100,14 +97,16 @@ const VideoCard = memo(function VideoCard({
   // 只在可见时渲染完整内容，否则只渲染占位符（占位符与卡片同为 16:9，避免布局偏移）
   if (!isVisible) {
     return (
-      <div className="w-full h-full bg-gray-100 rounded-lg animate-pulse" />
+      <div className="tech-skeleton h-full w-full rounded-xl bg-gray-100" />
     );
   }
 
-  // 无外框：整张卡片就是缩略图本身，不再有底部那条「标题 + 点赞」栏
+  // 缩略图即主体；外圈只补极细描边和悬浮光，避免抢内容
   return (
-    <div
-      className="group w-full h-full bg-gray-100 relative rounded-lg cursor-pointer"
+    <button
+      type="button"
+      aria-label={`播放视频：${item.title}`}
+      className="video-card tech-video-card group relative h-full w-full overflow-hidden rounded-xl border border-white/[0.06] bg-gray-100 text-left cursor-pointer focus-visible:outline-none"
       style={{
         contain: 'layout style',
       }}
@@ -119,29 +118,31 @@ const VideoCard = memo(function VideoCard({
       <img
         src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`}
         alt={item.title}
-        className="w-full h-full rounded-lg object-cover"
+        className="video-card-media h-full w-full object-cover"
         loading="lazy"
         decoding="async" // 异步解码，避免阻塞主线程
       />
       {/* 分类与标签：左上角 */}
       {(item.category || (item.tags?.length || 0) > 0) && (
-        <div className="absolute top-2 left-2 flex gap-1 z-20 flex-wrap">
+        <div className="absolute top-2 left-2 z-20 flex flex-wrap gap-1">
           {item.category && (
-            <span className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{item.category}</span>
+            <span className="rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[9px] text-white/90 backdrop-blur-sm">{item.category}</span>
           )}
           {(item.tags || []).slice(0, 2).map(tag => (
-            <span key={tag} className="px-1.5 py-0.5 bg-black/60 text-white text-[9px] rounded-full">{tag}</span>
+            <span key={tag} className="rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[9px] text-white/75">{tag}</span>
           ))}
         </div>
       )}
       {/* 点赞数：原来占底部一整栏，现挪到右上角，与左上角分类标签分居两侧 */}
-      <div className="absolute top-2 right-2 z-20 flex items-center gap-0.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+      <div className="absolute top-2 right-2 z-20 flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[10px] text-white/90">
         <HeartOutlined className="text-[10px]" />
         {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
       </div>
-      {/* 播放按钮 - 简化hover效果 */}
-      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 z-10 transition-none">
-        <PlayCircleOutlined style={{ fontSize: '48px', color: 'white' }} />
+      {/* 播放提示：hover 时收拢暗幕并点亮，键盘聚焦同样可见 */}
+      <div className="video-card-overlay absolute inset-0 z-10 flex items-center justify-center bg-black/0 opacity-0">
+        <span className="video-card-play flex h-14 w-14 items-center justify-center rounded-full border border-cyan-200/35 bg-black/35 text-white shadow-[0_0_36px_rgba(34,211,238,0.28)]">
+          <PlayCircleOutlined style={{ fontSize: '38px' }} />
+        </span>
       </div>
       {/* 标题/作者/时长压在缩略图上：不再单独占一栏高度，卡片仍是纯 16:9 缩略图。
           底部加一层由下往上的渐变遮罩，否则浅色缩略图上白字读不出来。 */}
@@ -182,7 +183,7 @@ const VideoCard = memo(function VideoCard({
         </div>,
         document.body,
       )}
-    </div>
+    </button>
   );
 });
 
@@ -259,6 +260,7 @@ export default function VideoListPage() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [videosLoading, setVideosLoading] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [projectTotal, setProjectTotal] = useState(0); // 项目总数（判断要不要显示「查看全部」）
   const [tvShowVideos, setTvShowVideos] = useState<VideoListItem[]>([]);
@@ -598,16 +600,21 @@ export default function VideoListPage() {
       openLoginModal();
       return;
     }
+    if (creatingProject) return;
+    setCreatingProject(true);
     try {
       const project = await projectApi.createProject({
         name: '未命名',
         description: '',
       });
+      message.success('创作空间已就绪');
       navigate(`/project/${project.id}`);
     } catch {
       // HTTP 错误已由 api.ts 拦截器统一 message.error()
+    } finally {
+      setCreatingProject(false);
     }
-  }, [isAuthenticated, openLoginModal, navigate, message]);
+  }, [creatingProject, isAuthenticated, openLoginModal, navigate, message]);
 
   return (
     <div
@@ -621,7 +628,7 @@ export default function VideoListPage() {
           所以里面所有可点元素都必须自己声明 cursor-pointer —— 否则 hover 上去
           显示的是"抓手"，看不出能点（左右箭头、指示点都踩过这个）。 */}
       <div
-        className="relative w-full h-60 md:h-96 overflow-hidden mb-6 md:mb-8 bg-gradient-to-b from-gray-900 to-gray-800 select-none"
+        className="tech-hero relative mb-6 h-64 w-full select-none overflow-hidden bg-gradient-to-b from-gray-900 to-gray-800 md:mb-8 md:h-[26rem]"
         onMouseEnter={handleBannerMouseEnter}
         onMouseLeave={handleBannerMouseLeave}
         onMouseDown={handleDragStart}
@@ -632,6 +639,14 @@ export default function VideoListPage() {
           contain: 'layout style paint', // CSS containment优化
         }}
       >
+        <div className="pointer-events-none absolute inset-x-0 top-5 z-10 hidden justify-center md:flex">
+          <div className="tech-hero-kicker">
+            <span className="tech-live-dot" aria-hidden="true" />
+            Creative Intelligence Canvas
+            <span className="text-white/25">/</span>
+            <span className="font-mono text-[10px] text-cyan-200/75">MANWA // ONLINE</span>
+          </div>
+        </div>
         {banners.length > 0 ? (
           <div
             className="relative w-full h-full flex items-center justify-center"
@@ -690,7 +705,7 @@ export default function VideoListPage() {
                 >
                   <div 
                     className="w-full h-full rounded-xl overflow-hidden shadow-xl cursor-pointer relative bg-gradient-to-r from-blue-600 to-purple-700"
-                    onClick={(e) => {
+                    onClick={() => {
                       // 如果发生了拖拽，不触发点击
                       if (hasDraggedRef.current) {
                         hasDraggedRef.current = false;
@@ -717,9 +732,9 @@ export default function VideoListPage() {
                           </div>
                         )}
                         <img 
-                          src={banner.image_url} 
+                    src={banner.image_url}
                           alt={banner.title}
-                          className={`w-full h-full object-cover transition-opacity duration-300 ${
+                    className={`h-full w-full object-cover transition-opacity duration-300 ${
                             loadingBannersRef.current.has(banner.id) ? 'opacity-0' : 'opacity-100'
                           }`}
                           onLoad={() => handleBannerImageLoad(banner.id)}
@@ -737,11 +752,14 @@ export default function VideoListPage() {
                       </div>
                     )}
                     {banner.image_url && !loadingBannersRef.current.has(banner.id) && (
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent">
-                        <div className="absolute bottom-3 left-3 right-3">
-                          <Title level={5} className="!text-white !mb-1 !text-sm">{banner.title}</Title>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/5 to-transparent">
+                        <div className="absolute bottom-4 left-4 right-4">
+                          <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-cyan-200/20 bg-cyan-300/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-cyan-100/80">
+                            Featured signal
+                          </span>
+                          <Title level={5} className="!text-white !mb-1 !text-sm [text-shadow:0_2px_16px_rgba(0,0,0,0.8)]">{banner.title}</Title>
                           {banner.description && (
-                            <span className="text-gray-300 text-[11px]">{banner.description}</span>
+                            <span className="line-clamp-2 text-gray-300 text-[11px] leading-5">{banner.description}</span>
                           )}
                         </div>
                       </div>
@@ -755,7 +773,8 @@ export default function VideoListPage() {
             {banners.length > 1 && (
               <>
                 <button
-                  className="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors cursor-pointer z-20"
+                  aria-label="上一个推荐"
+                  className="tech-arrow absolute left-2 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-white backdrop-blur-md transition-colors hover:border-cyan-200/35 hover:bg-cyan-300/15 md:left-4 md:h-10 md:w-10"
                   onClick={() => {
                     setCurrentBannerIndex((prev) =>
                       prev === 0 ? banners.length - 1 : prev - 1
@@ -767,7 +786,8 @@ export default function VideoListPage() {
                   </svg>
                 </button>
                 <button
-                  className="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 w-11 h-11 md:w-10 md:h-10 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center text-white transition-colors cursor-pointer z-20"
+                  aria-label="下一个推荐"
+                  className="tech-arrow absolute right-2 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-white backdrop-blur-md transition-colors hover:border-cyan-200/35 hover:bg-cyan-300/15 md:right-4 md:h-10 md:w-10"
                   onClick={() => {
                     setCurrentBannerIndex((prev) =>
                       prev === banners.length - 1 ? 0 : prev + 1
@@ -784,14 +804,16 @@ export default function VideoListPage() {
             {/* 指示器：叠在彩色 banner 上，必须保持浅色（用任意值写法绕开暗色主题对
                 bg-white 的"面板化"映射，否则会被映射成近黑底而看不见） */}
             {banners.length > 1 && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
+              <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/10 bg-black/25 px-2 py-1.5 backdrop-blur-sm">
                 {banners.map((_, index) => (
                   <button
                     key={index}
+                    aria-label={`切换到第 ${index + 1} 个推荐`}
+                    aria-current={index === currentBannerIndex ? 'true' : undefined}
                     className={`rounded-full transition-all cursor-pointer ${
                       index === currentBannerIndex
-                        ? 'w-2 h-2 bg-[#ffffff]'
-                        : 'w-1.5 h-1.5 bg-[#ffffff8c] hover:bg-[#ffffffcc]'
+                        ? 'h-1.5 w-5 bg-cyan-200 shadow-[0_0_12px_rgba(165,243,252,0.6)]'
+                        : 'h-1.5 w-1.5 bg-white/45 hover:bg-white/80'
                     }`}
                     onClick={() => setCurrentBannerIndex(index)}
                     style={{ minWidth: '12px', minHeight: '12px' }}
@@ -809,9 +831,15 @@ export default function VideoListPage() {
 
       {/* 最近项目（最多展示两行，超出走「我的项目」页）
           移动端（<768px）不提供这一板块：hidden 即不渲染占位，想看完整列表走「我的项目」页 */}
-      <section className="hidden md:block max-w-7xl mx-auto px-6 mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <Text className="text-gray-600 font-medium">最近项目</Text>
+      <section className="hidden md:block max-w-7xl mx-auto px-6 mb-12">
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <div className="mb-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.2em] text-cyan-200/60">
+              <span className="h-px w-5 bg-cyan-200/40" />
+              Working set
+            </div>
+            <Text className="!text-[15px] !font-medium !text-[var(--dv-text-1)]">最近项目</Text>
+          </div>
           {isAuthenticated && projectTotal > 4 && (
             <a
               className="group inline-flex items-center gap-1 text-[13px] text-gray-800 hover:opacity-75 cursor-pointer transition-opacity"
@@ -830,7 +858,7 @@ export default function VideoListPage() {
             裁切层会把卡片 hover 上移的那 2px 连同顶边/圆角、以及第二行的 hover 阴影一起切掉。 */}
         <div className="recent-projects-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 md:gap-3">
           {/* 新建项目卡片 */}
-          <CreateProjectCard onClick={handleCreateProject} />
+          <CreateProjectCard onClick={handleCreateProject} loading={creatingProject} />
 
           {/* 项目列表 */}
           {projectListData.map((project) => (
@@ -856,37 +884,44 @@ export default function VideoListPage() {
       </div>
 
       <section ref={tvSectionRef} className="max-w-7xl mx-auto px-3 md:px-6 scroll-mt-4">
-        <Text className="text-gray-600 font-medium text-[13px] md:text-lg mb-3 block">TV Show</Text>
+        <div className="mb-3 flex items-center gap-3">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-200/55">Explore</span>
+          <Text className="!mb-0 !block !text-[15px] !font-medium !text-[var(--dv-text-1)] md:!text-lg">TV Show</Text>
+          <span className="h-px flex-1 bg-gradient-to-r from-cyan-300/20 to-transparent" />
+        </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4">
           <div className="flex items-center gap-2 flex-wrap flex-1">
             {showCategories.map((cat) => (
-              <Tag
+              <button
+                type="button"
                 key={cat.key}
-                // 选中态不再用 antd 预设色板（color="blue" 不走主题主色，会跟全站青色选中态不一致），
-                // 改用统一约定：半透明青底 + 浅青字 + 青描边
-                className={`cursor-pointer text-xs ${
+                aria-pressed={activeCategory === cat.key}
+                className={`tech-filter cursor-pointer rounded-full border px-3 py-1.5 text-xs transition-all ${
                   activeCategory === cat.key
-                    ? '!bg-cyan-500/15 !text-cyan-200 !border-cyan-400 font-medium'
-                    : ''
+                    ? 'border-cyan-300/45 bg-cyan-400/15 font-medium text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.12)]'
+                    : 'border-white/[0.07] bg-white/[0.025] text-[var(--dv-text-3)] hover:border-white/15 hover:bg-white/[0.05] hover:text-[var(--dv-text-1)]'
                 }`}
                 onClick={() => handleCategoryChange(cat.key)}
               >
                 {cat.label}
-              </Tag>
+              </button>
             ))}
           </div>
-          <div className="relative">
-            <SearchOutlined className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-[14px]" />
+          <div className="tech-search relative">
+            <SearchOutlined className={`absolute left-3 top-1/2 -translate-y-1/2 text-[14px] transition-colors ${videosLoading ? 'animate-pulse text-cyan-300' : 'text-gray-400'}`} />
             <input
               value={searchKeyword}
               onChange={e => handleSearchChange(e.target.value)}
               placeholder="搜索视频标题、作者、标签..."
-              className="w-full sm:w-[280px] pl-9 pr-8 py-2 text-[14px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none bg-white"
+              aria-label="搜索视频"
+              className="tech-search-input w-full rounded-xl py-2 pl-9 pr-8 text-[14px] outline-none transition-all sm:w-[280px]"
             />
             {searchKeyword && (
               <button
+                type="button"
+                aria-label="清空搜索"
                 onClick={() => { setSearchKeyword(''); loadVideos(); }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-0.5"
+                className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-gray-400 transition-colors hover:text-cyan-200 active:scale-90"
               >
                 <CloseCircleOutlined className="text-[14px]" />
               </button>
@@ -895,7 +930,7 @@ export default function VideoListPage() {
         </div>
 
         {/* TV Show 网格 - 切换时遮罩 loading，数据返回后整体替换；固定最小高度放在总容器上，切换时内容区不塌陷 */}
-        <Spin spinning={videosLoading}>
+        <Spin spinning={videosLoading} tip={searchKeyword ? '正在搜索作品…' : '正在载入作品…'}>
           <div style={{ minHeight: '440px' }}>
             {/* 缩略图间距收紧到 8px（原 16px）：无边框后 16px 会显得空 */}
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3">

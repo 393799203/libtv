@@ -26,10 +26,12 @@ end
 return c
 `)
 
-// AllowRate 判断用户本分钟内的生成次数是否超限。
-// 返回：是否放行、本窗口已用次数、错误。
-// Redis 不可用或脚本报错时**放行**（限流属增强能力，不应阻断生成主流程）。
-func AllowRate(ctx context.Context, userID string, perMinute int) (bool, int, error) {
+// AllowRateScoped 通用固定窗口限流：scope 区分用途（gen=生成、forgot=找回密码…），
+// id 是被限对象（用户 ID / 客户端 IP / 邮箱）。
+//
+// key 格式与拆分前的 AllowRate 完全一致（scope 传 "gen"、id 传 userID 时逐字节相同），
+// 所以对生成限流而言这是一次纯重构，不会让线上正在计数的窗口重置。
+func AllowRateScoped(ctx context.Context, scope, id string, perMinute int) (bool, int, error) {
 	if client == nil {
 		return true, 0, ErrUnavailable
 	}
@@ -37,12 +39,19 @@ func AllowRate(ctx context.Context, userID string, perMinute int) (bool, int, er
 		return true, 0, nil
 	}
 	window := time.Now().Unix() / 60
-	key := fmt.Sprintf("rl:gen:%s:%d", userID, window)
+	key := fmt.Sprintf("rl:%s:%s:%d", scope, id, window)
 	n, err := rateScript.Run(ctx, client, []string{key}, 120).Int()
 	if err != nil {
 		return true, 0, err
 	}
 	return n <= perMinute, n, nil
+}
+
+// AllowRate 判断用户本分钟内的生成次数是否超限。
+// 返回：是否放行、本窗口已用次数、错误。
+// Redis 不可用或脚本报错时**放行**（限流属增强能力，不应阻断生成主流程）。
+func AllowRate(ctx context.Context, userID string, perMinute int) (bool, int, error) {
+	return AllowRateScoped(ctx, "gen", userID, perMinute)
 }
 
 // RateKeyTTL 返回限流窗口残留时间（供测试/观测）

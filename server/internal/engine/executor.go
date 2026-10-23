@@ -292,12 +292,19 @@ func activeChargeByNode(ledger *billing.Ledger, ctx context.Context, execID int6
 //
 // 因此这类失败一律交给用户自己决定是否重试。
 //
-// 具体三类：
+// 具体四类：
 //   - ErrVideoPollTimeout：上游一直在 processing，轮询预算用尽（本轮新增 25 分钟预算）；
+//   - ErrUpstreamRejected：上游明确拒绝本次请求（参数不合法、参考图超限、内容审核不过）。
+//     这类是**确定性**的：同样的输入再发一次，必然得到同样的拒绝。
+//     重试除了再扣一次费、再退一次费，唯一实际效果是覆盖掉真正的失败原因 ——
+//     线上实测：一个参考图超限的请求被拒后自动重试，重试又撞上另一笔并发执行的
+//     额度占用而报「积分不足」，最终落库的失败原因成了「积分不足」，
+//     真实原因（参考图 13 张、超过上限 9）只留在日志里，排查时被彻底带偏。
 //   - DeadlineExceeded：执行自身的 30 分钟预算耗尽（此时轮询预算还没走完）；
 //   - Canceled：用户主动停止生成 —— 停止更不该被队列自动重跑。
 func isNoRetryVideoFailure(err error) bool {
 	return errors.Is(err, llm.ErrVideoPollTimeout) ||
+		errors.Is(err, llm.ErrUpstreamRejected) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled)
 }
@@ -1572,6 +1579,15 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 		mentions = validMentions
 
+		// 与视频路径同样的去重：同一张图被提示词多次引用时 mentions 里有多条重复项，
+		// 不去重会把它当多张参考图送去图生图，既浪费额度也容易触发上游数量上限
+		if before := len(mentions); before > 1 {
+			mentions = dedupeMentions(mentions)
+			if dropped := before - len(mentions); dropped > 0 {
+				log.Printf("[ImageExecutor] 🔁 参考素材去重: 合并 %d 条重复引用（%d → %d）", dropped, before, len(mentions))
+			}
+		}
+
 		log.Printf("[ImageExecutor] mentions解析成功，找到%d个引用", len(mentions))
 		for idx, m := range mentions {
 			log.Printf("[ImageExecutor] mentions[%d]: nodeId=%s nodeType=%s imageUrl=%s", idx, m.NodeID, m.NodeType, m.ImageUrl)
@@ -2293,6 +2309,51 @@ type promptMention struct {
 	ImageUrl string `json:"imageUrl"`
 }
 
+// videoMaxRefImages 视频上游对参考图数量的硬上限。
+//
+// 电信视频超过这个数会直接拒单："expected at most 9 reference images but got 13 instead"。
+// 兜底分支（从上游节点补图）本来就用 9 作判断，这里提成常量与它对齐。
+const videoMaxRefImages = 9
+
+// dedupeMentions 按 nodeId 去重，保留首次出现的顺序。
+//
+// 必须去重：提示词里同一张图会被反复引用。一条 5 镜头的提示词里，
+// 同一个角色设定图可能挂着 6 个 [[m:xxx]] 标记，mentions 里于是出现 6 条，
+// 每条都指向同一张图。不去重就会把这张图当 6 张发给上游 ——
+// 线上实测过一个 5 镜头提示词因此凑出 13 张参考图而被电信拒单。
+// 这解释了「为什么单张图引用得越多越容易失败」这个反直觉的现象。
+//
+// 用 nodeId 而不是 URL 做键：语义是「同一个节点只算一份素材」，
+// URL 可能因重新生成而变化，nodeId 不会。
+func dedupeMentions(mentions []promptMention) []promptMention {
+	if len(mentions) < 2 {
+		return mentions
+	}
+	// 另起底层数组：两处调用方前面刚做过 mentions[:0] 的原地过滤，
+	// 复用同一数组会让返回的切片与被过滤的原切片互为别名
+	out := make([]promptMention, 0, len(mentions))
+	seen := make(map[string]struct{}, len(mentions))
+	for _, m := range mentions {
+		if m.NodeID != "" {
+			if _, dup := seen[m.NodeID]; dup {
+				continue
+			}
+			seen[m.NodeID] = struct{}{}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// shouldDedupeMentions 该视频模式下是否按 nodeId 去重。
+//
+// 首尾帧模式是唯一例外：video.go 按 imageURLs 的**位置**分配
+// first_frame / last_frame，用户完全可能故意把同一张图同时用作首帧和尾帧
+// （静态镜头），去重会把尾帧弄丢。该模式下游本来也只取前 2 张，不会撞上限。
+func shouldDedupeMentions(videoMode string) bool {
+	return videoMode != "first-last-frame"
+}
+
 // upstreamTextMaxRunes 单个上游文本节点的参考文本上限（按 rune 计）。
 // 上游模型对 prompt 长度有上限，而文本节点里可能是整段剧本 —— 原样整段拼进去容易被上游拒单。
 // 截断会留下 "...[truncated]" 标记，日志里也如实记录字符数，避免"为什么只用了半段"事后查不出来。
@@ -2425,6 +2486,18 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 		mentions = validMentions
 
+		// 同一张图被提示词多次引用时 mentions 里会有多条重复项：不去重就会把
+		// 同一张图当多张发给上游，参考图数量凭空翻几倍（电信上限 9 张，超了直接拒单）。
+		// 首尾帧模式例外，原因见 shouldDedupeMentions。
+		if shouldDedupeMentions(data.VideoMode) {
+			if before := len(mentions); before > 1 {
+				mentions = dedupeMentions(mentions)
+				if dropped := before - len(mentions); dropped > 0 {
+					log.Printf("[VideoExecutor] 🔁 参考素材去重: 合并 %d 条重复引用（%d → %d）", dropped, before, len(mentions))
+				}
+			}
+		}
+
 		for _, m := range mentions {
 			if m.NodeType == "image" {
 				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
@@ -2476,6 +2549,16 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				}
 			}
 		}
+	}
+
+	// 上游对参考图数量有硬上限，超了直接拒单。去重后仍超出时截断：
+	// 截断只是少用几张参考图（还能出片），原样发出去则是整单失败（用户白等一趟）。
+	// 必须放在 fallback 之前 —— 兜底补图也按 len(imageURLs) < videoMaxRefImages 判断，
+	// 先截断才能让它继续按剩余名额补。
+	if len(imageURLs) > videoMaxRefImages {
+		log.Printf("[VideoExecutor] ⚠️ 参考图 %d 张超过上游上限 %d，只取前 %d 张（node=%s）",
+			len(imageURLs), videoMaxRefImages, videoMaxRefImages, node.ID)
+		imageURLs = imageURLs[:videoMaxRefImages]
 	}
 
 	// fallback: 查找上游连接的图片/视频/音频节点

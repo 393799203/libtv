@@ -116,9 +116,14 @@ api.interceptors.response.use(
     const isUnauthenticated = error.response?.status === 401;
 
     // 登录/注册接口的 401 是业务性失败（如“邮箱或密码错误”），不是 token 失效，
-    // 不能走下面的“登录已失效”逻辑，否则真实原因会被吞掉、用户看不到任何提示
+    // 不能走下面的“登录已失效”逻辑，否则真实原因会被吞掉、用户看不到任何提示。
+    // 找回密码两条同理：它们是未登录可访问的公开接口，其失败（链接无效等）与登录态无关
     const reqUrl = error.config?.url || '';
-    const isAuthEndpoint = reqUrl.includes('/auth/login') || reqUrl.includes('/auth/register');
+    const isAuthEndpoint =
+      reqUrl.includes('/auth/login') ||
+      reqUrl.includes('/auth/register') ||
+      reqUrl.includes('/auth/forgot-password') ||
+      reqUrl.includes('/auth/reset-password');
 
     // 401 在窗口期内只处理一次：登出 + 弹登录框，后续并发 401 静默拒绝
     if (isUnauthenticated && !isAuthEndpoint) {

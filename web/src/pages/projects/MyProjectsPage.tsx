@@ -27,6 +27,7 @@ export default function MyProjectsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const loadProjects = useCallback(async (p: number) => {
     if (!isAuthenticated) return;
@@ -47,13 +48,18 @@ export default function MyProjectsPage() {
 
   // 新建项目并进入工作区
   const handleCreateProject = useCallback(async () => {
+    if (creating) return;
+    setCreating(true);
     try {
       const project = await projectApi.createProject({ name: '未命名', description: '' });
+      message.success('创作空间已就绪');
       navigate(`/project/${project.id}`);
     } catch {
       // HTTP 错误已由 api.ts 拦截器统一 message.error()
+    } finally {
+      setCreating(false);
     }
-  }, [navigate]);
+  }, [creating, message, navigate]);
 
   // 删除项目：刷新当前页；若删空且非第一页则回退一页
   const handleDeleteProject = useCallback((project: ProjectListItem) => {
@@ -83,13 +89,26 @@ export default function MyProjectsPage() {
     <div className="min-h-screen page-bg pb-20">
       <div className="max-w-7xl mx-auto px-6 pt-8">
         {/* 标题栏 */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-baseline gap-2">
-            <Title level={4} className="!mb-0">我的项目</Title>
-            <Text type="secondary" className="text-[13px]">共 {total} 个</Text>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <div className="mb-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.2em] text-cyan-200/60">
+              <span className="h-px w-5 bg-cyan-200/40" />
+              Workspace archive
+            </div>
+            <div className="flex items-baseline gap-2">
+              <Title level={4} className="!mb-0">我的项目</Title>
+              <Text type="secondary" className="text-[13px]">共 {total} 个</Text>
+            </div>
           </div>
-          <Button type="primary" className="max-md:!h-11" icon={<PlusOutlined />} onClick={handleCreateProject}>
-            新建项目
+          <Button
+            type="primary"
+            className="max-md:!h-11"
+            icon={<PlusOutlined />}
+            loading={creating}
+            aria-busy={creating}
+            onClick={handleCreateProject}
+          >
+            {creating ? '正在创建…' : '新建项目'}
           </Button>
         </div>
 
@@ -101,7 +120,7 @@ export default function MyProjectsPage() {
                 <div className="text-[14px]">暂无项目，点击右上角「新建项目」开始创作</div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-4">
                 {/* 这里不再放「开始创作」卡片：右上角已有「新建项目」主按钮，
                     本页空状态文案也是"点击右上角「新建项目」开始创作" —— 两个入口重复了。
                     （该卡片只有首页需要：首页头部没有新建按钮） */}
