@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { LoginModal } from '@/components/auth/LoginModal';
+import { AssistantPanel } from '@/components/assistant/AssistantPanel';
 import { useAuthStore } from '@/stores/authStore';
 
 /**
@@ -13,5 +14,12 @@ export function GlobalComponents() {
     useAuthStore.getState().initialize();
   }, []);
 
-  return <LoginModal />;
+  return (
+    <>
+      <LoginModal />
+      {/* AI 助手：常驻右下角。放在这里（而不是画布内）是为了在首页/项目列表也能问问题；
+          需要画布坐标的操作由 WorkspacePage 里的 CanvasBridge 反向注册 */}
+      <AssistantPanel />
+    </>
+  );
 }

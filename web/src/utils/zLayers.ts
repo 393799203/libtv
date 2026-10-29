@@ -7,6 +7,9 @@
  *                     拖拽预览、框选矩形。它们只需要高于画布本身，
  *                     所以必须低于一切弹窗 —— body 级 fixed 本身就高于画布。
  *   canvasMenu   900  画布内弹出层：右键菜单、节点选择弹窗、锚定节点的面板。
+ *   assistant    950  AI 助手悬浮面板。**刻意高于画布浮层与右键菜单、低于一切弹窗**：
+ *                     助手是常驻的，但不能盖住弹窗——否则用户点开积分超市/发布弹窗时，
+ *                     助手面板会压在它的按钮上（这正是下面"踩过的坑"里那类问题）。
  *   modalInline 1000  与 antd 弹窗同一层（antd zIndexPopupBase 默认 1000）。
  *                     自绘弹窗若要和 antd 弹窗互相可嵌套覆盖，就用这一档。
  *                     注意本档与 antd 弹窗的先后由挂载顺序决定。
@@ -26,6 +29,7 @@
 export const Z = {
   canvasFloat: 600,
   canvasMenu: 900,
+  assistant: 950,
   modalInline: 1000,
   overlay: 1200,
   modalTop: 9999,

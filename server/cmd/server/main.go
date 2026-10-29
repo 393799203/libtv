@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"libtv/internal/assistant"
 	"libtv/internal/audit"
 	"libtv/internal/billing"
 	"log"
@@ -122,7 +123,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}, &model.PasswordResetToken{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}, &model.PasswordResetToken{}, &model.AssistantLog{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -373,6 +374,10 @@ func main() {
 	idemStore := idem.New(nil, "idem:")
 	promptHandler := handler.NewPromptHandler(llmClient, modelManager, billingService, providerTaskService, idemStore, channelService)
 	previzHandler := handler.NewPrevizHandler(llmClient, imageClient, modelManager, billingService, providerTaskService, idemStore, channelService)
+	// AI 助手：把自然语言翻译成白名单内的画布命令。
+	// 这个服务**不接计费**——对话本身不扣用户积分，真正花钱的是它触发的生成（见 assistant_handler.go）
+	assistantService := assistant.NewService(llmClient, modelManager, channelService, db)
+	assistantHandler := handler.NewAssistantHandler(assistantService)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService, channelService)
@@ -662,6 +667,15 @@ func main() {
 			banners.POST("/images", bannerHandler.UploadImage) // 上传Banner图片
 			banners.PUT("/:id", bannerHandler.UpdateBanner)
 			banners.DELETE("/:id", bannerHandler.DeleteBanner)
+		}
+
+		// AI 助手（需登录）。
+		// 刻意**不挂 Billing**：对话本身不扣用户积分（见 docs/AI助手-智能问答与操作方案.md）。
+		// 限流用独立 scope "assistant"：与生成（gen）分开计数，
+		// 否则用户连着问几句话就把每分钟的生成配额吃光了。
+		assistantGroup := api.Group("/assistant")
+		{
+			assistantGroup.POST("/chat", middleware.RateLimitScoped(config.C.RateLimit, "assistant", "对话"), assistantHandler.Chat)
 		}
 
 		// 提示词生成（需登录）；AI 调用入口，先过扣费中间件

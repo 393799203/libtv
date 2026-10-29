@@ -36,8 +36,8 @@ type ResetPasswordRequest struct {
 
 // ForgotPassword 申请发送重置邮件 POST /api/auth/forgot-password
 //
-// 无论邮箱是否注册，成功响应完全一致（防用户枚举）。邮箱不存在、邮件已发出，
-// 走的是同一个分支、同一句话术，攻击者无法据此判断某个邮箱是否注册过。
+// 邮箱未注册时明确报错（ErrResetEmailNotFound → 404 + code 2010），
+// 不再为「防枚举」而返回与发送成功一致的话术——取舍理由见 service.RequestReset。
 func (h *PasswordResetHandler) ForgotPassword(c *gin.Context) {
 	var req ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -50,8 +50,8 @@ func (h *PasswordResetHandler) ForgotPassword(c *gin.Context) {
 		return
 	}
 
-	// 刻意不区分「已发送」与「邮箱不存在」：话术统一为条件句
-	response.OKWithMsg(c, "如果该邮箱已注册，我们已发送重置链接，请查收邮件", nil)
+	// 能走到这里说明邮箱确实已注册，话术直接陈述「已发送」即可，不必再用条件句
+	response.OKWithMsg(c, "重置邮件已发送，请查收邮件", nil)
 }
 
 // ResetPassword 凭令牌重置密码 POST /api/auth/reset-password

@@ -42,6 +42,9 @@ var (
 	ErrResetTooFrequent  = apperror.New(2007, http.StatusTooManyRequests, "操作过于频繁，请稍后再试")
 	ErrResetMailFailed   = apperror.New(2008, http.StatusServiceUnavailable, "重置邮件发送失败，请稍后重试")
 	ErrResetPwdTooShort  = apperror.New(2009, http.StatusBadRequest, "新密码至少6位")
+	// ErrResetEmailNotFound 邮箱未注册。原实现对此静默返回成功（防枚举），
+	// 现改为明确提示，取舍理由见 RequestReset 内 gorm.ErrRecordNotFound 分支的注释。
+	ErrResetEmailNotFound = apperror.New(2010, http.StatusNotFound, "该邮箱未注册，请检查是否输错，或先去注册")
 )
 
 // PasswordResetMailer 重置邮件的发送方（*mail.Sender 实现）。
@@ -64,8 +67,8 @@ func NewPasswordResetService(userRepo repository.UserRepo, resetRepo repository.
 
 // RequestReset 处理「忘记密码」请求：给该邮箱发一封带重置链接的邮件。
 //
-// 无论邮箱是否注册过，都返回同样的成功结果（防用户枚举）——调用方不要在返回值上
-// 区分这两种情况，否则这个防护就白做了：能看出差别的接口等于一个「邮箱是否注册」查询器。
+// 邮箱未注册时返回 ErrResetEmailNotFound（明确提示），不再静默成功；
+// 取舍理由见函数内 gorm.ErrRecordNotFound 分支的注释。
 func (s *PasswordResetService) RequestReset(ctx context.Context, email, clientIP string) error {
 	email = strings.TrimSpace(email)
 	if email == "" {
@@ -78,23 +81,30 @@ func (s *PasswordResetService) RequestReset(ctx context.Context, email, clientIP
 		return ErrResetTooFrequent
 	}
 
-	// 邮件服务必须**先于**查用户判断：它是全局开关，与邮箱是否注册无关。
-	// 若放在查用户之后就糟了 —— 邮件关闭期间，未知邮箱走「静默成功」分支、
-	// 已知邮箱走这里报错，两条路径的响应不同，接口立刻退化成「邮箱是否注册」查询器。
-	if s.mailer == nil || !s.mailer.Enabled() {
-		return ErrResetMailFailed
-	}
-
 	// 与登录同一套查找规则（精确保存、精确匹配）：能用哪个邮箱登录，就能用哪个邮箱找回。
 	// 这里刻意不做大小写不敏感兜底——注册时邮箱原样入库，A@x.com 与 a@x.com 可能是
 	// 两个不同账号，模糊匹配会认错人。
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Printf("[Reset] 收到未注册邮箱的重置请求，已静默忽略 email=%s", email)
-			return nil // 防枚举：对外与发送成功完全一致
+			// 未注册就如实报错（2026-10-27 决策变更，原为「静默返回成功」防枚举）。
+			//
+			// 防枚举的初衷没错，但它在这里并没有真正生效：注册接口
+			// /api/auth/register 对已注册邮箱直接返回 "email already registered"，
+			// 任何人无需验证码就能把邮箱是否注册问出来。于是静默只剩代价——用户把邮箱
+			// 打错一位（线上真实发生过：2484494687@qq.com vs 24844946872@qq.com），
+			// 界面照样显示「已发送」，然后永远收不到信，也不知道错在哪一步。
+			// 改为明确提示后，用户能立刻自查拼写或去注册。
+			log.Printf("[Reset] 未注册邮箱的找回请求 email=%s", email)
+			return ErrResetEmailNotFound
 		}
 		return err
+	}
+
+	// 邮件总开关放在「确认邮箱存在」之后判断：优先给出「该邮箱未注册」这个准确答案，
+	// 而不是让全局邮件故障把它盖成含义完全不同的「发送失败」。
+	if s.mailer == nil || !s.mailer.Enabled() {
+		return ErrResetMailFailed
 	}
 
 	token, err := newResetToken()
@@ -121,11 +131,9 @@ func (s *PasswordResetService) RequestReset(ctx context.Context, email, clientIP
 		return err
 	}
 
-	// 异步发信，理由有二：
-	//  1) 不让用户干等 SMTP 握手（常有秒级延迟）；
-	//  2) 让「邮箱存在」与「邮箱不存在」两条路径的响应耗时基本一致——
-	//     若同步发信，光是这几秒的耗时差就足以被用来判断某个邮箱是否注册过，
-	//     前面那层「永远返回成功」的防枚举就形同虚设。
+	// 异步发信：不让用户干等 SMTP 握手（常有秒级延迟）。
+	// 注：原实现还有第二个理由——抹平「邮箱存在 / 不存在」两条路径的耗时差以防枚举；
+	// 未注册现在会明确报错，这个理由已不成立。
 	s.sendResetAsync(user.Email, user.Nickname, token)
 	return nil
 }

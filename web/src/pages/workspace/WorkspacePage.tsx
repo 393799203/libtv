@@ -11,6 +11,7 @@ import {
   ShopOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
+import { CanvasBridge } from '@/components/assistant/CanvasBridge';
 import { CanvasToolbar } from '@/components/canvas/CanvasToolbar';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -220,6 +221,9 @@ function WorkspaceInner() {
 
   return (
     <ReactFlowProvider>
+    {/* 把画布坐标能力（视口中心 / 聚焦节点）注册给助手面板。
+        面板挂在 GlobalComponents，那里没有 ReactFlowProvider，只能用这种反向注册的方式。 */}
+    <CanvasBridge />
     <div className="w-full h-full flex flex-col overflow-hidden bg-[var(--dv-canvas-bg)]">
       {/* SSE 订阅实例：每个 activeStream 一个独立 EventSource */}
       {activeStreams.map((s) => (

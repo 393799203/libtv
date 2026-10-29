@@ -18,7 +18,7 @@ export const authApi = {
   logout: () =>
     api.post<ApiResponse<void>>('/auth/logout'),
 
-  /** 申请重置密码：无论邮箱是否注册，后端都回同一句「如果该邮箱已注册…」 */
+  /** 申请重置密码：邮箱未注册时后端返回 404 + code 2010，由拦截器统一弹出提示 */
   forgotPassword: (data: ForgotPasswordRequest) =>
     api.post<ApiResponse<void>>('/auth/forgot-password', data),
 

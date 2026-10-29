@@ -96,6 +96,10 @@ func (mm *ModelManager) load() error {
 // 同时也是 ImageClient.model 的初值，见 image.go）——三处必须同名，改默认模型时一起改。
 const FallbackImageModelID = "doubao-seedream-5.0-lite"
 
+// FallbackLLMModelID 文本模型的最后兜底（models.yaml 里 llm 分类标了 default: true 的那个）。
+// 只在 DefaultLLMModelID 查不到配置时使用；改默认模型时与 models.yaml 一起改。
+const FallbackLLMModelID = "deepseek-v4-flash"
+
 // 图像模型的上游协议风格（对应 models.yaml 的 api_style 字段）。
 // 判定入口是 ImageAPIStyle，分派点在 image.go 的 generate。
 const (
@@ -135,6 +139,36 @@ func (mm *ModelManager) DefaultImageModelID(channel string) string {
 		}
 	}
 	return FallbackImageModelID
+}
+
+// DefaultLLMModelID 返回指定渠道下的默认文本模型，供「调用方没有指定模型」时兜底。
+//
+// 目前只有 AI 助手用它（意图识别不该让用户去选模型）。
+// 与 DefaultImageModelID 同样的理由：默认模型是运营在 models.yaml 上标的（default: true），
+// 写死常量会在换默认模型时和配置悄悄分叉。
+func (mm *ModelManager) DefaultLLMModelID(channel string) string {
+	// 允许 nil receiver，调用方不必先判空（与 DefaultImageModelID 一致）
+	if mm == nil {
+		return FallbackLLMModelID
+	}
+
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	if mm.config == nil {
+		return FallbackLLMModelID
+	}
+	// 空渠道按华数处理：与 ListModelsForChannel 的约定保持一致
+	if channel == "" {
+		channel = "wasu"
+	}
+	// 同样不能调 ListModelsForChannel：它自己会 RLock，递归读锁在有待写者时会死锁
+	for _, m := range mm.config.Models[channel]["llm"] {
+		if m.Default && m.ID != "" {
+			return m.ID
+		}
+	}
+	return FallbackLLMModelID
 }
 
 // ImageAPIStyle 返回图像模型的上游协议风格（models.yaml 的 api_style）。

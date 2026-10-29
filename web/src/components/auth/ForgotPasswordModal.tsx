@@ -96,7 +96,7 @@ export function ForgotPasswordModal({ onClose, defaultEmail }: ForgotPasswordMod
             {sent ? (
               <>
                 <p className="mt-3 text-[13px] leading-6 text-white/50">
-                  如果该邮箱已注册，我们已发送一封重置邮件，请查收。
+                  重置邮件已发送，请查收。
                 </p>
                 <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-[12px] leading-6 text-white/45">
                   · 重置链接 <span className="text-white/70">30 分钟内</span>有效，且只能使用一次
@@ -167,7 +167,7 @@ export function ForgotPasswordModal({ onClose, defaultEmail }: ForgotPasswordMod
 
             <div className="mt-7 flex items-start gap-2 border-t border-white/[0.06] pt-5 text-[10px] leading-5 text-white/28">
               <SafetyCertificateOutlined className="mt-0.5 shrink-0 text-amber-200/45" />
-              <span>为保护账号安全，我们不会提示该邮箱是否已注册。</span>
+              <span>邮箱未注册时会直接提示，方便你确认是否输错。</span>
             </div>
           </div>
         </div>
