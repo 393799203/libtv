@@ -1,8 +1,15 @@
 package assistant
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"libtv/internal/config"
+	"libtv/internal/llm"
 )
 
 // 说明：本仓库此前没有任何 Go 测试，这是第一份。
@@ -300,4 +307,43 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return string(b)
+}
+
+// TestUsageRecorderCapturesTokens 锁住「平台侧 token 成本会被记下来」这条链路。
+//
+// 为什么值得单测：对话不扣用户积分，成本全在平台，所以 assistant_logs 里的
+// token 数是**唯一**能回答「助手一个月花了多少」的数据。而这条链路有个很坏的失败模式 ——
+// 采集器没挂上时 UsageFrom 返回 nil，Snapshot() 安静地回全 0，
+// 落库照常成功、测试全绿、界面上毫无异常，只是成本永远显示为 0。
+// 所以这里用一个本地假上游把真实数字钉死，不依赖网络。
+func TestUsageRecorderCapturesTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"1","object":"chat.completion","model":"m",`+
+			`"choices":[{"index":0,"message":{"role":"assistant","content":"{\"reply\":\"好\",\"commands\":[]}"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":600,"completion_tokens":200,"total_tokens":800}}`)
+	}))
+	defer srv.Close()
+
+	cfg := config.AIConfig{Providers: map[string]config.ProviderConfig{
+		"wasu": {APIKey: "test", BaseURL: srv.URL},
+	}}
+	client := llm.NewClient(cfg, llm.ChannelWasu)
+
+	// 与 Service.Chat 里完全一致的用法：先挂采集器，再发起调用
+	ctx := llm.WithUsageRecorder(context.Background())
+	if _, err := client.ChatWithModel(ctx, "m", "sys", "hi"); err != nil {
+		t.Fatalf("调用假上游失败: %v", err)
+	}
+
+	total, completion, _, calls := llm.UsageFrom(ctx).Snapshot()
+	if calls != 1 {
+		t.Fatalf("期望登记 1 次调用，实际 %d 次", calls)
+	}
+	if total != 800 {
+		t.Errorf("total_tokens = %d，期望 800（采集器没挂上时会静默记 0）", total)
+	}
+	if completion != 200 {
+		t.Errorf("completion_tokens = %d，期望 200", completion)
+	}
 }

@@ -167,8 +167,13 @@ func (s *Service) Chat(ctx context.Context, userID string, req *Request) (*Resul
 
 	result := s.interpret(content, truncated)
 
+	// 取上游真实回报的用量。对话不扣用户积分，这些 token 就是**平台自己的成本**：
+	// 落库才能回答「这个月助手花了多少」「哪个用户最费」；
+	// 只靠 llm 包那行 `usage.total=` 日志是聚合不出来的。
+	totalTokens, completionTokens, _, _ := llm.UsageFrom(ctx).Snapshot()
+
 	// 落库：解析失败也要记（那正是最该复盘的坏例）
-	logID := s.writeLog(userID, req, result, modelID, time.Since(started))
+	logID := s.writeLog(userID, req, result, modelID, time.Since(started), totalTokens, completionTokens)
 	result.LogID = logID
 	return result, nil
 }
@@ -345,7 +350,14 @@ func stripCodeFence(s string) string {
 //  日志
 // ============================================================
 
-func (s *Service) writeLog(userID string, req *Request, result *Result, modelID string, cost time.Duration) int64 {
+func (s *Service) writeLog(
+	userID string,
+	req *Request,
+	result *Result,
+	modelID string,
+	cost time.Duration,
+	totalTokens, completionTokens int64,
+) int64 {
 	if s.db == nil {
 		return 0
 	}
@@ -356,13 +368,15 @@ func (s *Service) writeLog(userID string, req *Request, result *Result, modelID 
 	}
 
 	row := model.AssistantLog{
-		UserID:    userID,
-		Message:   truncate(req.Message, maxLogTextLen),
-		Reply:     truncate(result.Reply, maxLogTextLen),
-		Commands:  datatypes.JSON(commands),
-		Rejected:  result.Rejected,
-		Model:     modelID,
-		LatencyMs: cost.Milliseconds(),
+		UserID:           userID,
+		Message:          truncate(req.Message, maxLogTextLen),
+		Reply:            truncate(result.Reply, maxLogTextLen),
+		Commands:         datatypes.JSON(commands),
+		Rejected:         result.Rejected,
+		Model:            modelID,
+		TotalTokens:      totalTokens,
+		CompletionTokens: completionTokens,
+		LatencyMs:        cost.Milliseconds(),
 	}
 	if err := s.db.Create(&row).Error; err != nil {
 		// 日志失败不能影响主流程

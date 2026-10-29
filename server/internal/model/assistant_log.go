@@ -32,6 +32,14 @@ type AssistantLog struct {
 	UndoneSoon bool `gorm:"not null;default:false" json:"undone_soon"`
 	// Model 实际使用的模型 ID（排查「是不是换了模型就变笨了」）
 	Model string `gorm:"size:100" json:"model"`
+	// TotalTokens / CompletionTokens 本次对话**平台侧实际消耗**的 token（上游口径）。
+	//
+	// 为什么必须落库：对话不扣用户积分，这些 token 的成本**全在平台**。
+	// 只让 llm 包打一行日志的话（`[LLM] ok: ... usage.total=`），
+	// 想回答「每个用户/每天花了多少」就只能去捞容器日志 —— 那基本等于查不了。
+	// 注意 completion 里含推理模型的思考 token，它们和正文共用同一个预算。
+	TotalTokens      int64 `gorm:"not null;default:0" json:"total_tokens"`
+	CompletionTokens int64 `gorm:"not null;default:0" json:"completion_tokens"`
 	// LatencyMs 从收到请求到返回命令的耗时
 	LatencyMs int64 `gorm:"not null;default:0" json:"latency_ms"`
 
