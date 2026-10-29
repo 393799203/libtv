@@ -159,7 +159,7 @@ func TestInterpretDropsIllegalCommands(t *testing.T) {
 		{"command":"create_node","args":{"nodeType":"text"}},
 		{"command":"rm_rf","args":{}},
 		{"command":"create_node","args":{"nodeType":"group"}}
-	]}`)
+	]}`, false)
 
 	if len(out.Commands) != 1 {
 		t.Fatalf("期望只保留 1 条合法命令，实际 %d 条: %+v", len(out.Commands), out.Commands)
@@ -175,7 +175,7 @@ func TestInterpretDropsIllegalCommands(t *testing.T) {
 // TestInterpretNeverErrors 解析失败要降级成一句人话，而不是让请求 500。
 func TestInterpretNeverErrors(t *testing.T) {
 	s := &Service{}
-	out := s.interpret("我今天不太想干活")
+	out := s.interpret("我今天不太想干活", false)
 	if out == nil {
 		t.Fatal("interpret 不应返回 nil")
 	}
@@ -245,7 +245,51 @@ func TestBuildUserPromptCarriesCanvas(t *testing.T) {
 	}
 }
 
-// itoa 避免为一个测试引入 strconv
+// TestInterpretTruncatedOutputDegrades 被 max_tokens 截断的输出要走「听不懂」降级路径，
+// 而不是崩掉或返回半截 JSON。截断与「模型不听话」对外表现一样，但日志要能分辨。
+func TestInterpretTruncatedOutputDegrades(t *testing.T) {
+	s := &Service{}
+	// 典型的截断残片：JSON 开到一半
+	out := s.interpret(`{"reply":"好，我来帮你","commands":[{"command":"create_no`, true)
+
+	if out == nil {
+		t.Fatal("interpret 不应返回 nil")
+	}
+	if len(out.Commands) != 0 {
+		t.Fatalf("截断的输出不应产生任何命令，实际: %+v", out.Commands)
+	}
+	if strings.TrimSpace(out.Reply) == "" {
+		t.Fatal("截断时必须给一句回复，否则用户看到空气泡")
+	}
+}
+
+// TestSystemPromptKeepsFallbackRules 锁住两条**最容易被后人删掉**的对话规则。
+//
+// 为什么值得单独立测：这两条都不是功能性的，删掉后代码照样跑、单测照样过，
+// 但用户体验会明显退化 ——
+//
+//	第 7 条：答不上来时不给任何能接的话，对话就断在那儿了；
+//	第 8 条：有命令却写成问句，会让用户以为助手在等他确认，其实已经执行了。
+//
+// 两者都是线上实测踩出来的，所以固化成断言。
+func TestSystemPromptKeepsFallbackRules(t *testing.T) {
+	p := systemPrompt()
+
+	if !strings.Contains(p, "引回画布") {
+		t.Error("提示词里缺少「答不上来时把话题引回画布」的要求（第 7 条）")
+	}
+	if !strings.Contains(p, "照着说就能得到结果") {
+		t.Error("提示词里缺少「给一句用户照着说就能得到结果的建议」的要求（第 7 条）")
+	}
+	if !strings.Contains(p, "陈述句") {
+		t.Error("提示词里缺少「有 commands 时 reply 必须用陈述句」的要求（第 8 条）")
+	}
+	// 反面例子比正面规则更能约束模型，删了它规则会明显变松
+	if !strings.Contains(p, "反例") {
+		t.Error("提示词里缺少反例示范，规则的约束力会明显下降")
+	}
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

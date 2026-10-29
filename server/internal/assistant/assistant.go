@@ -95,9 +95,15 @@ func NewService(llmClient *llm.Client, modelManager *llm.ModelManager, channels 
 }
 
 // 单次意图识别的输出上限。
-// 回复本来就要求 ≤ 2 句，这里给足 JSON 结构 + 少量话术即可；
-// 收紧同时也是成本闸门（对话不扣用户积分，token 成本全在平台）。
-const maxAssistantTokens = 1024
+//
+// 定成 2048 而不是更小：**推理模型的思考 token 和正文共用一个预算**
+// （电信渠道默认的 deepseek-v4.1-flash 就是会思考的，实测每次都会产出 reasoning_content）。
+// 预算太紧时，模型想得久一点就会把 JSON 正文截断 —— 表现是用户说了句很自然的话，
+// 却得到一句「我没太听懂」，而且日志里毫无线索（线上真实观测到 1 次）。
+// 这是**上限而非预留**，没用到就不计费，所以放宽它几乎零成本，还消灭了一整类失败。
+//
+// 上界仍要留着：对话不扣用户积分，token 成本全在平台，放任模型长篇大论就是放任成本。
+const maxAssistantTokens = 2048
 
 // 历史轮数上限：再多对意图识别帮助有限，却会让每次调用的 token 线性上涨。
 const maxRecentTurns = 8
@@ -153,7 +159,13 @@ func (s *Service) Chat(ctx context.Context, userID string, req *Request) (*Resul
 		content = resp.Choices[0].Message.ReasoningContent
 	}
 
-	result := s.interpret(content)
+	// 截断检测：finish_reason=length 说明输出被 max_tokens 砍了，
+	// 此时 JSON 几乎必然是残的。不单独分辨的话，它和「模型不听话」长得一模一样 ——
+	// 都只是一句「我没太听懂」，排查时完全看不出是预算不够还是提示词有问题。
+	fr := resp.Choices[0].FinishReason
+	truncated := fr == "length"
+
+	result := s.interpret(content, truncated)
 
 	// 落库：解析失败也要记（那正是最该复盘的坏例）
 	logID := s.writeLog(userID, req, result, modelID, time.Since(started))
@@ -165,10 +177,17 @@ func (s *Service) Chat(ctx context.Context, userID string, req *Request) (*Resul
 //
 // 解析失败一律**降级成一句道歉**而不是报错：助手听不懂不应该让整个请求 500，
 // 那对用户是莫名其妙的一次失败；回一句「没太听懂，换个说法？」体验上合理得多。
-func (s *Service) interpret(raw string) *Result {
+//
+// truncated 仅供日志区分原因（预算不够 vs 提示词有问题），不影响对外行为。
+func (s *Service) interpret(raw string, truncated bool) *Result {
 	parsed, err := parseModelOutput(raw)
 	if err != nil {
-		log.Printf("[Assistant] ⚠ 模型输出解析失败: %v | 原始输出前 200 字: %.200s", err, raw)
+		cause := "输出不是合法 JSON"
+		if truncated {
+			cause = "输出被 max_tokens 截断"
+		}
+		log.Printf("[Assistant] ⚠ 模型输出解析失败（%s）: %v | 原始输出前 200 字: %.200s",
+			cause, err, raw)
 		return &Result{
 			Reply: "抱歉，我没太听懂。可以换个说法，或者告诉我你想在画布上做什么？",
 		}

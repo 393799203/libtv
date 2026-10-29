@@ -118,15 +118,38 @@ export function AssistantPanel() {
             </div>
           </div>
         ) : (
-          messages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              onConfirm={confirmPending}
-              onDismiss={dismissPending}
-              onUndo={undoLast}
-            />
-          ))
+          <>
+            {messages.map((m) => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                onConfirm={confirmPending}
+                onDismiss={dismissPending}
+                onUndo={undoLast}
+              />
+            ))}
+            {/* 「能接着说什么」不能只在首次打开时给一次：用户问了跑题的问题之后，
+                示例就消失了，对话正断在那儿。所以只要空闲就常驻一条轻提示 + 可点问句。 */}
+            {!sending && (
+              <div className="space-y-1.5 pt-1.5">
+                <div className="text-[10px] text-[var(--dv-text-3)]">
+                  试试这样说（点一下直接发送）
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {EXAMPLES.map((ex) => (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => void send(ex)}
+                      className="rounded-lg border border-[var(--dv-border-1)] bg-[var(--dv-surface-2)] px-2 py-1 text-[10px] text-[var(--dv-text-3)] transition hover:border-[var(--dv-cyan-border)] hover:text-[var(--dv-cyan-text)]"
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
