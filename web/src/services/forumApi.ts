@@ -24,6 +24,8 @@ export interface ForumReplyItem {
   user_id: string;
   /** 富文本回复（HTML，同样已清洗） */
   content: string;
+  /** 被回复的那条回复 id；直接回复帖子时为空。前端据此把回复挂到对应留言下面 */
+  parent_id?: string;
   /** 回复某条回复时被回复人昵称；直接回复帖子时为空 */
   reply_to_nickname?: string;
   created_at: string;
@@ -54,9 +56,14 @@ export const forumApi = {
   createPost: (data: { id?: string; title: string; content: string }) =>
     api.post<ForumPostItem>('/forum/posts', data),
 
-  /** 回复帖子（需登录） */
-  createReply: (id: string, data: { id?: string; content: string; reply_to_nickname?: string }) =>
-    api.post<ForumReplyItem>(`/forum/posts/${id}/replies`, data),
+  /**
+   * 回复帖子（需登录）。
+   * parentId 非空表示回复某条留言：后端会校验它属于本帖，并按被回复人反查昵称。
+   */
+  createReply: (
+    id: string,
+    data: { id?: string; content: string; parent_id?: string; reply_to_nickname?: string },
+  ) => api.post<ForumReplyItem>(`/forum/posts/${id}/replies`, data),
 
   /** 修改帖子（本人或管理员） */
   updatePost: (id: string, data: { title: string; content: string }) =>

@@ -328,15 +328,25 @@ func (p *ForumPost) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
-// ForumReply 论坛回复（平铺一层；回复某条回复时用 ReplyToNickname 展示「回复 @某人」，
-// 不建父子树——与 show_comments 的展示口径一致，读起来更接近普通论坛）
+// ForumReply 论坛回复。
+//
+// 两层结构：直接回复帖子时 ParentID 为空（自成一楼），回复某层楼时 ParentID 指向那条回复，
+// 前端据此把回复挂到对应留言下面。
+//
+// 为什么光有 ReplyToNickname 不够：它只是个昵称字符串，同一个帖子里完全可能有多条同名
+// （甚至同一个人发的好几条）留言。用户点某条留言下的「回复」，平台只记下昵称、不知道回的
+// 是哪一条，列表就只能按时间平铺 —— 回复于是落到整页最底部，读者根本看不出它在回谁。
 type ForumReply struct {
 	ID     string `gorm:"primaryKey;size:36" json:"id"`
 	PostID string `gorm:"size:36;not null;index" json:"post_id"`
 	UserID string `gorm:"size:36;not null;index" json:"user_id"`
 	// Content 富文本回复（HTML，同样经过 bluemonday 清洗）
 	Content string `gorm:"type:text;not null" json:"content"`
-	// ReplyToNickname 冗余展示用：被回复人昵称（直接回复帖子时为空）
+	// ParentID 被回复的那条回复 id；空 = 直接回复帖子本身。
+	// 该列由 AutoMigrate 自动添加，历史回复为空（老数据只能按平铺展示）。
+	ParentID string `gorm:"size:36;index" json:"parent_id"`
+	// ReplyToNickname 冗余展示用：被回复人昵称（直接回复帖子时为空）。
+	// 传了 ParentID 时由服务端按被回复人反查生成，不采信客户端传值（防冒名）。
 	ReplyToNickname string    `gorm:"size:100" json:"reply_to_nickname"`
 	CreatedAt       time.Time `json:"created_at"`
 }

@@ -17,6 +17,8 @@ type GenerationHistoryRepo interface {
 	// 看门狗用它判断「结果其实已经产出并上传对象存储、只是执行状态没跟上」，
 	// 避免把已交付的生成误判为失败并退费。since 用于排除上一次生成的旧记录。
 	LatestByProjectNodes(ctx context.Context, projectID string, nodeIDs []string, since time.Time) ([]model.GenerationHistory, error)
+	// LatestNodeByProjectType 取该项目某类型最近一次成功生成的节点（查不到返回 nil, nil）
+	LatestNodeByProjectType(ctx context.Context, projectID, nodeType string) (*model.GenerationHistory, error)
 }
 
 type generationHistoryRepo struct {
@@ -62,4 +64,27 @@ func (r *generationHistoryRepo) LatestByProjectNodes(ctx context.Context, projec
 		Order("created_at DESC").
 		Find(&items).Error
 	return items, err
+}
+
+// LatestNodeByProjectType 取该项目某种类型（image/video）最近一次成功生成的节点。
+//
+// 供存量封面回填定位「最后一次生成视频的节点」—— 生成历史里没有存输入素材，
+// 但存了节点 ID，回填据此回画布里取该节点的素材引用。
+// 查不到返回 (nil, nil)：老项目可能根本没有生成历史，调用方要能退化处理。
+func (r *generationHistoryRepo) LatestNodeByProjectType(ctx context.Context, projectID, nodeType string) (*model.GenerationHistory, error) {
+	if projectID == "" || nodeType == "" {
+		return nil, nil
+	}
+	var item model.GenerationHistory
+	err := r.db.WithContext(ctx).
+		Where("project_id = ? AND node_type = ?", projectID, nodeType).
+		Order("created_at DESC").
+		First(&item).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }

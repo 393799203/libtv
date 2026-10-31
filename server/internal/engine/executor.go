@@ -1505,10 +1505,13 @@ type ImageExecutor struct {
 	// providerTasks 对账账本：图片/音频是同步调用，没有上游任务号，用「执行+节点」当 key
 	providerTasks            *billing.Ledger
 	generationHistoryService *service.GenerationHistoryService
+	// projectCover 项目封面兜底：项目**还没有视频**时，用这次生成的图片当封面
+	// （用户的优先级是「有视频用尾帧 > 没有视频用最后一张图」）。可为 nil。
+	projectCover *service.ProjectService
 }
 
 // NewImageExecutor 创建图像执行器
-func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, ledger *billing.Ledger) *ImageExecutor {
+func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, ledger *billing.Ledger, projectCoverService *service.ProjectService) *ImageExecutor {
 	return &ImageExecutor{
 		imageClient:              client,
 		modelManager:             modelManager,
@@ -1516,6 +1519,7 @@ func NewImageExecutor(client *llm.ImageClient, modelManager *llm.ModelManager, f
 		biller:                   biller,
 		generationHistoryService: generationHistoryService,
 		providerTasks:            ledger,
+		projectCover:             projectCoverService,
 	}
 }
 
@@ -2106,6 +2110,29 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 	}
 
+	// 项目卡片封面的兜底：项目**还没有视频**时，用这次生成的最后一张图当封面。
+	//
+	// 优先级来自用户的要求：有视频 → 视频尾帧 > 没有视频 → 最后一张图 > 都没有 → 前端渐变占位。
+	// 所以这里必须先确认「项目还没有视频」，否则会把视频尾帧盖成一张参考图；
+	// 而只要项目还没出过片，每次生成图片都覆盖一次，卡片上留的就是**最后**那张图。
+	//
+	// 全部放在协程里（含那次「有没有视频」的查询）：这是交付路径，
+	// 不能让封面的事占一点时间；失败只记日志，不影响出图。
+	if len(ownURLs) > 0 && i.projectCover != nil && execCtx != nil {
+		if projectID := execCtx.GetProjectID(); projectID != "" {
+			coverURL := ownURLs[len(ownURLs)-1]
+			coverCtx := detachedCtx(ctx)
+			go func() {
+				if i.generationHistoryService != nil && i.generationHistoryService.ProjectHasVideo(coverCtx, projectID) {
+					return // 已经有视频了，封面归尾帧管
+				}
+				if err := i.projectCover.SetCoverFromMaterial(coverCtx, projectID, coverURL); err != nil {
+					log.Printf("[ImageExecutor] 写项目封面失败（不影响出图）: projectID=%s err=%v", projectID, err)
+				}
+			}()
+		}
+	}
+
 	return &NodeOutput{
 		NodeID: node.ID,
 		Status: "success",
@@ -2234,11 +2261,17 @@ type VideoExecutor struct {
 	// providerTasks 上游任务对账表：任务号一旦拿到就落库（失败/退费/交付都补状态）。
 	// 没有它，失败之后连「上游有没有接单、有没有计费」都查不了（10-03 00:04 的教训）。
 	providerTasks *billing.Ledger
-	modelManager  *llm.ModelManager
+	// projectCover 项目封面：项目列表卡片此前没有任何内容图（前端兜底成 picsum
+	// 随机图，多个项目完全分不清），用户反馈「退出后再进来找不到想继续的项目」。
+	// 这里在出片成功时把这条片子的**尾帧**写为项目封面。可为 nil（不写封面）。
+	projectCover *service.ProjectService
+	// imageOps 抽帧能力（本机 ffmpeg）。取尾帧当封面走它；可为 nil（那就只写生成历史、不动封面）
+	imageOps     *service.ImageOpsService
+	modelManager *llm.ModelManager
 }
 
 // NewVideoExecutor 创建视频执行器
-func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, providerTaskService *billing.Ledger, modelManager ...*llm.ModelManager) *VideoExecutor {
+func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, providerTaskService *billing.Ledger, projectCoverService *service.ProjectService, imageOps *service.ImageOpsService, modelManager ...*llm.ModelManager) *VideoExecutor {
 	var mm *llm.ModelManager
 	if len(modelManager) > 0 {
 		mm = modelManager[0]
@@ -2249,6 +2282,8 @@ func NewVideoExecutor(videoClient *llm.VideoClient, fileUploadService *service.F
 		biller:                   biller,
 		generationHistoryService: generationHistoryService,
 		providerTasks:            providerTaskService,
+		projectCover:             projectCoverService,
+		imageOps:                 imageOps,
 		modelManager:             mm,
 	}
 }
@@ -2985,6 +3020,41 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		}
 	}
 
+	// 项目卡片封面 = 这条片子的**尾帧**（用户指定的优先级：有视频就抽最后一帧）。
+	//
+	// 为什么不再是「本次用的第一张素材图」：素材图回答的是「我用了哪张参考图」，
+	// 卡片上经常和成片画面无关（首尾帧、多图参考时更是如此）；尾帧才是「这条片子长什么样」。
+	//
+	// 位置与理由同上面的生成历史：走到这里才确定「钱花了、片子也落库了」，
+	// 中途失败不该改封面。
+	//
+	// 异步 + detached ctx：抽帧要跑一次 ffmpeg，还要从对象存储 Range 读一小段视频，
+	// 不能让它拖慢视频交付；失败只记日志 —— 封面是展示信息，下一支视频会再写一次。
+	if ownVideoURL != "" && v.projectCover != nil && v.imageOps != nil {
+		if projectID := execCtx.GetProjectID(); projectID != "" {
+			canvasDir := execCtx.GetCanvasDir()
+			videoURLForFrame := ownVideoURL
+			coverCtx := detachedCtx(ctx)
+			go func() {
+				tile, err := v.imageOps.CaptureLastFrameAsCover(coverCtx, videoURLForFrame, service.UploadOptions{
+					Dir:       canvasDir,
+					ProjectID: projectID,
+				})
+				if err != nil {
+					log.Printf("[VideoExecutor] 抽视频尾帧失败（不影响出片）: projectID=%s err=%v", projectID, err)
+					return
+				}
+				cover := tile.ThumbURL
+				if cover == "" {
+					cover = tile.URL
+				}
+				if err := v.projectCover.SetCover(coverCtx, projectID, cover); err != nil {
+					log.Printf("[VideoExecutor] 写项目封面失败（不影响出片）: projectID=%s err=%v", projectID, err)
+				}
+			}()
+		}
+	}
+
 	// 上游任务的对账结局：已交付（钱扣了、片子也落库了）
 	// 产物地址一起留痕：对账页「状态」列上悬停就能看到并直接打开
 	taskRef.ResultURL = ownVideoURL
@@ -3469,12 +3539,14 @@ func (p *PrevizExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 }
 
 // NewDefaultRegistry 创建默认执行器注册表（biller 为积分扣费服务，各执行器在真实 AI 调用前扣费并记账）
-func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, providerTaskService *billing.Ledger) *ExecutorRegistry {
+// projectService 供执行器更新项目卡片封面（可为 nil，则不更新封面）；
+// imageOps 供视频执行器抽尾帧当封面（可为 nil，则视频出片后不更新封面）。
+func NewDefaultRegistry(llmClient *llm.Client, imageClient *llm.ImageClient, videoClient *llm.VideoClient, audioClient *llm.AudioClient, modelManager *llm.ModelManager, fileUploadService *service.FileUploadService, biller *billing.Service, generationHistoryService *service.GenerationHistoryService, providerTaskService *billing.Ledger, projectService *service.ProjectService, imageOps *service.ImageOpsService) *ExecutorRegistry {
 	registry := NewExecutorRegistry()
 	registry.Register("text", NewTextExecutor(llmClient, biller, providerTaskService, modelManager))
 	registry.Register("script", NewScriptExecutor(llmClient, biller, providerTaskService, modelManager))
-	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService, providerTaskService))
-	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService, providerTaskService, modelManager))
+	registry.Register("image", NewImageExecutor(imageClient, modelManager, fileUploadService, biller, generationHistoryService, providerTaskService, projectService))
+	registry.Register("video", NewVideoExecutor(videoClient, fileUploadService, biller, generationHistoryService, providerTaskService, projectService, imageOps, modelManager))
 	registry.Register("audio", NewAudioExecutor(audioClient, fileUploadService, biller, providerTaskService, modelManager))
 	// 白模预演：无模型调用，仅承认前端已导出的白片/静帧，避免节点被判为失败
 	registry.Register("previz", NewPrevizExecutor())

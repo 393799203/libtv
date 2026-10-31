@@ -44,3 +44,16 @@ func (s *GenerationHistoryService) ListByNode(ctx context.Context, nodeID string
 func (s *GenerationHistoryService) LatestByProjectNodes(ctx context.Context, projectID string, nodeIDs []string, since time.Time) ([]model.GenerationHistory, error) {
 	return s.repo.LatestByProjectNodes(ctx, projectID, nodeIDs, since)
 }
+
+// ProjectHasVideo 该项目是否已经有过成功的视频生成。
+//
+// 项目封面用它定优先级：有视频 → 用视频尾帧当封面，所以**图片生成只在项目还没有视频时**
+// 才去顶封面，否则会把尾帧盖成一张参考图。
+// 出错按「没有视频」处理：图片当封面只是降级展示，不该因为一次查询失败就把封面空着。
+func (s *GenerationHistoryService) ProjectHasVideo(ctx context.Context, projectID string) bool {
+	if projectID == "" {
+		return false
+	}
+	h, err := s.repo.LatestNodeByProjectType(ctx, projectID, "video")
+	return err == nil && h != nil
+}

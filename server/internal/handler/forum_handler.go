@@ -103,14 +103,18 @@ func (h *ForumHandler) CreateReply(c *gin.Context) {
 		// ID 客户端生成，含义同发帖：定位本条回复自己的媒体目录
 		ID      string `json:"id"`
 		Content string `json:"content" binding:"required"`
-		// ReplyToNickname 可选：回复某条回复时传被回复人昵称，用于展示「回复 @某人」
+		// ParentID 可选：回复某条留言时传那条留言的 id。
+		// 前端据此把回复挂到对应留言下面（只看昵称无法区分同名留言，见 model.ForumReply 注释）
+		ParentID string `json:"parent_id"`
+		// ReplyToNickname 兼容旧前端：没有 ParentID 时用它展示「回复 @某人」。
+		// 传了 ParentID 就以被回复人反查为准，不采信这里的传值（防冒名）
 		ReplyToNickname string `json:"reply_to_nickname"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "回复内容不能为空")
 		return
 	}
-	reply, err := h.forumService.CreateReply(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), req.ID, req.Content, req.ReplyToNickname)
+	reply, err := h.forumService.CreateReply(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), req.ID, req.Content, req.ParentID, req.ReplyToNickname)
 	if err != nil {
 		response.FailWith(c, err)
 		return

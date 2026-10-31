@@ -271,9 +271,12 @@ func (s *ForumService) ListReplies(ctx context.Context, postID string, page, pag
 	return items, total, nil
 }
 
-// CreateReply 回复帖子（正文先清洗再入库），并同步帖子的回复数
-// CreateReply 回复帖子。id 同 CreatePost：客户端生成，用于定位该条回复自己的媒体目录。
-func (s *ForumService) CreateReply(ctx context.Context, postID, userID, id, content, replyToNickname string) (*model.ForumReply, error) {
+// CreateReply 回复帖子（正文先清洗再入库），并同步帖子的回复数。
+// id 同 CreatePost：客户端生成，用于定位该条回复自己的媒体目录。
+//
+// parentID 非空表示「回复某条留言」，会校验它确实属于本帖；replyToNickname 只在
+// 没有 parentID 时作为兼容旧前端的兜底（挂了 parentID 就按被回复人反查，防冒名）。
+func (s *ForumService) CreateReply(ctx context.Context, postID, userID, id, content, parentID, replyToNickname string) (*model.ForumReply, error) {
 	post, err := s.forumRepo.FindPostByID(ctx, postID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -298,12 +301,40 @@ func (s *ForumService) CreateReply(ctx context.Context, postID, userID, id, cont
 		}
 	}
 
+	// 校验被回复的那条留言确实在本帖里。
+	// 不校验就等于让前端传任意 id：那条回复会被挂到别的帖子的留言下面（串帖），
+	// 或者挂在一个不存在的父节点上永远显示不出来。
+	// 查不到（例如对方刚把留言删了）不报错 —— 用户写好的内容不能因为一次悬空引用丢掉，
+	// 退化成一条普通回复就好。
+	parentID = strings.TrimSpace(parentID)
+	parentNickname := ""
+	if parentID != "" {
+		parent, perr := s.forumRepo.FindReplyByID(ctx, parentID)
+		switch {
+		case perr != nil || parent == nil || parent.PostID != post.ID:
+			log.Printf("[Forum] 被回复的留言不存在或不属于本帖，按普通回复处理: postID=%s parentID=%s err=%v", post.ID, parentID, perr)
+			parentID = ""
+		default:
+			parentNickname = s.nicknameOf(ctx, parent.UserID)
+		}
+	}
+
+	nickname := strings.TrimSpace(replyToNickname)
+	if parentID != "" {
+		nickname = parentNickname
+		if nickname == "" {
+			// 与列表里作者名的展示口径保持一致，避免出现「回复 @」后面什么都没有
+			nickname = "匿名用户"
+		}
+	}
+
 	reply := &model.ForumReply{
 		ID:              id,
 		PostID:          post.ID,
 		UserID:          userID,
 		Content:         clean,
-		ReplyToNickname: strings.TrimSpace(replyToNickname),
+		ParentID:        parentID,
+		ReplyToNickname: nickname,
 	}
 	if err := s.forumRepo.CreateReply(ctx, reply); err != nil {
 		return nil, err
@@ -313,6 +344,17 @@ func (s *ForumService) CreateReply(ctx context.Context, postID, userID, id, cont
 		return reply, nil
 	}
 	return reply, nil
+}
+
+// nicknameOf 取用户昵称，用于「回复 @某人」的展示；查不到就返回空串由调用方兜底
+func (s *ForumService) nicknameOf(ctx context.Context, userID string) string {
+	if userID == "" {
+		return ""
+	}
+	if u, err := s.userRepo.FindByID(ctx, userID); err == nil && u != nil {
+		return strings.TrimSpace(u.Nickname)
+	}
+	return ""
 }
 
 // ========== 论坛媒体清理 ==========

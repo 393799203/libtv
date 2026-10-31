@@ -227,7 +227,7 @@ func main() {
 	// 邮件复用上面同一个 mailSender，因此 SMTP 一配上这个功能就跟着可用
 	passwordResetService := service.NewPasswordResetService(userRepo, repository.NewPasswordResetRepo(db), mailSender)
 	projectService := service.NewProjectService(projectRepo, canvasRepo, execRepo, aiTaskRepo, appStorage)
-	canvasService := service.NewCanvasService(canvasRepo)
+	canvasService := service.NewCanvasService(canvasRepo, projectRepo)
 	showService := service.NewShowService(showRepo, userRepo, commentRepo, appStorage)
 	commentService := service.NewCommentService(commentRepo, showRepo, userRepo)
 	forumService := service.NewForumService(forumRepo, userRepo, appStorage)
@@ -299,8 +299,16 @@ func main() {
 	auditChecker := audit.NewChecker(db, providerTaskRepo)
 	providerTaskHandler := handler.NewProviderTaskHandler(providerTaskService, auditChecker)
 
+	// 画布图片派生处理（宫格切分 / 尺寸放大 / 蒙版擦除 / 视频截帧）。
+	// 白名单 = 对象存储公网域名 + IMAGE_OPS_ALLOWED_HOSTS：本服务会按请求里的 URL 下载图片与视频，
+	// 不限制域名等于给登录用户开了个 SSRF 口子（借服务器访问内网）。
+	// 构建位置必须早于引擎注册表：视频执行器要用它抽**尾帧**当项目封面。
+	imageOpsHosts := imageOpsAllowedHosts(appStorage.GetURL("probe.png"))
+	log.Printf("[ImageOps] 允许抓取的图片域名: %v", imageOpsHosts)
+	imageOpsService := service.NewImageOpsService(fileUploadService, imageOpsHosts)
+
 	// 初始化工作流引擎
-	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService, providerTaskService)
+	registry := engine.NewDefaultRegistry(llmClient, imageClient, videoClient, audioClient, modelManager, fileUploadService, billingService, generationHistoryService, providerTaskService, projectService, imageOpsService)
 	eng := engine.NewWorkflowEngine(registry)
 
 	// 余额变动 → 顺着正在执行的那条事件流实时推给前端：
@@ -338,13 +346,10 @@ func main() {
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, projectRepo, eng, registry)
 	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService, projectRepo, userRepo)
+	// 存量项目封面回填（仅管理员）：有视频抽尾帧、没视频用最后一张图，都没有则保持占位
+	projectCoverHandler := handler.NewProjectCoverHandler(service.NewCoverBackfillService(projectRepo, canvasRepo, generationHistoryRepo, appStorage, imageOpsService))
 
-	// 画布图片派生处理（宫格切分 / 尺寸放大 / 蒙版擦除）。
-	// 白名单 = 对象存储公网域名 + IMAGE_OPS_ALLOWED_HOSTS：本服务会按请求里的 URL 下载图片，
-	// 不限制域名等于给登录用户开了个 SSRF 口子（借服务器访问内网）。
-	imageOpsHosts := imageOpsAllowedHosts(appStorage.GetURL("probe.png"))
-	log.Printf("[ImageOps] 允许抓取的图片域名: %v", imageOpsHosts)
-	imageOpsService := service.NewImageOpsService(fileUploadService, imageOpsHosts)
+	// 画布图片派生处理的 HTTP 入口（服务本身已在上面构造，见 imageOpsService）
 	imageOpsHandler := handler.NewImageOpsHandler(imageOpsService)
 	// 点选识别：用户点一下 → 视觉模型说出"那是什么" + 外接框（见 handler.ObjectRecognizeHandler）
 	objectRecognizeHandler := handler.NewObjectRecognizeHandler(llmClient, modelManager, channelService, imageOpsService, billingService, providerTaskService)
@@ -724,6 +729,10 @@ func main() {
 		// 媒体维护：给缺失缩略图的图片补图（仅管理员）
 		// 缩略图只在图片上传成功那一刻生成，漏了就没人补，这个接口用来扫一遍补齐
 		api.POST("/admin/media/backfill-thumbnails", middleware.RequireAdmin(userService), uploadHandler.BackfillThumbnails)
+
+		// 项目封面回填（仅管理员）：给自动封面功能上线前产出的项目补上「最后一次生成视频的素材图」。
+		// 建议先 ?dry_run=1 看样例核对，再真跑；一轮处理不完就用返回的 next_cursor 接着跑。
+		api.POST("/admin/projects/backfill-covers", middleware.RequireAdmin(userService), projectCoverHandler.BackfillCovers)
 
 		// 积分套餐管理（仅管理员；积分超市公开列表见上方公共路由）
 		pointsPackages := api.Group("/admin/points-packages", middleware.RequireAdmin(userService))

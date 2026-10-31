@@ -15,6 +15,7 @@ import { RichTextEditor } from '@/components/forum/RichTextEditor';
 import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
 import { isRichTextEmpty } from '@/components/forum/richText';
+import { buildReplyThreads } from '@/components/forum/replyTree';
 import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { decorateForumContent } from '@/utils/thumbUrl';
@@ -68,7 +69,11 @@ export default function ForumPostPage() {
 
   // 同列表页：回复正文用 ref，避免每次输入重渲染编辑器而打断格式标记
   const replyHtmlRef = useRef('');
-  const [replyTo, setReplyTo] = useState<string | null>(null);
+  // 正在回复哪条留言：既要 id（提交时作为 parent_id，决定它挂在谁下面），
+  // 也要昵称（编辑器标题上显示「回复 @某人」）
+  const [replyTo, setReplyTo] = useState<{ id: string; nickname: string } | null>(null);
+  // 刚发出的那条回复的 id：列表刷新后滚到它，免得用户找不到自己刚写的内容
+  const [scrollToReplyId, setScrollToReplyId] = useState<string | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   // 编辑帖子：作者本人或管理员可以改标题和正文
   const [editOpen, setEditOpen] = useState(false);
@@ -117,10 +122,14 @@ export default function ForumPostPage() {
     }
     setSubmitting(true);
     try {
+      const postedId = replyId;
       await forumApi.createReply(postId, {
         id: replyId,
         content: html,
-        reply_to_nickname: replyTo || undefined,
+        // parent_id 是「挂在谁下面」的唯一依据；昵称只用于展示，
+        // 且后端挂了 parent_id 后会自己反查昵称，不采信这里的值
+        parent_id: replyTo?.id,
+        reply_to_nickname: replyTo?.nickname,
       });
       message.success('回复成功');
       replyHtmlRef.current = '';
@@ -128,6 +137,9 @@ export default function ForumPostPage() {
       setReplyId(newContentId()); // 下一条回复换新目录，避免两条回复共用一份媒体
       setEditorKey((k) => k + 1); // 重新挂载编辑器以清空内容
       await load();
+      // 楼中楼回复出现在**被回复的那条留言下面**（可能在页面上方），编辑器却在页面底部，
+      // 不主动滚过去用户就会以为内容又「跑到最下面去了」（这正是本次要修的问题）
+      setScrollToReplyId(postedId);
     } catch {
       // 错误提示由 api 拦截器统一弹出
     } finally {
@@ -185,6 +197,75 @@ export default function ForumPostPage() {
     () => replies.map((reply) => ({ ...reply, decoratedContent: decorateForumContent(reply.content) })),
     [replies],
   );
+
+  // 扁平回复 → 「顶层留言 + 挂在它下面的回复」，见 replyTree.ts
+  const replyThreads = useMemo(() => buildReplyThreads(decoratedReplies), [decoratedReplies]);
+
+  // 列表刷新后滚到刚发出的那条回复。依赖 decoratedReplies 是为了等列表真正渲染出来
+  // （只依赖 id 的话 effect 可能在 DOM 更新前就跑了，getElementById 拿到 null）
+  useEffect(() => {
+    if (!scrollToReplyId) return;
+    document
+      .getElementById(`forum-reply-${scrollToReplyId}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setScrollToReplyId(null);
+  }, [scrollToReplyId, decoratedReplies]);
+
+  // 单条回复的展示。顶层留言与楼中楼回复共用同一套渲染，只有间距不同 ——
+  // 复制一份出来迟早会改漏一处。id 用 #forum-reply-<id> 作为锚点，发完回复要滚到它。
+  const renderReplyItem = (reply: (typeof decoratedReplies)[number], nested = false) => {
+    const canDeleteReply = isAuthenticated && (isAdmin || reply.user_id === currentUser?.id);
+    return (
+      <div id={`forum-reply-${reply.id}`} key={reply.id} className={`flex gap-3 ${nested ? 'py-3' : 'py-4'}`}>
+        <img
+          src={reply.avatar_url || '/default-avatar.svg'}
+          alt=""
+          className={`shrink-0 rounded-full border border-gray-200 object-cover ${nested ? 'h-7 w-7' : 'h-8 w-8'}`}
+          loading="lazy"
+          decoding="async"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 text-[12px] text-gray-400">
+            <span className="text-[13px] font-medium text-gray-700">{reply.nickname || '匿名用户'}</span>
+            {reply.reply_to_nickname && (
+              <span className="text-gray-400">
+                回复 <span className="text-blue-600">@{reply.reply_to_nickname}</span>
+              </span>
+            )}
+            <span>{formatTime(reply.created_at)}</span>
+          </div>
+          <div
+            className="forum-content forum-content--compact mt-1.5"
+            dangerouslySetInnerHTML={{ __html: reply.decoratedContent }}
+          />
+          <div className="mt-1 flex items-center gap-3 text-[12px]">
+            <button
+              className="cursor-pointer text-gray-400 transition-colors hover:text-blue-600"
+              onClick={() => {
+                if (!isAuthenticated) {
+                  openLoginModal('login');
+                  return;
+                }
+                // 记住「回复的是哪一条」：提交时作为 parent_id，这条回复就会挂到它下面
+                setReplyTo({ id: reply.id, nickname: reply.nickname || '匿名用户' });
+                document.getElementById('forum-reply-editor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+            >
+              回复
+            </button>
+            {canDeleteReply && (
+              <button
+                className="cursor-pointer text-gray-400 transition-colors hover:text-red-500"
+                onClick={() => handleDeleteReply(reply)}
+              >
+                删除
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const contentRootRef = useRef<HTMLDivElement>(null);
   // 点正文图片时用站内弹窗看原图（不新开页面）
@@ -376,56 +457,19 @@ export default function ForumPostPage() {
           />
         ) : (
           <div>
-            {decoratedReplies.map((reply, index) => {
-              const canDeleteReply = isAuthenticated && (isAdmin || reply.user_id === currentUser?.id);
-              return (
-                <div key={reply.id} className={`flex gap-3 py-4 ${index > 0 ? 'border-t border-gray-100' : ''}`}>
-                  <img
-                    src={reply.avatar_url || '/default-avatar.svg'}
-                    alt=""
-                    className="h-8 w-8 shrink-0 rounded-full border border-gray-200 object-cover" loading="lazy" decoding="async"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 text-[12px] text-gray-400">
-                      <span className="text-[13px] font-medium text-gray-700">{reply.nickname || '匿名用户'}</span>
-                      {reply.reply_to_nickname && (
-                        <span className="text-gray-400">
-                          回复 <span className="text-blue-600">@{reply.reply_to_nickname}</span>
-                        </span>
-                      )}
-                      <span>{formatTime(reply.created_at)}</span>
-                    </div>
-                    <div
-                      className="forum-content forum-content--compact mt-1.5"
-                      dangerouslySetInnerHTML={{ __html: reply.decoratedContent }}
-                    />
-                    <div className="mt-1 flex items-center gap-3 text-[12px]">
-                      <button
-                        className="cursor-pointer text-gray-400 transition-colors hover:text-blue-600"
-                        onClick={() => {
-                          if (!isAuthenticated) {
-                            openLoginModal('login');
-                            return;
-                          }
-                          setReplyTo(reply.nickname || '匿名用户');
-                          document.getElementById('forum-reply-editor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        }}
-                      >
-                        回复
-                      </button>
-                      {canDeleteReply && (
-                        <button
-                          className="cursor-pointer text-gray-400 transition-colors hover:text-red-500"
-                          onClick={() => handleDeleteReply(reply)}
-                        >
-                          删除
-                        </button>
-                      )}
-                    </div>
+            {replyThreads.map((thread, threadIndex) => (
+              <div key={thread.root.id} className={threadIndex > 0 ? 'border-t border-gray-100' : ''}>
+                {renderReplyItem(thread.root)}
+                {thread.descendants.length > 0 && (
+                  // 楼中楼：挂在同一条留言下的回复缩进展示，左侧浅色竖线标出归属。
+                  // 这样「回复某条留言」写出来的内容一定出现在那条留言下面，
+                  // 而不是按时间平铺到整页最底部（读者看不出它在回谁）。
+                  <div className="mb-3 ml-11 border-l-2 border-gray-100 pl-3">
+                    {thread.descendants.map((reply) => renderReplyItem(reply, true))}
                   </div>
-                </div>
-              );
-            })}
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -436,7 +480,7 @@ export default function ForumPostPage() {
           <span className="text-[14px] font-medium text-gray-700">
             {replyTo ? (
               <>
-                回复 <span className="text-blue-600">@{replyTo}</span>
+                回复 <span className="text-blue-600">@{replyTo.nickname}</span>
               </>
             ) : (
               '发表回复'

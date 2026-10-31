@@ -49,6 +49,9 @@ const (
 	videoFrameMaxSeekSeconds = 3600
 	// 尾帧回看的窗口：够跨过末尾可能存在的黑场/非关键帧，又不会退到倒数第二帧。
 	videoFrameTailWindow = 0.5
+	// 抽尾帧当封面的总时限。整文件下载那条兜底路在慢源站上要 30~200 秒，
+	// 给到 180 秒既容得下它，又能保证不留野 ffmpeg 进程 / 不挂死请求。
+	videoFrameCaptureTimeout = 180 * time.Second
 )
 
 // CaptureVideoFrame 取视频的一帧并落盘成图片，返回图片地址与尺寸。
@@ -78,6 +81,92 @@ func (s *ImageOpsService) CaptureVideoFrame(
 		return nil, err
 	}
 	return s.saveDerived(frame, "frame.png", opts)
+}
+
+// CaptureLastFrameAsCover 取视频**尾帧**，落成「封面图 + 640px webp 缩略图」，返回可直接展示的地址。
+//
+// 用途：项目卡片封面 = 这条片子最后长什么样（用户明确要求「有视频就抽最后一帧」）。
+//
+// 为什么不用 CaptureVideoFrame(VideoFrameLast)：那条路会先把**整个视频**下载到本地缓存。
+// 源站总带宽约 1.26MB/s，实测一支 37MB 的片子整下要 30~200 秒；而尾帧其实只需要文件末尾
+// 那一小段。这里复用 FilmstripVideo 那条已验证的「按时间点 seek」路径：ffprobe 只读头部拿
+// 时长（几百毫秒），再让 ffmpeg 带 -ss 去远端 seek 一帧（走 Range，只取解码那一帧需要的字节）。
+//
+// 取不到时**退回整文件下载**那条路（慢，但源站 seek 不友好/时长探测失败时还能出图）：
+// 封面是展示信息，宁可慢一点也不要空着。
+func (s *ImageOpsService) CaptureLastFrameAsCover(ctx context.Context, videoURL string, opts UploadOptions) (*Tile, error) {
+	videoURL = strings.TrimSpace(videoURL)
+	if videoURL == "" {
+		return nil, errors.New("视频地址为空")
+	}
+	if !s.HostAllowed(videoURL) {
+		return nil, fmt.Errorf("视频来源域名不在白名单内: %s", videoURL)
+	}
+
+	// 自己兜一个上限：调用方（引擎的异步协程）可能给的是没有 deadline 的 ctx，
+	// 而 exec.CommandContext 会在 ctx 结束时把 ffmpeg 一起杀掉 —— 有界才能保证不留野进程。
+	ctx, cancel := context.WithTimeout(ctx, videoFrameCaptureTimeout)
+	defer cancel()
+
+	if duration, ok := probeDurationFromURL(videoURL); ok && duration > 0 {
+		// 两个落点：先按尾帧窗口（0.5s）取，取不到再退到 1.5s。
+		// 为什么不在"最后一帧"上死磕：末尾可能有黑场/转场/非关键帧，退一点反而拿到有画面的那帧；
+		// 也不能退太多，否则就不是"最后一帧"而是倒数第几十帧了。
+		for _, at := range []float64{duration - videoFrameTailWindow, duration - videoFrameTailWindow*3} {
+			if at < 0 {
+				at = 0
+			}
+			frame, err := s.grabRemoteFrame(ctx, videoURL, at)
+			if err != nil || len(frame) == 0 {
+				continue
+			}
+			return s.saveDerived(frame, "frame.png", opts)
+		}
+	}
+
+	// 兜底：整文件下载（带本地缓存，见 fetchVideoToFileCached）再取尾帧
+	return s.CaptureVideoFrame(ctx, videoURL, VideoFrameLast, 0, opts)
+}
+
+// grabRemoteFrame 让 ffmpeg 自己去远端 seek 一帧，返回 PNG 字节。
+//
+// 参数与 filmstripBySeeking 保持一致 —— 那套参数是在 1.26MB/s 的源站上实测调出来的：
+//   - rw_timeout / protocol_whitelist：网络读超时，以及只放行 http(s)（不允许 ffmpeg 被人
+//     用 file:/concat: 之类的协议指去读本机文件，这是抽帧入口的 SSRF/本地文件读取防线）；
+//   - probesize/analyzeduration 收小：默认探测 5MB，在慢源站上就是 4 秒；
+//     mp4 的索引里已经写全了编码信息，200KB 足够认出流。
+func (s *ImageOpsService) grabRemoteFrame(ctx context.Context, videoURL string, at float64) ([]byte, error) {
+	ffmpegBin, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, errors.New("本机没有 ffmpeg，无法抽帧")
+	}
+	cmd := exec.CommandContext(ctx, ffmpegBin,
+		"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-rw_timeout", "20000000",
+		"-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+		"-probesize", "200000",
+		"-analyzeduration", "500000",
+		"-ss", strconv.FormatFloat(at, 'f', 3, 64),
+		"-i", videoURL,
+		"-frames:v", "1",
+		"-an",
+		"-f", "image2pipe", "-vcodec", "png",
+		"pipe:1",
+	)
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(errBuf.String())
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, fmt.Errorf("远端抽尾帧失败: %w: %s", err, msg)
+	}
+	if out.Len() == 0 {
+		return nil, errors.New("远端抽尾帧输出为空")
+	}
+	return out.Bytes(), nil
 }
 
 func validateFrameMode(mode VideoFrameMode, atSeconds float64) error {
