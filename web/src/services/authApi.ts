@@ -10,10 +10,10 @@ import type { ApiResponse } from '@/types/api';
 
 export const authApi = {
   login: (data: LoginRequest) =>
-    api.post<ApiResponse<AuthResponse>>('/auth/login', data),
+    api.post<AuthResponse>('/auth/login', data),
 
   register: (data: RegisterRequest) =>
-    api.post<ApiResponse<AuthResponse>>('/auth/register', data),
+    api.post<AuthResponse>('/auth/register', data),
 
   logout: () =>
     api.post<ApiResponse<void>>('/auth/logout'),

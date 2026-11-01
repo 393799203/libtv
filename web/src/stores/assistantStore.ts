@@ -131,14 +131,33 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     const loadingMsg: AssistantMessage = { id: nextId(), role: 'assistant', content: '', loading: true };
 
     const history = toRecentTurns(get().messages); // 取发问之前的历史
+    const context = buildAssistantContext();
+    const bridge = get().bridge;
     set((s) => ({ messages: [...s.messages, userMsg, loadingMsg], sending: true }));
 
     try {
       const reply = await assistantApi.chat({
         message,
-        context: buildAssistantContext(),
+        context,
         recent: history,
       });
+      // Older servers serialized the fallback's nil slice as commands:null.
+      // A conversational reply without tools is still a successful response.
+      const commands = Array.isArray(reply?.commands)
+        ? reply.commands.filter(command => command && typeof command.command === 'string') : [];
+      const content = typeof reply?.reply === 'string' && reply.reply.trim()
+        ? reply.reply : '助手暂未返回可用回复，请换个说法再试一次';
+      const needConfirm = reply?.needConfirm === true;
+
+      // A reply planned outside this canvas must never operate a newly opened
+      // project. The project panel has its own project-bound plan lifecycle.
+      if ((context.projectId || null) !== useCanvasStore.getState().projectId || bridge !== get().bridge) {
+        set(s => ({
+          messages: s.messages.map(m => m.id === loadingMsg.id
+            ? { ...m, loading: false, content, note: '页面已切换，本次画布操作未执行' } : m),
+        }));
+        return;
+      }
 
       // 用真实回复替换「思考中」气泡
       set((s) => ({
@@ -147,18 +166,18 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
             ? {
                 ...m,
                 loading: false,
-                content: reply.reply,
+                content,
                 // 需要确认的先挂起，等用户点执行
-                pending: reply.needConfirm && reply.commands.length > 0
-                  ? { commands: reply.commands }
+                pending: needConfirm && commands.length > 0
+                  ? { commands }
                   : undefined,
               }
             : m
         ),
       }));
 
-      if (!reply.needConfirm && reply.commands.length > 0) {
-        executeCommands(loadingMsg.id, reply.commands);
+      if (!needConfirm && commands.length > 0) {
+        executeCommands(loadingMsg.id, commands);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '助手暂时不可用';

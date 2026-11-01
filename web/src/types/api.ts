@@ -32,6 +32,7 @@ export interface RegisterRequest {
   nickname: string;
   /** 注册来源渠道（wasu=华数 / dianxin=电信）；由注册链接 ?source= 参数带入，缺省 wasu */
   channel?: string;
+  referralCode?: string;
 }
 
 // 找回密码：申请发送重置邮件

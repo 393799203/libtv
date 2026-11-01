@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/services/authApi';
 import type { AuthResponse, LoginRequest, RegisterRequest } from '@/types/api';
 import { Z } from '@/utils/zLayers';
+import { savedReferralCode, clearReferralCode, normalizeReferralCode, REFERRAL_CODE_PATTERN } from '@/utils/referral';
 
 const ForestCabinScene = lazy(() => import('@/components/auth/ForestCabinScene'));
 
@@ -57,10 +58,12 @@ export function LoginModal() {
           password: values.password,
           nickname: values.nickname || '',
           channel: source === 'wasu' ? 'wasu' : 'dianxin',
+          referralCode: normalizeReferralCode(values.referralCode || '') || undefined,
         });
       }
 
       setAuth(response);
+      clearReferralCode();
       message.success(authMode === 'login' ? '登录成功' : '注册成功');
       closeLoginModal();
       form.resetFields();
@@ -79,6 +82,7 @@ export function LoginModal() {
   useEffect(() => {
     if (showLoginModal) {
       form.resetFields();
+      if (authMode === 'register') form.setFieldValue('referralCode', savedReferralCode());
       setLoading(false);
     } else {
       // 登录框关了就把找回密码弹窗一起收起，免得下次打开时它还悬在上层
@@ -312,6 +316,12 @@ export function LoginModal() {
                     </Form.Item>
                   )}
 
+                  {authMode === 'register' && (
+                    <Form.Item label="推荐码（选填）" name="referralCode" normalize={normalizeReferralCode}
+                      rules={[{ pattern: REFERRAL_CODE_PATTERN, message: '请输入16位推荐码，或留空直接注册' }]}>
+                      <Input maxLength={16} placeholder="由好友提供，邀请链接会自动填入" autoComplete="off" />
+                    </Form.Item>
+                  )}
                   <Form.Item className={authMode === 'login' ? '!mb-0 !mt-7' : '!mb-0 !mt-5'}>
                     <button
                       type="submit"

@@ -1,0 +1,85 @@
+/* The project canvas panel uses the existing application's theme tokens. */
+.assistant-panel {
+  width: 380px;
+  max-width: 92vw;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--dv-border-1);
+  background: var(--dv-surface-1);
+  color: var(--dv-text-1);
+}
+.assistant-panel[hidden] { display: none; }
+.assistant-header { display: flex; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--dv-border-1); }
+.assistant-logo, .assistant-welcome-mark { display: grid; place-items: center; color: #9fc5ff; background: #82b4ff12; border: 1px solid #82b4ff24; border-radius: 12px; }
+.assistant-logo { width: 36px; height: 36px; font-size: 18px; }
+.assistant-heading { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.assistant-heading strong { font-size: 14px; font-weight: 600; }
+.assistant-heading > span { font-size: 11px; color: var(--dv-text-3); }
+.assistant-guidance { padding: 14px 16px; border-bottom: 1px solid var(--dv-border-1); background: linear-gradient(130deg, #82b4ff09, transparent); }
+.assistant-guidance-label { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--dv-text-3); margin-bottom: 8px; }
+.assistant-guidance-label > span { width: 5px; height: 5px; border-radius: 50%; background: #91bf9f; }
+.assistant-guidance > strong { display: block; font-size: 13px; font-weight: 500; color: var(--dv-text-1); }
+.assistant-guidance > p { font-size: 11px; line-height: 1.7; color: var(--dv-text-3); margin: 7px 0 10px; }
+.assistant-guidance-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.assistant-guidance-actions button { display: flex; align-items: center; gap: 7px; cursor: pointer; font-size: 11px; padding: 6px 9px; border: 1px solid #82b4ff30; border-radius: 7px; color: #bed5f7; background: #82b4ff0a; }
+.assistant-guidance-actions button:hover { border-color: #82b4ff70; background: #82b4ff12; }
+.assistant-guidance-actions button:disabled { cursor: default; opacity: .5; }
+.assistant-conversation { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 18px; }
+.assistant-welcome { padding-top: 24px; }
+.assistant-welcome-mark { width: 48px; height: 48px; font-size: 24px; margin-bottom: 18px; }
+.assistant-welcome h2 { font-size: 20px; letter-spacing: -.5px; font-weight: 600; margin: 0 0 10px; }
+.assistant-welcome > p { color: var(--dv-text-3); line-height: 1.8; font-size: 13px; margin: 0 0 26px; }
+.assistant-examples { display: flex; flex-direction: column; gap: 10px; }
+.assistant-examples button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--dv-border-1); border-radius: 12px; text-align: left; background: var(--dv-surface-2); cursor: pointer; color: var(--dv-text-2); transition: border-color .15s, background .15s; }
+.assistant-examples button:hover { border-color: #82b4ff60; background: var(--dv-surface-3); }
+.assistant-examples button strong { display: block; font-size: 13px; font-weight: 500; }
+.assistant-examples button small { display: block; margin-top: 5px; font-size: 11px; color: var(--dv-text-3); }
+.assistant-examples button:disabled, .assistant-next-steps button:disabled { opacity: .5; cursor: default; }
+.assistant-message { margin-bottom: 26px; overflow-wrap: anywhere; }
+.assistant-message-author { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dv-text-3); margin-bottom: 9px; }
+.assistant-message-user { padding: 12px 14px; background: var(--dv-surface-3); border: 1px solid var(--dv-border-1); border-radius: 12px; margin-left: 24px; }
+.assistant-content { font-size: 13px; line-height: 1.85; color: var(--dv-text-2); }
+.assistant-content > :first-child { margin-top: 0; }
+.assistant-content > :last-child { margin-bottom: 0; }
+.assistant-content p { margin: 0 0 12px; white-space: pre-wrap; }
+.assistant-content ul, .assistant-content ol { padding-left: 20px; margin: 8px 0 12px; }
+.assistant-content pre { overflow-x: auto; padding: 10px; background: var(--dv-bg); border-radius: 8px; }
+.assistant-content a { color: #9fc5ff; }
+.assistant-node-link { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 6px; margin: 1px 2px; border: 1px solid #82b4ff35; border-radius: 6px; color: #bed5f7; background: #82b4ff0a; font: inherit; font-size: 12px; cursor: pointer; vertical-align: baseline; overflow-wrap: anywhere; text-align: left; }
+.assistant-node-link:hover { border-color: #82b4ff90; background: #82b4ff18; }
+.assistant-node-link:disabled { color: var(--dv-text-3); opacity: .6; cursor: default; }
+.assistant-node-references { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.assistant-node-references > span { font-size: 10px; color: var(--dv-text-3); margin-right: 3px; }
+.assistant-content h1, .assistant-content h2, .assistant-content h3 { font-size: 14px; margin: 14px 0 8px; }
+.assistant-message-error .assistant-content { color: #ffb4ae; }
+.assistant-result { display: flex; align-items: flex-start; gap: 6px; color: #a3c9b0; background: #79ba8e0b; padding: 10px; border: 1px solid #79ba8e20; border-radius: 8px; margin-top: 12px; font-size: 11px; line-height: 1.7; }
+.assistant-result > .anticon { padding-top: 4px; }
+.assistant-thinking { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dv-text-3); padding: 5px 0 15px; }
+.assistant-task { padding: 12px; margin-top: 14px; border: 1px solid var(--dv-border-2); background: var(--dv-surface-2); border-radius: 10px; }
+.assistant-task-heading { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 8px; }
+.assistant-task-node { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; padding: 7px 0; border-bottom: 1px solid var(--dv-border-1); }
+.assistant-task-node > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-task-node > :last-child { flex-shrink: 0; font-size: 11px; color: var(--dv-text-3); }
+.assistant-task-node-title small { display: block; margin-top: 3px; font-size: 10px; color: var(--dv-text-3); }
+.assistant-task-node [data-status="success"] { color: #9ac7a8; }
+.assistant-task-node [data-status="failed"], .assistant-task-error { color: #ffb4ae; }
+.assistant-task-node [data-status="running"], .assistant-task-node [data-status="pending"] { color: #9fc5ff; }
+.assistant-muted { font-size: 11px; color: var(--dv-text-3); line-height: 1.7; margin: 9px 0; }
+.assistant-task-error { font-size: 11px; line-height: 1.7; margin-top: 8px; }
+.assistant-task-error button { cursor: pointer; margin-left: 5px; text-decoration: underline; }
+.assistant-next-steps { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+.assistant-next-steps button { display: flex; align-items: flex-start; gap: 8px; text-align: left; padding: 9px 10px; border: 1px solid var(--dv-border-1); background: transparent; border-radius: 8px; font-size: 12px; line-height: 1.6; cursor: pointer; color: var(--dv-text-2); }
+.assistant-next-steps .anticon { padding-top: 4px; color: #9fc5ff; }
+.assistant-next-steps button:hover { border-color: #82b4ff60; }
+.assistant-composer { padding: 12px 14px 10px; border-top: 1px solid var(--dv-border-1); }
+.assistant-context { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; font-size: 11px; color: var(--dv-text-3); white-space: nowrap; }
+.assistant-context-label { overflow: hidden; text-overflow: ellipsis; color: #b6cef3; }
+.assistant-composer textarea.ant-input { font-size: 13px; border-radius: 10px; resize: none; background: var(--dv-surface-2); }
+.assistant-composer-actions { display: flex; gap: 10px; justify-content: space-between; align-items: center; margin-top: 8px; }
+.assistant-composer-actions .ant-select { min-width: 0; max-width: 260px; font-size: 12px; }
+.assistant-composer-hint { display: flex; justify-content: space-between; gap: 10px; color: var(--dv-text-3); font-size: 10px; margin-top: 10px; }
+@media (max-width: 760px) {
+  .assistant-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 35; box-shadow: -8px 0 30px #0005; }
+}

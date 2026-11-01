@@ -57,11 +57,11 @@ export function AppLayout() {
 
   const userMenuItems: MenuProps['items'] = isMobile
     ? [
-        // 移动端只留退出登录：个人设置/资产管理/费用明细本身是桌面布局，手机上进不去也没法用
+        { key: 'profile', icon: <SettingOutlined />, label: '个人中心', onClick: () => setShowProfileSettings(true) },
         { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
       ]
     : [
-        { key: 'profile', icon: <SettingOutlined />, label: '个人设置', onClick: () => setShowProfileSettings(true) },
+        { key: 'profile', icon: <SettingOutlined />, label: '个人中心', onClick: () => setShowProfileSettings(true) },
         { key: 'assets', icon: <FolderOutlined />, label: '资产管理', onClick: () => setShowAssetLibrary(true) },
         { key: 'billing', icon: <AccountBookOutlined />, label: '费用明细', onClick: () => setShowBillingRecords(true) },
         { type: 'divider' },

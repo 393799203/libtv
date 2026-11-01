@@ -41,8 +41,9 @@ import ProviderTaskReconciliation from './ProviderTaskReconciliation';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { Z } from '@/utils/zLayers';
+import ReferralDashboard from './ReferralDashboard';
 
-type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'reconcile' | 'channels' | 'packages';
+type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'referrals' | 'reconcile' | 'channels' | 'packages';
 
 export default function AdminPage() {
   // 应用内页：不被搜索引擎收录（nginx 的 add_header 到不了这里，见 web/libtv-app.conf 说明）
@@ -728,6 +729,7 @@ export default function AdminPage() {
         { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
         { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
         { key: 'users', icon: <UserOutlined />, label: '用户管理' },
+        { key: 'referrals', icon: <UserOutlined />, label: '邀请统计' },
       ],
     },
     {
@@ -1315,6 +1317,10 @@ export default function AdminPage() {
                                 )}
                               </div>
                               <div className="text-gray-400 font-mono text-[11px] mt-0.5 break-all">{user.id}</div>
+                              {user.inviter_id && <div className="mt-1 text-[11px] text-cyan-300">
+                                邀请者：{user.inviter_nickname || user.inviter_email || '已注销用户'}
+                                {user.inviter_nickname && user.inviter_email && <span className="ml-1 text-gray-400">({user.inviter_email})</span>}
+                              </div>}
                             </td>
                             <td className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-gray-500 text-[12px]">
                               <span>项目 {user.project_count || 0}</span>
@@ -1666,6 +1672,7 @@ export default function AdminPage() {
         )}
 
         {/* ========== 渠道与价格 Tab（原「商务配置」下的价格管理 + 渠道管理，合并后独立成一级菜单）========== */}
+        {activeTab === 'referrals' && <ReferralDashboard />}
         {activeTab === 'channels' && <ChannelPricingPage />}
 
         {/* ========== 套餐管理 Tab（原「商务配置」的子页签，独立成一级菜单）========== */}

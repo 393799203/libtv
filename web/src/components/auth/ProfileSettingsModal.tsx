@@ -8,6 +8,8 @@ import { userApi } from '@/services/userApi';
 import { uploadAvatar } from '@/services/uploadApi';
 import { getUserAvatarSrc } from '@/utils/avatar';
 import { Z } from '@/utils/zLayers';
+import { ReferralCard } from './ReferralCard';
+import './profile.css';
 
 interface ProfileSettingsModalProps {
   onClose: () => void;
@@ -117,112 +119,53 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
       style={{ zIndex: Z.modalInline, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}
       onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
     >
-      <div
-        className="relative w-full max-w-[420px] mx-4 max-h-[85vh] overflow-auto"
-        style={{ background: 'var(--dv-surface-1, #fff)', borderRadius: 16, boxShadow: '0 20px 60px var(--dv-modal-shadow, rgba(0,0,0,0.15))' }}
-      >
-        <button
-          onClick={(e) => { e.stopPropagation(); if (!saving) onClose(); }}
-          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
-        >
-          <CloseOutlined style={{ fontSize: 14 }} />
-        </button>
-
-        <div className="px-8 pt-8 pb-8">
-          <h2 className="text-xl font-semibold text-gray-800 mb-6">个人设置</h2>
-
-          {/* 头像 */}
-          <div className="flex items-center gap-4 mb-6">
-            <div
-              className="relative w-16 h-16 rounded-full overflow-hidden border border-gray-200 cursor-pointer group"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <img
-                src={avatarUrl || getUserAvatarSrc(user)}
-                alt="头像"
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <CameraOutlined style={{ color: '#fff', fontSize: 18 }} />
+      <section className="profile-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+        <header className="profile-header">
+          <div><h2 id="profile-title">个人中心</h2><p>管理资料、邀请好友与账号安全</p></div>
+          <button type="button" className="profile-close" aria-label="关闭个人中心"
+            onClick={() => { if (!saving) onClose(); }}><CloseOutlined /></button>
+        </header>
+        <div className="profile-columns">
+          <section className="profile-details" aria-label="个人资料">
+            <h3>个人资料</h3>
+            <button type="button" className="profile-avatar" aria-label="更换头像"
+              disabled={avatarUploading} onClick={() => fileInputRef.current?.click()}>
+              <img src={avatarUrl || getUserAvatarSrc(user)} alt="头像" />
+              <span><CameraOutlined />{avatarUploading ? '上传中' : '更换头像'}</span>
+            </button>
+            <p className="profile-hint">JPG / PNG / WebP · 不超过 5MB</p>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={e => {
+              const file = e.target.files?.[0]; if (file) void handleSelectAvatar(file); e.target.value = '';
+            }} />
+            <label htmlFor="profile-nickname">用户名（昵称）</label>
+            <input id="profile-nickname" value={nickname} onChange={e => setNickname(e.target.value)}
+              maxLength={50} placeholder="请输入昵称" />
+            <label htmlFor="profile-email">邮箱</label>
+            <input id="profile-email" value={user?.email || ''} readOnly />
+            <div className="profile-balance"><span>当前积分</span><strong>{(user?.credits || 0).toLocaleString('zh-CN')}</strong></div>
+          </section>
+          <div className="profile-settings">
+            <ReferralCard />
+            <section className="profile-security" aria-label="账号安全">
+              <h3><LockOutlined /> 账号安全 <span>不填则不修改密码</span></h3>
+              <input type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)}
+                placeholder="原密码" aria-label="原密码" autoComplete="current-password" />
+              <div className="profile-password-pair">
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                  placeholder="新密码（至少 6 位）" aria-label="新密码" autoComplete="new-password" />
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="确认新密码" aria-label="确认新密码" autoComplete="new-password" />
               </div>
-              {avatarUploading && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                  <div className="animate-spin rounded-full w-5 h-5 border-b-2 border-white" />
-                </div>
-              )}
-            </div>
-            <div className="text-[12px] text-gray-400">
-              <div className="text-gray-600 text-[13px] mb-1">点击头像更换</div>
-              支持 JPG/PNG/WebP，不超过 5MB
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleSelectAvatar(f);
-                  e.target.value = '';
-                }}
-              />
-            </div>
+            </section>
           </div>
-
-          {/* 昵称 */}
-          <label className="block text-[13px] text-gray-500 mb-1.5">用户名（昵称）</label>
-          <input
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            maxLength={50}
-            placeholder="请输入昵称"
-            className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none mb-1"
-          />
-          <div className="text-[11px] text-gray-400 mb-6">邮箱：{user?.email}</div>
-
-          {/* 修改密码 */}
-          <div className="flex items-center gap-2 text-[13px] text-gray-600 font-medium mb-3">
-            <LockOutlined style={{ fontSize: 13 }} />
-            修改密码
-            <span className="text-[11px] text-gray-400 font-normal">（不填则不修改）</span>
-          </div>
-          <div className="space-y-3 mb-6">
-            <input
-              type="password"
-              value={oldPassword}
-              onChange={(e) => setOldPassword(e.target.value)}
-              placeholder="原密码"
-              className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-            />
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="新密码（至少 6 位）"
-              className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-            />
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="确认新密码"
-              className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-lg focus:border-blue-400 outline-none"
-            />
-          </div>
-
-          {/* 保存按钮 */}
-          <button
-            onClick={handleSave}
-            disabled={saving || avatarUploading}
-            className="w-full py-2.5 text-sm text-white rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-            style={{
-              background: 'linear-gradient(135deg, #33353a 0%, #26282c 50%, #1a1b1e 100%)',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
-          >
-            {saving ? '保存中...' : '保存修改'}
-          </button>
         </div>
-      </div>
+        <footer className="profile-footer">
+          <span>修改密码后需要重新登录</span>
+          <button type="button" className="profile-save" onClick={() => void handleSave()} disabled={saving || avatarUploading}>
+            {saving ? '保存中…' : '保存修改'}
+          </button>
+        </footer>
+      </section>
     </div>,
     document.body,
   );

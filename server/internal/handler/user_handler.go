@@ -32,7 +32,8 @@ type RegisterRequest struct {
 	Nickname string `json:"nickname"`
 	// Channel 注册来源渠道（wasu=华数 / dianxin=电信）；缺省 wasu。
 	// 由前端从注册链接的 ?source= 参数或其他投放渠道标记带入。
-	Channel string `json:"channel"`
+	Channel      string `json:"channel"`
+	ReferralCode string `json:"referralCode"`
 }
 
 type LoginRequest struct {
@@ -52,7 +53,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.RegisterWithChannel(c.Request.Context(), req.Email, req.Password, req.Nickname, req.Channel)
+	user, err := h.userService.RegisterWithChannel(c.Request.Context(), req.Email, req.Password, req.Nickname, req.Channel, req.ReferralCode)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
@@ -174,6 +175,7 @@ func (h *UserHandler) List(c *gin.Context) {
 			response.FailWith(c, err)
 			return
 		}
+		h.protectReferralMetadata(c, items)
 		response.OK(c, gin.H{
 			"items":     items,
 			"total":     total,
@@ -188,10 +190,23 @@ func (h *UserHandler) List(c *gin.Context) {
 		response.FailWith(c, err)
 		return
 	}
+	h.protectReferralMetadata(c, items)
 	response.OK(c, gin.H{
 		"items": items,
 		"total": len(items),
 	})
+}
+
+// Existing author selectors use /users too. Referral attribution is admin-only.
+func (h *UserHandler) protectReferralMetadata(c *gin.Context, items []service.UserListItem) {
+	role, err := h.userService.GetUserRole(c.Request.Context(), middleware.GetUserID(c))
+	if err == nil && role == "admin" {
+		return
+	}
+	for i := range items {
+		items[i].ReferralCode, items[i].InviterID = nil, nil
+		items[i].InviterNickname, items[i].InviterEmail = "", ""
+	}
 }
 
 // Delete 删除用户（管理员）

@@ -1,6 +1,9 @@
 package model
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,11 +13,13 @@ import (
 
 // User 用户模型
 type User struct {
-	ID           string `gorm:"primaryKey;size:36" json:"id"`
-	Email        string `gorm:"uniqueIndex;size:255;not null" json:"email"`
-	PasswordHash string `gorm:"size:255;not null" json:"-"`
-	Nickname     string `gorm:"size:100" json:"nickname"`
-	AvatarURL    string `gorm:"size:500" json:"avatar_url"`
+	ID           string  `gorm:"primaryKey;size:36" json:"id"`
+	Email        string  `gorm:"uniqueIndex;size:255;not null" json:"email"`
+	PasswordHash string  `gorm:"size:255;not null" json:"-"`
+	Nickname     string  `gorm:"size:100" json:"nickname"`
+	AvatarURL    string  `gorm:"size:500" json:"avatar_url"`
+	ReferralCode *string `gorm:"size:16;uniqueIndex" json:"referral_code,omitempty"`
+	InviterID    *string `gorm:"size:36;index" json:"inviter_id,omitempty"`
 	// PasswordVersion 密码版本号：每次改密码 +1，写入 JWT，使旧 token 全部失效
 	PasswordVersion int    `gorm:"not null;default:0" json:"-"`
 	Role            string `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
@@ -40,7 +45,22 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 	if u.ID == "" {
 		u.ID = uuid.New().String()
 	}
+	if u.ReferralCode == nil {
+		code, err := NewReferralCode()
+		if err != nil {
+			return err
+		}
+		u.ReferralCode = &code
+	}
 	return nil
+}
+
+func NewReferralCode() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return strings.ToUpper(hex.EncodeToString(raw[:])), nil
 }
 
 // Project 项目模型

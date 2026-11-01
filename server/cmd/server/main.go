@@ -223,6 +223,8 @@ func main() {
 		log.Printf("[Mail] 未启用 SMTP（smtp.enabled=false 或缺少 host/from），注册欢迎邮件不会发送")
 	}
 	userService := service.NewUserService(userRepo, appStorage, mailSender)
+	referralService := service.NewReferralService(db)
+	userService.SetReferralService(referralService)
 	// 找回密码：独立于 UserService（未登录流程），令牌存库不依赖 Redis，
 	// 邮件复用上面同一个 mailSender，因此 SMTP 一配上这个功能就跟着可用
 	passwordResetService := service.NewPasswordResetService(userRepo, repository.NewPasswordResetRepo(db), mailSender)
@@ -341,6 +343,7 @@ func main() {
 
 	// 初始化 Handler
 	userHandler := handler.NewUserHandler(userService, billingService)
+	referralHandler := handler.NewReferralHandler(referralService)
 	passwordResetHandler := handler.NewPasswordResetHandler(passwordResetService)
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
@@ -383,6 +386,7 @@ func main() {
 	// 这个服务**不接计费**——对话本身不扣用户积分，真正花钱的是它触发的生成（见 assistant_handler.go）
 	assistantService := assistant.NewService(llmClient, modelManager, channelService, db)
 	assistantHandler := handler.NewAssistantHandler(assistantService)
+	canvasAssistantHandler := handler.NewCanvasAssistantHandler(llmClient, modelManager, projectRepo, channelService, idemStore, db)
 	userAssetHandler := handler.NewUserAssetHandler(userAssetService)
 	billingHandler := handler.NewBillingHandler(billingRepo, userService)
 	pricingHandler := handler.NewPricingHandler(pricingService, channelService)
@@ -545,6 +549,10 @@ func main() {
 
 		// 用户
 		api.GET("/auth/me", userHandler.Me)
+		api.GET("/auth/referral", referralHandler.Mine)
+		api.GET("/auth/referral/stats", referralHandler.MyStats)
+		api.GET("/admin/referrals", middleware.RequireAdmin(userService), referralHandler.Dashboard)
+		api.GET("/admin/referrals/:id/users", middleware.RequireAdmin(userService), referralHandler.Invitees)
 		api.POST("/auth/refresh", userHandler.Refresh)                  // 滑动续期：剩余寿命不足时换新 token
 		api.PUT("/auth/profile", userHandler.UpdateProfile)             // 更新当前用户个人资料（昵称/头像）
 		api.PUT("/auth/password", userHandler.ChangePassword)           // 修改当前用户密码
@@ -592,6 +600,7 @@ func main() {
 			projects.DELETE("/:id", projectHandler.Delete)
 			projects.GET("/:id/canvas", canvasHandler.Get)
 			projects.PUT("/:id/canvas", canvasHandler.Save)
+			projects.POST("/:id/assistant/chat", middleware.RateLimitScoped(config.C.RateLimit, "assistant", "对话"), canvasAssistantHandler.Chat)
 			// 工作流（路径对齐前端 api/services/workflowApi.ts）；AI 调用入口，先过扣费中间件
 			projects.POST("/:id/workflows/execute", middleware.RateLimit(config.C.RateLimit), middleware.Billing(billingService, billing.ActionWorkflowExecute), workflowHandler.Execute)
 			projects.GET("/:id/workflows/:execId", workflowHandler.GetExecution)

@@ -9,9 +9,12 @@ import {
   FolderOutlined,
   GoldOutlined,
   ShopOutlined,
+  BulbOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { Canvas } from '@/components/canvas/Canvas';
 import { CanvasBridge } from '@/components/assistant/CanvasBridge';
+import { CanvasAssistantPanel } from '@/components/assistant/CanvasAssistantPanel';
 import { CanvasToolbar } from '@/components/canvas/CanvasToolbar';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useCanvasStore } from '@/stores/canvasStore';
@@ -30,6 +33,7 @@ import { showApi, type ShowCategoryItem } from '@/services/showApi';
 import { refreshCredits } from '@/utils/refreshCredits';
 import { useCreditsSync } from '@/hooks/useCreditsSync';
 import { usePageMeta } from '@/hooks/usePageMeta';
+import './workspace.css';
 
 /** 画布是否"效果为空"：无节点，或所有节点都是空内容（未填输入、无产出） */
 function isEffectivelyEmptyCanvas(nodes: { data?: Record<string, unknown> }[]): boolean {
@@ -111,6 +115,10 @@ function WorkspaceInner() {
   const [prefillVideoUrl, setPrefillVideoUrl] = useState('');
   // 个人资产库（画布左侧停靠面板，不是弹窗：选图时不该把画布挡掉）
   const [showAssetPanel, setShowAssetPanel] = useState(false);
+  // The topbar is the single entry; desktop guidance starts expanded.
+  const [showAssistant, setShowAssistant] = useState(() => window.matchMedia('(min-width: 960px)').matches);
+  const toggleAssistant = () => setShowAssistant(open => !open);
+  const closeAssistant = () => setShowAssistant(false);
   // 积分超市（充值入口）：挂在余额左边，看完余额顺手就能充
   const [showPointsMall, setShowPointsMall] = useState(false);
   // 积分明细（扣费/退款/充值）弹窗
@@ -237,6 +245,7 @@ function WorkspaceInner() {
             type="text"
             size="small"
             aria-label="返回项目列表"
+            className="workspace-back"
             icon={<ArrowLeftOutlined />}
             loading={isLeaving}
             onClick={async () => {
@@ -259,7 +268,7 @@ function WorkspaceInner() {
         {isEditingName ? (
           <input
             ref={nameInputRef}
-            className="w-48 rounded-lg border border-cyan-300/30 bg-cyan-400/[0.06] px-2 py-1 text-sm text-gray-100 outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)]"
+            className="workspace-project-name-input w-48 rounded-lg border border-cyan-300/30 bg-cyan-400/[0.06] px-2 py-1 text-sm text-gray-100 outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)]"
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             onBlur={handleNameBlur}
@@ -275,10 +284,10 @@ function WorkspaceInner() {
             {projectName || '未命名项目'}
           </span>
         )}
-        <div className="flex-1" />
+        <div className="workspace-topbar-spacer flex-1" />
         {/* 顶栏中间：[未保存状态 + 保存] ｜ [撤销/重做 + 放大缩小/适应/100%]
             保存属于"改动画布"的动作，跟撤销/重做放一起才顺手；竖线把两者分开。 */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="workspace-edit-tools flex items-center gap-1.5">
           {/* 未保存改动：保存按钮右上角的红点（原先是一整行"未保存"文字，太占地方） */}
           <Tooltip title={isDirty ? '保存 (Ctrl+S) · 有未保存的改动' : '保存 (Ctrl+S)'}>
             <span className="relative inline-flex">
@@ -299,7 +308,24 @@ function WorkspaceInner() {
           <span className="inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" /> {/* 与画布工具栏内部的竖线同一种元素（1px 细线），不再用 "|" 文字 */}
           <CanvasToolbar />
         </div>
-        <div className="flex-1" />
+        <div className="workspace-topbar-spacer flex-1" />
+        <Tooltip title={showAssistant ? '收起蛙导 · 创作助手' : '展开蛙导 · 规划下一步、创建节点'}>
+          <button
+            type="button"
+            className="workspace-assistant-toggle"
+            data-open={showAssistant}
+            aria-label={showAssistant ? '收起创作助手' : '打开创作助手'}
+            aria-expanded={showAssistant}
+            aria-controls="canvas-creation-assistant"
+            onClick={toggleAssistant}
+          >
+            <span className="workspace-assistant-mark" aria-hidden="true"><BulbOutlined /></span>
+            <span className="workspace-assistant-name">蛙导<span className="workspace-assistant-description">创作助手</span></span>
+            {showAssistant && <span className="workspace-assistant-status">已展开</span>}
+            <RightOutlined className="workspace-assistant-chevron" aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <span className="workspace-toolbar-break" aria-hidden="true" />
         <Tooltip title="积分超市（充值）">
           <Button
             type="text"
@@ -307,14 +333,14 @@ function WorkspaceInner() {
             icon={<ShopOutlined />}
             aria-label="打开积分超市"
             onClick={() => setShowPointsMall(true)}
-            className="!text-amber-500"
+            className="workspace-secondary-action !text-amber-500"
           />
         </Tooltip>
         <Tooltip title="查看积分明细（扣费 / 退款 / 充值）">
           <button
             type="button"
             onClick={() => setShowBillingRecords(true)}
-            className="tech-credit-badge flex shrink-0 cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium text-amber-300 transition-all hover:border-amber-300/30 hover:bg-amber-300/10 active:scale-[0.97]"
+            className="workspace-balance tech-credit-badge flex shrink-0 cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-medium text-amber-300 transition-all hover:border-amber-300/30 hover:bg-amber-300/10 active:scale-[0.97]"
           >
             <GoldOutlined />
             <span>{user?.credits ?? 0}</span>
@@ -327,6 +353,7 @@ function WorkspaceInner() {
             size="small"
             icon={<VideoCameraOutlined />}
             aria-label="提交视频发布"
+            className="workspace-secondary-action"
             loading={isPreparingPublish}
             onClick={async () => {
               if (isPreparingPublish) return;
@@ -351,7 +378,7 @@ function WorkspaceInner() {
       </div>
 
       {/* 画布区域：左侧停靠个人资产库（与右侧提示词面板对称，不遮挡画布） */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 relative">
         {showAssetPanel && <AssetPanel onClose={() => setShowAssetPanel(false)} />}
         <div className="flex-1 relative min-w-0">
           <CanvasWithDrop urlProjectId={urlProjectId} />
@@ -377,6 +404,8 @@ function WorkspaceInner() {
             </div>
           )}
         </div>
+        <CanvasAssistantPanel key={`${user?.id}:${urlProjectId}`} projectId={urlProjectId}
+          open={showAssistant} onClose={closeAssistant} />
       </div>
 
       {/* 积分明细弹窗（与头部「费用明细」同一个组件） */}

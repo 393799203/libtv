@@ -38,3 +38,10 @@ server/vendor/
 
 # ---- SSH 部署密钥（勿提交！）----
 .ssh-deploy/
+
+# Regression tests shipped with the canvas assistant and referral features.
+!server/internal/assistant/plan_test.go
+!server/internal/handler/canvas_assistant_handler_test.go
+!server/internal/handler/referral_handler_test.go
+!server/internal/service/referral_service_test.go
+!web/tests/*.test.ts

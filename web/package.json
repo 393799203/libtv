@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:assistant": "node --import ./tests/register-loader.mjs --test tests/assistant-plan.test.ts",
+    "test:referral": "node --import ./tests/register-loader.mjs --test tests/referral.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },

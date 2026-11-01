@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -37,10 +38,13 @@ type WelcomeMailer interface {
 }
 
 type UserService struct {
-	userRepo repository.UserRepo
-	storage  storage.Storage
-	mailer   WelcomeMailer
+	userRepo  repository.UserRepo
+	storage   storage.Storage
+	mailer    WelcomeMailer
+	referrals *ReferralService
 }
+
+func (s *UserService) SetReferralService(referrals *ReferralService) { s.referrals = referrals }
 
 func NewUserService(userRepo repository.UserRepo, s storage.Storage, mailer WelcomeMailer) *UserService {
 	return &UserService{userRepo: userRepo, storage: s, mailer: mailer}
@@ -63,13 +67,24 @@ func (s *UserService) Register(ctx context.Context, email, password, nickname st
 }
 
 // RegisterWithChannel 注册（可指定来源渠道：wasu=华数 / dianxin=电信；缺省/非法回退 dianxin）
-func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, nickname, channel string) (*model.User, error) {
+func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, nickname, channel string, referralCodes ...string) (*model.User, error) {
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	if existing != nil {
 		return nil, errors.New("email already registered")
+	}
+	var inviterID *string
+	if len(referralCodes) > 0 && strings.TrimSpace(referralCodes[0]) != "" {
+		if s.referrals == nil {
+			return nil, fmt.Errorf("推荐码服务暂不可用")
+		}
+		id, err := s.referrals.ResolveInviter(ctx, referralCodes[0])
+		if err != nil {
+			return nil, err
+		}
+		inviterID = &id
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -86,6 +101,7 @@ func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, 
 		PasswordHash: string(hash),
 		Nickname:     nickname,
 		Channel:      channel,
+		InviterID:    inviterID,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
@@ -154,9 +170,11 @@ func (s *UserService) List(ctx context.Context, keyword string) ([]model.User, e
 // UserListItem 用户列表条目（附带项目数与分类型资产数统计）
 type UserListItem struct {
 	model.User
-	ProjectCount    int64 `json:"project_count"`
-	AssetImageCount int64 `json:"asset_image_count"`
-	AssetVideoCount int64 `json:"asset_video_count"`
+	ProjectCount    int64  `json:"project_count"`
+	AssetImageCount int64  `json:"asset_image_count"`
+	AssetVideoCount int64  `json:"asset_video_count"`
+	InviterNickname string `json:"inviter_nickname,omitempty"`
+	InviterEmail    string `json:"inviter_email,omitempty"`
 }
 
 // ListWithStats 用户列表 + 项目/资产统计（管理员列表展示用）
@@ -182,6 +200,11 @@ func (s *UserService) ListWithStats(ctx context.Context, keyword string) ([]User
 			item.AssetVideoCount = st.AssetVideoCount
 		}
 		items = append(items, item)
+	}
+	if s.referrals != nil {
+		if err := s.referrals.EnrichUsers(ctx, items); err != nil {
+			return nil, err
+		}
 	}
 	return items, nil
 }
@@ -210,6 +233,11 @@ func (s *UserService) ListWithStatsPaged(ctx context.Context, keyword, role, cha
 			item.AssetVideoCount = st.AssetVideoCount
 		}
 		items = append(items, item)
+	}
+	if s.referrals != nil {
+		if err := s.referrals.EnrichUsers(ctx, items); err != nil {
+			return nil, 0, err
+		}
 	}
 	return items, total, nil
 }
@@ -349,7 +377,7 @@ func (s *UserService) generateToken(user *model.User) (string, error) {
 const activityTouchTTL = 5 * time.Minute
 
 var (
-	activityMu    sync.Mutex
+	activityMu      sync.Mutex
 	activityTouched = map[string]time.Time{}
 )
 

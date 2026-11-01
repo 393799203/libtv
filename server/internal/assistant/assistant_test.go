@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -191,6 +192,10 @@ func TestInterpretNeverErrors(t *testing.T) {
 	}
 	if strings.TrimSpace(out.Reply) == "" {
 		t.Fatal("解析失败时必须给一句回复，否则用户看到空气泡")
+	}
+	wire, err := json.Marshal(out)
+	if err != nil || !strings.Contains(string(wire), `"commands":[]`) {
+		t.Fatalf("降级回复也必须序列化空数组，不能返回 null: %s (%v)", wire, err)
 	}
 }
 

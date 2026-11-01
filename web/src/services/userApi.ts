@@ -19,6 +19,10 @@ export interface UserItem {
   asset_image_count?: number;
   /** 视频资产数（管理员列表接口返回） */
   asset_video_count?: number;
+  referral_code?: string;
+  inviter_id?: string;
+  inviter_nickname?: string;
+  inviter_email?: string;
 }
 
 export const userApi = {

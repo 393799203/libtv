@@ -194,7 +194,8 @@ func (s *Service) interpret(raw string, truncated bool) *Result {
 		log.Printf("[Assistant] ⚠ 模型输出解析失败（%s）: %v | 原始输出前 200 字: %.200s",
 			cause, err, raw)
 		return &Result{
-			Reply: "抱歉，我没太听懂。可以换个说法，或者告诉我你想在画布上做什么？",
+			Reply:    "抱歉，我没太听懂。可以换个说法，或者告诉我你想在画布上做什么？",
+			Commands: []Command{},
 		}
 	}
 

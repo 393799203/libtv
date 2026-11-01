@@ -172,6 +172,13 @@ interface CanvasState extends WorkspaceUIState {
    * 整组只走一次 saveHistory，一次撤销即可整组回退。
    */
   addNodesAndEdges: (nodes: LibTVNode[], edges: LibTVEdge[]) => void;
+  /** 助手的一轮改动只记录一次历史，保留现有产物与节点布局。 */
+  applyAssistantTransaction: (
+    projectId: string,
+    nodes: LibTVNode[],
+    edges: LibTVEdge[],
+    updates: { nodeId: string; data: Partial<LibTVNode['data']> }[],
+  ) => void;
   removeNodes: (ids: string[]) => void;
   /**
    * 把当前选中的节点合成一个组合（框选后右键「组合」走这里）。
@@ -606,6 +613,24 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   // --- 节点操作 ---
+  applyAssistantTransaction: (projectId, nodes, edges, updates) => {
+    set((state) => {
+      if (state.projectId !== projectId || state.isLoading) throw new Error('画布已切换或尚未加载');
+      if (!nodes.length && !edges.length && !updates.length) return {};
+      const cache = new Map(state._cache);
+      const data = { ...(cache.get(projectId) || createEmptyProjectData()) };
+      const patches = new Map(updates.map(u => [u.nodeId, u.data]));
+      data.nodes = [
+        ...data.nodes.map(n => patches.has(n.id) ? { ...n, data: { ...n.data, ...patches.get(n.id) } } : n),
+        ...nodes,
+      ] as LibTVNode[];
+      data.edges = [...data.edges, ...edges];
+      Object.assign(data, saveHistory(data));
+      cache.set(projectId, data);
+      return { _cache: cache, isDirty: true, ...syncFromCache(projectId, cache) };
+    });
+  },
+
   createMediaNodeAt: (nodeType, position, payload) => {
     const node = createNode(nodeType, position, {
       data: mediaFieldsFor(nodeType, payload) as never,
