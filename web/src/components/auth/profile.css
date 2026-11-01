@@ -2,7 +2,7 @@
 .profile-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 23px 26px 20px; border-bottom: 1px solid var(--dv-border-1); }
 .profile-header h2 { margin: 0; font-size: 20px; font-weight: 600; }
 .profile-header p { margin: 5px 0 0; font-size: 12px; color: var(--dv-text-3); }
-.profile-close { display: grid; place-items: center; width: 30px; height: 30px; cursor: pointer; border-radius: 8px; color: var(--dv-text-3); }
+.profile-close { display: grid; place-items: center; width: 36px; height: 36px; cursor: pointer; border-radius: 8px; color: var(--dv-text-3); }
 .profile-close:hover { background: var(--dv-surface-3); color: var(--dv-text-1); }
 .profile-columns { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; overflow: auto; }
 .profile-details { padding: 22px 24px; border-right: 1px solid var(--dv-border-1); background: var(--dv-bg); }
@@ -15,6 +15,7 @@
 .profile-details label { display: block; font-size: 11px; margin: 16px 0 6px; color: var(--dv-text-3); }
 .profile-dialog input:not([type=file]) { width: 100%; min-width: 0; padding: 9px 10px; font-size: 12px; border: 1px solid var(--dv-border-1); border-radius: 8px; background: var(--dv-surface-1); outline: none; color: var(--dv-text-1); }
 .profile-dialog input:focus { border-color: #82b4ff70; }
+.profile-dialog input:focus-visible { outline: 2px solid var(--dv-cyan); outline-offset: 1px; }
 .profile-dialog input[readonly] { color: var(--dv-text-3); }
 .profile-balance { margin-top: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--dv-text-3); }
 .profile-balance strong { font-size: 18px; font-variant-numeric: tabular-nums; font-weight: 500; color: #efce88; }
@@ -25,7 +26,7 @@
 .profile-password-pair { display: flex; gap: 10px; margin-top: 10px; }
 .profile-footer { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 15px 24px; border-top: 1px solid var(--dv-border-1); }
 .profile-footer > span { font-size: 10px; color: var(--dv-text-3); }
-.profile-save { padding: 8px 26px; border: 1px solid #82b4ff45; border-radius: 8px; background: #82b4ff16; color: #bed5f7; font-size: 12px; cursor: pointer; }
+.profile-save { min-height: 40px; padding: 8px 26px; border: 1px solid var(--dv-cyan-border); border-radius: 8px; background: var(--dv-cyan-soft); color: var(--dv-cyan-text); font-size: 13px; cursor: pointer; }
 .profile-save:hover { background: #82b4ff24; }
 .profile-save:disabled { opacity: .5; cursor: default; }
 @media (max-width: 650px) {
@@ -35,4 +36,6 @@
   .profile-details, .profile-settings { padding: 18px 20px; }
   .profile-header { padding: 18px 20px; }
   .profile-password-pair { flex-direction: column; }
+  .profile-dialog input:not([type=file]), .profile-save, .profile-close { min-height: 44px; }
+  .profile-close { min-width: 44px; }
 }

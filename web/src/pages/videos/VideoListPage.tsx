@@ -5,6 +5,7 @@ import {
   Typography,
   App,
   Spin,
+  Button,
 } from 'antd';
 import {
   ArrowRightOutlined,
@@ -24,6 +25,8 @@ import type { ProjectListItem } from '@/types/project';
 import type { VideoListItem } from '@/types/video';
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { Z } from '@/utils/zLayers';
+import { EmptyState } from '@/components/common/EmptyState';
+import './home.css';
 
 const { Title, Text } = Typography;
 
@@ -53,6 +56,7 @@ const VideoCard = memo(function VideoCard({
   // - 用 portal 挂到 body，否则会被外层滚动容器（overflow: auto）裁掉
   // - 位置直接写 DOM 的 transform，不走 state：鼠标一移动就 setState 会让整卡高频重渲染
   const [tipOn, setTipOn] = useState(false);
+  const [failedThumbnail, setFailedThumbnail] = useState('');
   const tipRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<number | null>(null);
   const posRef = useRef({ x: 0, y: 0 });
@@ -97,16 +101,16 @@ const VideoCard = memo(function VideoCard({
   // 只在可见时渲染完整内容，否则只渲染占位符（占位符与卡片同为 16:9，避免布局偏移）
   if (!isVisible) {
     return (
-      <div className="tech-skeleton h-full w-full rounded-xl bg-gray-100" />
+      <div className="video-card-placeholder" aria-hidden="true" />
     );
   }
 
-  // 缩略图即主体；外圈只补极细描边和悬浮光，避免抢内容
+  // 封面与文字分区：在窄屏上仍可读到标题，不遮挡作品画面。
   return (
     <button
       type="button"
       aria-label={`播放视频：${item.title}`}
-      className="video-card tech-video-card group relative h-full w-full overflow-hidden rounded-xl border border-white/[0.06] bg-gray-100 text-left cursor-pointer focus-visible:outline-none"
+      className="video-card"
       style={{
         contain: 'layout style',
       }}
@@ -115,44 +119,41 @@ const VideoCard = memo(function VideoCard({
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
     >
-      <img
-        src={item.thumbnailUrl || `https://picsum.photos/400/225?random=${item.id}`}
-        alt={item.title}
-        className="video-card-media h-full w-full object-cover"
+      <div className="video-card-preview">
+      {item.thumbnailUrl && item.thumbnailUrl !== failedThumbnail ? <img
+        src={item.thumbnailUrl}
+        alt=""
+        className="video-card-media"
         loading="lazy"
         decoding="async" // 异步解码，避免阻塞主线程
-      />
+        onError={() => setFailedThumbnail(item.thumbnailUrl)}
+      /> : <div className="video-card-fallback"><VideoCameraOutlined /><span>封面暂不可用</span></div>}
       {/* 分类与标签：左上角 */}
       {(item.category || (item.tags?.length || 0) > 0) && (
-        <div className="absolute top-2 left-2 z-20 flex flex-wrap gap-1">
+        <div className="video-card-tags">
           {item.category && (
-            <span className="rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[9px] text-white/90 backdrop-blur-sm">{item.category}</span>
+            <span>{item.category}</span>
           )}
           {(item.tags || []).slice(0, 2).map(tag => (
-            <span key={tag} className="rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[9px] text-white/75">{tag}</span>
+            <span key={tag} className="video-card-tag-secondary">{tag}</span>
           ))}
         </div>
       )}
-      {/* 点赞数：原来占底部一整栏，现挪到右上角，与左上角分类标签分居两侧 */}
-      <div className="absolute top-2 right-2 z-20 flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[10px] text-white/90">
-        <HeartOutlined className="text-[10px]" />
-        {item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}
-      </div>
       {/* 播放提示：hover 时收拢暗幕并点亮，键盘聚焦同样可见 */}
       <div className="video-card-overlay absolute inset-0 z-10 flex items-center justify-center bg-black/0 opacity-0">
-        <span className="video-card-play flex h-14 w-14 items-center justify-center rounded-full border border-cyan-200/35 bg-black/35 text-white shadow-[0_0_36px_rgba(34,211,238,0.28)]">
+        <span className="video-card-play flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white">
           <PlayCircleOutlined style={{ fontSize: '38px' }} />
         </span>
       </div>
-      {/* 标题/作者/时长压在缩略图上：不再单独占一栏高度，卡片仍是纯 16:9 缩略图。
-          底部加一层由下往上的渐变遮罩，否则浅色缩略图上白字读不出来。 */}
-      <div className="absolute bottom-0 left-0 right-0 z-20 rounded-b-lg bg-gradient-to-t from-black/75 via-black/45 to-transparent px-2 pb-2 pt-8">
-        <p className="truncate text-[12px] md:text-[13px] font-medium text-white">
+      {item.duration > 0 && <span className="video-card-duration">{formatDuration(item.duration)}</span>}
+      </div>
+      <div className="video-card-caption">
+        <p className="video-card-title" title={item.title}>
           {item.title}
         </p>
-        <div className="mt-1 flex items-center justify-between gap-2">
+        <div className="video-card-meta">
           {/* 作者信息：优先用作者真实头像，缺失时用作者首字占位 */}
-          <div className="flex min-w-0 items-center gap-1">
+          <div className="video-card-author" title={item.author}>
             {item.authorAvatar ? (
               <img src={item.authorAvatar} alt="" className="w-4 h-4 shrink-0 rounded-full border border-white/50 object-cover" loading="lazy" decoding="async" />
             ) : (
@@ -160,12 +161,7 @@ const VideoCard = memo(function VideoCard({
             )}
             <span className="truncate text-[11px] text-white/90">{item.author}</span>
           </div>
-          {/* 时长 */}
-          {item.duration > 0 && (
-            <div className="shrink-0 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-white">
-              {formatDuration(item.duration)}
-            </div>
-          )}
+          <span className="video-card-likes"><HeartOutlined />{item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}</span>
         </div>
       </div>
 
@@ -260,6 +256,7 @@ export default function VideoListPage() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [videosLoading, setVideosLoading] = useState(false);
+  const [videosError, setVideosError] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [projectTotal, setProjectTotal] = useState(0); // 项目总数（判断要不要显示「查看全部」）
@@ -283,6 +280,19 @@ export default function VideoListPage() {
   const [dragStartX, setDragStartX] = useState(0); // 拖拽起始X坐标
   const hasDraggedRef = useRef(false); // 是否发生了拖拽（用于区分点击和拖拽）
   const navigate = useNavigate();
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = () => setReducedMotion(media.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+  const openBanner = (link?: string) => {
+    if (!link) return;
+    const target = link.trim();
+    if (target.startsWith('/')) navigate(target);
+    else window.open(target, '_blank', 'noopener,noreferrer');
+  };
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -394,6 +404,7 @@ export default function VideoListPage() {
   const loadVideos = useCallback(async (keyword?: string) => {
     const seq = ++loadSeqRef.current;
     setVideosLoading(true);
+    setVideosError(false);
     setCurrentPage(1);
     setHasMore(true);
     try {
@@ -425,6 +436,7 @@ export default function VideoListPage() {
     } catch {
       if (seq !== loadSeqRef.current) return;
       setTvShowVideos([]);
+      setVideosError(true);
       setHasMore(false);
       setVideosLoading(false);
     }
@@ -546,7 +558,7 @@ export default function VideoListPage() {
   }, [banners.length]);
 
   useEffect(() => {
-    if (banners.length > 1) {
+    if (banners.length > 1 && !reducedMotion) {
       bannerTimerRef.current = setInterval(() => {
         setCurrentBannerIndex((prev) => (prev + 1) % bannersLengthRef.current);
       }, 5000);
@@ -554,9 +566,10 @@ export default function VideoListPage() {
     return () => {
       if (bannerTimerRef.current) {
         clearInterval(bannerTimerRef.current);
+        bannerTimerRef.current = null;
       }
     };
-  }, []); // 依赖数组为空，只在挂载/卸载时执行
+  }, [banners.length, reducedMotion]);
 
   // 鼠标悬停暂停/恢复轮播
   const handleBannerMouseEnter = useCallback(() => {
@@ -567,12 +580,13 @@ export default function VideoListPage() {
   }, []);
 
   const handleBannerMouseLeave = useCallback(() => {
-    if (banners.length > 1 && !bannerTimerRef.current) {
+    if (banners.length > 1 && !bannerTimerRef.current && !reducedMotion &&
+      !document.activeElement?.closest('.home-recommendations')) {
       bannerTimerRef.current = setInterval(() => {
         setCurrentBannerIndex((prev) => (prev + 1) % bannersLengthRef.current);
       }, 5000);
     }
-  }, [banners.length]);
+  }, [banners.length, reducedMotion]);
 
   // 删除项目
   const handleDeleteProject = useCallback(async (project: ProjectListItem) => {
@@ -628,9 +642,15 @@ export default function VideoListPage() {
           所以里面所有可点元素都必须自己声明 cursor-pointer —— 否则 hover 上去
           显示的是"抓手"，看不出能点（左右箭头、指示点都踩过这个）。 */}
       <div
-        className="tech-hero relative mb-6 h-64 w-full select-none overflow-hidden bg-gradient-to-b from-gray-900 to-gray-800 md:mb-8 md:h-[26rem]"
+        className="home-recommendations tech-hero relative mb-6 h-64 w-full select-none overflow-hidden md:mb-8 md:h-[22rem]"
+        role="region"
+        aria-label="精选推荐"
         onMouseEnter={handleBannerMouseEnter}
         onMouseLeave={handleBannerMouseLeave}
+        onFocusCapture={handleBannerMouseEnter}
+        onBlurCapture={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) handleBannerMouseLeave();
+        }}
         onMouseDown={handleDragStart}
         onMouseMove={handleDragMove}
         onMouseUp={handleDragEnd}
@@ -639,14 +659,6 @@ export default function VideoListPage() {
           contain: 'layout style paint', // CSS containment优化
         }}
       >
-        <div className="pointer-events-none absolute inset-x-0 top-5 z-10 hidden justify-center md:flex">
-          <div className="tech-hero-kicker">
-            <span className="tech-live-dot" aria-hidden="true" />
-            Creative Intelligence Canvas
-            <span className="text-white/25">/</span>
-            <span className="font-mono text-[10px] text-cyan-200/75">MANWA // ONLINE</span>
-          </div>
-        </div>
         {banners.length > 0 ? (
           <div
             className="relative w-full h-full flex items-center justify-center"
@@ -700,27 +712,24 @@ export default function VideoListPage() {
                     willChange: 'transform, opacity', // 提示Chrome优化合成层
                     backfaceVisibility: 'hidden', // 避免渲染背面
                     transformStyle: 'preserve-3d', // 优化3D变换
-                    transition: 'transform 700ms ease-out, opacity 700ms ease-out', // 只过渡必要的属性
+                    transition: reducedMotion ? 'none' : 'transform 350ms ease-out, opacity 350ms ease-out',
                   }}
                 >
                   <div 
-                    className="w-full h-full rounded-xl overflow-hidden shadow-xl cursor-pointer relative bg-gradient-to-r from-blue-600 to-purple-700"
+                    className="home-banner-card w-full h-full rounded-xl overflow-hidden relative"
+                    role={banner.link_url ? 'link' : undefined}
+                    tabIndex={banner.link_url && offset === 0 ? 0 : -1}
+                    aria-label={banner.title}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' && banner.link_url) { event.preventDefault(); openBanner(banner.link_url); }
+                    }}
                     onClick={() => {
                       // 如果发生了拖拽，不触发点击
                       if (hasDraggedRef.current) {
                         hasDraggedRef.current = false;
                         return;
                       }
-                      if (banner.link_url) {
-                        const bannerLink = banner.link_url.trim();
-                        // 站内链接（以 / 开头，例如论坛活动落地页 /forum 或某篇帖子
-                        // /forum/<id>）走前端路由跳转，不要新开标签页；外链仍新开窗口
-                        if (bannerLink.startsWith('/')) {
-                          navigate(bannerLink);
-                        } else {
-                          window.open(bannerLink, '_blank', 'noopener,noreferrer');
-                        }
-                      }
+                      openBanner(banner.link_url);
                     }}
                   >
                     {banner.image_url ? (
@@ -754,9 +763,6 @@ export default function VideoListPage() {
                     {banner.image_url && !loadingBannersRef.current.has(banner.id) && (
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/5 to-transparent">
                         <div className="absolute bottom-4 left-4 right-4">
-                          <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-cyan-200/20 bg-cyan-300/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-cyan-100/80">
-                            Featured signal
-                          </span>
                           <Title level={5} className="!text-white !mb-1 !text-sm [text-shadow:0_2px_16px_rgba(0,0,0,0.8)]">{banner.title}</Title>
                           {banner.description && (
                             <span className="line-clamp-2 text-gray-300 text-[11px] leading-5">{banner.description}</span>
@@ -824,24 +830,21 @@ export default function VideoListPage() {
           </div>
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <Text className="text-white/60">暂无Banner</Text>
+            <Text className="text-white/60">暂无精选推荐</Text>
           </div>
         )}
       </div>
 
       {/* 最近项目（最多展示两行，超出走「我的项目」页）
           移动端（<768px）不提供这一板块：hidden 即不渲染占位，想看完整列表走「我的项目」页 */}
-      <section className="hidden md:block max-w-7xl mx-auto px-6 mb-12">
+      <section className="home-recent-projects hidden md:block max-w-7xl mx-auto px-6 mb-10" aria-labelledby="recent-projects-title">
         <div className="mb-4 flex items-end justify-between">
           <div>
-            <div className="mb-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.2em] text-cyan-200/60">
-              <span className="h-px w-5 bg-cyan-200/40" />
-              Working set
-            </div>
-            <Text className="!text-[15px] !font-medium !text-[var(--dv-text-1)]">最近项目</Text>
+            <h2 id="recent-projects-title" className="library-section-title">最近项目</h2>
+            <p className="library-section-description">继续你的创作，或从一张新画布开始。</p>
           </div>
-          {isAuthenticated && projectTotal > 4 && (
-            <a
+          {isAuthenticated && (
+            <button type="button"
               className="group inline-flex items-center gap-1 text-[13px] text-gray-800 hover:opacity-75 cursor-pointer transition-opacity"
               onClick={() => navigate('/projects')}
             >
@@ -850,7 +853,7 @@ export default function VideoListPage() {
               {/* 箭头用图标而不是「→」：字符在不同字体下形状/粗细/基线都不受控，看着毛糙；
                   图标能和文字对齐，hover 时轻微右移，做出"点得进去"的暗示 */}
               <ArrowRightOutlined className="text-[11px] transition-transform duration-200 group-hover:translate-x-0.5" />
-            </a>
+            </button>
           )}
         </div>
         {/* 只显示两行（超过 19 个的走「我的项目」页），由 .recent-projects-grid 的
@@ -883,11 +886,9 @@ export default function VideoListPage() {
         </div>
       </div>
 
-      <section ref={tvSectionRef} className="max-w-7xl mx-auto px-3 md:px-6 scroll-mt-4">
+      <section ref={tvSectionRef} className="home-gallery max-w-7xl mx-auto px-3 md:px-6 scroll-mt-4" aria-labelledby="gallery-title">
         <div className="mb-3 flex items-center gap-3">
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-200/55">Explore</span>
-          <Text className="!mb-0 !block !text-[15px] !font-medium !text-[var(--dv-text-1)] md:!text-lg">TV Show</Text>
-          <span className="h-px flex-1 bg-gradient-to-r from-cyan-300/20 to-transparent" />
+          <h1 id="gallery-title" className="library-section-title">作品广场</h1>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4">
           <div className="flex items-center gap-2 flex-wrap flex-1">
@@ -896,9 +897,9 @@ export default function VideoListPage() {
                 type="button"
                 key={cat.key}
                 aria-pressed={activeCategory === cat.key}
-                className={`tech-filter cursor-pointer rounded-full border px-3 py-1.5 text-xs transition-all ${
+                className={`home-category tech-filter cursor-pointer rounded-full border px-3 py-1.5 text-xs transition-all ${
                   activeCategory === cat.key
-                    ? 'border-cyan-300/45 bg-cyan-400/15 font-medium text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,0.12)]'
+                    ? 'border-cyan-300/45 bg-cyan-400/15 font-medium text-cyan-100'
                     : 'border-white/[0.07] bg-white/[0.025] text-[var(--dv-text-3)] hover:border-white/15 hover:bg-white/[0.05] hover:text-[var(--dv-text-1)]'
                 }`}
                 onClick={() => handleCategoryChange(cat.key)}
@@ -930,8 +931,13 @@ export default function VideoListPage() {
         </div>
 
         {/* TV Show 网格 - 切换时遮罩 loading，数据返回后整体替换；固定最小高度放在总容器上，切换时内容区不塌陷 */}
-        <Spin spinning={videosLoading} tip={searchKeyword ? '正在搜索作品…' : '正在载入作品…'}>
+        <Spin spinning={videosLoading && tvShowVideos.length > 0} tip={searchKeyword ? '正在搜索作品…' : '正在载入作品…'}>
           <div style={{ minHeight: '440px' }}>
+            {videosLoading && tvShowVideos.length === 0 && (
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3" role="status" aria-label="正在加载作品">
+                {Array.from({ length: 8 }, (_, index) => <div key={index} className="video-card-placeholder" />)}
+              </div>
+            )}
             {/* 缩略图间距收紧到 8px（原 16px）：无边框后 16px 会显得空 */}
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3">
             {videoListData.map((item, index) => (
@@ -939,7 +945,7 @@ export default function VideoListPage() {
                 key={item.id}
                 ref={(el) => setItemRef(index, el)}
                 data-index={index}
-                className="aspect-video" // 16:9：与占位符同比例，去掉底栏后不再需要固定像素高
+                className="min-w-0"
               >
                 <VideoCard
                   item={item}
@@ -970,15 +976,12 @@ export default function VideoListPage() {
 
             {/* 空状态：在固定高度容器内居中，文案样式与“已加载全部”一致 */}
             {!videosLoading && tvShowVideos.length === 0 && (
-              <div className="h-[440px] flex items-center justify-center">
-                <div className="flex flex-col items-center gap-3 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1f2024] text-gray-400 ring-1 ring-white/5">
-                    <VideoCameraOutlined className="text-[22px]" />
-                  </div>
-                  <div className="text-[14px] text-gray-300">还没有视频内容</div>
-                  <div className="text-[12px] text-gray-500">换个分类看看，或去画布创作你的第一条作品</div>
-                </div>
-              </div>
+              <EmptyState className="min-h-[300px]" icon={<VideoCameraOutlined />}
+                title={videosError ? '作品暂时无法加载' : searchKeyword ? '没有找到匹配的作品' : '这个分类还没有作品'}
+                hint={videosError ? '网络可能暂时中断，可以重新加载。' : searchKeyword ? '试试其他关键词，或清空搜索查看作品。' : '换个分类看看，或到画布创作你的作品。'}
+                action={videosError
+                  ? <Button onClick={() => void loadVideos(searchKeyword)}>重新加载</Button>
+                  : searchKeyword ? <Button onClick={() => { setSearchKeyword(''); void loadVideos(); }}>清空搜索</Button> : undefined} />
             )}
           </div>
         </Spin>

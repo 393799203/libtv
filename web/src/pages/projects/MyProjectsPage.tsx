@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import type { ProjectListItem } from '@/types/project';
 import { ProjectCard } from '@/components/project/ProjectCard';
 import { usePageMeta } from '@/hooks/usePageMeta';
+import { EmptyState } from '@/components/common/EmptyState';
 
 const { Title, Text } = Typography;
 
@@ -26,19 +27,21 @@ export default function MyProjectsPage() {
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const loadProjects = useCallback(async (p: number) => {
     if (!isAuthenticated) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const data = await projectApi.getProjects(p, PAGE_SIZE);
       setProjects(data.list || []);
       setTotal(data.total || 0);
       setPage(data.page || p);
     } catch {
-      // HTTP 错误已由 api.ts 拦截器统一 message.error()
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -91,10 +94,6 @@ export default function MyProjectsPage() {
         {/* 标题栏 */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <div className="mb-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.2em] text-cyan-200/60">
-              <span className="h-px w-5 bg-cyan-200/40" />
-              Workspace archive
-            </div>
             <div className="flex items-baseline gap-2">
               <Title level={4} className="!mb-0">我的项目</Title>
               <Text type="secondary" className="text-[13px]">共 {total} 个</Text>
@@ -112,18 +111,23 @@ export default function MyProjectsPage() {
           </Button>
         </div>
 
-        <Spin spinning={loading}>
+        {loadError && <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4" role="alert">
+          <span className="text-sm text-[var(--dv-text-2)]">项目列表暂时无法加载，已保留当前内容。</span>
+          <Button onClick={() => void loadProjects(page)}>重新加载</Button>
+        </div>}
+        <Spin spinning={loading && projects.length > 0}>
           <div style={{ minHeight: '240px' }}>
-            {!loading && projects.length === 0 ? (
-              <div className="h-[240px] flex flex-col items-center justify-center text-gray-400">
-                <FolderOpenOutlined style={{ fontSize: 36 }} className="mb-3 opacity-40" />
-                <div className="text-[14px]">暂无项目，点击右上角「新建项目」开始创作</div>
+            {loading && !projects.length ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-4" role="status" aria-label="正在加载项目">
+                {Array.from({ length: 5 }, (_, i) => <div key={i} className="project-card-skeleton" />)}
               </div>
+            ) : !loadError && projects.length === 0 ? (
+              <EmptyState icon={<FolderOpenOutlined />} title="从第一个项目开始"
+                hint="在画布中组织故事、分镜和素材，保存后可随时回来继续创作。"
+                action={<Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={() => void handleCreateProject()}>新建项目</Button>} />
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-4">
-                {/* 这里不再放「开始创作」卡片：右上角已有「新建项目」主按钮，
-                    本页空状态文案也是"点击右上角「新建项目」开始创作" —— 两个入口重复了。
-                    （该卡片只有首页需要：首页头部没有新建按钮） */}
+                {/* 有项目时保持内容网格；空状态提供就地的新建操作。 */}
                 {projects.map((project) => (
                   <ProjectCard
                     key={project.id}

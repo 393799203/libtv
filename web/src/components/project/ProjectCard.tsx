@@ -1,9 +1,7 @@
-import { memo } from 'react';
-import { Card, Spin, Typography } from 'antd';
+import { memo, useState } from 'react';
 import { PlusOutlined, DeleteOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { ProjectListItem } from '@/types/project';
-
-const { Text } = Typography;
+import './projectCard.css';
 
 /**
  * 无封面时的兜底图：项目名首字 + 由 id 哈希出的两个色相，本地渲染、零网络请求。
@@ -38,65 +36,46 @@ export const ProjectCard = memo(function ProjectCard({
   onDelete: (project: ProjectListItem) => void;
 }) {
   const fallback = fallbackCover(project);
+  const [failedCover, setFailedCover] = useState('');
+  const hasCover = project.coverUrl && project.coverUrl !== failedCover;
+  const date = new Date(project.updatedAt);
+  const updated = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
   return (
-    <button
-      type="button"
-      aria-label={`打开项目：${project.name}`}
-      className="project-card tech-card group relative h-32 w-full overflow-hidden rounded-xl border border-white/[0.06] bg-gray-100 text-left cursor-pointer focus-visible:outline-none"
-      onClick={() => onNavigate(project.id)}
-      style={{
-        willChange: 'transform', // 提示Chrome优化
-        contain: 'layout style paint', // CSS containment优化
-      }}
-    >
-      {project.coverUrl ? (
-        <img src={project.coverUrl} alt="" className="project-card-media w-full h-full object-cover" loading="lazy" />
+    <article className="project-card" aria-label={`项目：${project.name}`}>
+      <button type="button" className="project-card-open" aria-label={`打开项目：${project.name}`}
+        onClick={() => onNavigate(project.id)}>
+      <div className="project-card-cover">
+      {hasCover ? (
+        <img src={project.coverUrl} alt="" className="project-card-media" loading="lazy" decoding="async"
+          onError={() => setFailedCover(project.coverUrl)} />
       ) : (
         <div
-          className="project-card-media w-full h-full flex items-center justify-center"
+          className="project-card-media project-card-fallback"
           style={{ background: fallback.background }}
           aria-hidden="true"
         >
-          <span className="select-none text-5xl font-semibold text-white/20">{fallback.initial}</span>
+          <span>{fallback.initial}</span>
         </div>
       )}
-      {/* 已发布三角角标（右上角缎带，不响应点击，避免挡住卡片跳转） */}
       {project.showStatus === 'published' && (
-        <div className="absolute top-0 right-0 w-16 h-16 overflow-hidden pointer-events-none z-10">
-          <div className="absolute top-[13px] right-[-29px] w-[88px] text-center rotate-45 bg-gradient-to-r from-emerald-500 to-green-500 text-white text-[10px] font-medium leading-4 shadow-sm">
-            已发布
-          </div>
-        </div>
+        <span className="project-card-published">已发布</span>
       )}
-      {/* 删除按钮：桌面 hover 显示；移动端恒显示并放大到 36px
-          —— 触摸屏没有 hover，原来 opacity-0 group-hover:opacity-100 等于手机上根本点不到 */}
-      <span
-        role="button"
-        tabIndex={0}
+      </div>
+      <div className="project-card-caption">
+        <p title={project.name}>{project.name}</p>
+        <span>{updated ? `${updated}更新` : '创作画布'}</span>
+      </div>
+      </button>
+      <button
+        type="button"
         aria-label={`删除项目：${project.name}`}
-        className="absolute top-1.5 right-1.5 z-20 w-7 h-7 max-md:w-9 max-md:h-9 flex items-center justify-center rounded-lg border border-white/10 bg-black/55 text-white hover:bg-red-500 active:scale-90 cursor-pointer opacity-0 max-md:opacity-100 group-hover:opacity-100 transition-all"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(project);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            e.stopPropagation();
-            onDelete(project);
-          }
-        }}
+        className="project-card-delete"
+        onClick={() => onDelete(project)}
         title="删除项目"
       >
-        <DeleteOutlined className="text-[12px] max-md:text-[16px]" />
-      </span>
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/45 to-transparent px-3 pb-2.5 pt-10">
-        <p className="!mb-0 !text-white !text-[13px] md:!text-xs truncate">{project.name}</p>
-        <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-white/45">
-          {project.showStatus === 'published' ? 'Published' : 'Canvas ready'}
-        </p>
-      </div>
-    </button>
+        <DeleteOutlined />
+      </button>
+    </article>
   );
 });
 
@@ -111,29 +90,15 @@ export const CreateProjectCard = memo(function CreateProjectCard({
   return (
     <button
       type="button"
-      className="create-project-card tech-create-card group relative h-32 w-full overflow-hidden rounded-xl text-left cursor-pointer disabled:cursor-wait"
+      className="create-project-card"
       onClick={onClick}
       disabled={loading}
       aria-busy={loading}
       aria-label={loading ? '正在创建项目' : '创建一个新项目'}
     >
-      <Card
-        hoverable
-        className="!h-full !rounded-xl border-dashed border-cyan-400/20 overflow-hidden"
-        styles={{ body: { padding: 0, height: '100%' } }}
-      >
-        <div className="relative h-full bg-gray-50 flex flex-col items-center justify-center">
-          <div className="relative mb-2 flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-200 shadow-[0_0_30px_rgba(34,211,238,0.12)]">
-            {loading ? <Spin indicator={<LoadingOutlined spin />} size="small" /> : <PlusOutlined />}
-          </div>
-          <Text type="secondary" className="relative text-xs">
-            {loading ? '正在创建创作空间…' : '开始创作'}
-          </Text>
-          <span className="relative mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-200/55">
-            Init canvas
-          </span>
-        </div>
-      </Card>
+      <span className="create-project-icon" aria-hidden="true">{loading ? <LoadingOutlined spin /> : <PlusOutlined />}</span>
+      <strong>{loading ? '正在创建…' : '开始创作'}</strong>
+      <span>新建一张创作画布</span>
     </button>
   );
 });

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 /* 平台暗色主题（高饱和冷色：黑/青/蓝/紫）：语义变量 + 浅色工具类的暗色映射 */
 @import "./styles/dark-theme.css";
+@import "./styles/interface.css";
 
 /* 防止 Tooltip 弹出时触发滚动条闪动 */
 @layer base {

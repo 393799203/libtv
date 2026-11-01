@@ -1,0 +1,10 @@
+/* Shared interaction cues use the existing dark-theme palette. */
+.theme-dark ::selection { color: var(--dv-text-1); background: #185365; }
+.theme-dark :is(input,textarea,[contenteditable="true"]) { caret-color: var(--dv-cyan); }
+.theme-dark :is(button,a,[tabindex="0"]):focus-visible { outline: 2px solid var(--dv-cyan); outline-offset: 3px; }
+.theme-dark :is(input,textarea):focus-visible { outline: 2px solid var(--dv-cyan); outline-offset: 1px; }
+.theme-dark a { text-underline-offset: .2em; }
+@media (prefers-reduced-motion: reduce) {
+  .theme-dark :is(.tech-skeleton,.ant-skeleton-button,.ant-skeleton-avatar) { animation: none; }
+  .theme-dark :is(.tech-card,.tech-video-card,.project-card-media,.video-card-media,.video-card-overlay,.video-card-play) { transition: none; }
+}

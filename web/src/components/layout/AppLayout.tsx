@@ -22,6 +22,7 @@ import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { PointsMallModal } from '@/components/auth/PointsMallModal';
 import { getUserAvatarSrc } from '@/utils/avatar';
 import { useCreditsSync } from '@/hooks/useCreditsSync';
+import './appLayout.css';
 
 const { Header: AntHeader, Content } = Layout;
 
@@ -100,14 +101,13 @@ export function AppLayout() {
     <Layout className="h-screen">
       {/* 底色不再写死 !bg-white（Tailwind 的 ! 强制类会绕过主题映射，导致"白底白字"），
             改由 ConfigProvider 的暗色 headerBg 提供；再压深一档，让导航文字对比更强 */}
-        <AntHeader className="tech-header !py-0 !pl-4 !pr-2 md:!px-4 !h-14 md:!h-12 flex items-center justify-between border-b border-[#232427] !leading-none">
-        <span className="tech-header-scan" aria-hidden="true" />
-        <div className="flex items-center gap-1.5 md:gap-3">
+        <AntHeader className="site-header tech-header">
+        <div className="site-header-main">
           <button
             type="button"
             onClick={() => navigate('/')}
             aria-label="返回首页"
-            className="group flex cursor-pointer items-center gap-2 rounded-lg transition-all hover:brightness-110 active:scale-[0.98] md:gap-3"
+            className="site-brand flex cursor-pointer items-center"
           >
             {/* 品牌标：矢量描摹标（见 BrandMarkTraced.tsx，从用户提供的那张图描摹而来），替掉原来那颗通用相机图标 ——
                 antd 的 VideoCameraFilled 是"通用图标库里的相机"，谁都能用，配一行普通字重的文字
@@ -117,24 +117,22 @@ export function AppLayout() {
                 另外三个候选方向见 web/public/logo-lab.html。
                 H5 上标缩到 24px、字缩到 15px，跟头部的紧凑尺寸对齐。 */}
             <BrandLogo size={28} wordClass="h-[17px] md:h-[18px]" markClass="max-sm:h-5 max-sm:w-auto" />
-            <span className="tech-brand-pulse hidden h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_10px_#22d3ee] md:block" aria-hidden="true" />
           </button>
-          {/* 移动端隐藏：390px 宽的头部放不下，且社区/积分超市入口更需要位置 */}
-          <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
-          <span className="hidden md:inline text-sm text-gray-400">AI 视频创作工作台</span>
           {/* 论坛入口：放在登录态判断之外——论坛是公开可读的，
               未登录访客（含从 banner 活动落地进来的）也要能看到这个入口
               移动端保留入口但不显示图标（只留文字） */}
-          <span className="hidden sm:inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
+          <nav className="site-navigation" aria-label="主导航">
+          <button type="button" className="site-nav-link" aria-current={location.pathname === '/' ? 'page' : undefined}
+            onClick={() => navigate('/')}>作品广场</button>
+          {isAuthenticated && <button type="button" className="site-nav-link"
+            aria-current={location.pathname === '/projects' ? 'page' : undefined}
+            onClick={() => navigate('/projects')}>我的项目</button>}
           <button
             type="button"
             onClick={() => navigate('/forum')}
+            aria-label="漫蛙社区"
             aria-current={location.pathname.startsWith('/forum') ? 'page' : undefined}
-            className={`tech-nav-item flex h-10 w-auto cursor-pointer flex-row items-center justify-center gap-0.5 rounded-lg px-2.5 py-0 text-[12px] leading-none transition-all md:h-auto md:gap-1.5 md:px-3 md:py-1.5 md:text-[13px] ${
-              location.pathname.startsWith('/forum')
-                ? 'bg-cyan-400/10 text-cyan-200'
-                : 'text-gray-400 hover:bg-cyan-400/[0.07] hover:text-cyan-100'
-            }`}
+            className="site-nav-link"
           >
             {/* 移动端不显示图标。这里必须用外层 span 控制显隐：
                 antd 图标自带 .anticon{display:inline-flex}，与 Tailwind 的 display 工具类同特异度，
@@ -144,24 +142,25 @@ export function AppLayout() {
             </span>
             漫蛙社区
           </button>
+          </nav>
         </div>
 
         {/* 使用指南入口：放在导航正中间（左组与右组之间） */}
         <button
           type="button"
           onClick={() => navigate(`/forum/${GUIDE_POST_ID}`)}
-          className={`tech-nav-item hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-all md:flex ${
+          className={`site-guide tech-nav-item hidden cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-all xl:flex ${
             location.pathname === `/forum/${GUIDE_POST_ID}`
               ? 'bg-cyan-400/10 text-cyan-200'
               : 'text-gray-400 hover:bg-cyan-400/[0.07] hover:text-cyan-100'
           }`}
         >
           <ReadOutlined />
-          漫蛙AI使用指南
+          使用指南
         </button>
 
         {isAuthenticated ? (
-          <div className="flex items-center gap-2">
+          <div className="site-header-tools flex items-center gap-2">
             {/* 系统管理入口（仅管理员）。移动端隐藏：390px 头部装不下，且运营管理本身是为 PC 设计的 */}
             {user?.role === 'admin' && (
               <button
@@ -190,7 +189,7 @@ export function AppLayout() {
 
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               {/* 移动端只剩头像，把点击区补到 44px；左右内边距收紧，避免头像右边留白比左边宽 */}
-              <Button type="text" size="small" className="!min-h-[44px] md:!min-h-0 !px-1 md:!px-2">
+              <Button type="text" size="small" aria-label="打开个人菜单" className="!min-h-[40px] !px-1 md:!px-2">
                 {/* 用普通 flex 取代 AntD Space：Space 会给每个子元素套 .ant-space-item，
                     被 hidden 的昵称/积分仍在那里占位，头像右边就多出 ~17px 留白 */}
                 <span className="flex items-center gap-2">

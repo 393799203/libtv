@@ -76,28 +76,28 @@ export function CanvasToolbar() {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
       <Tooltip title="撤销">
-        <Button type="text" size="small" icon={<UndoOutlined />} disabled={!canUndo} onClick={undo} />
+        <Button type="text" size="small" aria-label="撤销" icon={<UndoOutlined />} disabled={!canUndo} onClick={undo} />
       </Tooltip>
       <Tooltip title="重做">
-        <Button type="text" size="small" icon={<RedoOutlined />} disabled={!canRedo} onClick={redo} />
+        <Button type="text" size="small" aria-label="重做" icon={<RedoOutlined />} disabled={!canRedo} onClick={redo} />
       </Tooltip>
 
       <div className="w-px h-4 bg-gray-200 mx-1.5" />
 
       <Tooltip title="放大">
-        <Button type="text" size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn} />
+        <Button type="text" size="small" aria-label="放大画布" icon={<ZoomInOutlined />} onClick={handleZoomIn} />
       </Tooltip>
       <div className="w-12 text-center text-xs text-gray-600 select-none tabular-nums">
         {Math.round(zoom * 100)}%
       </div>
       <Tooltip title="缩小">
-        <Button type="text" size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut} />
+        <Button type="text" size="small" aria-label="缩小画布" icon={<ZoomOutOutlined />} onClick={handleZoomOut} />
       </Tooltip>
       <Tooltip title="适应画布">
-        <Button type="text" size="small" icon={<AimOutlined />} onClick={handleFitView} />
+        <Button type="text" size="small" aria-label="适应画布" icon={<AimOutlined />} onClick={handleFitView} />
       </Tooltip>
       <Tooltip title="100%">
-        <Button type="text" size="small" icon={<FullscreenOutlined />} onClick={handleZoomReset} />
+        <Button type="text" size="small" aria-label="画布缩放复位到100%" icon={<FullscreenOutlined />} onClick={handleZoomReset} />
       </Tooltip>
     </div>
   );

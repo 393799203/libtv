@@ -865,8 +865,6 @@ html.theme-dark-root #root {
   transition: transform 0.5s var(--dv-tech-ease), filter 0.35s ease;
 }
 
-.theme-dark .project-card:hover .project-card-media,
-.theme-dark .project-card:focus-visible .project-card-media,
 .theme-dark .video-card:hover .video-card-media,
 .theme-dark .video-card:focus-visible .video-card-media {
   filter: saturate(1.08) brightness(1.04);

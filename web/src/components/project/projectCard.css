@@ -1,0 +1,41 @@
+.project-card {
+  position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--dv-border-1);
+  border-radius: 12px; background: var(--dv-surface-1); transition: border-color .18s;
+}
+.project-card:hover, .project-card:focus-within { border-color: var(--dv-border-2); }
+.project-card-open { display: block; width: 100%; height: 100%; text-align: left; cursor: pointer; border-radius: inherit; }
+.theme-dark .project-card-open:focus-visible { outline: 2px solid var(--dv-cyan); outline-offset: -3px; }
+.project-card-cover { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--dv-surface-2); }
+.project-card .project-card-media { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .2s; }
+.project-card-open:hover .project-card-media { transform: scale(1.025); filter: none; }
+.project-card .project-card-fallback { display: grid; place-items: center; }
+.project-card-fallback > span { color: rgba(255,255,255,.55); font-size: 38px; font-weight: 500; }
+.project-card-caption { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; }
+.project-card-caption p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: var(--dv-text-1); font-size: 13px; line-height: 20px; font-weight: 500; }
+.project-card-caption > span { flex-shrink: 0; color: var(--dv-text-3); font-size: 10px; line-height: 20px; white-space: nowrap; }
+.project-card-delete { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 7px; background: rgba(10,12,14,.8); color: #f3f4f5; cursor: pointer; opacity: 0; transition: opacity .15s, background .15s; }
+.project-card:hover .project-card-delete, .project-card:focus-within .project-card-delete { opacity: 1; }
+.project-card-delete:hover { background: #9f263c; }
+.project-card-delete:focus-visible { opacity: 1; outline: 2px solid var(--dv-cyan); outline-offset: 2px; }
+.project-card-published { position: absolute; top: 9px; left: 9px; padding: 3px 7px; border-radius: 5px; background: #164932; color: #d6f4df; font-size: 10px; }
+.create-project-card { min-width: 0; min-height: 144px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 22px; border: 1px dashed var(--dv-border-2); border-radius: 12px; background: var(--dv-surface-1); cursor: pointer; transition: border-color .15s, background .15s; }
+.create-project-card:hover { border-color: var(--dv-cyan-border-hover); background: var(--dv-surface-2); }
+.create-project-card:focus-visible { outline: 2px solid var(--dv-cyan); outline-offset: 3px; }
+.create-project-card:disabled { opacity: .6; cursor: wait; }
+.create-project-card strong { color: var(--dv-text-1); font-size: 14px; font-weight: 500; }
+.create-project-card > span:last-child { color: var(--dv-text-3); font-size: 12px; }
+.create-project-icon { color: var(--dv-cyan-text); font-size: 24px; margin-bottom: 5px; }
+.project-card-skeleton { aspect-ratio: 16 / 9; margin-bottom: 38px; border-radius: 12px; background: var(--dv-surface-2); animation: project-pulse 1.4s ease-in-out infinite alternate; }
+@keyframes project-pulse { to { opacity: .5; } }
+@media (hover: none) {
+  .project-card-delete { opacity: 1; width: 40px; height: 40px; }
+}
+@media (max-width: 640px) {
+  .project-card-delete { width: 40px; height: 40px; opacity: 1; }
+  .project-card-caption { gap: 6px; padding: 0 8px; }
+  .create-project-card { min-height: 136px; padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-card *, .project-card, .create-project-card { transition: none; }
+  .project-card-skeleton { animation: none; }
+}
