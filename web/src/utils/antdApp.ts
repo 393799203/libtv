@@ -1,6 +1,8 @@
 import { message as staticMessage, Modal as StaticModal } from 'antd';
 import type { MessageInstance } from 'antd/es/message/interface';
+import type { ConfigOptions } from 'antd/es/message/interface';
 import type { HookAPI as ModalHookAPI } from 'antd/es/modal/useModal';
+import { Z } from './zLayers';
 
 /**
  * 非组件代码（services / hooks）里用的 message / modal。
@@ -24,6 +26,11 @@ import type { HookAPI as ModalHookAPI } from 'antd/es/modal/useModal';
  * 两处都要用同一个值：<App message={{ top }}> 管组件内的 useApp()，这里管静态实例兜底。
  */
 export const MESSAGE_TOP = 72;
+// 主题实例与静态兜底都使用容器层级；仅抬高 notice 子项无法越过登录框的层叠上下文。
+export const MESSAGE_CONFIG: ConfigOptions = {
+  top: MESSAGE_TOP,
+  styles: { list: { zIndex: Z.feedback } },
+};
 
 let themed: { message: MessageInstance; modal: ModalHookAPI } | null = null;
 
@@ -37,7 +44,7 @@ let themed: { message: MessageInstance; modal: ModalHookAPI } | null = null;
  */
 export function bindAntdApp(instances: { message: MessageInstance; modal: ModalHookAPI }) {
   themed = instances;
-  staticMessage.config({ top: MESSAGE_TOP });
+  staticMessage.config(MESSAGE_CONFIG);
 }
 
 /**

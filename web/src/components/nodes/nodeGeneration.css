@@ -1,0 +1,37 @@
+.node-generation-overlay {
+  background: rgba(15, 20, 27, 0.94);
+  color: #f6f6f7;
+}
+
+.node-generation-status,
+.node-generation-progress {
+  max-width: 100%;
+  color: var(--dv-text-1, #111827);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-generation-progress {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #183445;
+  color: #f0f9ff;
+}
+
+.node-generation-hint {
+  color: var(--dv-text-2, #4b5563);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.node-generation-overlay .node-generation-status { color: #f6f6f7; }
+.node-generation-overlay .node-generation-hint { color: #d6d7da; }
+.node-generation-overlay .node-generation-spinner { color: #67e8f9; }
+
+.node-generation-detail {
+  background: var(--dv-surface-2, #f3f4f6);
+}

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { LoadingOutlined } from '@ant-design/icons';
 import type { NodeExecutionStatus } from '@/types/canvas';
+import './nodeGeneration.css';
 
 interface NodeLoadingStateProps {
   /** 节点执行状态 */
@@ -62,7 +63,7 @@ export const NodeLoadingState = memo<NodeLoadingStateProps>(function NodeLoading
         </div>
 
         {/* ✅ 状态文字（包含执行时间，从progressMessage获取） */}
-        <span className="text-xs font-medium text-gray-700">
+        <span className="node-generation-progress">
           {displayText}
         </span>
 
@@ -71,7 +72,7 @@ export const NodeLoadingState = memo<NodeLoadingStateProps>(function NodeLoading
             格式、来源、位置全部保持不变 —— 这行只是它下面**新增**的一条预期说明，
             不替换、不合并，进度该多久报一次就还是多久报一次。 */}
         {hint && (
-          <span className="text-[10px] leading-snug text-gray-400 text-center max-w-[240px] whitespace-pre-line">
+          <span className="node-generation-hint text-center max-w-[240px] whitespace-pre-line">
             {hint}
           </span>
         )}

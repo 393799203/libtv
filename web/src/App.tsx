@@ -3,7 +3,8 @@ import { RouterProvider } from 'react-router-dom';
 import { App as AntApp, ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { router } from '@/router';
-import { bindAntdApp, MESSAGE_TOP } from '@/utils/antdApp';
+import { bindAntdApp, MESSAGE_CONFIG } from '@/utils/antdApp';
+import { Z } from '@/utils/zLayers';
 
 /**
  * 平台主题：高饱和冷色暗底（黑 / 青 / 蓝 / 紫）。
@@ -91,6 +92,8 @@ function App() {
           controlItemBgActiveHover: 'rgba(34, 211, 238, 0.22)', 
         },
         components: {
+          Message: { zIndexPopup: Z.feedback },
+          Notification: { zIndexPopup: Z.feedback },
           // headerBg / siderBg 用**不透明**底色：原来 0.86 半透明是专门配 backdrop-filter 毛玻璃的，
           // 毛玻璃已去掉（见 dark-theme.css 的说明），半透明反而会透出背后画布的锐利内容。
           // 取值与 bodyBg / --dv-bg 同色，头部与页面的层次由边框 + 投影承担。
@@ -125,7 +128,7 @@ function App() {
         },
       }}
     >
-      <AntApp message={{ top: MESSAGE_TOP }}>
+      <AntApp message={MESSAGE_CONFIG}>
         <AntdAppBridge>
           <RouterProvider router={router} />
         </AntdAppBridge>

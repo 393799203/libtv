@@ -222,16 +222,16 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
               <div className="opacity-40 pointer-events-none select-none" aria-hidden="true">
                 {children}
               </div>
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-md bg-white/45 backdrop-blur-[1px]">
-                <LoadingOutlined className="text-xl text-blue-500 animate-spin" />
-                <span className="text-[11px] font-medium text-blue-600">
+              <div className="node-generation-overlay absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-md px-4 py-3">
+                <LoadingOutlined className="node-generation-spinner text-xl animate-spin" />
+                <span className="node-generation-status">
                   {status === 'pending' ? '等待生成中...' : '重新生成中...'}
                 </span>
                 {data.progressMessage ? (
-                  <span className="text-[10px] text-gray-500">{data.progressMessage}</span>
+                  <span className="node-generation-progress">{data.progressMessage}</span>
                 ) : null}
                 {WAIT_HINTS[nodeType] ? (
-                  <span className="text-[10px] leading-snug text-gray-400 text-center max-w-[240px] whitespace-pre-line">
+                  <span className="node-generation-hint text-center max-w-[240px] whitespace-pre-line">
                     {WAIT_HINTS[nodeType]}
                   </span>
                 ) : null}

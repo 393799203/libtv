@@ -7,6 +7,7 @@ import { ShotHeader } from './ShotHeader';
 import { ShotTable } from './ShotTable';
 import { AssetPreparationPanel } from './AssetPreparationPanel';
 import { PromptMergeModal } from './PromptMergeModal';
+import '../nodeGeneration.css';
 
 interface ScriptDetailPanelProps {
   open: boolean;
@@ -44,8 +45,8 @@ const GeneratingSkeleton = memo(function GeneratingSkeleton({
   return (
     <div className="flex flex-col h-full">
       {/* 进度提示 */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-amber-50/50">
-        <span className="text-xs font-medium text-amber-700">
+      <div className="node-generation-detail px-4 py-3 border-b border-gray-100">
+        <span className="node-generation-progress inline-block">
           {message || '正在生成分镜数据...'}
         </span>
       </div>
@@ -73,7 +74,7 @@ const GeneratingSkeleton = memo(function GeneratingSkeleton({
       {/* 底部提示 */}
       <div className="px-4 py-2 border-t border-gray-100 text-center">
         <LoadingOutlined className="text-amber-500 mr-1 animate-spin" />
-        <span className="text-[10px] text-gray-400">生成完成后将自动显示分镜列表</span>
+        <span className="node-generation-hint">生成完成后将自动显示分镜列表</span>
       </div>
     </div>
   );
