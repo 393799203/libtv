@@ -96,8 +96,8 @@ function App() {
           // 取值与 bodyBg / --dv-bg 同色，头部与页面的层次由边框 + 投影承担。
           Layout: { headerBg: '#121316', bodyBg: '#121316', siderBg: '#121316' },
           Modal: { contentBg: '#232427', headerBg: '#232427' },
-          // 主按钮的投影：青色调、柔和下沉，让按钮"浮"在面板上（比默认灰影更贴主题）
-          Button: { primaryShadow: '0 6px 18px -6px rgba(34, 211, 238, 0.55)' },
+          // 主操作统一白字，底色与交互状态由 dark-theme.css 的 action 变量统一定义。
+          Button: { primaryColor: '#fff', primaryShadow: '0 6px 14px -8px rgba(0, 0, 0, 0.5)' },
           Card: { colorBgContainer: '#1b1c1f' },
           Table: {
             colorBgContainer: '#1b1c1f',

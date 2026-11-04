@@ -94,6 +94,11 @@
 
   /* 高饱和强调色 */
   --dv-cyan: #22d3ee;
+  /* 实心主按钮：白字配深青蓝，普通态与悬停态对比度均高于 4.5:1。 */
+  --dv-action-bg: #0e7490;
+  --dv-action-bg-hover: #0f7b95;
+  --dv-action-bg-active: #155e75;
+  --dv-action-text: #fff;
   --dv-blue: #3b82f6;
   --dv-violet: #8b5cf6;
   --dv-danger: #f43f5e;
@@ -1349,9 +1354,7 @@ html.theme-dark-root #root {
       不再出现 9/10px。9px 只允许留在纯装饰分隔符上。
    2) 英文微标签（Working set / Explore / Init canvas）改为一枚编号 +
       中文小标题，像片场场记单一样有秩序，也少一层「AI 味」。
-   3) 主操作从「青→蓝→紫渐变 + 白字」（对比度只有 2.4~3.1）改成
-      「亮青底 + 近黑字」：对比 11:1，更像电影海报上的信号色，渐变只
-      留给品牌标与扫描线。
+   3) 主操作使用深青蓝实心底与白字，保证文字清晰；渐变只留给品牌标与扫描线。
    4) 首屏加银幕暗角与细颗粒，标题放大到可读的「字幕」尺寸。
    ============================================================ */
 
@@ -1359,8 +1362,6 @@ html.theme-dark-root #root {
   --ui-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --ui-hairline: rgba(103, 232, 249, 0.16);
   --ui-cyan-ink: #67e8f9;
-  /* 亮青底上的墨色：不用纯黑，带一点冷调，和深色主题同一色温 */
-  --ui-on-bright: #04121a;
 }
 
 /* ---- 编辑式标题：编号 + 中文标题 + 渐隐细线 ---- */
@@ -1447,31 +1448,31 @@ html.theme-dark-root #root {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- 主操作：亮青底 + 近黑字（对比 11:1） ----
+/* ---- 主操作：深青蓝底 + 白字 ----
    只接管「实心主按钮」；ghost / link / danger 各有语义，保持原样。 */
 .theme-dark .ant-btn-primary:not(:disabled):not(.ant-btn-background-ghost):not(.ant-btn-dangerous) {
   border-color: transparent;
   background-image: none;
-  background-color: var(--dv-cyan);
-  color: var(--ui-on-bright);
+  background-color: var(--dv-action-bg);
+  color: var(--dv-action-text);
   font-weight: 600;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 10px 26px -16px rgba(34, 211, 238, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 6px 14px -8px rgba(0, 0, 0, 0.5);
 }
 
 .theme-dark .ant-btn-primary:not(:disabled):not(.ant-btn-background-ghost):not(.ant-btn-dangerous):hover {
-  background-color: #67e8f9;
-  color: var(--ui-on-bright);
+  background-color: var(--dv-action-bg-hover);
+  color: var(--dv-action-text);
 }
 
 .theme-dark .ant-btn-primary:not(:disabled):not(.ant-btn-background-ghost):not(.ant-btn-dangerous):active {
-  background-color: #06b6d4;
-  color: var(--ui-on-bright);
+  background-color: var(--dv-action-bg-active);
+  color: var(--dv-action-text);
 }
 
 .theme-dark .ant-btn-primary:disabled {
-  color: rgba(4, 18, 26, 0.55);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 /* ---- 统一的键盘焦点环：只在键盘操作时出现，鼠标点击不闪 ---- */
