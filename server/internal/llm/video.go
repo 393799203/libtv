@@ -392,7 +392,10 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 	}
 
 	// 参考素材 role 复用 collectMedia（role 词汇与华数一致）
-	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	items, err := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	if err != nil {
+		return "", err
+	}
 
 	content := make([]DianxinVideoItem, 0, len(items)+1)
 	// 提示词作为 text 条目（电信协议：文本独立成 content 项）
@@ -666,7 +669,10 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 	logDurationNormalized(origDuration, duration)
 
 	// 参考素材：role 规则与万相一致（单图无 mode 归 reference_image）
-	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	items, err := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	if err != nil {
+		return "", err
+	}
 	media := make([]DianxinWanMediaItem, 0, len(items))
 	for _, it := range items {
 		media = append(media, DianxinWanMediaItem{Type: it.role, URL: it.url})
@@ -877,7 +883,10 @@ func (c *VideoClient) buildSeedanceRequest(ctx context.Context, model string, pr
 
 	// seedance 角色规则：首尾帧=first_frame/last_frame；全能参考=reference_image；
 	// 单图无 mode=不填 role；参考视频=reference_video；参考音频=reference_audio
-	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "")
+	items, err := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "")
+	if err != nil {
+		return nil, err
+	}
 
 	content := make([]VideoContentItem, 0, len(items))
 	for _, it := range items {
@@ -986,7 +995,10 @@ func (c *VideoClient) buildWanRequest(ctx context.Context, model string, prompt 
 	logDurationNormalized(origDuration, duration)
 
 	// wan3.0 角色规则：与 seedance 相同，但单图无 mode 也必须带 type，归为 reference_image
-	items := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	items, err := c.collectMedia(ctx, imageURLs, videoURLs, audioURLs, videoMode, "reference_image")
+	if err != nil {
+		return nil, err
+	}
 
 	wanMedia := make([]WanMediaItem, 0, len(items))
 	for _, it := range items {
@@ -1058,31 +1070,34 @@ func normalizeWanParams(ctx context.Context, duration int, videoURLs []string) (
 
 // collectMedia 下载/转码参考素材并分配 role（两家 API 的 role 词汇相同）。
 // defaultImageRole：单图无 mode 时的角色（seedance 传 ""；wan3.0 传 "reference_image"）
-// 首尾帧模式忽略参考视频：wan3.0 规定 first_frame/last_frame 与 reference_* 互斥，
-// 混合会被整单拒绝（且首尾帧模式下参考视频本来也没有意义）
-func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, defaultImageRole string) []mediaItem {
+// 首尾帧与普通参考互斥；冲突或素材失败直接报错，不能偷偷删掉素材后改变图号。
+func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, videoURLs []string, audioURLs []string, videoMode string, defaultImageRole string) ([]mediaItem, error) {
 	var items []mediaItem
+	if videoMode == "first-last-frame" && (len(imageURLs) == 0 || len(imageURLs) > 2) {
+		return nil, fmt.Errorf("首尾帧模式需要1–2张图片，请明确选择首帧和尾帧")
+	}
+	if videoMode == "first-last-frame" && (len(videoURLs) > 0 || len(audioURLs) > 0) {
+		return nil, fmt.Errorf("首尾帧模式不接受视频或音频参考，请切换全能参考模式")
+	}
 
 	// 参考图：0张=文生视频；1张=参考；首尾帧模式=first_frame+last_frame
 	for i, rawURL := range imageURLs {
 		if rawURL == "" {
-			continue
+			return nil, fmt.Errorf("参考图%d为空，无法保持参考图对应关系", i+1)
 		}
 		finalURL, err := c.processImageURL(ctx, rawURL)
 		if err != nil {
-			log.Printf("[VideoGen] ⚠️ 参考图[%d]处理失败，跳过: %v", i, err)
-			continue
+			return nil, fmt.Errorf("参考图%d处理失败，已停止生成以保持素材对应关系: %w", i+1, err)
 		}
 		item := mediaItem{url: finalURL, role: defaultImageRole}
-		// 首尾帧按实际写入顺序分配 first/last，
-		// 不能用 imageURLs 原始下标——前面的图为空或处理失败被跳过时会导致角色错位
+		// 任何素材失败都会终止，不允许把第二张图提升成首帧。
 		if videoMode == "first-last-frame" {
 			if len(items) == 0 {
 				item.role = "first_frame"
 			} else {
 				item.role = "last_frame"
 			}
-		} else if videoMode == "universal-ref" {
+		} else if videoMode == "universal-ref" || len(imageURLs) > 1 || len(videoURLs)+len(audioURLs) > 0 {
 			item.role = "reference_image"
 		}
 		items = append(items, item)
@@ -1091,17 +1106,12 @@ func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, vide
 
 	// 参考视频（视频参考/全能参考模式）
 	for i, rawURL := range videoURLs {
-		if videoMode == "first-last-frame" {
-			log.Printf("[VideoGen] ⚠️ 首尾帧模式忽略参考视频[%d]（首尾帧与参考互斥）", i)
-			continue
-		}
 		if rawURL == "" {
-			continue
+			return nil, fmt.Errorf("参考视频%d为空，无法保持参考素材对应关系", i+1)
 		}
 		finalURL, err := c.processImageURL(ctx, rawURL) // 复用同一函数处理URL（本地转base64/公网直传）
 		if err != nil {
-			log.Printf("[VideoGen] ⚠️ 参考视频[%d]处理失败，跳过: %v", i, err)
-			continue
+			return nil, fmt.Errorf("参考视频%d处理失败，已停止生成以保持素材对应关系: %w", i+1, err)
 		}
 		items = append(items, mediaItem{url: finalURL, role: "reference_video", isVideo: true})
 		log.Printf("[VideoGen] ✅ 参考视频[%d]已添加: role=reference_video urlLen=%d", i, len(finalURL))
@@ -1109,23 +1119,51 @@ func (c *VideoClient) collectMedia(ctx context.Context, imageURLs []string, vide
 
 	// 参考音频（华数 r2v 音频参考）：role=reference_audio，时长须≤15.2s，不能作为唯一参考（平台校验）
 	for i, rawURL := range audioURLs {
-		if videoMode == "first-last-frame" {
-			log.Printf("[VideoGen] ⚠️ 首尾帧模式忽略参考音频[%d]（首尾帧与参考互斥）", i)
-			continue
-		}
 		if rawURL == "" {
-			continue
+			return nil, fmt.Errorf("参考音频%d为空，无法保持参考素材对应关系", i+1)
 		}
 		// 音频 URL 直接透传（音频节点/上传产物均为公网可访问地址）
 		items = append(items, mediaItem{url: rawURL, role: "reference_audio", isAudio: true})
 		log.Printf("[VideoGen] ✅ 参考音频[%d]已添加: role=reference_audio urlLen=%d", i, len(rawURL))
 	}
 
-	// 首尾帧模式限制2张
-	if videoMode == "first-last-frame" && len(items) > 2 {
-		items = items[:2]
+	return items, nil
+}
+
+type preparedVideoReferencesKey struct{}
+
+// PrepareVideoReferences 在扣费前校验和缓存转换结果。原始 URL 仍用于时长测量与计费，
+// 只有最终协议构造读取缓存后的 data URI，避免转换之后无法测量本地参考视频时长。
+func (c *VideoClient) PrepareVideoReferences(ctx context.Context, images, videos, audios []string) (context.Context, error) {
+	prepared := make(map[string]string)
+	prepare := func(urls []string, kind string) error {
+		for i, url := range urls {
+			if strings.TrimSpace(url) == "" {
+				return fmt.Errorf("%s%d为空，请重新选择参考素材", kind, i+1)
+			}
+			if _, ok := prepared[url]; ok {
+				continue
+			}
+			converted, err := c.processImageURL(ctx, url)
+			if err != nil {
+				return fmt.Errorf("%s%d无法读取，请检查素材后重试: %w", kind, i+1, err)
+			}
+			prepared[url] = converted
+		}
+		return nil
 	}
-	return items
+	if err := prepare(images, "参考图"); err != nil {
+		return ctx, err
+	}
+	if err := prepare(videos, "参考视频"); err != nil {
+		return ctx, err
+	}
+	for i, audio := range audios {
+		if strings.TrimSpace(audio) == "" {
+			return ctx, fmt.Errorf("参考音频%d为空，请重新选择参考素材", i+1)
+		}
+	}
+	return context.WithValue(ctx, preparedVideoReferencesKey{}, prepared), nil
 }
 
 // videoModeLabel 日志用的模式名称
@@ -1225,6 +1263,14 @@ func sumRefVideoDuration(ctx context.Context, videoURLs []string) float64 {
 
 // processImageURL 处理图片URL：公网URL直接使用，本地URL转base64
 func (c *VideoClient) processImageURL(ctx context.Context, imageURL string) (string, error) {
+	if prepared, ok := ctx.Value(preparedVideoReferencesKey{}).(map[string]string); ok {
+		if url, exists := prepared[imageURL]; exists {
+			return url, nil
+		}
+	}
+	if strings.HasPrefix(imageURL, "data:") {
+		return imageURL, nil
+	}
 	isPublicURL := (strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://")) &&
 		!strings.Contains(imageURL, "localhost") &&
 		!strings.Contains(imageURL, "127.0.0.1")

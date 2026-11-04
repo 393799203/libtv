@@ -1556,164 +1556,22 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return nil, fmt.Errorf("parse image node data: %w", err)
 	}
 
-	// ✅ 解析 mentions 字段，提取用户明确@引用的节点ID
-	// 根据nodeId从节点data中提取完整imageUrl，而不是直接使用mentions中的imageUrl（前端预览用）
-	var styleImageURLs []string     // 风格图：只提取画风/色彩/视觉风格
-	var referenceImageURLs []string // 普通参考图：保持主体结构进行修改
-	var mentions []promptMention
-
 	// 元素编辑（局部重绘）指令：非空就说明这次是"只重画选区"（见 element_edit.go）
 	element := parseElementEdit(data.ElementEdit)
-
-	// ✅ 详细日志：打印mentions字段内容（用于调试图生图判断逻辑）
-	log.Printf("[ImageExecutor] ========== 图生图判断逻辑（开始） ========== ")
-	log.Printf("[ImageExecutor] 当前节点ID: %s", node.ID)
-	log.Printf("[ImageExecutor] data.Mentions字段: %s", string(data.Mentions))
-
-	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
-		// 防御：只保留 prompt 中实际存在的 [[m:xxx]] 对应的 mentions
-		validMentions := mentions[:0]
-		for _, m := range mentions {
-			marker := fmt.Sprintf("[[m:%s]]", m.ID)
-			if m.ID != "" && !strings.Contains(data.Prompt, marker) {
-				log.Printf("[ImageExecutor] ⚠️ 跳过残留mention: id=%s nodeId=%s type=%s (prompt中不存在)", m.ID, m.NodeID, m.NodeType)
-				continue
-			}
-			validMentions = append(validMentions, m)
+	var imageRefs imageReferences
+	if element == nil {
+		var refErr error
+		imageRefs, refErr = resolveImageReferences(node.ID, data.Prompt, data.Mentions, execCtx)
+		if refErr != nil {
+			return &NodeOutput{NodeID: node.ID, Status: "failed",
+				Data: map[string]interface{}{"error": refErr.Error()}}, nil
 		}
-		mentions = validMentions
-
-		// 与视频路径同样的去重：同一张图被提示词多次引用时 mentions 里有多条重复项，
-		// 不去重会把它当多张参考图送去图生图，既浪费额度也容易触发上游数量上限
-		if before := len(mentions); before > 1 {
-			mentions = dedupeMentions(mentions)
-			if dropped := before - len(mentions); dropped > 0 {
-				log.Printf("[ImageExecutor] 🔁 参考素材去重: 合并 %d 条重复引用（%d → %d）", dropped, before, len(mentions))
-			}
-		}
-
-		log.Printf("[ImageExecutor] mentions解析成功，找到%d个引用", len(mentions))
-		for idx, m := range mentions {
-			log.Printf("[ImageExecutor] mentions[%d]: nodeId=%s nodeType=%s imageUrl=%s", idx, m.NodeID, m.NodeType, m.ImageUrl)
-			// ✅ 只处理用户明确@引用的图片节点
-			if m.NodeType == "image" {
-				// ✅ 根据nodeId从节点data中提取完整imageUrl（支持实时更新）
-				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
-					var nd struct {
-						ImageUrl string `json:"imageUrl"`
-						StyleId  string `json:"styleId"`
-					}
-					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-						// 区分风格图（data.styleId 有值）和普通参考图：id 不承载语义，只看字段
-						if nd.StyleId != "" {
-							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
-							log.Printf("[ImageExecutor] 🎨 从@引用的风格图提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
-						} else {
-							referenceImageURLs = append(referenceImageURLs, nd.ImageUrl)
-							log.Printf("[ImageExecutor] ✅ 从@引用的图片节点提取到URL: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
-						}
-					} else {
-						log.Printf("[ImageExecutor] ❌ @引用的图片节点没有imageUrl: nodeId=%s raw=%s", m.NodeID, string(raw))
-					}
-				} else {
-					log.Printf("[ImageExecutor] ❌ @引用的图片节点找不到数据: nodeId=%s", m.NodeID)
-				}
-			} else if m.NodeType == "previz" {
-				// ✅ 白模预演节点：用它导出的静帧作为构图参考图
-				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
-					var nd struct {
-						StillUrl string `json:"stillUrl"`
-					}
-					if err := json.Unmarshal(raw, &nd); err == nil && nd.StillUrl != "" {
-						referenceImageURLs = append(referenceImageURLs, nd.StillUrl)
-						log.Printf("[ImageExecutor] ✅ 从@引用的白模节点提取静帧作为参考图: nodeId=%s stillUrl=%s", m.NodeID, nd.StillUrl)
-					} else {
-						log.Printf("[ImageExecutor] ⚠️ @引用的白模节点还没有静帧（需先在预演编辑器导出静帧）: nodeId=%s", m.NodeID)
-					}
-				}
-			}
-		}
-	} else {
-		log.Printf("[ImageExecutor] ❌ mentions解析失败: err=%v", err)
 	}
-
-	// 合并所有上游图片URL
-	upstreamImageURLs := append(styleImageURLs, referenceImageURLs...)
-
-	if len(upstreamImageURLs) > 0 {
-		// ✅ 风格图是独立通道：不参与 @ 引用，无论用户是否 @ 了参考图，
-		// 上游连线的风格节点（data.styleId 有值）始终参与生成，按 URL 去重
-		for _, sourceNodeID := range execCtx.GetUpstreamSources(node.ID) {
-			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
-				var nd struct {
-					ImageUrl string `json:"imageUrl"`
-					StyleId  string `json:"styleId"`
-				}
-				if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-					if nd.StyleId != "" {
-						dup := false
-						for _, u := range styleImageURLs {
-							if u == nd.ImageUrl {
-								dup = true
-								break
-							}
-						}
-						if !dup {
-							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
-							log.Printf("[ImageExecutor] 🎨 上游风格图（独立通道）: nodeId=%s imageUrl=%s", sourceNodeID, nd.ImageUrl)
-						}
-					}
-				}
-			}
-		}
-		// 风格图补充后重新合并
-		upstreamImageURLs = append(styleImageURLs, referenceImageURLs...)
-		log.Printf("[ImageExecutor] ✅ 最终结果：风格图=%d 普通参考图=%d 总计=%d", len(styleImageURLs), len(referenceImageURLs), len(upstreamImageURLs))
-	} else {
-		log.Printf("[ImageExecutor] ⚠️ 没有找到@引用的图片，尝试fallback逻辑（查找上游连接的图片节点）")
-		// ✅ 如果用户没有明确@引用图片，但当前节点有上游连接的图片节点，默认使用第一个上游图片作为参考图
-		// 这符合直觉：用户通过画布连接上游图片节点，本身就表示"基于上游图片生成"
-		upstreamSources := execCtx.GetUpstreamSources(node.ID)
-		log.Printf("[ImageExecutor] 上游节点列表: %v", upstreamSources)
-
-		for idx, sourceNodeID := range upstreamSources {
-			log.Printf("[ImageExecutor] 检查上游节点[%d]: nodeId=%s", idx, sourceNodeID)
-			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
-				var nd struct {
-					Type     string `json:"type"`     // 节点类型
-					ImageUrl string `json:"imageUrl"` // 图片URL
-					StillUrl string `json:"stillUrl"` // 白模预演导出的静帧
-					StyleId  string `json:"styleId"`  // 风格图标识
-				}
-				if err := json.Unmarshal(raw, &nd); err == nil {
-					log.Printf("[ImageExecutor] 上游节点数据: type=%s imageUrl=%s stillUrl=%s", nd.Type, nd.ImageUrl, nd.StillUrl)
-					// ✅ 白模预演节点：静帧即参考图（锁构图）
-					if nd.Type == "previz" && nd.StillUrl != "" {
-						referenceImageURLs = append(referenceImageURLs, nd.StillUrl)
-						log.Printf("[ImageExecutor] ✅ 使用上游白模节点的静帧作为参考图: upstreamNodeID=%s stillUrl=%s", sourceNodeID, nd.StillUrl)
-					} else if nd.Type == "previz" {
-						log.Printf("[ImageExecutor] ⚠️ 上游白模节点还没有静帧（需先在预演编辑器导出静帧）: upstreamNodeID=%s", sourceNodeID)
-					} else if nd.Type == "image" || nd.ImageUrl != "" {
-						// 区分风格图和普通参考图
-						if nd.StyleId != "" {
-							styleImageURLs = append(styleImageURLs, nd.ImageUrl)
-							log.Printf("[ImageExecutor] 🎨 默认使用上游风格图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
-						} else {
-							referenceImageURLs = append(referenceImageURLs, nd.ImageUrl)
-							log.Printf("[ImageExecutor] ✅ 默认使用上游连接的图片作为参考图: upstreamNodeID=%s upstreamImageURL=%s", sourceNodeID, nd.ImageUrl)
-						}
-					} else {
-						log.Printf("[ImageExecutor] ❌ 上游节点不是图片节点: type=%s imageUrl=%s", nd.Type, nd.ImageUrl)
-					}
-				} else {
-					log.Printf("[ImageExecutor] ❌ 上游节点数据解析失败: nodeId=%s", sourceNodeID)
-				}
-			} else {
-				log.Printf("[ImageExecutor] ❌ 上游节点找不到数据: nodeId=%s", sourceNodeID)
-			}
-		}
-		// fallback 后重新合并
-		upstreamImageURLs = append(styleImageURLs, referenceImageURLs...)
+	mentions := imageRefs.Mentions
+	upstreamImageURLs, styleImageURLs, referenceImageURLs := imageRefs.urls()
+	for index, ref := range imageRefs.Images {
+		log.Printf("[ImageExecutor] 参考图编号: node=%s image=%d source=%s style=%v",
+			node.ID, index+1, ref.NodeID, ref.Style)
 	}
 
 	// 元素编辑：把**节点自己的原图**当参考图（也是"要改的那张图"）。
@@ -1916,7 +1774,7 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	size := fmt.Sprintf("%dx%d", width, height)
 
 	// 清理提示词中的占位符（在上游文本并入之后清理）
-	cleanedPrompt := stripMentionMarkers(effectivePrompt)
+	cleanedPrompt := stripMentionMarkers(imageRefs.rewritePrompt(effectivePrompt))
 
 	// 资产归属读节点 data（前端写入）；不再从节点 id 的「角色-/场景-/道具-」前缀推断
 	assetType := data.AssetType
@@ -2015,7 +1873,8 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		if compositor != nil {
 			imageToImagePrompt = compositor.buildRequestPrompt(finalPrompt)
 		} else {
-			imageToImagePrompt = buildImageToImagePrompt(finalPrompt, data.ViewKind, len(styleImageURLs) > 0, len(referenceImageURLs) > 0)
+			imageToImagePrompt = buildImageToImagePrompt(finalPrompt, data.ViewKind, len(styleImageURLs) > 0, len(referenceImageURLs) > 0, len(referenceImageURLs))
+			imageToImagePrompt = imageRefs.describePrompt(imageToImagePrompt)
 		}
 		log.Printf("[ImageExecutor] 使用图生图模式: styleCount=%d refCount=%d elementEdit=%v prompt=%s", len(styleImageURLs), len(referenceImageURLs), compositor != nil, imageToImagePrompt)
 		generatedURLs, err = i.imageClient.GenerateImageFromImageWithModel(ctx, apiModelID, upstreamImageURLs, imageToImagePrompt, size, count)
@@ -2340,6 +2199,7 @@ type promptMention struct {
 	ID       string `json:"id"`
 	NodeID   string `json:"nodeId"`
 	NodeType string `json:"nodeType"`
+	Label    string `json:"label"`
 	// ImageUrl 只有图片节点前端会带（预览用），后端不读，留着避免解析时丢掉字段
 	ImageUrl string `json:"imageUrl"`
 }
@@ -2482,7 +2342,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		Mode          string          `json:"mode"`
 		Prompt        string          `json:"prompt"`
 		Model         string          `json:"model"`
-		Duration      int             `json:"duration"`
+		Duration      float64         `json:"duration"`
 		Fps           int             `json:"fps"`
 		AspectRatio   string          `json:"aspectRatio"`
 		Resolution    string          `json:"resolution"`
@@ -2500,144 +2360,21 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		generateAudio = *data.GenerateAudio
 	}
 
-	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%d videoMode=%s generateAudio=%v", node.ID, data.Model, len(data.Prompt), data.Duration, data.VideoMode, generateAudio)
+	log.Printf("[VideoExecutor] nodeID=%s model=%s promptLen=%d duration=%g videoMode=%s generateAudio=%v", node.ID, data.Model, len(data.Prompt), data.Duration, data.VideoMode, generateAudio)
 
-	// 解析 mentions，收集上游图片URL和视频URL
-	var imageURLs []string
-	var videoURLs []string
-	var audioURLs []string
-	var mentions []promptMention
-	if err := json.Unmarshal(data.Mentions, &mentions); err == nil {
-		// 防御：只保留 prompt 中实际存在的 [[m:xxx]] 对应的 mentions
-		// 防止前端残留已删除的 mention 导致错误收集资源
-		validMentions := mentions[:0]
-		for _, m := range mentions {
-			marker := fmt.Sprintf("[[m:%s]]", m.ID)
-			if m.ID != "" && !strings.Contains(data.Prompt, marker) {
-				log.Printf("[VideoExecutor] ⚠️ 跳过残留mention: id=%s nodeId=%s type=%s (prompt中不存在)", m.ID, m.NodeID, m.NodeType)
-				continue
-			}
-			validMentions = append(validMentions, m)
-		}
-		mentions = validMentions
-
-		// 同一张图被提示词多次引用时 mentions 里会有多条重复项：不去重就会把
-		// 同一张图当多张发给上游，参考图数量凭空翻几倍（电信上限 9 张，超了直接拒单）。
-		// 首尾帧模式例外，原因见 shouldDedupeMentions。
-		if shouldDedupeMentions(data.VideoMode) {
-			if before := len(mentions); before > 1 {
-				mentions = dedupeMentions(mentions)
-				if dropped := before - len(mentions); dropped > 0 {
-					log.Printf("[VideoExecutor] 🔁 参考素材去重: 合并 %d 条重复引用（%d → %d）", dropped, before, len(mentions))
-				}
-			}
-		}
-
-		for _, m := range mentions {
-			if m.NodeType == "image" {
-				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
-					var nd struct {
-						ImageUrl string `json:"imageUrl"`
-					}
-					if err := json.Unmarshal(raw, &nd); err == nil && nd.ImageUrl != "" {
-						imageURLs = append(imageURLs, nd.ImageUrl)
-						log.Printf("[VideoExecutor] ✅ 参考图: nodeId=%s imageUrl=%s", m.NodeID, nd.ImageUrl)
-					}
-				}
-			} else if m.NodeType == "video" {
-				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
-					var nd struct {
-						VideoUrl string `json:"videoUrl"`
-					}
-					if err := json.Unmarshal(raw, &nd); err == nil && nd.VideoUrl != "" {
-						videoURLs = append(videoURLs, nd.VideoUrl)
-						log.Printf("[VideoExecutor] ✅ 参考视频: nodeId=%s videoUrl=%s", m.NodeID, nd.VideoUrl)
-					}
-				}
-			} else if m.NodeType == "audio" {
-				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
-					var nd struct {
-						AudioUrl string `json:"audioUrl"`
-					}
-					if err := json.Unmarshal(raw, &nd); err == nil && nd.AudioUrl != "" {
-						audioURLs = append(audioURLs, nd.AudioUrl)
-						log.Printf("[VideoExecutor] ✅ 参考音频: nodeId=%s audioUrl=%s", m.NodeID, nd.AudioUrl)
-					}
-				}
-			} else if m.NodeType == "previz" {
-				// ✅ 白模预演节点：白片作视频参考（走位/动作/运镜以此为准），静帧作图片参考
-				if raw, ok := execCtx.GetNodeData(m.NodeID); ok && len(raw) > 0 {
-					var nd struct {
-						VideoUrl string `json:"videoUrl"`
-						StillUrl string `json:"stillUrl"`
-					}
-					if err := json.Unmarshal(raw, &nd); err == nil {
-						if nd.VideoUrl != "" {
-							videoURLs = append(videoURLs, nd.VideoUrl)
-							log.Printf("[VideoExecutor] ✅ 白模白片作为参考视频: nodeId=%s videoUrl=%s", m.NodeID, nd.VideoUrl)
-						}
-						if nd.StillUrl != "" {
-							imageURLs = append(imageURLs, nd.StillUrl)
-							log.Printf("[VideoExecutor] ✅ 白模静帧作为参考图: nodeId=%s stillUrl=%s", m.NodeID, nd.StillUrl)
-						}
-					}
-				}
-			}
+	execID := execCtx.GetExecutionID()
+	resumeRef := llm.LoadAsyncTaskRef(ctx, execID, node.ID)
+	resuming := resumeRef != nil && resumeRef.TaskID != ""
+	refs := videoReferences{Mode: data.VideoMode}
+	if !resuming {
+		var refErr error
+		refs, refErr = resolveVideoReferences(node.ID, data.Prompt, data.VideoMode, data.Mentions, execCtx)
+		if refErr != nil {
+			return &NodeOutput{NodeID: node.ID, Status: "failed", Data: map[string]interface{}{"error": refErr.Error()}}, nil
 		}
 	}
-
-	// 上游对参考图数量有硬上限，超了直接拒单。去重后仍超出时截断：
-	// 截断只是少用几张参考图（还能出片），原样发出去则是整单失败（用户白等一趟）。
-	// 必须放在 fallback 之前 —— 兜底补图也按 len(imageURLs) < videoMaxRefImages 判断，
-	// 先截断才能让它继续按剩余名额补。
-	if len(imageURLs) > videoMaxRefImages {
-		log.Printf("[VideoExecutor] ⚠️ 参考图 %d 张超过上游上限 %d，只取前 %d 张（node=%s）",
-			len(imageURLs), videoMaxRefImages, videoMaxRefImages, node.ID)
-		imageURLs = imageURLs[:videoMaxRefImages]
-	}
-
-	// fallback: 查找上游连接的图片/视频/音频节点
-	// 仅当 mentions 完全没有提供某类资源时，才从上游补充（尊重用户 @mentions 的选择）
-	// 首尾帧模式需要2张图，所以不能只收集1张；video.go 会按模式截断数量
-	mentionsImageCount := len(imageURLs)
-	mentionsVideoCount := len(videoURLs)
-	mentionsAudioCount := len(audioURLs)
-	if mentionsImageCount == 0 || mentionsVideoCount == 0 || mentionsAudioCount == 0 {
-		upstreamSources := execCtx.GetUpstreamSources(node.ID)
-		for _, sourceNodeID := range upstreamSources {
-			if raw, ok := execCtx.GetNodeData(sourceNodeID); ok && len(raw) > 0 {
-				var nd struct {
-					ImageUrl string `json:"imageUrl"`
-					VideoUrl string `json:"videoUrl"`
-					AudioUrl string `json:"audioUrl"`
-					StillUrl string `json:"stillUrl"` // 白模预演导出的静帧
-					Type     string `json:"type"`
-				}
-				if err := json.Unmarshal(raw, &nd); err == nil {
-					if nd.Type == "previz" {
-						// ✅ 白模预演节点：白片补充视频参考，静帧补充图片参考
-						if nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {
-							videoURLs = append(videoURLs, nd.VideoUrl)
-							log.Printf("[VideoExecutor] ✅ 从上游白模节点获取参考视频（白片）: nodeId=%s", sourceNodeID)
-						}
-						if nd.StillUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 9 {
-							imageURLs = append(imageURLs, nd.StillUrl)
-							log.Printf("[VideoExecutor] ✅ 从上游白模节点获取参考图（静帧）: nodeId=%s", sourceNodeID)
-						}
-					} else if nd.Type == "image" && nd.ImageUrl != "" && mentionsImageCount == 0 && len(imageURLs) < 9 {
-						imageURLs = append(imageURLs, nd.ImageUrl)
-						log.Printf("[VideoExecutor] ✅ 从上游图片节点获取参考图: nodeId=%s", sourceNodeID)
-					} else if nd.Type == "video" && nd.VideoUrl != "" && mentionsVideoCount == 0 && len(videoURLs) == 0 {
-						videoURLs = append(videoURLs, nd.VideoUrl)
-						log.Printf("[VideoExecutor] ✅ 从上游视频节点获取参考视频: nodeId=%s", sourceNodeID)
-					} else if nd.Type == "audio" && nd.AudioUrl != "" && mentionsAudioCount == 0 {
-						audioURLs = append(audioURLs, nd.AudioUrl)
-						log.Printf("[VideoExecutor] ✅ 从上游音频节点获取参考音频: nodeId=%s", sourceNodeID)
-					}
-				}
-			}
-		}
-	}
+	imageURLs, videoURLs, audioURLs := refs.urls()
+	mentions := refs.Mentions
 
 	// 上游文本节点（连上或 @ 引用）→ 作为提示词参考并入本次生成的提示词。
 	// 只影响这一次调用（data.Prompt 保持用户自己写的那份，不写回节点）：
@@ -2655,7 +2392,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 只在"真空白"时拦：首尾帧 / 参考模式可能只靠素材生成，提示词是可选的，
 	// 各上游对空提示词的容忍度不一样，这里不做过度判断（拦错比放过更糟）。
 	if strings.TrimSpace(stripMentionMarkers(effectivePrompt)) == "" &&
-		len(imageURLs) == 0 && len(videoURLs) == 0 && len(audioURLs) == 0 {
+		len(imageURLs) == 0 && len(videoURLs) == 0 && len(audioURLs) == 0 && !resuming {
 		return &NodeOutput{
 			NodeID: node.ID,
 			Status: "failed",
@@ -2674,6 +2411,14 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[VideoExecutor] 检测到参考音频，强制开启声音生成 generateAudio=false→true")
 		generateAudio = true
 	}
+	if !resuming && v.videoClient != nil {
+		var prepareErr error
+		ctx, prepareErr = v.videoClient.PrepareVideoReferences(ctx, imageURLs, videoURLs, audioURLs)
+		if prepareErr != nil {
+			return &NodeOutput{NodeID: node.ID, Status: "failed", Data: map[string]interface{}{"error": prepareErr.Error()}}, nil
+		}
+	}
+	effectivePrompt = refs.describePrompt(refs.rewritePrompt(effectivePrompt))
 
 	// 确定模型：计费用逻辑 ID（data.Model），API 调用用渠道解析后的真实 ID
 	model := data.Model
@@ -2696,12 +2441,11 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	if v.modelManager != nil {
 		minDur, maxDur = v.modelManager.VideoDurationRange(execCtx.GetChannel(), model)
 	}
-	data.Duration = llm.ClampVideoDuration(data.Duration, minDur, maxDur)
+	duration := llm.ClampVideoDuration(int(math.Round(data.Duration)), minDur, maxDur)
 
 	// 计费时长里的「输入视频时长」：只有 models.yaml 开启 ref_video_billing 的模型
 	// （当前 3 个 Seedance 模型）才测量并计入，其余模型（wan3.0 等）保持「只按输出时长」计费。
-	// 首尾帧模式与参考素材互斥，video.go 的 collectMedia 会把参考视频直接丢掉，
-	// 那种情况参考视频既没上送也不该计费，故一并排除。
+	// 首尾帧模式与参考视频互斥，在参考素材解析阶段就已排除该模式下的隐式视频。
 	// 测量与模型侧的限制校验共用 ffprobe 口径（恰好等于受模型限制约束的那个数）；
 	// 测量失败时按 0 计（本次只算输出时长），失败原因在日志里
 	billRefVideo := v.modelManager != nil && v.modelManager.RefVideoBilling(execCtx.GetChannel(), model)
@@ -2712,7 +2456,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		} else if len(videoURLs) > 0 {
 			refVideoSeconds = llm.SumRefVideoDuration(ctx, videoURLs)
 			log.Printf("[VideoExecutor] 参考视频计费: nodeId=%s refVideos=%d 参考视频总时长=%.2fs 输出时长=%ds",
-				node.ID, len(videoURLs), refVideoSeconds, data.Duration)
+				node.ID, len(videoURLs), refVideoSeconds, duration)
 		}
 	}
 
@@ -2723,8 +2467,6 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 进程重启/发版中断后队列会重投该任务，此时上游那次视频其实还在跑甚至已跑完。
 	// 若重新下发一次：上游重复生成、用户重复扣费，而第一次的结果被白白丢掉。
 	// 因此先查有没有「已提交但未取回结果」的 taskID，命中就直接续查，且**不再扣费**。
-	execID := execCtx.GetExecutionID()
-	resumeRef := llm.LoadAsyncTaskRef(ctx, execID, node.ID)
 	taskRef := llm.NewAsyncTaskRef(execID, node.ID)
 	var chargedAmount int64
 	// chargeDetail 本次扣费的计费口径（分辨率 / 计费时长 / 其中参考视频时长）：
@@ -2772,7 +2514,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		ctx = billing.WithChargeKey(ctx, chargeKey)
 		chargedAmount, chargeDetail, chargeErr = v.biller.ChargeVideoByDuration(
 			ctx, execCtx.GetUserID(), billing.ActionVideo, model, "视频生成",
-			resolution, data.Duration, refVideoSeconds)
+			resolution, duration, refVideoSeconds)
 		if chargeErr != nil {
 			return nil, chargeErr
 		}
@@ -2822,7 +2564,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		ctx,
 		model,
 		effectivePrompt,
-		data.Duration,
+		duration,
 		resolution,
 		data.AspectRatio,
 		imageURLs,
@@ -3449,9 +3191,12 @@ func resolveImageModel(model, channel string, mm *llm.ModelManager) string {
 //
 // 多视图只可能是「角色/场景/道具是某个图片节点」这一种来源（ViewConfig 只 @ 了那一张
 // 参考图），但为稳妥起见，只要 viewKind 非空就用多视图话术，不依赖风格图/参考图的分支判断。
-func buildImageToImagePrompt(finalPrompt, viewKind string, hasStyleImage, hasReferenceImage bool) string {
+func buildImageToImagePrompt(finalPrompt, viewKind string, hasStyleImage, hasReferenceImage bool, referenceCount ...int) string {
 	if viewKind != "" {
 		return fmt.Sprintf("以参考图为素材，把同一主体扩展成多视角设定表：这不是在原图上做局部修改，也不是照抄参考图的相机角度。%s。参考图只提供主体的外观、配色、材质与画风；画面布局与每一格的相机角度以文字说明为准。", finalPrompt)
+	}
+	if len(referenceCount) > 0 && referenceCount[0] > 1 {
+		return fmt.Sprintf("根据用户为每张图指定的用途组合参考图，完成以下要求：%s。分别处理身份、人脸、动作、构图和背景来源，不要擅自改变用户指定的人脸来源；除非用户明确要求融合人脸，否则不要混合多张图的人脸。", finalPrompt)
 	}
 	switch {
 	case hasStyleImage && hasReferenceImage:

@@ -69,10 +69,16 @@ type ChatMessage struct {
 
 // ChatRequest 聊天补全请求
 type ChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
+	Model           string              `json:"model"`
+	Messages        []ChatMessage       `json:"messages"`
+	Temperature     float64             `json:"temperature,omitempty"`
+	MaxTokens       int                 `json:"max_tokens,omitempty"`
+	ResponseFormat  *ChatResponseFormat `json:"response_format,omitempty"`
+	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
+}
+
+type ChatResponseFormat struct {
+	Type string `json:"type"`
 }
 
 // ChatResponse 聊天补全响应
@@ -117,8 +123,12 @@ func (c *Client) ChatWithModel(ctx context.Context, model, systemPrompt, userMes
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userMessage},
 		},
-		Temperature: reqOpts.Temperature,
-		MaxTokens:   reqOpts.MaxTokens,
+		Temperature:     reqOpts.Temperature,
+		MaxTokens:       reqOpts.MaxTokens,
+		ReasoningEffort: reqOpts.ReasoningEffort,
+	}
+	if reqOpts.JSONOutput {
+		body.ResponseFormat = &ChatResponseFormat{Type: "json_object"}
 	}
 
 	payload, err := json.Marshal(body)
@@ -126,7 +136,7 @@ func (c *Client) ChatWithModel(ctx context.Context, model, systemPrompt, userMes
 		return nil, fmt.Errorf("marshal chat request: %w", err)
 	}
 
-	return c.doChatRequest(ctx, model, payload, len(userMessage))
+	return c.doChatRequest(ctx, model, payload, len(userMessage), reqOpts.RequestTimeout)
 }
 
 // ---- 视觉（图片理解）调用 ----
@@ -204,7 +214,7 @@ func (c *Client) ChatWithImages(ctx context.Context, model, systemPrompt, userTe
 }
 
 // doChatRequest 发送 /chat/completions 请求并解析响应（纯文本与视觉调用共用）
-func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte, userMsgLen int) (*ChatResponse, error) {
+func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte, userMsgLen int, requestTimeout ...time.Duration) (*ChatResponse, error) {
 	// 多渠道路由：按 ctx 中的用户渠道动态取 apiKey/baseURL；无 router 时用固定凭据
 	apiKey, baseURL := c.apiKey, c.baseURL
 	if c.router != nil {
@@ -225,7 +235,21 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 
 	log.Printf("[LLM] sending request...")
 	start := time.Now()
-	resp, err := c.httpCli.Do(httpReq)
+	httpClient := c.httpCli
+	if len(requestTimeout) > 0 && requestTimeout[0] > 0 {
+		// 每次调用单独设置预算，避免分镜的大输出被通用的 5 分钟上限截断。
+		// 不修改共享 client/transport，其他并发请求仍沿用原来的超时。
+		clientCopy := *httpClient
+		clientCopy.Timeout = requestTimeout[0]
+		if transport, ok := httpClient.Transport.(*http.Transport); ok {
+			transportCopy := transport.Clone()
+			transportCopy.ResponseHeaderTimeout = requestTimeout[0]
+			clientCopy.Transport = transportCopy
+			defer transportCopy.CloseIdleConnections()
+		}
+		httpClient = &clientCopy
+	}
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		log.Printf("[LLM] error after %s: %v", time.Since(start), err)
 		return nil, fmt.Errorf("http request: %w", err)
@@ -272,8 +296,11 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 // ---- 可选参数 ----
 
 type chatOptions struct {
-	Temperature float64
-	MaxTokens   int
+	Temperature     float64
+	MaxTokens       int
+	JSONOutput      bool
+	RequestTimeout  time.Duration
+	ReasoningEffort string
 	// DisableThinking 关闭模型思考（部分上游支持，且是必须的，见 WithThinkingDisabled）
 	DisableThinking bool
 }
@@ -286,6 +313,18 @@ func WithTemperature(t float64) Option {
 
 func WithMaxTokens(n int) Option {
 	return func(o *chatOptions) { o.MaxTokens = n }
+}
+
+func WithJSONOutput() Option {
+	return func(o *chatOptions) { o.JSONOutput = true }
+}
+
+func WithRequestTimeout(timeout time.Duration) Option {
+	return func(o *chatOptions) { o.RequestTimeout = timeout }
+}
+
+func WithReasoningEffort(effort string) Option {
+	return func(o *chatOptions) { o.ReasoningEffort = effort }
 }
 
 /**

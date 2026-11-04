@@ -3,25 +3,27 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"libtv/internal/config"
 )
 
 // ScriptShot LLM 返回的分镜结构
 type ScriptShot struct {
-	ID                 string `json:"id"`
-	ShotNumber         int    `json:"shotNumber"`
-	Duration           int    `json:"duration"`
-	Visual             string `json:"visual"`
-	ShotSize           string `json:"shotSize"`
-	CameraMovement     string `json:"cameraMovement"` // 运镜方式（含角度）
-	Dialogue           string `json:"dialogue"`
-	SoundEffect        string `json:"soundEffect"`
-	LightingAtmosphere string `json:"lightingAtmosphere"` // 光影氛围
-	ToneHint           string `json:"toneHint"`
+	ID                 string  `json:"id"`
+	ShotNumber         int     `json:"shotNumber"`
+	Duration           float64 `json:"duration"`
+	Visual             string  `json:"visual"`
+	ShotSize           string  `json:"shotSize"`
+	CameraMovement     string  `json:"cameraMovement"` // 运镜方式（含角度）
+	Dialogue           string  `json:"dialogue"`
+	SoundEffect        string  `json:"soundEffect"`
+	LightingAtmosphere string  `json:"lightingAtmosphere"` // 光影氛围
+	ToneHint           string  `json:"toneHint"`
 }
 
 // Character 角色信息
@@ -71,6 +73,8 @@ type scriptResponse struct {
 // 显式传大值，避免服务端写死小值截断、也避免不传时网关套用小默认值
 const maxGenerationTokens = 65536
 
+const scriptRequestTimeout = 10 * time.Minute
+
 // GenerateStory 根据用户提示词生成故事剧本文本
 // 用于 TextNode：用户输入 prompt → LLM 生成故事 → 填充 content
 func GenerateStory(ctx context.Context, client *Client, userPrompt string, model string) (string, error) {
@@ -113,14 +117,34 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 		return nil, fmt.Errorf("未指定文本模型：请在节点上选择模型后重试")
 	}
 
-	resp, err := client.ChatWithModel(
-		ctx,
-		model,
-		ScriptSystemPrompt,
-		BuildScriptUserPrompt(textContent),
-		WithTemperature(0.7),
-		WithMaxTokens(maxGenerationTokens),
-	)
+	opts := []Option{WithTemperature(0.7), WithMaxTokens(maxGenerationTokens), WithRequestTimeout(scriptRequestTimeout)}
+	jsonOutput := true
+	// GLM 5.3 强制思考且默认 max；分镜拆分使用 low，避免长时间推理。
+	// https://docs.bigmodel.cn/cn/guide/capabilities/thinking
+	lowReasoning := strings.HasPrefix(strings.ToLower(model), "glm-5.3")
+	var resp *ChatResponse
+	var err error
+	// 只在上游明确拒绝可选参数时回退，超时/5xx/已生成的无效输出
+	// 都不重新请求，避免同一次点击再次产生上游成本。
+	for attempt := 0; attempt < 3; attempt++ {
+		callOpts := append([]Option(nil), opts...)
+		if jsonOutput {
+			callOpts = append(callOpts, WithJSONOutput())
+		}
+		if lowReasoning {
+			callOpts = append(callOpts, WithReasoningEffort("low"))
+		}
+		resp, err = client.ChatWithModel(ctx, model, ScriptSystemPrompt, BuildScriptUserPrompt(textContent), callOpts...)
+		if jsonOutput && isChatParameterRejected(err, "response_format") {
+			jsonOutput = false
+			continue
+		}
+		if lowReasoning && isChatParameterRejected(err, "reasoning_effort") {
+			lowReasoning = false
+			continue
+		}
+		break
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("llm chat: %w", err)
@@ -143,25 +167,33 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 
 	// 清理可能的 markdown 代码块包裹
 	content = cleanJSONMarkdown(content)
+	content = joinJSONStringValues(content)
 
 	var result scriptResponse
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
 		// 完整原文写服务端日志（截断展示），返回给前端的错误只带末尾片段：
 		// JSON 语法错误看末尾才能区分是截断（ unexpected end ）还是格式错误（少逗号等）
+		runes := []rune(content)
 		rawLog := content
-		if len(rawLog) > 2000 {
-			rawLog = rawLog[:2000] + "..."
+		if len(runes) > 2000 {
+			rawLog = string(runes[:2000]) + "..."
 		}
 		log.Printf("[GenerateScript] JSON 解析失败: %v\nraw: %s", err, rawLog)
 		tail := content
-		if len(tail) > 200 {
-			tail = "..." + tail[len(tail)-200:]
+		if len(runes) > 200 {
+			tail = "..." + string(runes[len(runes)-200:])
 		}
 		return nil, fmt.Errorf("模型输出的 JSON 格式有误，请重试（%v）: %s", err, tail)
+	}
+	if len(result.Shots) == 0 {
+		return nil, fmt.Errorf("模型未返回分镜镜头，请重试或选择其他文本模型")
 	}
 
 	// 确保每个 shot 有 ID
 	for i := range result.Shots {
+		if result.Shots[i].Duration <= 0 {
+			return nil, fmt.Errorf("模型返回的第 %d 个镜头时长无效，请重试", i+1)
+		}
 		if result.Shots[i].ID == "" {
 			result.Shots[i].ID = fmt.Sprintf("shot-%d", i+1)
 		}
@@ -185,6 +217,106 @@ func GenerateScript(ctx context.Context, client *Client, textContent string, mod
 		Props:         result.Props,
 		Shots:         result.Shots,
 	}, nil
+}
+
+func isChatParameterRejected(err error, parameter string) bool {
+	if !errors.Is(err, ErrUpstreamRejected) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, parameter) {
+		return false
+	}
+	for _, marker := range []string{"unsupported", "not support", "unknown", "unrecognized", "invalidparameter", "invalid parameter"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// joinJSONStringValues 仅合并字段值中的 "文本" + "文本"。
+// 不执行表达式，不改字符串内的加号、数字运算或其他非法语法。
+func joinJSONStringValues(raw string) string {
+	var out strings.Builder
+	for i := 0; i < len(raw); {
+		if raw[i] != '"' {
+			out.WriteByte(raw[i])
+			i++
+			continue
+		}
+		end := jsonStringEnd(raw, i)
+		if end < 0 {
+			out.WriteString(raw[i:])
+			break
+		}
+		previous := i - 1
+		for previous >= 0 && isJSONSpace(raw[previous]) {
+			previous--
+		}
+		if previous < 0 || raw[previous] != ':' {
+			out.WriteString(raw[i:end])
+			i = end
+			continue
+		}
+		var value string
+		if json.Unmarshal([]byte(raw[i:end]), &value) != nil {
+			out.WriteString(raw[i:end])
+			i = end
+			continue
+		}
+		joined := false
+		for {
+			next := end
+			for next < len(raw) && isJSONSpace(raw[next]) {
+				next++
+			}
+			if next >= len(raw) || raw[next] != '+' {
+				break
+			}
+			next++
+			for next < len(raw) && isJSONSpace(raw[next]) {
+				next++
+			}
+			if next >= len(raw) || raw[next] != '"' {
+				break
+			}
+			nextEnd := jsonStringEnd(raw, next)
+			if nextEnd < 0 {
+				break
+			}
+			var part string
+			if json.Unmarshal([]byte(raw[next:nextEnd]), &part) != nil {
+				break
+			}
+			value += part
+			end = nextEnd
+			joined = true
+		}
+		if joined {
+			encoded, _ := json.Marshal(value)
+			out.Write(encoded)
+		} else {
+			out.WriteString(raw[i:end])
+		}
+		i = end
+	}
+	return out.String()
+}
+
+func isJSONSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
+}
+
+func jsonStringEnd(raw string, start int) int {
+	for i := start + 1; i < len(raw); i++ {
+		if raw[i] == '\\' {
+			i++
+		} else if raw[i] == '"' {
+			return i + 1
+		}
+	}
+	return -1
 }
 
 // NewScriptClient 创建用于剧本生成的 LLM 客户端

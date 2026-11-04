@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"libtv/internal/model"
+	"libtv/internal/pkg/textcut"
 
 	"gorm.io/gorm"
 )
@@ -67,7 +69,7 @@ func (r *executionRepo) UpdateStatusIfActive(ctx context.Context, id int64, stat
 func statusUpdates(status string, errMsg string) map[string]interface{} {
 	updates := map[string]interface{}{"status": status}
 	if errMsg != "" {
-		updates["error_msg"] = errMsg
+		updates["error_msg"] = executionErrorMessage(errMsg)
 	} else if status == "running" || status == "pending" {
 		// 复位重跑时清掉上一轮的失败原因：否则前端会把旧错误挂到正在重跑的执行上
 		updates["error_msg"] = ""
@@ -78,6 +80,12 @@ func statusUpdates(status string, errMsg string) map[string]interface{} {
 		updates["finished_at"] = time.Now()
 	}
 	return updates
+}
+
+// error_msg 的列宽是 1000；修复旧错误中的半个 UTF-8 字符并限制长度，
+// 避免错误详情反过来阻止终态落库，让已失败任务一直显示为生成中。
+func executionErrorMessage(msg string) string {
+	return textcut.NotLongerThan(strings.ToValidUTF8(msg, "�"), 990)
 }
 
 // ListStaleActive 查询「超过给定时刻仍未结束」的执行（看门狗用）。
@@ -152,7 +160,7 @@ func (r *aiTaskRepo) UpdateOutput(ctx context.Context, id int64, status string, 
 		updates["output"] = output
 	}
 	if errMsg != "" {
-		updates["error_msg"] = errMsg
+		updates["error_msg"] = executionErrorMessage(errMsg)
 	}
 	return r.db.WithContext(ctx).Model(&model.AITask{}).Where("id = ?", id).Updates(updates).Error
 }
