@@ -29,6 +29,11 @@
 .profile-save { min-height: 40px; padding: 8px 26px; border: 1px solid var(--dv-cyan-border); border-radius: 8px; background: var(--dv-cyan-soft); color: var(--dv-cyan-text); font-size: 13px; cursor: pointer; }
 .profile-save:hover { background: #82b4ff24; }
 .profile-save:disabled { opacity: .5; cursor: default; }
+.referral-link-row { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 8px; }
+.referral-link-row > .ant-btn { flex-shrink: 0; }
+.referral-qr-content { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.referral-qr-content [role=img] { padding: 4px; border-radius: 8px; background: #fff; }
+.referral-qr-content p { max-width: 220px; margin: 0; color: var(--dv-text-2); font-size: 12px; line-height: 1.6; text-align: center; }
 @media (max-width: 650px) {
   .profile-columns { grid-template-columns: minmax(0, 1fr); }
   .profile-details { border-right: 0; border-bottom: 1px solid var(--dv-border-1); }
@@ -38,4 +43,5 @@
   .profile-password-pair { flex-direction: column; }
   .profile-dialog input:not([type=file]), .profile-save, .profile-close { min-height: 44px; }
   .profile-close { min-width: 44px; }
+  .referral-link-row > .ant-btn, .profile-settings section[aria-label="我的推荐码"] .ant-btn { min-height: 44px; }
 }

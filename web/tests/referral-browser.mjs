@@ -35,6 +35,12 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(auth => localStorage.setItem('libtv_auth', JSON.stringify(auth)), { token: 'qa-token', user });
+  await page.addInitScript(() => {
+    window.__referralClipboard = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async text => { window.__referralClipboard = text; },
+    } });
+  });
   await page.route('**/api/**', intercept);
   await page.goto(`${base}/admin/referrals`);
   await page.getByRole('heading', { name: '邀请统计' }).waitFor();
@@ -50,6 +56,39 @@ try {
   await page.getByRole('textbox', { name: '我的推荐码', exact: true }).waitFor();
   assert.equal(await page.getByRole('textbox', { name: '我的推荐码', exact: true }).inputValue(), row.referral_code);
   assert.match(await page.getByRole('textbox', { name: '我的邀请链接' }).inputValue(), /\?ref=1234567890ABCDEF$/);
+  const invitationLink = page.getByRole('textbox', { name: '我的邀请链接' });
+  const copyInvitation = page.getByRole('button', { name: '复制邀请链接', exact: true });
+  const checkLinkCopyPosition = async () => {
+    const link = await invitationLink.boundingBox();
+    const copy = await copyInvitation.boundingBox();
+    assert.ok(copy.x >= link.x + link.width, 'copy belongs to the right of the link');
+    assert.ok(copy.y < link.y + link.height && copy.y + copy.height > link.y, 'link and copy must share a row');
+    await copyInvitation.click();
+    assert.equal(await page.evaluate(() => window.__referralClipboard), await invitationLink.inputValue());
+  };
+  const checkQRCode = async () => {
+    await page.getByRole('button', { name: '二维码邀请链接', exact: true }).click();
+    const qr = page.getByRole('img', { name: '邀请二维码', exact: true });
+    await qr.waitFor();
+    await page.waitForFunction(() => {
+      const element = document.querySelector('[aria-label="邀请二维码"]');
+      if (!element) return false;
+      const box = element.getBoundingClientRect();
+      return box.width >= 207 && box.x >= -1 && box.right <= innerWidth + 1;
+    });
+    assert.equal(await qr.locator('svg').count(), 1);
+    const bounds = await qr.boundingBox();
+    assert.ok(bounds.width >= 207 && bounds.x >= -1 &&
+      bounds.x + bounds.width <= page.viewportSize().width + 1,
+      `QR must remain readable and inside the viewport: ${JSON.stringify(bounds)}`);
+    await page.screenshot({ path: `/tmp/libtv-referral-qr-${page.viewportSize().width}.png`, fullPage: true });
+    // The popover must sit above the profile and remain dismissible without closing it.
+    assert.ok(await qr.evaluate(el => Number(getComputedStyle(el.closest('.ant-popover')).zIndex) > 1000));
+    await page.getByRole('button', { name: '二维码邀请链接', exact: true }).click();
+    await qr.waitFor({ state: 'hidden' });
+  };
+  await checkLinkCopyPosition();
+  await checkQRCode();
   const profile = page.getByRole('dialog', { name: '个人中心', exact: true });
   const profileBox = await profile.boundingBox();
   const detailsBox = await page.getByRole('region', { name: '个人资料' }).boundingBox();
@@ -72,6 +111,8 @@ try {
   const mobileInvite = await page.getByRole('region', { name: '我的推荐码', exact: true }).boundingBox();
   assert.ok(mobileInvite.y > mobileDetails.y + mobileDetails.height - 1);
   assert.ok(await profile.evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+  await checkLinkCopyPosition();
+  await checkQRCode();
   await page.getByRole('button', { name: '我的邀请统计', exact: true }).scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: '我的邀请统计', exact: true }).click();
   await personalMetrics.getByText('¥45.00', { exact: true }).waitFor();
@@ -97,5 +138,6 @@ try {
   assert.equal(submitted.referralCode, row.referral_code);
   assert.equal(submitted.channel, 'dianxin');
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(JSON.stringify({ ok: true, dashboard: true, inviteeDetails: true, profile: true, registrationAttribution: true, errors }));
+  console.log(JSON.stringify({ ok: true, dashboard: true, inviteeDetails: true, profile: true,
+    invitationQR: true, linkCopy: true, registrationAttribution: true, errors }));
 } finally { await browser.close(); }

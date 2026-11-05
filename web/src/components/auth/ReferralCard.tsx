@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { App, Button, Modal, Spin } from 'antd';
-import { CopyOutlined, TeamOutlined, BarChartOutlined } from '@ant-design/icons';
+import { App, Button, Modal, Popover, QRCode, Spin } from 'antd';
+import { CopyOutlined, QrcodeOutlined, TeamOutlined, BarChartOutlined } from '@ant-design/icons';
 import { referralApi, type MyReferralStats } from '@/services/referralApi';
 import { referralLink } from '@/utils/referral';
 import { Z } from '@/utils/zLayers';
@@ -43,10 +43,24 @@ export function ReferralCard() {
             className="min-w-0 flex-1 rounded-lg border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-2 font-mono text-[13px] tracking-wider" />
           <Button size="small" icon={<CopyOutlined />} onClick={() => void copy(data.code)}>复制推荐码</Button>
         </div>
-        <input readOnly value={referralLink(data.code)} aria-label="我的邀请链接" onFocus={e => e.target.select()}
-          className="mb-2 w-full rounded-lg border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-2 text-[11px] text-[var(--dv-text-3)]" />
+        <div className="referral-link-row">
+          <input readOnly value={referralLink(data.code)} aria-label="我的邀请链接" onFocus={e => e.target.select()}
+            className="min-w-0 flex-1 rounded-lg border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-2 text-[11px] text-[var(--dv-text-3)]" />
+          <Button size="small" aria-label="复制邀请链接" icon={<CopyOutlined />}
+            onClick={() => void copy(referralLink(data.code))}>复制</Button>
+        </div>
         <div className="flex gap-2">
-          <Button className="flex-1" size="small" onClick={() => void copy(referralLink(data.code))}>复制邀请链接</Button>
+          <Popover trigger="click" placement="top" zIndex={Z.modalTopAbove}
+            title="二维码邀请链接"
+            content={<div className="referral-qr-content">
+              <div role="img" aria-label="邀请二维码">
+                <QRCode type="svg" value={referralLink(data.code)} size={208}
+                  color="#111827" bgColor="#fff" marginSize={4} bordered={false} />
+              </div>
+              <p>好友扫码即可通过你的邀请链接注册</p>
+            </div>}>
+            <Button className="flex-1" size="small" aria-label="二维码邀请链接" icon={<QrcodeOutlined />}>二维码邀请链接</Button>
+          </Popover>
           <Button className="flex-1" size="small" aria-label="我的邀请统计" icon={<BarChartOutlined />} onClick={() => void loadStats()}>我的邀请统计</Button>
         </div>
       </> : failed ? <Button size="small" onClick={() => setAttempt(v => v + 1)}>重新读取推荐码</Button>
