@@ -389,9 +389,9 @@ export default function VideoDetailPage() {
         className={`absolute right-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-6 z-30 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}
       >
         {/* 作者头像 */}
-        <div className="flex flex-col items-center">
+        {videoInfo.author && <div className="flex flex-col items-center">
           <Avatar size={48} src={videoInfo.authorAvatar || undefined} style={{ border: '2px solid white' }} />
-        </div>
+        </div>}
 
         {/* 点赞 */}
         <div className="flex flex-col items-center">

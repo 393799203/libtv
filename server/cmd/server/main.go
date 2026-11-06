@@ -592,6 +592,7 @@ func main() {
 
 		// 项目 + 画布
 		projects := api.Group("/projects")
+		projects.Use(middleware.RequireProjectOwner(projectRepo))
 		{
 			projects.POST("", projectHandler.Create)
 			projects.GET("", projectHandler.List)

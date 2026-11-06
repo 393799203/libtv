@@ -50,4 +50,5 @@ server/vendor/
 !server/internal/engine/image_references_test.go
 !server/internal/engine/video_references_test.go
 !server/internal/llm/video_references_test.go
+!server/internal/middleware/project_owner_test.go
 !web/tests/*.test.ts
