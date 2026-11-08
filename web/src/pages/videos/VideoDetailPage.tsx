@@ -401,7 +401,11 @@ export default function VideoDetailPage() {
       >
         {/* 作者头像 */}
         {videoInfo.author && <div className="flex flex-col items-center">
-          <Avatar size={48} src={videoInfo.authorAvatar || undefined} style={{ border: '2px solid white' }} />
+          <Avatar size={48} src={videoInfo.authorAvatar || undefined}
+            alt={`${videoInfo.author}的头像`}
+            style={{ border: '2px solid white', backgroundColor: '#303b42', color: '#e5edf0' }}>
+            {Array.from(videoInfo.author.trim())[0] || '用'}
+          </Avatar>
         </div>}
 
         {/* 点赞 */}
