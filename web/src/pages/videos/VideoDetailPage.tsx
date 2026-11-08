@@ -137,6 +137,24 @@ export default function VideoDetailPage() {
     }
   };
 
+  // 进入详情后直接播放；浏览器禁止有声自动播放时，退到静音播放。
+  // 只在视频地址变化时尝试，缓冲恢复不会覆盖用户主动暂停。
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoInfo?.videoUrl) return;
+    let cancelled = false;
+    void video.play().catch(async (error: unknown) => {
+      if (cancelled || !(error instanceof DOMException) || error.name !== 'NotAllowedError') return;
+      video.muted = true;
+      setIsMuted(true);
+      try { await video.play(); } catch { /* 保留手动播放入口。 */ }
+    });
+    return () => {
+      cancelled = true;
+      video.pause();
+    };
+  }, [videoInfo?.videoUrl]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoInfo?.videoUrl) return;
@@ -331,6 +349,7 @@ export default function VideoDetailPage() {
             ref={videoRef}
             src={videoInfo.videoUrl}
             className="w-full h-full object-contain"
+            playsInline
             loop
             preload="metadata"
             onTimeUpdate={handleTimeUpdate}
