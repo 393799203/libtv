@@ -90,7 +90,7 @@ export default function MyProjectsPage() {
 
   return (
     <div className="min-h-screen page-bg pb-20">
-      <div className="max-w-7xl mx-auto px-6 pt-8">
+      <div className="library-shell pt-8 md:pt-10">
         {/* 标题栏 */}
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -118,7 +118,7 @@ export default function MyProjectsPage() {
         <Spin spinning={loading && projects.length > 0}>
           <div style={{ minHeight: '240px' }}>
             {loading && !projects.length ? (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-4" role="status" aria-label="正在加载项目">
+              <div className="library-project-grid" role="status" aria-label="正在加载项目">
                 {Array.from({ length: 5 }, (_, i) => <div key={i} className="project-card-skeleton" />)}
               </div>
             ) : !loadError && projects.length === 0 ? (
@@ -126,7 +126,7 @@ export default function MyProjectsPage() {
                 hint="在画布中组织故事、分镜和素材，保存后可随时回来继续创作。"
                 action={<Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={() => void handleCreateProject()}>新建项目</Button>} />
             ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 md:gap-4">
+              <div className="library-project-grid">
                 {/* 有项目时保持内容网格；空状态提供就地的新建操作。 */}
                 {projects.map((project) => (
                   <ProjectCard

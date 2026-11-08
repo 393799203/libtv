@@ -91,7 +91,6 @@ export default function VideoDetailPage() {
   const isPlayingRef = useRef(false);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
-  const closeLoginModal = useAuthStore((s) => s.closeLoginModal);
 
   // 从 Show API 获取视频详情
   useEffect(() => {
@@ -127,13 +126,6 @@ export default function VideoDetailPage() {
       });
     }
   }, [id, isAuthenticated]);
-
-  // 组件卸载时关闭登录弹窗
-  useEffect(() => {
-    return () => {
-      closeLoginModal();
-    };
-  }, [closeLoginModal]);
 
   const togglePlay = () => {
     if (videoRef.current) {

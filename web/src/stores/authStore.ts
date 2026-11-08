@@ -8,7 +8,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isInitialized: boolean;
 
-  // 登录弹窗状态
+  // 登录页面跳转请求；保留原入口名称，供页面和 API 失效处理统一调用。
   showLoginModal: boolean;
   authMode: 'login' | 'register';
   // 是否正在初始化（用于区分正常请求401 vs 初始化验证401）

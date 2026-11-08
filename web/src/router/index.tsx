@@ -21,6 +21,7 @@ const PrevizEditor = lazy(() => import('@/pages/previz/PrevizEditor'));
 const ForumListPage = lazy(() => import('@/pages/forum/ForumListPage'));
 const ForumPostPage = lazy(() => import('@/pages/forum/ForumPostPage'));
 const ResetPasswordPage = lazy(() => import('@/pages/auth/ResetPasswordPage'));
+const AuthPage = lazy(() => import('@/pages/auth/AuthPage'));
 
 const Loading = () => (
   <div className="w-full h-screen flex items-center justify-center">
@@ -47,6 +48,14 @@ export const routes: RouteObject[] = [
       </>
     ),
     children: [
+      {
+        path: 'login',
+        element: <LazyLoad><AuthPage key="login" /></LazyLoad>,
+      },
+      {
+        path: 'register',
+        element: <LazyLoad><AuthPage key="register" /></LazyLoad>,
+      },
       // 视频详情页（全屏，公开，无需登录）
       {
         path: 'videos/:id',

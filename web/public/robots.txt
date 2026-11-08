@@ -1,0 +1,23 @@
+# 漫蛙 · AI 视频创作工作台
+# https://manwa.yunqueai.cloud
+#
+# 可收录：首页（公开作品列表）/videos/:id、论坛 /forum 与 /forum/:id
+# 不可收录：需要登录的应用页（对爬虫没有任何可读内容）
+
+User-agent: *
+Allow: /
+
+# 应用内页：需登录，收录了也只是一个空壳
+Disallow: /projects
+Disallow: /project/
+Disallow: /ai-models
+Disallow: /admin
+Disallow: /login
+Disallow: /register
+
+# 接口与媒体文件：不产生搜索价值，还把抓取预算浪费在二进制上
+Disallow: /api/
+Disallow: /uploads/
+Disallow: /ws
+
+Sitemap: https://manwa.yunqueai.cloud/sitemap.xml

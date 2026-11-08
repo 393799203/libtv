@@ -53,8 +53,9 @@ export function ReferralCard() {
           <Popover trigger="click" placement="top" zIndex={Z.modalTopAbove}
             title="二维码邀请链接"
             content={<div className="referral-qr-content">
-              <div role="img" aria-label="邀请二维码">
+              <div role="img" aria-label="带漫蛙标志的邀请二维码">
                 <QRCode type="svg" value={referralLink(data.code)} size={208}
+                  icon="/logo-mark-color.svg" iconSize={40} errorLevel="H"
                   color="#111827" bgColor="#fff" marginSize={4} bordered={false} />
               </div>
               <p>好友扫码即可通过你的邀请链接注册</p>

@@ -32,6 +32,8 @@ const { Title, Text } = Typography;
 
 // TV Show 分类（从 API 加载，初始含"全部"选项）
 const ALL_CATEGORY = { key: 'all', label: '全部' };
+const GALLERY_PRELOAD_MARGIN = '800px 0px';
+const VIDEO_PREVIEW_DELAY_MS = 2000;
 
 const formatDuration = (seconds: number) => {
   if (seconds === 0) return '';
@@ -50,16 +52,70 @@ const VideoCard = memo(function VideoCard({
 }: {
   item: VideoListItem;
   onNavigate: (id: string) => void;
-  isVisible: boolean; // 是否在可视区域
+  isVisible: boolean; // 是否已进入封面预加载区
 }) {
-  // 描述 tooltip 跟随鼠标：
+  // 描述 tooltip 仅在标题上触发并跟随鼠标：
   // - 用 portal 挂到 body，否则会被外层滚动容器（overflow: auto）裁掉
   // - 位置直接写 DOM 的 transform，不走 state：鼠标一移动就 setState 会让整卡高频重渲染
   const [tipOn, setTipOn] = useState(false);
   const [failedThumbnail, setFailedThumbnail] = useState('');
+  const [previewActive, setPreviewActive] = useState(false);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewPending, setPreviewPending] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewTimerRef = useRef<number | null>(null);
+  const hoveredRef = useRef(false);
   const tipRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<number | null>(null);
   const posRef = useRef({ x: 0, y: 0 });
+
+  const stopPreview = useCallback(() => {
+    if (previewTimerRef.current !== null) {
+      window.clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    videoRef.current?.pause();
+    setPreviewPending(false);
+    setPreviewActive(false);
+    setPreviewPlaying(false);
+  }, []);
+
+  useEffect(() => {
+    if (!previewActive || !videoRef.current) return;
+    const video = videoRef.current;
+    let cancelled = false;
+    video.muted = true;
+    void video.play().catch(() => {
+      if (!cancelled) stopPreview();
+    });
+    return () => {
+      cancelled = true;
+      video.pause();
+      // 释放加载中的媒体请求，移开或切换页面后不继续下载。
+      video.removeAttribute('src');
+      video.load();
+    };
+  }, [previewActive, item.videoUrl, stopPreview]);
+
+  useEffect(() => {
+    const cancelHover = () => {
+      if (!hoveredRef.current) return;
+      hoveredRef.current = false;
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      setTipOn(false);
+      stopPreview();
+    };
+    const handleVisibility = () => {
+      if (document.hidden) cancelHover();
+    };
+    window.addEventListener('blur', cancelHover);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('blur', cancelHover);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+    };
+  }, [stopPreview]);
 
   const placeTip = (x: number, y: number) => {
     const el = tipRef.current;
@@ -83,19 +139,37 @@ const VideoCard = memo(function VideoCard({
   }, [tipOn]);
   useEffect(() => () => { if (timerRef.current) window.clearTimeout(timerRef.current); }, []);
 
-  const handleEnter = (e: React.MouseEvent) => {
+  const handleEnter = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'mouse') return;
+    hoveredRef.current = true;
+    stopPreview();
+    if (item.videoUrl && !document.hidden && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setPreviewPending(true);
+      previewTimerRef.current = window.setTimeout(() => {
+        previewTimerRef.current = null;
+        if (hoveredRef.current && !document.hidden) setPreviewActive(true);
+      }, VIDEO_PREVIEW_DELAY_MS);
+    }
+  };
+  const handleTitleEnter = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'mouse' || !item.description) return;
     posRef.current = { x: e.clientX, y: e.clientY };
     if (timerRef.current) window.clearTimeout(timerRef.current);
-    // 轻微延迟：鼠标扫过一排卡片时不会闪出一串框
+    // 扫过标题时不立即弹出描述；离开标题就取消。
     timerRef.current = window.setTimeout(() => setTipOn(true), 120);
   };
-  const handleMove = (e: React.MouseEvent) => {
+  const handleTitleMove = (e: React.PointerEvent) => {
     posRef.current = { x: e.clientX, y: e.clientY };
     if (tipOn) placeTip(e.clientX, e.clientY);
   };
-  const handleLeave = () => {
+  const handleTitleLeave = () => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
     setTipOn(false);
+  };
+  const handleLeave = () => {
+    hoveredRef.current = false;
+    handleTitleLeave();
+    stopPreview();
   };
 
   // 只在可见时渲染完整内容，否则只渲染占位符（占位符与卡片同为 16:9，避免布局偏移）
@@ -114,20 +188,32 @@ const VideoCard = memo(function VideoCard({
       style={{
         contain: 'layout style',
       }}
-      onClick={() => onNavigate(item.id)}
-      onMouseEnter={handleEnter}
-      onMouseMove={handleMove}
-      onMouseLeave={handleLeave}
+      onClick={() => { handleLeave(); onNavigate(item.id); }}
+      onPointerEnter={handleEnter}
+      onPointerLeave={handleLeave}
+      data-preview-playing={previewPlaying}
     >
       <div className="video-card-preview">
       {item.thumbnailUrl && item.thumbnailUrl !== failedThumbnail ? <img
         src={item.thumbnailUrl}
         alt=""
         className="video-card-media"
-        loading="lazy"
+        loading="eager" // 已由卡片观察器控制预加载范围，挂载后立即请求，避免二次懒加载
         decoding="async" // 异步解码，避免阻塞主线程
         onError={() => setFailedThumbnail(item.thumbnailUrl)}
       /> : <div className="video-card-fallback"><VideoCameraOutlined /><span>封面暂不可用</span></div>}
+      {previewActive && <video
+        ref={videoRef}
+        src={item.videoUrl}
+        className="video-card-hover-preview"
+        muted
+        loop
+        playsInline
+        preload="none"
+        aria-hidden="true"
+        onPlaying={() => { setPreviewPending(false); setPreviewPlaying(true); }}
+        onError={stopPreview}
+      />}
       {/* 分类与标签：左上角 */}
       {(item.category || (item.tags?.length || 0) > 0) && (
         <div className="video-card-tags">
@@ -142,13 +228,22 @@ const VideoCard = memo(function VideoCard({
       {/* 播放提示：hover 时收拢暗幕并点亮，键盘聚焦同样可见 */}
       <div className="video-card-overlay absolute inset-0 z-10 flex items-center justify-center bg-black/0 opacity-0">
         <span className="video-card-play flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white">
+          {previewPending && <svg className="video-card-wait-ring" viewBox="0 0 56 56"
+            fill="none" strokeWidth="3" aria-hidden="true" focusable="false">
+            <circle className="video-card-wait-track" cx="28" cy="28" r="25" />
+            <circle className="video-card-wait-progress" cx="28" cy="28" r="25" pathLength="100"
+              style={{ animationDuration: `${VIDEO_PREVIEW_DELAY_MS}ms` }} />
+          </svg>}
           <PlayCircleOutlined style={{ fontSize: '38px' }} />
         </span>
       </div>
       {item.duration > 0 && <span className="video-card-duration">{formatDuration(item.duration)}</span>}
       </div>
       <div className="video-card-caption">
-        <p className="video-card-title" title={item.title}>
+        <p className="video-card-title" title={item.description ? undefined : item.title}
+          onPointerEnter={handleTitleEnter}
+          onPointerMove={handleTitleMove}
+          onPointerLeave={handleTitleLeave}>
           {item.title}
         </p>
         <div className="video-card-meta">
@@ -165,11 +260,11 @@ const VideoCard = memo(function VideoCard({
         </div>
       </div>
 
-      {/* 描述 tooltip：挂在 body 上（不受卡片与外层滚动容器裁剪），跟随鼠标；
-          pointer-events-none 保证它不抢下面卡片的 hover。只有填了描述的视频才提示。 */}
+      {/* 描述只在标题上提示；挂在 body 上避免裁剪，且不抢标题的 hover。 */}
       {tipOn && item.description && createPortal(
         <div
           ref={tipRef}
+          role="tooltip"
           className="pointer-events-none fixed left-0 top-0 will-change-transform"
           style={{ zIndex: Z.canvasFloat }}
         >
@@ -183,8 +278,28 @@ const VideoCard = memo(function VideoCard({
   );
 });
 
-// Intersection Observer Hook - 检测元素是否在可视区域
-function useIntersectionObserver(threshold = 0.1) {
+// 稳定每张卡片的 ref 和 props，追加数据或其他卡片进入预加载区时不重绘旧卡片。
+const VideoGridItem = memo(function VideoGridItem({
+  item, index, onNavigate, isVisible, setItemRef,
+}: {
+  item: VideoListItem;
+  index: number;
+  onNavigate: (id: string) => void;
+  isVisible: boolean;
+  setItemRef: (index: number, element: HTMLDivElement | null) => void;
+}) {
+  const attachRef = useCallback((element: HTMLDivElement | null) => {
+    setItemRef(index, element);
+  }, [index, setItemRef]);
+  return (
+    <div ref={attachRef} data-index={index} className="min-w-0">
+      <VideoCard item={item} onNavigate={onNavigate} isVisible={isVisible} />
+    </div>
+  );
+});
+
+// 提前约一屏准备封面；每张卡片只观察到首次进入预加载区。
+function useIntersectionObserver(sectionRef: React.RefObject<HTMLElement | null>) {
   const [visibleItems, setVisibleItems] = useState<Set<number>>(new Set());
   const observerRef = useRef<IntersectionObserver | null>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -196,6 +311,7 @@ function useIntersectionObserver(threshold = 0.1) {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             toAdd.push(Number(entry.target.getAttribute('data-index')));
+            observer.unobserve(entry.target);
           }
         });
         if (toAdd.length === 0) return;
@@ -208,8 +324,10 @@ function useIntersectionObserver(threshold = 0.1) {
         });
       },
       {
-        threshold,
-        rootMargin: '100px', // 提前100px开始渲染
+        // 页面在 main 内滚动，以它为根才能让预加载边距越过内容区的裁剪边界。
+        root: sectionRef.current?.closest('main') ?? null,
+        threshold: 0,
+        rootMargin: GALLERY_PRELOAD_MARGIN,
       }
     );
     observerRef.current = observer;
@@ -223,9 +341,11 @@ function useIntersectionObserver(threshold = 0.1) {
       observer.disconnect();
       observerRef.current = null;
     };
-  }, [threshold]); // observer 只创建一次，不依赖 visibleItems
+  }, [sectionRef]);
 
   const setItemRef = useCallback((index: number, el: HTMLDivElement | null) => {
+    const previous = itemRefs.current.get(index);
+    if (previous && previous !== el) observerRef.current?.unobserve(previous);
     if (el) {
       itemRefs.current.set(index, el);
       if (observerRef.current) {
@@ -238,7 +358,6 @@ function useIntersectionObserver(threshold = 0.1) {
 
   // 重置可见状态（切换标签时使用，避免旧索引残留）；可同时预标记前 seedCount 项为可见，避免占位符闪现一帧
   const resetVisibleItems = useCallback((seedCount = 0) => {
-    itemRefs.current.clear();
     setVisibleItems(new Set(Array.from({ length: seedCount }, (_, i) => i)));
   }, []);
 
@@ -264,8 +383,7 @@ export default function VideoListPage() {
   const [showCategories, setShowCategories] = useState<{ key: string; label: string }[]>([ALL_CATEGORY]);
   const [banners, setBanners] = useState<BannerItem[]>([]);
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
-  // 轮播容器宽度：卡片尺寸/位移本来写死 520×292 + translateX(450)，在 390px 手机视口下
-  // 相邻卡片会整块跑到屏幕外。这里按容器宽度换算，桌面端取原值不变。
+  // 按窗口宽度同步推荐卡片尺寸与位移：手机保留相邻卡片预览，大屏放大展示。
   const [bannerBoxW, setBannerBoxW] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth));
   const loadingBannersRef = useRef<Set<string>>(new Set()); // 用ref跟踪loading状态，不触发重渲染
   // 跟随窗口宽度更新轮播容器宽度（轮播是整宽容器，直接用 innerWidth）
@@ -280,6 +398,7 @@ export default function VideoListPage() {
   const [dragStartX, setDragStartX] = useState(0); // 拖拽起始X坐标
   const hasDraggedRef = useRef(false); // 是否发生了拖拽（用于区分点击和拖拽）
   const navigate = useNavigate();
+  const handleVideoNavigate = useCallback((id: string) => navigate(`/videos/${id}`), [navigate]);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -295,6 +414,10 @@ export default function VideoListPage() {
   };
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
+  const handleProjectNavigate = useCallback((id: string) => {
+    if (isAuthenticated) navigate(`/project/${id}`);
+    else openLoginModal();
+  }, [isAuthenticated, navigate, openLoginModal]);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -306,9 +429,11 @@ export default function VideoListPage() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const tvSectionRef = useRef<HTMLElement>(null);
   const loadSeqRef = useRef(0); // 请求序号：快速切换标签时使过期请求的响应作废，避免旧数据闪回列表
+  const loadMoreRequestRef = useRef<{ seq: number; page: number } | null>(null);
+  const loadedKeywordRef = useRef('');
 
   // Intersection Observer - 检测视频列表中哪些项在可视区域
-  const { visibleItems, setItemRef, resetVisibleItems } = useIntersectionObserver(0.05);
+  const { visibleItems, setItemRef, resetVisibleItems } = useIntersectionObserver(tvSectionRef);
 
   // Banner图片加载处理（使用ref，不触发重渲染）
   const handleBannerImageLoad = useCallback((bannerId: string) => {
@@ -403,6 +528,9 @@ export default function VideoListPage() {
   // 加载视频列表：从 shows API 获取（支持分类筛选 + 关键词后端搜索）
   const loadVideos = useCallback(async (keyword?: string) => {
     const seq = ++loadSeqRef.current;
+    loadMoreRequestRef.current = null;
+    loadedKeywordRef.current = keyword || '';
+    setLoadingMore(false);
     setVideosLoading(true);
     setVideosError(false);
     setCurrentPage(1);
@@ -431,7 +559,7 @@ export default function VideoListPage() {
       }));
       setTvShowVideos(list);
       // 判断是否还有更多数据
-      setHasMore(list.length >= PAGE_SIZE);
+      setHasMore(list.length > 0 && list.length < data.total);
       setVideosLoading(false);
     } catch {
       if (seq !== loadSeqRef.current) return;
@@ -444,14 +572,16 @@ export default function VideoListPage() {
 
   // 加载更多视频（无限滚动）
   const loadMoreVideos = useCallback(async () => {
-    if (loadingMore || !hasMore || videosLoading) return;
+    if (loadMoreRequestRef.current || searchTimerRef.current !== null || !hasMore || videosLoading) return;
     const seq = loadSeqRef.current;
-    setLoadingMore(true);
     const nextPage = currentPage + 1;
+    const request = { seq, page: nextPage };
+    loadMoreRequestRef.current = request;
+    setLoadingMore(true);
     try {
       const data = await showApi.list({
         category_id: activeCategory,
-        keyword: searchKeyword.trim() || undefined,
+        keyword: loadedKeywordRef.current || undefined,
         page: nextPage,
         page_size: PAGE_SIZE,
       });
@@ -473,14 +603,16 @@ export default function VideoListPage() {
       }));
       setTvShowVideos(prev => [...prev, ...newList]);
       setCurrentPage(nextPage);
-      // 如果返回的数据少于每页数量，说明没有更多了
-      setHasMore(newList.length >= PAGE_SIZE);
+      setHasMore(newList.length > 0 && nextPage * PAGE_SIZE < data.total);
     } catch {
       if (seq === loadSeqRef.current) setHasMore(false);
     } finally {
-      setLoadingMore(false);
+      if (loadMoreRequestRef.current === request) {
+        loadMoreRequestRef.current = null;
+        setLoadingMore(false);
+      }
     }
-  }, [currentPage, hasMore, loadingMore, videosLoading, activeCategory, searchKeyword]);
+  }, [currentPage, hasMore, videosLoading, activeCategory]);
 
   // 无限滚动检测器 - 监听哨兵元素进入视口
   useEffect(() => {
@@ -493,7 +625,7 @@ export default function VideoListPage() {
           loadMoreVideos();
         }
       },
-      { rootMargin: '200px' } // 提前200px触发加载
+      { root: tvSectionRef.current?.closest('main') ?? null, rootMargin: GALLERY_PRELOAD_MARGIN }
     );
 
     observer.observe(sentinel);
@@ -517,6 +649,7 @@ export default function VideoListPage() {
     setSearchKeyword(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
+      searchTimerRef.current = null;
       loadVideos(value.trim());
     }, 300);
   }, [loadVideos]);
@@ -642,7 +775,7 @@ export default function VideoListPage() {
           所以里面所有可点元素都必须自己声明 cursor-pointer —— 否则 hover 上去
           显示的是"抓手"，看不出能点（左右箭头、指示点都踩过这个）。 */}
       <div
-        className="home-recommendations tech-hero relative mb-6 h-64 w-full select-none overflow-hidden md:mb-8 md:h-[22rem]"
+        className="home-recommendations tech-hero relative w-full select-none overflow-hidden"
         role="region"
         aria-label="精选推荐"
         onMouseEnter={handleBannerMouseEnter}
@@ -688,11 +821,12 @@ export default function VideoListPage() {
               if (offset < -1 || offset > 1) return null;
               
               // 3D变换参数
-              // 移动端：卡片按容器宽度收缩（最多 84vw），位移同步收缩，保证前后两张卡片露在屏幕内；
-              // 桌面端（≥768px）保持原来的 520×292 / 位移 450 不变。
-              const bannerCardW = Math.round(Math.min(520, bannerBoxW * 0.84));
+              // 小屏保留相邻推荐预览；桌面缩小卡片，并限制展开距离，避免两侧贴边或被裁切。
+              const bannerCardW = Math.round(Math.min(620, Math.max(420, bannerBoxW * 0.35), bannerBoxW * 0.84));
               const bannerCardH = Math.round((bannerCardW * 292) / 520);
-              const bannerOffsetX = bannerBoxW < 768 ? Math.round(bannerCardW * 0.88) : 450;
+              const bannerOffsetX = Math.round(bannerBoxW < 768
+                ? bannerCardW * 0.88
+                : Math.min(bannerCardW * 0.8, (bannerBoxW - bannerCardW) / 2 - 32));
               const rotateY = -offset * 20; // 左右旋转角度（减小到30度）
               const translateX = offset * bannerOffsetX; // 左右平移距离
               const translateZ = offset === 0 ? 0 : -150; // 深度偏移
@@ -837,7 +971,7 @@ export default function VideoListPage() {
 
       {/* 最近项目（最多展示两行，超出走「我的项目」页）
           移动端（<768px）不提供这一板块：hidden 即不渲染占位，想看完整列表走「我的项目」页 */}
-      <section className="home-recent-projects hidden md:block max-w-7xl mx-auto px-6 mb-10" aria-labelledby="recent-projects-title">
+      <section className="home-recent-projects library-shell hidden md:block" aria-labelledby="recent-projects-title">
         <div className="mb-4 flex items-end justify-between">
           <div>
             <h2 id="recent-projects-title" className="library-section-title">最近项目</h2>
@@ -856,10 +990,10 @@ export default function VideoListPage() {
             </button>
           )}
         </div>
-        {/* 只显示两行（超过 19 个的走「我的项目」页），由 .recent-projects-grid 的
+        {/* 只显示两行，宽屏增加到六列；由 .recent-projects-grid 的
             媒体查询按断点把多余格子 display:none —— 不用 max-h + overflow-hidden 裁：
             裁切层会把卡片 hover 上移的那 2px 连同顶边/圆角、以及第二行的 hover 阴影一起切掉。 */}
-        <div className="recent-projects-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 md:gap-3">
+        <div className="recent-projects-grid library-project-grid">
           {/* 新建项目卡片 */}
           <CreateProjectCard onClick={handleCreateProject} loading={creatingProject} />
 
@@ -868,7 +1002,7 @@ export default function VideoListPage() {
             <ProjectCard
               key={project.id}
               project={project}
-              onNavigate={(id) => isAuthenticated ? navigate(`/project/${id}`) : openLoginModal()}
+              onNavigate={handleProjectNavigate}
               onDelete={handleDeleteProject}
             />
           ))}
@@ -877,7 +1011,7 @@ export default function VideoListPage() {
 
       {/* TV Show 分类 */}
       {/* 移动端提醒（<768px 才显示）：移动端没有进入画布的入口，这里说明创作请用 PC */}
-      <div className="md:hidden max-w-7xl mx-auto px-3 mb-3">
+      <div className="library-shell md:hidden mb-4">
         <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
           <DesktopOutlined className="mt-0.5 shrink-0" />
           <span>
@@ -886,11 +1020,11 @@ export default function VideoListPage() {
         </div>
       </div>
 
-      <section ref={tvSectionRef} className="home-gallery max-w-7xl mx-auto px-3 md:px-6 scroll-mt-4" aria-labelledby="gallery-title">
+      <section ref={tvSectionRef} className="home-gallery library-shell scroll-mt-4" aria-labelledby="gallery-title">
         <div className="mb-3 flex items-center gap-3">
           <h1 id="gallery-title" className="library-section-title">作品广场</h1>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4">
+        <div className="home-gallery-toolbar flex flex-col lg:flex-row lg:items-center gap-4 mb-6">
           <div className="flex items-center gap-2 flex-wrap flex-1">
             {showCategories.map((cat) => (
               <button
@@ -934,25 +1068,20 @@ export default function VideoListPage() {
         <Spin spinning={videosLoading && tvShowVideos.length > 0} tip={searchKeyword ? '正在搜索作品…' : '正在载入作品…'}>
           <div style={{ minHeight: '440px' }}>
             {videosLoading && tvShowVideos.length === 0 && (
-              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3" role="status" aria-label="正在加载作品">
+              <div className="home-video-grid" role="status" aria-label="正在加载作品">
                 {Array.from({ length: 8 }, (_, index) => <div key={index} className="video-card-placeholder" />)}
               </div>
             )}
-            {/* 缩略图间距收紧到 8px（原 16px）：无边框后 16px 会显得空 */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3">
+            <div className="home-video-grid">
             {videoListData.map((item, index) => (
-              <div
+              <VideoGridItem
                 key={item.id}
-                ref={(el) => setItemRef(index, el)}
-                data-index={index}
-                className="min-w-0"
-              >
-                <VideoCard
-                  item={item}
-                  onNavigate={(id) => navigate(`/videos/${id}`)}
-                  isVisible={visibleItems.has(index)} // 传递可见状态
-                />
-              </div>
+                item={item}
+                index={index}
+                onNavigate={handleVideoNavigate}
+                isVisible={visibleItems.has(index)}
+                setItemRef={setItemRef}
+              />
             ))}
             </div>
 

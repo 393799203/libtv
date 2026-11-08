@@ -10,7 +10,6 @@ import {
 } from '@ant-design/icons';
 import { BrandLogo } from '@/components/layout/BrandLogo';
 import { authApi } from '@/services/authApi';
-import { useAuthStore } from '@/stores/authStore';
 
 type ResetFormValues = { password: string; confirmPassword: string };
 
@@ -26,7 +25,6 @@ export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { message } = App.useApp();
-  const openLoginModal = useAuthStore((s) => s.openLoginModal);
   const [form] = Form.useForm<ResetFormValues>();
   const [loading, setLoading] = useState(false);
   /** 改密成功：切到成功态，引导去登录 */
@@ -53,8 +51,7 @@ export default function ResetPasswordPage() {
   };
 
   const goHomeAndLogin = () => {
-    navigate('/', { replace: true });
-    openLoginModal();
+    navigate('/login', { replace: true });
   };
 
   return (

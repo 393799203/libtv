@@ -1,6 +1,6 @@
 .theme-dark .site-header.tech-header {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  height: 60px; padding: 0 28px; line-height: normal; flex-shrink: 0;
+  height: 60px; padding: 0 clamp(16px, 1.5vw, 32px); line-height: normal; flex-shrink: 0;
   background: var(--dv-surface-1) !important; border-bottom: 1px solid var(--dv-border-1);
 }
 .site-header-main { display: flex; align-items: center; gap: 26px; min-width: 0; }

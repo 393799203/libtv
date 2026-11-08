@@ -573,8 +573,8 @@
    卡片 hover 的 translateY(-2px)、顶边圆角、第二行的 hover 阴影一起切了（看着像被切一刀）。
    改成按断点把多余的格子 display:none：容器完全不裁，位移和阴影都完整可见，
    可见结果仍是"正好两行"。
-   注意：下面每个断点的列数必须与 .recent-projects-grid 上的 grid-cols-* 保持一致
-   （2 / sm:3 / lg:4 / xl:5），改列数时要一起改 —— 两行能放 列数×2 个格子。 */
+   断点与 interface.css 的 .library-project-grid 保持一致；
+   两行能放列数×2个格子，1920px起六列。 */
 @media (max-width: 639.98px) {
   .recent-projects-grid > :nth-child(n + 5) { display: none; }   /* 2 列 → 4 个 */
 }
@@ -584,8 +584,11 @@
 @media (min-width: 1024px) and (max-width: 1279.98px) {
   .recent-projects-grid > :nth-child(n + 9) { display: none; }   /* 4 列 → 8 个 */
 }
-@media (min-width: 1280px) {
+@media (min-width: 1280px) and (max-width: 1919.98px) {
   .recent-projects-grid > :nth-child(n + 11) { display: none; }  /* 5 列 → 10 个 */
+}
+@media (min-width: 1920px) {
+  .recent-projects-grid > :nth-child(n + 13) { display: none; }  /* 6 列 → 12 个 */
 }
 
 

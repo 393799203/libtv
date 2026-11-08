@@ -1,3 +1,33 @@
+/* Browsing surfaces share a fluid width; reading pages keep their own measure. */
+:root {
+  --library-max-width: 1920px;
+  --library-gutter: clamp(16px, 3vw, 64px);
+  --library-grid-gap: clamp(12px, 1vw, 20px);
+}
+.library-shell {
+  width: 100%;
+  max-width: var(--library-max-width);
+  margin-inline: auto;
+  padding-inline: var(--library-gutter);
+}
+.library-project-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--library-grid-gap);
+}
+@media (min-width: 640px) {
+  .library-project-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .library-project-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .library-project-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-width: 1920px) {
+  .library-project-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
 /* Shared interaction cues use the existing dark-theme palette. */
 .theme-dark ::selection { color: var(--dv-text-1); background: #185365; }
 .theme-dark :is(input,textarea,[contenteditable="true"]) { caret-color: var(--dv-cyan); }

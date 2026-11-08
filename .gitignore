@@ -7,6 +7,15 @@ server/*.out
 # ---- Node / Vite ----
 other
 public
+# Ship authentication media, invitation branding and SEO exclusions.
+!web/public/
+web/public/*
+!web/public/robots.txt
+!web/public/logo-mark-color.svg
+!web/public/auth/
+web/public/auth/*
+!web/public/auth/auth-town-7700299900935884095.mp4
+!web/public/auth/auth-town-7700299900935884095.jpg
 web/node_modules/
 web/dist/
 web/.vite/
