@@ -22,6 +22,18 @@ type canvasRepo struct {
 	db *gorm.DB
 }
 
+type generationStateUpdatesKey struct{}
+
+// WithGenerationStateUpdates 只有服务端生成结果/看门狗可以更新指定节点的终态。
+// 浏览器的整图保存不能把已交付的成功结果降回旧 failed/running。
+func WithGenerationStateUpdates(ctx context.Context, nodeIDs ...string) context.Context {
+	ids := make(map[string]bool, len(nodeIDs))
+	for _, id := range nodeIDs {
+		ids[id] = true
+	}
+	return context.WithValue(ctx, generationStateUpdatesKey{}, ids)
+}
+
 func NewCanvasRepo(db *gorm.DB) CanvasRepo {
 	return &canvasRepo{db: db}
 }
@@ -36,7 +48,7 @@ func (r *canvasRepo) FindByProjectID(ctx context.Context, projectID string) (*mo
 
 // Save 保存画布内容。
 //
-// 两件事必须一起做，否则画布会出现「产物被旧快照覆盖」这类事故：
+// 产物、状态及并发写入都必须保护，否则旧快照会覆盖已交付的事实：
 //
 //  1. **产物字段只增不减**（mergeStickyProducts）：即将保存的内容里某个节点缺了
 //     imageUrl/videoUrl/thumbUrl/imageUrls/content，而磁盘上已有值，则保留磁盘的值。
@@ -47,6 +59,8 @@ func (r *canvasRepo) FindByProjectID(ctx context.Context, projectID string) (*mo
 //  2. **版本乐观锁 + 冲突重试**：并发写入（前端保存 vs 引擎逐节点落库 vs 看门狗收口）
 //     谁都不该整块覆盖谁。带 version 条件更新，冲突就重新读一次再合并重试
 //     （合并是幂等的，重试一定收敛）。
+//
+//  3. 已成功的状态不能被普通整图保存降级；新任务的真实失败由服务端定点写入。
 func (r *canvasRepo) Save(ctx context.Context, canvas *model.Canvas) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -70,6 +84,8 @@ func (r *canvasRepo) Save(ctx context.Context, canvas *model.Canvas) error {
 		// 逐节点落库 / 看门狗）都经过这里，所以在这一层剥最省事也最可靠。
 		content := stripTransientNodeFields(canvas.Content)
 		content = mergeStickyProducts(existing.Content, content)
+		allowed, _ := ctx.Value(generationStateUpdatesKey{}).(map[string]bool)
+		content = preserveDeliveredState(existing.Content, content, allowed)
 		canvas.Content = content
 		canvas.ID = existing.ID
 		canvas.Version = existing.Version + 1
@@ -92,6 +108,63 @@ func (r *canvasRepo) Save(ctx context.Context, canvas *model.Canvas) error {
 		lastErr = fmt.Errorf("canvas save conflict: project_id=%s", canvas.ProjectID)
 	}
 	return lastErr
+}
+
+// preserveDeliveredState 保留成功终态，真实的新一次失败必须由服务端明确授权写入。
+// 不凭「存在视频」判成功：新一次生成确实失败时仍保留旧视频及真实失败原因。
+func preserveDeliveredState(oldRaw, newRaw datatypes.JSON, allowed map[string]bool) datatypes.JSON {
+	oldNodes := nodeDataByID(oldRaw)
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(newRaw, &doc) != nil {
+		return newRaw
+	}
+	var nodes []map[string]json.RawMessage
+	if json.Unmarshal(doc["nodes"], &nodes) != nil {
+		return newRaw
+	}
+	changed := false
+	for _, node := range nodes {
+		var id string
+		_ = json.Unmarshal(node["id"], &id)
+		if allowed[id] {
+			continue
+		}
+		old := oldNodes[id]
+		var oldStatus string
+		_ = json.Unmarshal(old["status"], &oldStatus)
+		if oldStatus != "success" {
+			continue
+		}
+		var data map[string]json.RawMessage
+		if json.Unmarshal(node["data"], &data) != nil || data == nil {
+			continue
+		}
+		var status string
+		_ = json.Unmarshal(data["status"], &status)
+		if status == "success" && len(data["error"]) > 0 {
+			delete(data, "error")
+			node["data"], _ = json.Marshal(data)
+			changed = true
+			continue
+		}
+		if status != "failed" && status != "running" && status != "pending" {
+			continue
+		}
+		data["status"] = json.RawMessage(`"success"`)
+		delete(data, "error")
+		delete(data, "progressMessage")
+		node["data"], _ = json.Marshal(data)
+		changed = true
+	}
+	if !changed {
+		return newRaw
+	}
+	doc["nodes"], _ = json.Marshal(nodes)
+	result, err := json.Marshal(doc)
+	if err != nil {
+		return newRaw
+	}
+	return datatypes.JSON(result)
 }
 
 // productFields 画布节点上「一旦有值就不该被抹掉」的产物字段。

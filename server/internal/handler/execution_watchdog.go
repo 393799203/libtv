@@ -11,6 +11,7 @@ import (
 	"libtv/internal/engine"
 	"libtv/internal/llm"
 	"libtv/internal/model"
+	"libtv/internal/repository"
 	"libtv/internal/service"
 
 	"gorm.io/datatypes"
@@ -348,7 +349,7 @@ func (h *WorkflowHandler) reconcileCanvasNodes(ctx context.Context, projectID st
 		return
 	}
 	canvas.Content = datatypes.JSON(updated)
-	if err := h.canvasRepo.Save(ctx, canvas); err != nil {
+	if err := h.canvasRepo.Save(repository.WithGenerationStateUpdates(ctx, nodeIDs...), canvas); err != nil {
 		log.Printf("[Watchdog] ⚠️ 画布节点修正落库失败: projectID=%s err=%v", projectID, err)
 		return
 	}

@@ -55,9 +55,12 @@ server/vendor/
 !server/internal/service/referral_service_test.go
 !server/internal/llm/script_test.go
 !server/internal/repository/execution_repo_test.go
+!server/internal/repository/canvas_generation_state_test.go
+!server/internal/handler/node_output_clear_test.go
 !server/internal/engine/script_duration_test.go
 !server/internal/engine/image_references_test.go
 !server/internal/engine/video_references_test.go
+!server/internal/engine/execution_outputs_test.go
 !server/internal/llm/video_references_test.go
 !server/internal/middleware/project_owner_test.go
 !web/tests/*.test.ts

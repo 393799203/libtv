@@ -17,7 +17,7 @@ import { workflowApi } from '@/services/workflowApi';
  *   - 成功终态要回查后端最新节点数据补齐（真的没有产物就回到 idle，让用户能再点一次，
  *     停在 running 只会永久转圈且按钮不可用）。
  *
- * @param nodeIds 只传当前仍处于 running/pending 的节点（调用方先筛一遍）
+ * @param nodeIds 本执行需要核对的节点；成功收尾也包含残留 failed 的节点。
  */
 export async function reconcileNodesOnTerminal(
   projectId: string,
@@ -27,10 +27,19 @@ export async function reconcileNodesOnTerminal(
   errorMsg?: string,
 ): Promise<void> {
   const execStore = useExecutionStore.getState();
+  if (useCanvasStore.getState().projectId !== projectId) {
+    execStore.removeActiveStream(executionId);
+    return;
+  }
+  const belongsToNewerRun = (id: string) =>
+    useExecutionStore.getState().activeStreams.some(stream =>
+      stream.projectId === projectId && Number(stream.executionId) > Number(executionId) &&
+      (stream.nodeId === id || stream.nodeIds?.includes(id)));
 
   if (finalStatus === 'failed') {
     const store = useCanvasStore.getState();
     nodeIds.forEach((id) => {
+      if (belongsToNewerRun(id)) return;
       // transient：失败没有产物、画布内容没变，不该占一格撤销；
       // 成功分支（下面）仍然记录 —— 那一格正是"生成后"的内容态。
       store.updateNodeData(id, {
@@ -46,7 +55,19 @@ export async function reconcileNodesOnTerminal(
         const nodeData = (resp as unknown as { node_data?: Record<string, unknown> } | undefined)
           ?.node_data;
         const cur = useCanvasStore.getState();
-        if (nodeData) {
+        if (cur.projectId !== projectId ||
+          !pendingNodeIdsOf([id], true, executionId, projectId).includes(id)) continue;
+        const hasResult = nodeData && (
+          nodeData.videoUrl || nodeData.imageUrl || nodeData.audioUrl ||
+          nodeData.content || nodeData.scriptContent ||
+          (Array.isArray(nodeData.imageUrls) && nodeData.imageUrls.length > 0) ||
+          (Array.isArray(nodeData.shots) && nodeData.shots.length > 0)
+        );
+        if (nodeData?.status === 'failed') {
+          // 旧执行的成功查询不能抹去后来一次真正失败的结果。
+          continue;
+        }
+        if (nodeData && hasResult) {
           cur.updateNodeData(id, {
             ...nodeData,
             status: 'success',
@@ -60,33 +81,51 @@ export async function reconcileNodesOnTerminal(
         }
       } catch (e) {
         console.warn('[Terminal] 回查节点最新数据失败，置回 idle:', id, e);
-        useCanvasStore.getState().updateNodeStatus(id, 'idle');
+        if (useCanvasStore.getState().projectId === projectId && !belongsToNewerRun(id)) {
+          useCanvasStore.getState().updateNodeStatus(id, 'idle');
+        }
       }
     }
   }
 
   // 同步执行级状态：否则 generatingNodeId 不会清除，生成按钮永久停在「生成中…」且重试被拦
   nodeIds.forEach((id) => {
+    if (useCanvasStore.getState().projectId !== projectId || belongsToNewerRun(id)) return;
+    const actual = useCanvasStore.getState().nodes.find(n => n.id === id)?.data.status;
+    const status = actual === 'failed' ? 'failed' : finalStatus;
     execStore.updateNodeExecution(id, {
-      status: finalStatus,
-      progress: finalStatus === 'success' ? 100 : 0,
+      status,
+      progress: status === 'success' ? 100 : 0,
     });
   });
-  execStore.setExecutionStatus(finalStatus === 'success' ? 'completed' : 'failed');
-  execStore.setGeneratingNodeId(null);
   execStore.removeActiveStream(executionId);
-  execStore.setLastError(null);
+  if (!useExecutionStore.getState().activeStreams.some(s => s.projectId === projectId)) {
+    execStore.setExecutionStatus(finalStatus === 'success' ? 'completed' : 'failed');
+    execStore.setGeneratingNodeId(null);
+    execStore.setLastError(null);
+  }
 }
 
-/** 筛出画布上仍处于 running/pending 的指定节点（终态收口只处理这些） */
-export function pendingNodeIdsOf(nodeIds: Iterable<string>): string[] {
+/** 成功终态同时核对残留 failed；任何时候都不触碰较新的重试。 */
+export function pendingNodeIdsOf(
+  nodeIds: Iterable<string>,
+  includeFailed = false,
+  executionId?: string | number,
+  projectId?: string,
+): string[] {
+  if (projectId && useCanvasStore.getState().projectId !== projectId) return [];
   const nodes = useCanvasStore.getState().nodes;
   const byId = new Map(nodes.map((n) => [n.id, n.data.status]));
   const out: string[] = [];
   // 用 for...of 而不是 forEach：入参是 Iterable<string>，没有 forEach 方法
   for (const id of nodeIds) {
+    // 老执行的收尾不能把同节点较新的重试任务提前标成成功。
+    const newerRun = useExecutionStore.getState().activeStreams.some(stream =>
+      stream.projectId === projectId && Number(stream.executionId) > Number(executionId) &&
+      (stream.nodeId === id || stream.nodeIds?.includes(id)));
+    if (newerRun) continue;
     const s = byId.get(id);
-    if (s === 'running' || s === 'pending') out.push(id);
+    if (s === 'running' || s === 'pending' || (includeFailed && s === 'failed')) out.push(id);
   }
   return out;
 }

@@ -1314,6 +1314,9 @@ export const Canvas = memo(function Canvas() {
                 thumbUrl: deriveThumbUrl(selectedUrl),
                 width: undefined,
                 height: undefined,
+                status: 'success',
+                error: undefined,
+                progressMessage: undefined,
               });
             } else {
               updateNodeData(historyModal.nodeId, {
@@ -1321,6 +1324,9 @@ export const Canvas = memo(function Canvas() {
                 duration: undefined,
                 videoWidth: undefined,
                 videoHeight: undefined,
+                status: 'success',
+                error: undefined,
+                progressMessage: undefined,
               });
             }
           }}

@@ -296,7 +296,7 @@ export function useExecutionStream(
             // SSE 断线后走这里收尾，余额会一直停在旧值（刷新页面才更新）
             void refreshCredits();
 
-            const pending = pendingNodeIdsOf(seenNodeIds);
+            const pending = pendingNodeIdsOf(seenNodeIds, finalStatus === 'success', executionId, projectId);
             if (pending.length > 0) {
               await reconcileNodesOnTerminal(
                 projectId,
@@ -502,7 +502,7 @@ export function useExecutionStream(
           // 漏一次的节点就会永久停在 running —— 更糟的是 onFinal 会立刻把这个 running
           // 存进服务端画布，刷新后也回不到正确状态（节点永远「生成中」）。
           // 这里对仍处于 running/pending 的节点逐个回查后端最新节点数据补齐。
-          const pending = pendingNodeIdsOf(seenNodeIds);
+          const pending = pendingNodeIdsOf(seenNodeIds, true, executionId, projectId);
           if (pending.length > 0 && projectId) {
             reconcilePromise = reconcileNodesOnTerminal(projectId, executionId, pending, 'success');
           }

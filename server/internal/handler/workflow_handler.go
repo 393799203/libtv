@@ -287,7 +287,7 @@ func (h *WorkflowHandler) runExecutionAsync(execID int64, projectID, ownerUserID
 // 返回 engine 的执行错误（队列据此决定是否重试；降级路径忽略该返回值）
 func (h *WorkflowHandler) runExecution(ctx context.Context, execID int64, projectID, ownerUserID string, canvas *model.Canvas, plan *engine.ExecutionPlan) error {
 	log.Printf("[Handler] execute start: executionID=%d, projectID=%s", execID, projectID)
-	execErr := h.engine.Execute(ctx, plan, execID, projectID, ownerUserID)
+	outputs, execErr := h.engine.ExecuteWithOutputs(ctx, plan, execID, projectID, ownerUserID)
 	if execErr != nil {
 		log.Printf("[Handler] engine.Execute returned error: %v", execErr)
 	} else {
@@ -302,7 +302,7 @@ func (h *WorkflowHandler) runExecution(ctx context.Context, execID int64, projec
 	finalCtx := context.WithoutCancel(ctx)
 
 	// 把每个节点的 output 回写到画布（持久化生成的 content / 后续字段）
-	h.persistNodeOutputs(finalCtx, canvas, plan)
+	h.persistNodeOutputs(finalCtx, canvas, plan, outputs)
 	log.Printf("[Handler] persistNodeOutputs done: executionID=%d", execID)
 
 	status := "done"
@@ -629,7 +629,7 @@ func (h *WorkflowHandler) persistNodeOutput(ctx context.Context, projectID strin
 		return
 	}
 	canvas.Content = datatypes.JSON(updated)
-	if err := h.canvasRepo.Save(ctx, canvas); err != nil {
+	if err := h.canvasRepo.Save(repository.WithGenerationStateUpdates(ctx, out.NodeID), canvas); err != nil {
 		log.Printf("[NodePersist] ⚠️ 节点产物落库失败: projectID=%s node=%s err=%v", projectID, out.NodeID, err)
 		return
 	}
@@ -696,22 +696,36 @@ func mergeNodeOutputData(existing map[string]json.RawMessage, out *engine.NodeOu
 	}
 }
 
-func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.Canvas, plan *engine.ExecutionPlan) {
+func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.Canvas, plan *engine.ExecutionPlan, outputs map[string]*engine.NodeOutput) {
 	if canvas == nil || plan == nil {
 		return
 	}
 
-	// 解析当前画布内容
+	// 收尾必须读最新画布，不能把执行开始前的整图（含其他节点的旧失败状态）写回去。
+	lock := h.lockCanvas(canvas.ProjectID)
+	defer lock.Unlock()
+	latest, err := h.canvasRepo.FindByProjectID(ctx, canvas.ProjectID)
+	if err != nil || latest == nil {
+		return
+	}
+	canvas = latest
 	var dsl engine.CanvasDSL
 	if err := json.Unmarshal([]byte(canvas.Content), &dsl); err != nil {
 		return
 	}
 
-	// 从引擎拿到本次所有节点输出
-	outputs := h.engine.LastOutputs()
+	// 输出来自本次执行的返回值，不能使用所有并发执行共用的 LastOutputs。
+	nodeIDs := planNodeIDs(plan)
+	want := make(map[string]bool, len(nodeIDs))
+	for _, id := range nodeIDs {
+		want[id] = true
+	}
 
 	for i := range dsl.Nodes {
 		n := dsl.Nodes[i]
+		if !want[n.ID] {
+			continue
+		}
 		var existing map[string]json.RawMessage
 		if err := json.Unmarshal(n.Data, &existing); err != nil {
 			existing = make(map[string]json.RawMessage)
@@ -754,8 +768,8 @@ func (h *WorkflowHandler) persistNodeOutputs(ctx context.Context, canvas *model.
 	if err != nil {
 		return
 	}
-	lock := h.lockCanvas(canvas.ProjectID)
-	defer lock.Unlock()
 	canvas.Content = datatypes.JSON(updated)
-	_ = h.canvasRepo.Save(ctx, canvas)
+	if err := h.canvasRepo.Save(repository.WithGenerationStateUpdates(ctx, nodeIDs...), canvas); err != nil {
+		log.Printf("[NodePersist] 执行收尾落库失败: projectID=%s err=%v", canvas.ProjectID, err)
+	}
 }

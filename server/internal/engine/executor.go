@@ -786,6 +786,12 @@ func (e *WorkflowEngine) LastOutputs() map[string]*NodeOutput {
 
 // Execute 执行工作流（userID 为项目属主，画布文件存到 users/<userID>/canvas/<projectID>/）
 func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, executionID int64, projectID string, userID string) error {
+	_, err := e.ExecuteWithOutputs(ctx, plan, executionID, projectID, userID)
+	return err
+}
+
+// ExecuteWithOutputs 返回本次执行自己的结果，避免并发执行互相覆盖共享 lastOutputs。
+func (e *WorkflowEngine) ExecuteWithOutputs(ctx context.Context, plan *ExecutionPlan, executionID int64, projectID string, userID string) (map[string]*NodeOutput, error) {
 	log.Printf("[Engine] Execute start: executionID=%d, projectID=%s, userID=%s, plan levels=%d, totalNodes=%d", executionID, projectID, userID, len(plan.Levels), len(plan.Schema.Nodes))
 	execCtx := NewExecutionContext()
 
@@ -905,6 +911,9 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 						Error:  err.Error(),
 					}
 					execCtx.SetOutput(n.ID, noExecOut)
+					mu.Lock()
+					outputs[n.ID] = noExecOut
+					mu.Unlock()
 					e.recordNodeOutput(projectID, noExecOut)
 
 					e.emit(WorkflowEvent{
@@ -1010,9 +1019,9 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 			// 该层里有节点把失败标成「不重试」（如视频轮询超时：钱已退、界面已显示失败，
 			// 重试要么重复扣费、要么复用旧任务免费出片）→ 给错误打标记，队列据此跳过重试
 			if execCtx.NonRetryable() {
-				return fmt.Errorf("%w: level %d failed: %v", apperr.ErrNoRetry, levelIdx, levelErrors)
+				return outputs, fmt.Errorf("%w: level %d failed: %v", apperr.ErrNoRetry, levelIdx, levelErrors)
 			}
-			return fmt.Errorf("level %d failed: %v", levelIdx, levelErrors)
+			return outputs, fmt.Errorf("level %d failed: %v", levelIdx, levelErrors)
 		}
 	}
 
@@ -1024,7 +1033,7 @@ func (e *WorkflowEngine) Execute(ctx context.Context, plan *ExecutionPlan, execu
 		Timestamp:   time.Now().UnixMilli(),
 	})
 
-	return nil
+	return outputs, nil
 }
 
 // saveOutputs 把本次执行的所有输出存到 engine.lastOutputs
