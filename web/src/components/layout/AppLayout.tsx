@@ -20,7 +20,7 @@ import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { PointsMallModal } from '@/components/auth/PointsMallModal';
-import { getUserAvatarSrc } from '@/utils/avatar';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import { useCreditsSync } from '@/hooks/useCreditsSync';
 import './appLayout.css';
 
@@ -197,9 +197,9 @@ export function AppLayout() {
                 {/* 用普通 flex 取代 AntD Space：Space 会给每个子元素套 .ant-space-item，
                     被 hidden 的昵称/积分仍在那里占位，头像右边就多出 ~17px 留白 */}
                 <span className="flex items-center gap-2">
-                  <img 
-                    src={getUserAvatarSrc(user)} 
-                    alt="" 
+                  <UserAvatar
+                    src={user?.avatarUrl}
+                    name={user?.nickname}
                     className="w-7 h-7 md:w-6 md:h-6 rounded-full ring-2 ring-gray-100 border border-gray-200" 
                   />
                   <span className="hidden sm:inline text-sm">{user?.nickname ?? '用户'}</span>

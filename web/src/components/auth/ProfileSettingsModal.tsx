@@ -6,7 +6,7 @@ import { CloseOutlined, CameraOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuthStore } from '@/stores/authStore';
 import { userApi } from '@/services/userApi';
 import { uploadAvatar } from '@/services/uploadApi';
-import { getUserAvatarSrc } from '@/utils/avatar';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import { Z } from '@/utils/zLayers';
 import { ReferralCard } from './ReferralCard';
 import { PASSWORD_HINT, validNewPassword } from '@/utils/authSession';
@@ -131,7 +131,7 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
             <h3>个人资料</h3>
             <button type="button" className="profile-avatar" aria-label="更换头像"
               disabled={avatarUploading} onClick={() => fileInputRef.current?.click()}>
-              <img src={avatarUrl || getUserAvatarSrc(user)} alt="头像" />
+              <UserAvatar src={avatarUrl} name={nickname} alt="头像" className="h-full w-full" style={{ borderRadius: 'inherit' }} />
               <span><CameraOutlined />{avatarUploading ? '上传中' : '更换头像'}</span>
             </button>
             <p className="profile-hint">JPG / PNG / WebP · 不超过 5MB</p>

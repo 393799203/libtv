@@ -119,7 +119,7 @@
   .home-gallery .video-card-caption { padding: 0 8px; gap: 6px; }
   .video-card-meta { gap: 5px; max-width: 42%; }
   .video-card-author { max-width: 44px; }
-  .video-card-author > img, .video-card-author > div { display: none; }
+  .video-card-author > .user-avatar { display: none; }
   .video-card-tags .video-card-tag-secondary { display: none; }
   .home-category { min-height: 40px; }
   .home-gallery .tech-search-input { min-height: 44px; }

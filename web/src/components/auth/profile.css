@@ -9,8 +9,8 @@
 .profile-dialog h3 { font-size: 13px; font-weight: 500; margin: 0 0 16px; }
 .profile-avatar { position: relative; display: block; width: 90px; height: 90px; overflow: hidden; border: 1px solid var(--dv-border-2); border-radius: 22px; cursor: pointer; margin: 22px 0 10px; }
 .profile-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.profile-avatar span { position: absolute; inset: auto 0 0; padding: 4px 0; font-size: 10px; color: white; background: #0009; }
-.profile-avatar span .anticon { margin-right: 4px; }
+.profile-avatar > span:not(.user-avatar) { position: absolute; inset: auto 0 0; padding: 4px 0; font-size: 10px; color: white; background: #0009; }
+.profile-avatar > span:not(.user-avatar) .anticon { margin-right: 4px; }
 .profile-hint { font-size: 10px; color: var(--dv-text-3); margin-bottom: 22px; }
 .profile-details label { display: block; font-size: 11px; margin: 16px 0 6px; color: var(--dv-text-3); }
 .profile-dialog input:not([type=file]) { width: 100%; min-width: 0; padding: 9px 10px; font-size: 12px; border: 1px solid var(--dv-border-1); border-radius: 8px; background: var(--dv-surface-1); outline: none; color: var(--dv-text-1); }

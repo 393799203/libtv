@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Typography,
   Button,
-  Avatar,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -22,6 +21,7 @@ import {
 import { showApi } from '@/services/showApi';
 import { useAuthStore } from '@/stores/authStore';
 import CommentPanel from '@/components/show/CommentPanel';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import type { Video } from '@/types/video';
 import { usePageMeta } from '@/hooks/usePageMeta';
 
@@ -401,11 +401,9 @@ export default function VideoDetailPage() {
       >
         {/* 作者头像 */}
         {videoInfo.author && <div className="flex flex-col items-center">
-          <Avatar size={48} src={videoInfo.authorAvatar || undefined}
+          <UserAvatar size={48} src={videoInfo.authorAvatar} name={videoInfo.author}
             alt={`${videoInfo.author}的头像`}
-            style={{ border: '2px solid white', backgroundColor: '#303b42', color: '#e5edf0' }}>
-            {Array.from(videoInfo.author.trim())[0] || '用'}
-          </Avatar>
+            style={{ border: '2px solid white' }} />
         </div>}
 
         {/* 点赞 */}

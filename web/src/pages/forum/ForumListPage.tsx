@@ -18,6 +18,7 @@ import { newContentId } from '@/utils/contentId';
 import { useFullscreenModal } from '@/components/forum/useFullscreenModal';
 import { EmptyState } from '@/components/common/EmptyState';
 import { usePageMeta } from '@/hooks/usePageMeta';
+import { UserAvatar } from '@/components/common/UserAvatar';
 
 const PAGE_SIZE = 10;
 
@@ -231,13 +232,10 @@ export default function ForumListPage() {
                 </p>
                 <div className="mt-2 flex items-center gap-4 text-[12px] text-gray-400">
                   <span className="flex items-center gap-1.5 text-gray-500">
-                    <img
-                      src={post.avatar_url || '/default-avatar.svg'}
-                      alt=""
-                      className="h-5 w-5 shrink-0 rounded-full bg-gray-100 object-cover" loading="lazy" decoding="async"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
-                      }}
+                    <UserAvatar
+                      src={post.avatar_url}
+                      name={post.nickname}
+                      className="h-5 w-5 shrink-0 rounded-full bg-gray-100 object-cover" loading="lazy"
                     />
                     {post.nickname || '匿名用户'}
                   </span>

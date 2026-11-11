@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Avatar, Button, Popconfirm, Spin } from 'antd';
-import { CloseOutlined, DeleteOutlined, MessageOutlined, UserOutlined } from '@ant-design/icons';
+import { App, Button, Popconfirm, Spin } from 'antd';
+import { CloseOutlined, DeleteOutlined, MessageOutlined } from '@ant-design/icons';
 import { commentApi, type CommentItem } from '@/services/commentApi';
 import { useAuthStore } from '@/stores/authStore';
+import { UserAvatar } from '@/components/common/UserAvatar';
 
 const PAGE_SIZE = 20;
 const REPLY_PAGE_SIZE = 50;
@@ -225,7 +226,7 @@ export default function CommentPanel({ showId, open, onClose, initialCount, onCo
   // 单条评论/回复的共用渲染（size 控制头像与字号）
   const renderItem = (c: CommentItem, isReply: boolean) => (
     <div key={c.id} className={`flex gap-3 ${isReply ? 'py-2' : 'py-3 border-b border-gray-50'}`}>
-      <Avatar size={isReply ? 24 : 32} src={c.avatar_url || undefined} icon={<UserOutlined />} />
+      <UserAvatar size={isReply ? 24 : 32} src={c.avatar_url} name={c.nickname} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <span className="text-[12px] text-gray-500 truncate">

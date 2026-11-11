@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { newContentId } from '@/utils/contentId';
 import { decorateForumContent } from '@/utils/thumbUrl';
 import { EmptyState } from '@/components/common/EmptyState';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import { usePageMeta } from '@/hooks/usePageMeta';
 
 function formatTime(iso: string): string {
@@ -217,12 +218,11 @@ export default function ForumPostPage() {
     const canDeleteReply = isAuthenticated && (isAdmin || reply.user_id === currentUser?.id);
     return (
       <div id={`forum-reply-${reply.id}`} key={reply.id} className={`flex gap-3 ${nested ? 'py-3' : 'py-4'}`}>
-        <img
-          src={reply.avatar_url || '/default-avatar.svg'}
-          alt=""
+        <UserAvatar
+          src={reply.avatar_url}
+          name={reply.nickname}
           className={`shrink-0 rounded-full border border-gray-200 object-cover ${nested ? 'h-7 w-7' : 'h-8 w-8'}`}
           loading="lazy"
-          decoding="async"
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-gray-400">
@@ -422,10 +422,10 @@ export default function ForumPostPage() {
 
         <div className="mt-3 flex flex-wrap items-center gap-4 border-b border-gray-100 pb-4 text-[12px] text-gray-400">
           <span className="flex items-center gap-2 text-[13px] text-gray-600">
-            <img
-              src={post.avatar_url || '/default-avatar.svg'}
-              alt=""
-              className="h-6 w-6 rounded-full border border-gray-200 object-cover" loading="lazy" decoding="async"
+            <UserAvatar
+              src={post.avatar_url}
+              name={post.nickname}
+              className="h-6 w-6 rounded-full border border-gray-200 object-cover" loading="lazy"
             />
             {post.nickname || '匿名用户'}
           </span>

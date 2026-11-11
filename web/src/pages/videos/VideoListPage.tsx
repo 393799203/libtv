@@ -26,6 +26,7 @@ import type { VideoListItem } from '@/types/video';
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { Z } from '@/utils/zLayers';
 import { EmptyState } from '@/components/common/EmptyState';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import './home.css';
 
 const { Title, Text } = Typography;
@@ -249,11 +250,7 @@ const VideoCard = memo(function VideoCard({
         <div className="video-card-meta">
           {/* 作者信息：优先用作者真实头像，缺失时用作者首字占位 */}
           {item.author && <div className="video-card-author" title={item.author}>
-            {item.authorAvatar ? (
-              <img src={item.authorAvatar} alt="" className="w-4 h-4 shrink-0 rounded-full border border-white/50 object-cover" loading="lazy" decoding="async" />
-            ) : (
-              <div className="w-4 h-4 shrink-0 rounded-full border border-white/50 bg-gray-500 text-white text-[8px] flex items-center justify-center">{item.author.slice(0, 1)}</div>
-            )}
+            <UserAvatar src={item.authorAvatar} name={item.author} className="w-4 h-4 shrink-0 rounded-full border border-white/50" loading="lazy" />
             <span className="truncate text-[11px] text-white/90">{item.author}</span>
           </div>}
           <span className="video-card-likes"><HeartOutlined />{item.likes >= 10000 ? `${(item.likes / 10000).toFixed(1)}万` : item.likes}</span>
