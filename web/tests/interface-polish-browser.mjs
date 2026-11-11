@@ -103,7 +103,7 @@ try {
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(base);
-  await page.getByRole('textbox', { name: '搜索视频', exact: true }).fill('没有这个作品');
+  await page.getByRole('searchbox', { name: '搜索视频', exact: true }).fill('没有这个作品');
   await page.getByText('没有找到匹配的作品', { exact: true }).waitFor();
   await page.getByRole('button', { name: '清空搜索', exact: true }).last().click();
   await page.getByRole('button', { name: `播放视频：${shows[0].title}`, exact: true }).waitFor();

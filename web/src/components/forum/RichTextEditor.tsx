@@ -6,6 +6,7 @@ import { Input } from 'antd';
 import { message } from '@/utils/antdApp';
 import { useAuthStore } from '@/stores/authStore';
 import { useIsTouchDevice } from '@/hooks/useIsMobile';
+import api from '@/services/api';
 
 const IMAGE_MAX_MB = 10;
 // 视频上限按角色区分（与后端 forumVideoMaxSize 对齐）：管理员 1GB，其他用户 200MB
@@ -206,7 +207,6 @@ export function RichTextEditor({
   // 移动端 textarea 的受控值（桌面端走 wangEditor，不用它）。初值从 defaultValue 的 HTML 还原成纯文本
   const [mobileText, setMobileText] = useState(() => (defaultValue ? htmlToPlainText(defaultValue) : ''));
   const [editor, setEditor] = useState<IDomEditor | null>(null);
-  const token = useAuthStore((s) => s.token);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   // 管理员可以传整段片子（1GB），普通用户 200MB
   const videoMaxMB = isAdmin ? VIDEO_MAX_MB_ADMIN : VIDEO_MAX_MB_USER;
@@ -222,8 +222,22 @@ export function RichTextEditor({
 
   // 上传地址带上内容 id：服务端据此把文件放进 forum/<draftId>/。
   // 用查询参数而不是 form 字段，是因为上传配置只在挂载时读取一次，拼在 URL 上最直接。
-  const uploadURL = (base: string) =>
-    draftId ? `${base}?draftId=${encodeURIComponent(draftId)}` : base;
+  const uploadURL = useCallback((base: string) =>
+    draftId ? `${base}?draftId=${encodeURIComponent(draftId)}` : base, [draftId]);
+
+  const uploadAsset = useCallback(async (file: File, kind: 'image' | 'video', insert: (url: string, alt?: string, href?: string) => void) => {
+    if (!guardUpload(kind === 'image' ? '图片' : '视频', kind === 'image' ? IMAGE_MAX_MB : videoMaxMB)
+      .onBeforeUpload({ file })) return;
+    const data = new FormData();
+    data.append('file', file);
+    try {
+      const result = await api.post<{ url: string }>(
+        `/upload/forum-${kind}${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`, data,
+        { headers: { 'Content-Type': 'multipart/form-data' }, timeout: VIDEO_UPLOAD_TIMEOUT_MS },
+      );
+      insert(result.url, '', result.url);
+    } catch { /* The shared API handler reports upload/authentication errors. */ }
+  }, [draftId, videoMaxMB]);
 
   const editorConfig = useMemo<Partial<IEditorConfig>>(
     () =>
@@ -232,6 +246,8 @@ export function RichTextEditor({
         autoFocus,
         MENU_CONF: {
           uploadImage: {
+            customUpload: (file: File, insert: (url: string, alt?: string, href?: string) => void) =>
+              uploadAsset(file, 'image', insert),
             // 论坛专用上传接口（需登录）：存到 forum/<draftId>/，
             // 不和全站 images/ 目录混在一起，删帖时按这个目录前缀一次删净
             server: uploadURL('/api/upload/forum-image'),
@@ -242,7 +258,6 @@ export function RichTextEditor({
             maxFileSize: IMAGE_MAX_MB * 1024 * 1024,
             timeout: 5 * 60 * 1000,
 
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
             ...guardUpload('图片'),
             // 后端返回的是 {code:0,msg,data:{url,width,height}}，
             // 与 wangEditor 默认期望的 {errno,data:{url,alt,href}} 不同，所以自己插入
@@ -255,6 +270,8 @@ export function RichTextEditor({
             },
           },
           uploadVideo: {
+            customUpload: (file: File, insert: (url: string, poster?: string) => void) =>
+              uploadAsset(file, 'video', insert),
             // 论坛专用视频接口（需登录）：服务端存到 forum/<userID>/，同步落盘不转码，
             // 所以拿到 url 就能立刻播。格式限制在这里和接口白名单两处都要对得上。
             server: uploadURL('/api/upload/forum-video'),
@@ -264,7 +281,6 @@ export function RichTextEditor({
             // 库默认只给 30 秒，1GB 的视频必然超时；这里放宽到 30 分钟
             timeout: VIDEO_UPLOAD_TIMEOUT_MS,
 
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
             ...guardUpload('视频', videoMaxMB),
             // wangEditor 会插入 <video poster controls><source src type></video>，
             // 插入回调签名是 (src, poster)，这里不要封面图。
@@ -278,7 +294,7 @@ export function RichTextEditor({
           },
         },
       }) as Partial<IEditorConfig>,
-    [placeholder, token, autoFocus, draftId, videoMaxMB],
+    [placeholder, autoFocus, videoMaxMB, uploadAsset, uploadURL],
   );
 
   // 监听编辑器容器的类名变化，把全屏状态同步给父组件

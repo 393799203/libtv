@@ -419,6 +419,8 @@ export default function VideoListPage() {
     else openLoginModal();
   }, [isAuthenticated, navigate, openLoginModal]);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchComposingRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 无限滚动分页状态
@@ -648,11 +650,29 @@ export default function VideoListPage() {
   const handleSearchChange = useCallback((value: string) => {
     setSearchKeyword(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = null;
+    if (searchComposingRef.current) return;
     searchTimerRef.current = setTimeout(() => {
       searchTimerRef.current = null;
       loadVideos(value.trim());
     }, 300);
   }, [loadVideos]);
+
+  const submitSearch = (value: string) => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = null;
+    void loadVideos(value.trim());
+  };
+
+  const clearSearch = () => {
+    setSearchKeyword('');
+    submitSearch('');
+    searchInputRef.current?.focus();
+  };
+
+  useEffect(() => () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+  }, []);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
 
@@ -1042,12 +1062,35 @@ export default function VideoListPage() {
               </button>
             ))}
           </div>
-          <div className="tech-search relative">
-            <SearchOutlined className={`absolute left-3 top-1/2 -translate-y-1/2 text-[14px] transition-colors ${videosLoading ? 'animate-pulse text-cyan-300' : 'text-gray-400'}`} />
+          <form className="tech-search home-gallery-search relative" role="search" onSubmit={event => {
+            event.preventDefault();
+            if (searchComposingRef.current) return;
+            submitSearch(searchKeyword);
+            searchInputRef.current?.blur();
+          }}>
+            <SearchOutlined aria-hidden className={`home-search-icon absolute left-3 top-1/2 -translate-y-1/2 text-[14px] transition-colors ${videosLoading ? 'animate-pulse text-cyan-300' : 'text-gray-400'}`} />
             <input
+              ref={searchInputRef}
+              type="search"
+              enterKeyHint="search"
+              autoComplete="off"
               value={searchKeyword}
               onChange={e => handleSearchChange(e.target.value)}
-              placeholder="搜索视频标题、作者、标签..."
+              onCompositionStart={() => {
+                searchComposingRef.current = true;
+                if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+                searchTimerRef.current = null;
+              }}
+              onCompositionEnd={event => {
+                searchComposingRef.current = false;
+                handleSearchChange(event.currentTarget.value);
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) {
+                  event.preventDefault();
+                }
+              }}
+              placeholder="搜索作品、作者或标签"
               aria-label="搜索视频"
               className="tech-search-input w-full rounded-xl py-2 pl-9 pr-8 text-[14px] outline-none transition-all sm:w-[280px]"
             />
@@ -1055,13 +1098,13 @@ export default function VideoListPage() {
               <button
                 type="button"
                 aria-label="清空搜索"
-                onClick={() => { setSearchKeyword(''); loadVideos(); }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-gray-400 transition-colors hover:text-cyan-200 active:scale-90"
+                onClick={clearSearch}
+                className="home-search-clear absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-gray-400 transition-colors hover:text-cyan-200 active:scale-90"
               >
                 <CloseCircleOutlined className="text-[14px]" />
               </button>
             )}
-          </div>
+          </form>
         </div>
 
         {/* TV Show 网格 - 切换时遮罩 loading，数据返回后整体替换；固定最小高度放在总容器上，切换时内容区不塌陷 */}
@@ -1110,7 +1153,7 @@ export default function VideoListPage() {
                 hint={videosError ? '网络可能暂时中断，可以重新加载。' : searchKeyword ? '试试其他关键词，或清空搜索查看作品。' : '换个分类看看，或到画布创作你的作品。'}
                 action={videosError
                   ? <Button onClick={() => void loadVideos(searchKeyword)}>重新加载</Button>
-                  : searchKeyword ? <Button onClick={() => { setSearchKeyword(''); void loadVideos(); }}>清空搜索</Button> : undefined} />
+                  : searchKeyword ? <Button onClick={clearSearch}>清空搜索</Button> : undefined} />
             )}
           </div>
         </Spin>

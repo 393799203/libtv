@@ -286,7 +286,7 @@ export default function AddShowDialog({
         applyPrefillVideo(prefillVideoUrl);
       }
     }
-    if (authorOptions.length === 0) fetchAuthors('');
+    if (!lockAuthor && authorOptions.length === 0) fetchAuthors('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

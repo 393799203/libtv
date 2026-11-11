@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { App, Form, Input } from 'antd';
+import { Alert, App, Checkbox, Form, Input } from 'antd';
 import {
   LoadingOutlined,
   LockOutlined,
@@ -13,10 +13,11 @@ import { ForgotPasswordModal } from '@/components/auth/ForgotPasswordModal';
 import { useAuthStore } from '@/stores/authStore';
 import { authApi } from '@/services/authApi';
 import type { AuthResponse, LoginRequest, RegisterRequest } from '@/types/api';
-import { savedReferralCode, clearReferralCode, normalizeReferralCode, REFERRAL_CODE_PATTERN } from '@/utils/referral';
-import { authPagePath, safeAuthReturnPath } from '@/utils/authNavigation';
+import { clearReferralCode, normalizeReferralCode } from '@/utils/referral';
+import { authPagePath } from '@/utils/authNavigation';
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { AuthBackgroundVideo } from '@/components/auth/AuthBackgroundVideo';
+import { PASSWORD_HINT, validNewPassword } from '@/utils/authSession';
 import './authPage.css';
 
 type AuthFormValues = LoginRequest &
@@ -25,6 +26,11 @@ type AuthFormValues = LoginRequest &
   };
 
 export default function AuthPage() {
+  const { pathname } = useLocation();
+  return <AuthPageForm key={pathname} />;
+}
+
+function AuthPageForm() {
   const { message } = App.useApp();
   const location = useLocation();
   const authMode = location.pathname === '/register' ? 'register' : 'login';
@@ -33,12 +39,23 @@ export default function AuthPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
-  const returnPath = safeAuthReturnPath(params.get('redirect') || sessionStorage.getItem('auth_redirect'));
+  const returnPath = '/';
   const loginPath = authPagePath('login', returnPath, location.search);
   const registerPath = authPagePath('register', returnPath, location.search);
   usePageMeta({ title: authMode === 'login' ? '登录' : '注册', noindex: true });
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<AuthFormValues>();
+  const [error, setError] = useState('');
+  const [sendingCode, setSendingCode] = useState(false);
+  const [resendAt, setResendAt] = useState(0);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  useEffect(() => {
+    if (!resendAt) return;
+    const update = () => setSecondsLeft(Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendAt]);
   // 「忘记密码」弹窗：叠在登录框之上（zIndex 更高），关掉后仍回到登录框
   const [forgotOpen, setForgotOpen] = useState(false);
   // 打开时把登录框里已填的邮箱存下来带过去。存成 state 而不是每次渲染现取，
@@ -48,22 +65,31 @@ export default function AuthPage() {
 
   const handleSubmit = async (values: AuthFormValues) => {
     setLoading(true);
+    setError('');
     try {
       let response: AuthResponse;
       if (authMode === 'login') {
         response = await authApi.login({
-          email: values.email,
+          email: values.email.trim(),
           password: values.password,
+          remember_me: values.remember_me ?? false,
         });
       } else {
         const source = new URLSearchParams(window.location.search).get('source');
-        response = await authApi.register({
-          email: values.email,
+        const registration = await authApi.register({
+          email: values.email.trim(),
           password: values.password,
           nickname: values.nickname || '',
           channel: source === 'wasu' ? 'wasu' : 'dianxin',
-          referralCode: normalizeReferralCode(values.referralCode || '') || undefined,
+          referralCode: normalizeReferralCode(params.get('ref') || '') || undefined,
+          code: values.code || '',
         });
+        if ('login_required' in registration) {
+          message.success('账号已创建，请使用新账号登录');
+          navigate(loginPath, { replace: true });
+          return;
+        }
+        response = registration;
       }
 
       setAuth(response);
@@ -72,10 +98,30 @@ export default function AuthPage() {
       form.resetFields();
       sessionStorage.removeItem('auth_redirect');
       navigate(returnPath, { replace: true });
-    } catch {
-      // HTTP 错误已由 api.ts 拦截器统一 message.error()
+    } catch (cause) {
+      const failure = cause as { response?: { data?: { msg?: string } }; message?: string };
+      setError(failure.response?.data?.msg || failure.message || '暂时无法提交，请稍后重试');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const sendCode = async () => {
+    try {
+      await form.validateFields(['email']);
+    } catch { return; }
+    setSendingCode(true);
+    setError('');
+    try {
+      const result = await authApi.sendRegistrationCode(form.getFieldValue('email').trim());
+      setResendAt(Date.now() + result.retry_after * 1000);
+      message.success('验证码已发送，10 分钟内有效，请查收邮箱');
+      form.getFieldInstance('code')?.focus();
+    } catch (cause) {
+      const failure = cause as { response?: { data?: { msg?: string } }; message?: string };
+      setError(failure.response?.data?.msg || failure.message || '验证码发送失败，请重试');
+    } finally {
+      setSendingCode(false);
     }
   };
 
@@ -139,13 +185,18 @@ export default function AuthPage() {
                   form={form}
                   layout="vertical"
                   onFinish={handleSubmit}
-                  initialValues={{ referralCode: normalizeReferralCode(params.get('ref') || savedReferralCode()) }}
+                  initialValues={{ remember_me: false }}
+                  onValuesChange={changed => {
+                    setError('');
+                    if ('email' in changed) form.setFieldValue('code', '');
+                  }}
                   requiredMark={false}
                   className="forest-auth-form"
                 >
                   <Form.Item
                     label="邮箱地址"
                     name="email"
+                    normalize={value => value.trim()}
                     rules={[
                       { required: true, message: '请输入邮箱' },
                       { type: 'email', message: '请输入有效的邮箱地址' },
@@ -156,20 +207,50 @@ export default function AuthPage() {
                       placeholder="name@example.com"
                       size="large"
                       autoComplete="email"
+                      inputMode="email"
+                      maxLength={255}
                     />
                   </Form.Item>
+
+                  {authMode === 'register' && (
+                    <Form.Item label="邮箱验证码" required>
+                      <div className="auth-code-row">
+                        <Form.Item
+                          name="code"
+                          noStyle
+                          rules={[{ required: true, message: '请输入邮箱验证码' }, { pattern: /^\d{6}$/, message: '请输入 6 位数字验证码' }]}
+                        >
+                          <Input
+                            aria-label="邮箱验证码"
+                            placeholder="6 位数字"
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            maxLength={6}
+                            size="large"
+                          />
+                        </Form.Item>
+                        <button type="button" className="auth-code-send" onClick={sendCode}
+                          disabled={sendingCode || secondsLeft > 0 || loading}>
+                          {sendingCode ? '正在发送…' : secondsLeft > 0 ? `${secondsLeft} 秒后重发` : '发送验证码'}
+                        </button>
+                      </div>
+                      <span className="auth-field-hint">验证码 10 分钟内有效；未收到时请检查垃圾邮件。</span>
+                    </Form.Item>
+                  )}
 
                   {authMode === 'register' && (
                     <Form.Item
                       label="昵称"
                       name="nickname"
-                      rules={[{ required: true, message: '请输入昵称' }]}
+                      normalize={value => value.trim()}
+                      rules={[{ required: true, message: '请输入昵称' }, { max: 50, message: '昵称不能超过 50 个字符' }]}
                     >
                       <Input
                         prefix={<UserOutlined />}
                         placeholder="你希望被怎样称呼"
                         size="large"
                         autoComplete="nickname"
+                        maxLength={50}
                       />
                     </Form.Item>
                   )}
@@ -182,13 +263,14 @@ export default function AuthPage() {
                         ? [{ required: true, message: '请输入密码' }]
                         : [
                             { required: true, message: '请输入密码' },
-                            { min: 6, message: '密码至少 6 位' },
+                            { validator: (_, value) => !value || validNewPassword(value)
+                              ? Promise.resolve() : Promise.reject(new Error(PASSWORD_HINT)) },
                           ]
                     }
                   >
                     <Input.Password
                       prefix={<LockOutlined />}
-                      placeholder={authMode === 'login' ? '输入密码' : '至少 6 位字符'}
+                      placeholder={authMode === 'login' ? '输入密码' : '至少 8 个字符'}
                       size="large"
                       autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
                     />
@@ -197,7 +279,10 @@ export default function AuthPage() {
                   {/* 忘记密码入口：只在登录态出现（注册时还没有密码可忘）。
                       -mt-3 抵掉 Form.Item 的下外边距，避免密码框与按钮之间空出一大块 */}
                   {authMode === 'login' && (
-                    <div className="-mt-3 mb-1 flex justify-end">
+                    <div className="auth-login-options">
+                      <Form.Item name="remember_me" valuePropName="checked" noStyle>
+                        <Checkbox>记住我 30 天</Checkbox>
+                      </Form.Item>
                       <button
                         type="button"
                         onClick={() => {
@@ -210,6 +295,7 @@ export default function AuthPage() {
                       </button>
                     </div>
                   )}
+                  {authMode === 'login' && <p className="auth-field-hint">未勾选时登录最长保留 24 小时。请勿在公共设备上勾选。</p>}
 
                   {authMode === 'register' && (
                     <Form.Item
@@ -235,12 +321,7 @@ export default function AuthPage() {
                     </Form.Item>
                   )}
 
-                  {authMode === 'register' && (
-                    <Form.Item label="推荐码（选填）" name="referralCode" normalize={normalizeReferralCode}
-                      rules={[{ pattern: REFERRAL_CODE_PATTERN, message: '请输入16位推荐码，或留空直接注册' }]}>
-                      <Input maxLength={16} placeholder="由好友提供，邀请链接会自动填入" autoComplete="off" />
-                    </Form.Item>
-                  )}
+                  {error && <Alert type="error" title={error} showIcon role="alert" className="auth-form-error" />}
                   <Form.Item className={authMode === 'login' ? '!mb-0 !mt-7' : '!mb-0 !mt-5'}>
                     <button
                       type="submit"

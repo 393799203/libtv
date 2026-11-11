@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"libtv/internal/middleware"
 	"libtv/internal/model"
 	"libtv/internal/pkg/response"
 	"libtv/internal/repository"
@@ -31,10 +32,44 @@ type ShowHandler struct {
 	showService       *service.ShowService
 	fileUploadService *service.FileUploadService
 	projectRepo       repository.ProjectRepo
+	roles             middleware.UserRoleGetter
 }
 
-func NewShowHandler(showService *service.ShowService, fileUploadService *service.FileUploadService, projectRepo repository.ProjectRepo) *ShowHandler {
-	return &ShowHandler{showService: showService, fileUploadService: fileUploadService, projectRepo: projectRepo}
+func NewShowHandler(showService *service.ShowService, fileUploadService *service.FileUploadService, projectRepo repository.ProjectRepo, roles middleware.UserRoleGetter) *ShowHandler {
+	return &ShowHandler{showService: showService, fileUploadService: fileUploadService, projectRepo: projectRepo, roles: roles}
+}
+
+func (h *ShowHandler) isAdmin(c *gin.Context) bool {
+	id := middleware.GetUserID(c)
+	if id == "" || h.roles == nil {
+		return false
+	}
+	role, err := h.roles.GetUserRole(c.Request.Context(), id)
+	return err == nil && role == "admin"
+}
+
+func (h *ShowHandler) ownsProject(c *gin.Context, id string) bool {
+	userID := middleware.GetUserID(c)
+	if id == "" || userID == "" || h.projectRepo == nil {
+		return false
+	}
+	project, err := h.projectRepo.FindByID(c.Request.Context(), id)
+	return err == nil && project != nil && project.UserID == userID
+}
+
+func (h *ShowHandler) authorizeShow(c *gin.Context, show *model.Show, editing bool) (bool, bool) {
+	if h.isAdmin(c) {
+		return true, true
+	}
+	if !h.ownsProject(c, show.ProjectID) {
+		response.Fail(c, http.StatusNotFound, "视频不存在")
+		return false, false
+	}
+	if editing && show.Status == "published" {
+		response.Fail(c, http.StatusForbidden, "已发布作品仅管理员可修改")
+		return false, false
+	}
+	return false, true
 }
 
 // ========== 公开接口：首页展示 ==========
@@ -107,6 +142,11 @@ func (h *ShowHandler) GetShow(c *gin.Context) {
 	if err != nil {
 		response.FailWith(c, err)
 		return
+	}
+	if show.Status != "published" {
+		if _, allowed := h.authorizeShow(c, show, false); !allowed {
+			return
+		}
 	}
 	response.OK(c, show)
 }
@@ -199,6 +239,15 @@ func (h *ShowHandler) CreateShow(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !h.isAdmin(c) {
+		if !h.ownsProject(c, req.ProjectID) {
+			response.Fail(c, http.StatusForbidden, "只能提交自己项目的作品")
+			return
+		}
+		req.AuthorID = middleware.GetUserID(c)
+		req.Status = "pending"
+		req.SortOrder = 0
+	}
 
 	tagsJSON, _ := json.Marshal(req.Tags)
 	show := &model.Show{
@@ -237,6 +286,9 @@ func (h *ShowHandler) UploadThumbnail(c *gin.Context) {
 	show, err := h.showService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		response.FailWith(c, err)
+		return
+	}
+	if _, allowed := h.authorizeShow(c, show, true); !allowed {
 		return
 	}
 
@@ -293,6 +345,9 @@ func (h *ShowHandler) UploadVideo(c *gin.Context) {
 		response.FailWith(c, err)
 		return
 	}
+	if _, allowed := h.authorizeShow(c, show, true); !allowed {
+		return
+	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -335,11 +390,20 @@ func (h *ShowHandler) UpdateShow(c *gin.Context) {
 		response.FailWith(c, err)
 		return
 	}
+	admin, allowed := h.authorizeShow(c, show, true)
+	if !allowed {
+		return
+	}
 
 	var req UpdateShowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
+	}
+	if !admin {
+		authorID, status := middleware.GetUserID(c), "pending"
+		req.AuthorID, req.Status = &authorID, &status
+		req.SortOrder = nil
 	}
 
 	if req.Title != nil {
@@ -399,6 +463,10 @@ func (h *ShowHandler) DeleteShow(c *gin.Context) {
 // GetShowByProjectID 按项目ID查询关联的 show（需登录）
 func (h *ShowHandler) GetShowByProjectID(c *gin.Context) {
 	projectID := c.Param("projectId")
+	if !h.isAdmin(c) && !h.ownsProject(c, projectID) {
+		response.Fail(c, http.StatusNotFound, "项目不存在")
+		return
+	}
 	show, err := h.showService.GetShowByProjectID(c.Request.Context(), projectID)
 	if err != nil {
 		response.OK(c, nil)

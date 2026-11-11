@@ -48,9 +48,13 @@ export function AppLayout() {
   const [showBillingRecords, setShowBillingRecords] = useState(false);
   const [showPointsMall, setShowPointsMall] = useState(false);
 
-  const handleLogout = () => {
-    logout();
-    message.success('已退出登录');
+  const handleLogout = async () => {
+    try {
+      await logout();
+      message.success('已退出登录');
+    } catch {
+      message.error('暂时无法退出登录，请检查网络后重试');
+    }
   };
 
   // 移动端 <768px：用于菜单项这类无法用 CSS 表达的差异

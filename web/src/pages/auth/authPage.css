@@ -63,3 +63,58 @@
   .auth-page .forest-auth-tabs a { transition: none; }
   .auth-page-video-loading-ring { animation: none; }
 }
+.auth-code-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.auth-code-row > .ant-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.auth-code-send {
+  flex-shrink: 0;
+  padding-inline: 12px;
+  border: 1px solid var(--dv-border-2, #3a3d43);
+  border-radius: 8px;
+  color: #f1d6ac;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.auth-code-send:hover:not(:disabled) {
+  border-color: #f1d6ac;
+}
+
+.auth-code-send:disabled {
+  color: #a9a29a;
+  cursor: default;
+}
+
+.auth-code-send:focus-visible {
+  outline: 2px solid #f1d6ac;
+  outline-offset: 3px;
+}
+
+.auth-field-hint {
+  display: block;
+  margin-block: 8px 0;
+  color: #c5bcb1;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.auth-login-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-form-error {
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}

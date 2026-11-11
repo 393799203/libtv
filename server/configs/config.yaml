@@ -1,6 +1,8 @@
 server:
   port: 8080
   mode: debug  # debug / release
+  # nginx in Docker, or a local reverse proxy. Never trust arbitrary client IP headers.
+  trusted_proxies: ["127.0.0.1", "::1", "172.16.0.0/12"]
 
 # CORS 允许来源白名单；为空时使用内置默认（localhost:5173/3000 等）
 # 生产环境推荐通过环境变量 CORS_ORIGINS=http://a,http://b 覆盖
@@ -8,6 +10,8 @@ cors:
   origins:
     - http://localhost:5173
     - http://localhost:3000
+    - http://127.0.0.1:3000
+    - http://127.0.0.1:5173
     - http://192.168.110.115:8880
     - http://39.171.58.10:38880
     - http://yunqueai.cloud:38880
@@ -76,7 +80,8 @@ ratelimit:
 
 jwt:
   secret: "libtv-mvp-secret-change-in-production"
-  expire_hours: 24
+  # Access token: 15 minutes; session: 24 hours, or 30 days with remember_me.
+  cookie_domain: ".yunqueai.cloud" # Other hosts automatically use a host-only cookie.
 
 storage:
   type: fallback  # fallback / minio / local / zos (fallback=MinIO优先，失败降级local；zos=天翼云对象存储)

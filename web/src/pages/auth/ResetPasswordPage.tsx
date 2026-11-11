@@ -10,6 +10,8 @@ import {
 } from '@ant-design/icons';
 import { BrandLogo } from '@/components/layout/BrandLogo';
 import { authApi } from '@/services/authApi';
+import { useAuthStore } from '@/stores/authStore';
+import { PASSWORD_HINT, validNewPassword } from '@/utils/authSession';
 
 type ResetFormValues = { password: string; confirmPassword: string };
 
@@ -38,13 +40,15 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       await authApi.resetPassword({ token, password: values.password });
+      useAuthStore.getState().clearAuth();
       setDone(true);
       setRejected(false);
       message.success('密码已重置');
-    } catch {
+    } catch (error) {
       // 具体原因（链接无效/已过期/过于频繁）已由 api.ts 拦截器统一提示，
       // 这里只负责把界面切到「这条路走不通，去重新获取」的状态
-      setRejected(true);
+      const failure = error as { response?: { data?: { code?: number } } };
+      setRejected(failure.response?.data?.code === 2006);
     } finally {
       setLoading(false);
     }
@@ -136,12 +140,13 @@ export default function ResetPasswordPage() {
                     name="password"
                     rules={[
                       { required: true, message: '请输入新密码' },
-                      { min: 6, message: '密码至少 6 位' },
+                      { validator: (_, value) => !value || validNewPassword(value)
+                        ? Promise.resolve() : Promise.reject(new Error(PASSWORD_HINT)) },
                     ]}
                   >
                     <Input.Password
                       prefix={<LockOutlined />}
-                      placeholder="至少 6 位字符"
+                      placeholder="至少 8 个字符"
                       size="large"
                       autoComplete="new-password"
                     />

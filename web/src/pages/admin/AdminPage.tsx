@@ -24,6 +24,7 @@ import {
   ReloadOutlined,
   ShoppingCartOutlined,
   TagOutlined,
+  TeamOutlined,
   UploadOutlined,
   UserOutlined,
   VideoCameraOutlined,
@@ -194,7 +195,7 @@ export default function AdminPage() {
   // ========== 版图管理函数 ==========
   const loadBanners = () => {
     setBannersLoading(true);
-    bannerApi.list()
+    bannerApi.listAdmin()
       .then((res) => setBanners(res || []))
       .catch(() => {})
       .finally(() => setBannersLoading(false));
@@ -729,7 +730,7 @@ export default function AdminPage() {
         { key: 'shows', icon: <VideoCameraOutlined />, label: '视频管理' },
         { key: 'styles', icon: <TagOutlined />, label: '风格管理' },
         { key: 'users', icon: <UserOutlined />, label: '用户管理' },
-        { key: 'referrals', icon: <UserOutlined />, label: '邀请统计' },
+        { key: 'referrals', icon: <TeamOutlined />, label: '邀请统计' },
       ],
     },
     {

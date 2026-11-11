@@ -41,7 +41,7 @@ func Auth(checker UserTokenChecker, tracker UserActivityTracker) gin.HandlerFunc
 
 		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 			return []byte(config.C.JWT.Secret), nil
-		})
+		}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired(), jwt.WithIssuedAt(), jwt.WithIssuer("libtv"))
 		if err != nil || !token.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid token"})
 			c.Abort()
@@ -56,7 +56,7 @@ func Auth(checker UserTokenChecker, tracker UserActivityTracker) gin.HandlerFunc
 		}
 
 		userID, ok := claims["user_id"].(string)
-		if !ok {
+		if !ok || userID == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid user_id in token"})
 			c.Abort()
 			return
@@ -70,6 +70,7 @@ func Auth(checker UserTokenChecker, tracker UserActivityTracker) gin.HandlerFunc
 		}
 
 		c.Set("user_id", userID)
+		c.Set("auth_claims", claims)
 
 		// 打"最后操作"点（内部节流 + 异步，不影响本次请求耗时）
 		if tracker != nil {

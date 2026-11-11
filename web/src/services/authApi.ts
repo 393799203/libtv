@@ -13,7 +13,10 @@ export const authApi = {
     api.post<AuthResponse>('/auth/login', data),
 
   register: (data: RegisterRequest) =>
-    api.post<AuthResponse>('/auth/register', data),
+    api.post<AuthResponse | { registered: true; login_required: true }>('/auth/register', data),
+
+  sendRegistrationCode: (email: string) =>
+    api.post<{ retry_after: number; expires_in: number }>('/auth/register-code', { email }),
 
   logout: () =>
     api.post<ApiResponse<void>>('/auth/logout'),

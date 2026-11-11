@@ -1,63 +1,57 @@
 import { create } from 'zustand';
-import type { AuthResponse } from '@/types/api';
-import api from '@/services/api';
+import axios from 'axios';
+import type { ApiResponse, AuthResponse } from '@/types/api';
+import { tokenExpiresAt } from '@/utils/authSession';
 
 interface AuthState {
   token: string | null;
   user: AuthResponse['user'] | null;
   isAuthenticated: boolean;
   isInitialized: boolean;
-
-  // 登录页面跳转请求；保留原入口名称，供页面和 API 失效处理统一调用。
+  initializing: boolean;
   showLoginModal: boolean;
   authMode: 'login' | 'register';
-  // 是否正在初始化（用于区分正常请求401 vs 初始化验证401）
-  initializing: boolean;
-
-  // Actions
   setAuth: (response: AuthResponse) => void;
   setUser: (user: Partial<AuthResponse['user']>) => void;
-  logout: () => void;
-  initialize: () => void;
+  clearAuth: () => void;
+  logout: () => Promise<void>;
+  refresh: () => Promise<string | null>;
+  initialize: () => Promise<void>;
   openLoginModal: (mode?: 'login' | 'register') => void;
   closeLoginModal: () => void;
   setAuthMode: (mode: 'login' | 'register') => void;
 }
 
-const AUTH_KEY = 'libtv_auth';
+const EVENT_KEY = 'libtv_auth_event';
+const cookieRequest = { headers: { 'X-Requested-With': 'libtv' }, withCredentials: true, timeout: 15000 };
+let revision = 0;
+let refreshing: Promise<string | null> | null = null;
+let initializing: Promise<void> | null = null;
 
-// ---- 跨子域共享登录态 ----------------------------------------------------
-// localStorage 是按 origin 隔离的：在 www.yunqueai.cloud 登录后打开
-// manwa.yunqueai.cloud 属于另一个 origin，读不到 token，会被要求重新登录。
-// 所以在父域（.yunqueai.cloud）上再存一份 cookie，任一子域都能读到。
-// 只对多级域名生效；localhost / 纯 IP 下写 Domain 会被浏览器拒绝，直接跳过。
-const COOKIE_DOMAIN_SUFFIX = 'yunqueai.cloud';
-
-function sharedCookieDomain(): string | null {
-  const host = location.hostname;
-  if (host === COOKIE_DOMAIN_SUFFIX) return null;      // 裸域本身就是全站共享，无需 Domain
-  if (!host.endsWith('.' + COOKIE_DOMAIN_SUFFIX)) return null;  // localhost / 内网 IP / 其他域
-  return '.' + COOKIE_DOMAIN_SUFFIX;
+function announce(type: 'login' | 'logout') {
+  try {
+    localStorage.setItem(EVENT_KEY, JSON.stringify({ type, nonce: Date.now() + Math.random() }));
+  } catch { /* Storage restrictions must not prevent login or logout. */ }
 }
 
-function writeSharedAuth(value: string) {
-  const domain = sharedCookieDomain();
-  if (!domain) return;
-  const secure = location.protocol === 'https:' ? '; Secure' : '';
-  document.cookie =
-    `${AUTH_KEY}=${encodeURIComponent(value)}; Domain=${domain}; Path=/; ` +
-    `Max-Age=2592000; SameSite=Lax${secure}`;
+function removeLegacyAuth() {
+  try { localStorage.removeItem('libtv_auth'); } catch { /* Storage may be disabled. */ }
+  document.cookie = 'libtv_auth=; Path=/; Max-Age=0; SameSite=Lax';
+  if (location.hostname === 'yunqueai.cloud' || location.hostname.endsWith('.yunqueai.cloud')) {
+    document.cookie = 'libtv_auth=; Domain=yunqueai.cloud; Path=/; Max-Age=0; SameSite=Lax';
+  }
 }
 
-function readSharedAuth(): string | null {
-  const matched = document.cookie.match(new RegExp(`(?:^|;\\s*)${AUTH_KEY}=([^;]*)`));
-  return matched ? decodeURIComponent(matched[1]) : null;
-}
-
-function clearSharedAuth() {
-  const domain = sharedCookieDomain();
-  if (!domain) return;
-  document.cookie = `${AUTH_KEY}=; Domain=${domain}; Path=/; Max-Age=0; SameSite=Lax`;
+function authFields(response: AuthResponse) {
+  if (!response.token || !response.user?.id || (tokenExpiresAt(response.token) ?? 0) <= Date.now()) {
+    throw new Error('登录信息无效，请重新登录');
+  }
+  return {
+    token: response.token,
+    user: { ...response.user, avatarUrl: response.user.avatarUrl ?? response.user.avatar_url },
+    isAuthenticated: true,
+    showLoginModal: false,
+  };
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -65,105 +59,81 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
   isInitialized: false,
+  initializing: false,
   showLoginModal: false,
   authMode: 'login',
-  initializing: false,
 
-  setAuth: (response: AuthResponse) => {
-    const serialized = JSON.stringify(response);
-    localStorage.setItem(AUTH_KEY, serialized);
-    writeSharedAuth(serialized);   // 同一父域下的其他子域也能直接进入登录态
-    set({
-      token: response.token,
-      user: response.user,
-      isAuthenticated: true,
-      showLoginModal: false,
-    });
+  setAuth: response => {
+    revision++;
+    set(authFields(response));
+    removeLegacyAuth();
+    announce('login');
   },
 
-  // 更新当前用户信息（个人资料修改后同步到内存与 localStorage）
-  setUser: (partial) => {
+  setUser: partial => {
     const current = get().user;
-    if (!current) return;
-    const merged = { ...current, ...partial };
-    const stored = localStorage.getItem(AUTH_KEY);
-    if (stored) {
-      try {
-        const data = JSON.parse(stored) as AuthResponse;
-        data.user = merged;
-        localStorage.setItem(AUTH_KEY, JSON.stringify(data));
-      } catch {
-        // localStorage 数据损坏时忽略
-      }
-    }
-    set({ user: merged });
+    if (current) set({ user: { ...current, ...partial } });
   },
 
-  logout: () => {
-    localStorage.removeItem(AUTH_KEY);
-    clearSharedAuth();
+  clearAuth: () => {
+    revision++;
+    removeLegacyAuth();
     set({ token: null, user: null, isAuthenticated: false });
   },
 
-  initialize: async () => {
+  logout: async () => {
+    revision++;
+    await axios.post('/api/auth/logout', {}, cookieRequest);
+    get().clearAuth();
+    announce('logout');
+  },
+
+  refresh: () => {
+    if (refreshing) return refreshing;
+    const startedAt = revision;
+    const pending = axios.request<ApiResponse<AuthResponse>>({
+      ...cookieRequest, method: 'POST', url: '/api/auth/refresh', data: {},
+    }).then(response => {
+      if (startedAt !== revision) return null;
+      if (response.data?.code !== 0) throw new Error('登录信息无效，请重新登录');
+      const auth = response.data.data as AuthResponse;
+      set(authFields(auth));
+      return auth.token;
+    });
+    const settled = pending.finally(() => {
+      if (refreshing === settled) refreshing = null;
+    });
+    refreshing = settled;
+    return settled;
+  },
+
+  initialize: () => {
+    if (initializing) return initializing;
+    removeLegacyAuth();
     set({ initializing: true });
-    try {
-      let stored = localStorage.getItem(AUTH_KEY);
-      if (!stored) {
-        // 本 origin 没有登录态时，尝试从父域共享 cookie 恢复：
-        // 用户可能在 www 登录后直接打开了 manwa 子域
-        const shared = readSharedAuth();
-        if (shared) {
-          stored = shared;
-          localStorage.setItem(AUTH_KEY, shared);
-        }
-      }
-      if (!stored) {
-        set({ isInitialized: true, initializing: false });
-        return;
-      }
-
-      const data: AuthResponse = JSON.parse(stored);
-
-      // 验证 token 是否仍然有效（此时不设置 isAuthenticated，避免错误拦截器误判）
-      try {
-        // 临时设置 token 以便请求携带
-        set({ token: data.token });
-
-        const me = await api.get('/auth/me') as { id: string; email: string; nickname: string; avatar_url: string; role?: string; credits?: number };
-        // token 有效。顺手补写共享 cookie：老版本登录的用户 localStorage 里
-        // 已有凭证但父域还没有 cookie，不补写的话换了子域仍会被要求重新登录。
-        writeSharedAuth(stored);
-        // token 有效
-        set({
-          user: { id: me.id, email: me.email, nickname: me.nickname, avatarUrl: me.avatar_url, role: me.role, credits: me.credits },
-          isAuthenticated: true,
-          isInitialized: true,
-          initializing: false,
-        });
-      } catch {
-        // token 无效或过期，静默清除（共享 cookie 一并清掉，
-        // 否则其他子域每次进来都会拿这个失效 token 重新试一遍）
-        localStorage.removeItem(AUTH_KEY);
-        clearSharedAuth();
-        set({ token: null, user: null, isAuthenticated: false, isInitialized: true, initializing: false });
-      }
-    } catch {
-      localStorage.removeItem(AUTH_KEY);
-      clearSharedAuth();
+    initializing = get().refresh().then(() => undefined).catch(() => {
+      get().clearAuth();
+    }).finally(() => {
       set({ isInitialized: true, initializing: false });
-    }
+      initializing = null;
+    });
+    return initializing;
   },
 
-  openLoginModal: (mode = 'login') => {
-    set({ showLoginModal: true, authMode: mode });
-  },
-
-  closeLoginModal: () => {
-    set({ showLoginModal: false, authMode: 'login' });
-  },
-
-  setAuthMode: (mode) => {
-    set({ authMode: mode });
-  },
+  openLoginModal: (mode = 'login') => set({ showLoginModal: true, authMode: mode }),
+  closeLoginModal: () => set({ showLoginModal: false, authMode: 'login' }),
+  setAuthMode: mode => set({ authMode: mode }),
 }));
+
+// Tabs share the HttpOnly session cookie; broadcasts carry no credentials.
+window.addEventListener('storage', event => {
+  if (event.key !== EVENT_KEY || !event.newValue) return;
+  try {
+    const { type } = JSON.parse(event.newValue);
+    if (type === 'logout') useAuthStore.getState().clearAuth();
+    if (type === 'login') {
+      useAuthStore.getState().clearAuth();
+      void useAuthStore.getState().initialize();
+    }
+  } catch { /* Ignore malformed events from old tabs. */ }
+});

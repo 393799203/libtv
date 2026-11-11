@@ -31,7 +31,7 @@ type ForgotPasswordRequest struct {
 // service 层再校验一次（不依赖调用方是否记得校验）。
 type ResetPasswordRequest struct {
 	Token    string `json:"token" binding:"required"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required"`
 }
 
 // ForgotPassword 申请发送重置邮件 POST /api/auth/forgot-password

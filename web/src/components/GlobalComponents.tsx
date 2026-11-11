@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { captureReferralCode } from '@/utils/referral';
 import { authPagePath, isAuthPath } from '@/utils/authNavigation';
+import { tokenExpiresAt } from '@/utils/authSession';
+import api from '@/services/api';
 
 /**
  * 全局组件容器
@@ -17,21 +19,33 @@ export function GlobalComponents() {
   const authMode = useAuthStore(s => s.authMode);
   // 应用启动时初始化认证状态（所有页面共享）
   useEffect(() => {
-    useAuthStore.getState().initialize();
+    void useAuthStore.getState().initialize();
+    // Refresh in the foreground as well as before API requests, so editors
+    // using upload headers also receive current access credentials.
+    const checkSession = () => {
+      const { token, isAuthenticated } = useAuthStore.getState();
+      if (!isAuthenticated || !token || document.visibilityState === 'hidden') return;
+      if ((tokenExpiresAt(token) ?? 0) - Date.now() < 2 * 60 * 1000) {
+        void api.get('/auth/me', { silentError: true }).catch(() => {});
+      }
+    };
+    const timer = window.setInterval(checkSession, 30000);
+    window.addEventListener('focus', checkSession);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', checkSession);
+    };
   }, []);
   useEffect(() => {
     const code = captureReferralCode(location.search);
     if (code && initialized && !authenticated && !isAuthPath(location.pathname)) {
-      navigate(authPagePath('register', location.pathname + location.search + location.hash, location.search), { replace: true });
+      navigate(authPagePath('register', '/', location.search), { replace: true });
     }
   }, [location, initialized, authenticated, navigate]);
   useEffect(() => {
     if (!authRequested) return;
-    const returnPath = isAuthPath(location.pathname)
-      ? new URLSearchParams(location.search).get('redirect') || '/'
-      : location.pathname + location.search + location.hash;
     useAuthStore.getState().closeLoginModal();
-    navigate(authPagePath(authMode, returnPath, location.search));
+    navigate(authPagePath(authMode, '/', location.search));
   }, [authRequested, authMode, location, navigate]);
 
   // 蛙导由具体项目画布挂载，非创作页面没有可操作的画布。

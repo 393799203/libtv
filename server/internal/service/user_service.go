@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"libtv/internal/config"
 	"libtv/internal/model"
 	"libtv/internal/pkg/apperror"
 	"libtv/internal/repository"
@@ -42,6 +41,7 @@ type UserService struct {
 	storage   storage.Storage
 	mailer    WelcomeMailer
 	referrals *ReferralService
+	authRepo  repository.AuthRepo
 }
 
 func (s *UserService) SetReferralService(referrals *ReferralService) { s.referrals = referrals }
@@ -68,12 +68,24 @@ func (s *UserService) Register(ctx context.Context, email, password, nickname st
 
 // RegisterWithChannel 注册（可指定来源渠道：wasu=华数 / dianxin=电信；缺省/非法回退 dianxin）
 func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, nickname, channel string, referralCodes ...string) (*model.User, error) {
+	var err error
+	email, err = NormalizeEmail(email)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidatePassword(password); err != nil {
+		return nil, err
+	}
+	nickname = strings.TrimSpace(nickname)
+	if len([]rune(nickname)) > 50 {
+		return nil, apperror.New(2109, http.StatusBadRequest, "昵称不能超过 50 个字符")
+	}
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	if existing != nil {
-		return nil, errors.New("email already registered")
+		return nil, ErrEmailRegistered
 	}
 	var inviterID *string
 	if len(referralCodes) > 0 && strings.TrimSpace(referralCodes[0]) != "" {
@@ -102,8 +114,12 @@ func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, 
 		Nickname:     nickname,
 		Channel:      channel,
 		InviterID:    inviterID,
+		Role:         "user",
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "23505") {
+			return nil, ErrEmailRegistered
+		}
 		return nil, err
 	}
 	// 注册成功即发欢迎邮件：异步 + 只记日志，绝不因为邮件问题让注册失败
@@ -134,28 +150,30 @@ func (s *UserService) sendWelcomeAsync(user *model.User) {
 	}()
 }
 
-func (s *UserService) Login(ctx context.Context, email, password string) (string, *model.User, error) {
+func (s *UserService) authenticate(ctx context.Context, email, password string) (*model.User, error) {
+	email = strings.TrimSpace(email)
+	if len(email) > 255 || len(password) > 72 {
+		return nil, ErrInvalidCredentials
+	}
 	user, err := s.userRepo.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil, errors.New("invalid email or password")
+			// Keep the missing-account path comparable to a wrong password.
+			_ = bcrypt.CompareHashAndPassword([]byte(dummyPasswordHash), []byte(password))
+			return nil, ErrInvalidCredentials
 		}
-		return "", nil, err
+		return nil, err
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return "", nil, errors.New("invalid email or password")
+		return nil, ErrInvalidCredentials
 	}
 
 	// 不再单独记录"最后登录"：后台只关心"最后操作"（last_active_at）。
 	// 登录本身也是一次操作，这里打一个点即可（内部节流 + 异步，不影响登录耗时）。
 	s.TouchActivity(user.ID)
 
-	token, err := s.generateToken(user)
-	if err != nil {
-		return "", nil, err
-	}
-	return token, user, nil
+	return user, nil
 }
 
 func (s *UserService) GetByID(ctx context.Context, id string) (*model.User, error) {
@@ -325,8 +343,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, id string, nickname, av
 
 // ChangePassword 修改当前用户密码（需验证原密码）
 func (s *UserService) ChangePassword(ctx context.Context, id, oldPassword, newPassword string) error {
-	if len(newPassword) < 6 {
-		return errors.New("新密码至少6位")
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
 	}
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
@@ -350,26 +368,19 @@ func (s *UserService) ChangePassword(ctx context.Context, id, oldPassword, newPa
 // 不含 pwd_ver 的旧版 token 一律视为失效，需重新登录
 func (s *UserService) CheckTokenValid(ctx context.Context, userID string, claims jwt.MapClaims) bool {
 	ver, ok := claims["pwd_ver"].(float64)
-	if !ok {
+	sid, sidOK := claims["sid"].(string)
+	if !ok || !sidOK || sid == "" || s.authRepo == nil {
+		return false
+	}
+	session, err := s.authRepo.FindSession(ctx, sid)
+	if err != nil || session.UserID != userID || float64(session.PasswordVersion) != ver {
 		return false
 	}
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return false
 	}
-	return int(ver) == user.PasswordVersion
-}
-
-func (s *UserService) generateToken(user *model.User) (string, error) {
-	claims := jwt.MapClaims{
-		"user_id": user.ID,
-		"email":   user.Email,
-		// 密码版本号：改密码后服务端版本递增，旧 token 中的版本号不匹配即失效
-		"pwd_ver": user.PasswordVersion,
-		"exp":     time.Now().Add(time.Duration(config.C.JWT.ExpireHours) * time.Hour).Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(config.C.JWT.Secret))
+	return ver == float64(user.PasswordVersion)
 }
 
 // activityTouchTTL 同一用户两次"最后操作"落库的最小间隔。
@@ -406,21 +417,6 @@ func (s *UserService) TouchActivity(userID string) {
 			log.Printf("warning: update last_active_at failed userID=%s: %v", userID, err)
 		}
 	}()
-}
-
-// RenewToken 会话滑动续期：为已登录用户重新签发一个完整有效期的 token。
-// 只做"延长"，不改变身份信息 —— claims 完全复用 generateToken（含 pwd_ver），
-// 所以改密码后旧 token 依然会失效，续期不会成为绕过密码版本的漏洞。
-func (s *UserService) RenewToken(ctx context.Context, userID string) (string, *model.User, error) {
-	user, err := s.GetByID(ctx, userID)
-	if err != nil {
-		return "", nil, err
-	}
-	token, err := s.generateToken(user)
-	if err != nil {
-		return "", nil, err
-	}
-	return token, user, nil
 }
 
 // GetUserChannel 查询用户 AI 渠道（管理员修改/渠道路由用）

@@ -15,6 +15,7 @@ export interface BannerItem {
 }
 
 export const bannerApi = {
+  listAdmin: () => api.get<BannerItem[]>('/admin/banners'),
   /** 获取所有Banner列表 */
   list: (params?: { is_active?: boolean }) => {
     const query = new URLSearchParams();

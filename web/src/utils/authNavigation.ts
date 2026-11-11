@@ -20,13 +20,12 @@ export function safeAuthReturnPath(path?: string | null): string {
   }
 }
 
-/** 登录/注册切换时保留返回位置、渠道和邀请信息。 */
+/** 登录/注册切换只保留渠道和邀请信息，认证成功统一进入首页。 */
 export function authPagePath(mode: AuthMode, returnPath = '/', search = ''): string {
   const redirect = safeAuthReturnPath(returnPath);
   const current = new URLSearchParams(search);
   const destination = new URL(redirect, PARSE_ORIGIN).searchParams;
   const params = new URLSearchParams();
-  if (redirect !== '/') params.set('redirect', redirect);
   if ((current.get('source') || destination.get('source')) === 'wasu') params.set('source', 'wasu');
   const referral = normalizeReferralCode(current.get('ref') || destination.get('ref') || '');
   if (REFERRAL_CODE_PATTERN.test(referral)) params.set('ref', referral);

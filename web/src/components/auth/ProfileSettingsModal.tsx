@@ -9,6 +9,7 @@ import { uploadAvatar } from '@/services/uploadApi';
 import { getUserAvatarSrc } from '@/utils/avatar';
 import { Z } from '@/utils/zLayers';
 import { ReferralCard } from './ReferralCard';
+import { PASSWORD_HINT, validNewPassword } from '@/utils/authSession';
 import './profile.css';
 
 interface ProfileSettingsModalProps {
@@ -19,7 +20,7 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
   const { message } = App.useApp();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const logout = useAuthStore((s) => s.logout);
+  const clearAuth = useAuthStore((s) => s.clearAuth);
   const openLoginModal = useAuthStore((s) => s.openLoginModal);
   const location = useLocation();
 
@@ -67,8 +68,8 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
         message.error('请输入原密码');
         return;
       }
-      if (newPassword.length < 6) {
-        message.error('新密码至少 6 位');
+      if (!validNewPassword(newPassword)) {
+        message.error(PASSWORD_HINT);
         return;
       }
       if (newPassword !== confirmPassword) {
@@ -100,7 +101,7 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
         message.success('密码已修改，请重新登录');
         sessionStorage.setItem('auth_redirect', location.pathname);
         onClose();
-        logout();
+        clearAuth();
         openLoginModal();
         return;
       }
@@ -152,7 +153,7 @@ export function ProfileSettingsModal({ onClose }: ProfileSettingsModalProps) {
                 placeholder="原密码" aria-label="原密码" autoComplete="current-password" />
               <div className="profile-password-pair">
                 <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)}
-                  placeholder="新密码（至少 6 位）" aria-label="新密码" autoComplete="new-password" />
+                  placeholder="新密码（至少 8 个字符）" aria-label="新密码" autoComplete="new-password" />
                 <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
                   placeholder="确认新密码" aria-label="确认新密码" autoComplete="new-password" />
               </div>

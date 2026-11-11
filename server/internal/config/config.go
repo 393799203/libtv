@@ -24,10 +24,10 @@ type Config struct {
 	SMTP      SMTPConfig      `yaml:"smtp"`
 }
 
-// SMTPConfig 系统通知邮件的 SMTP 配置（当前用于注册欢迎邮件）。
+// SMTPConfig 注册验证、密码重置及欢迎邮件的 SMTP 配置。
 //
 // 与支付密钥同一套注入方式：config.yaml 里留空占位，生产用 SMTP_* 环境变量注入，
-// 口令不要写进仓库。enabled=false（默认）时完全不发信，注册流程不受任何影响。
+// 口令不要写进仓库。enabled=false 时已有账号仍可登录，新用户无法获取注册验证码。
 type SMTPConfig struct {
 	Enabled    bool   `yaml:"enabled"`     // 启用开关
 	Host       string `yaml:"host"`        // 如 smtp.qq.com / smtp.163.com / smtpdm.aliyun.com
@@ -56,13 +56,13 @@ type VideoConfig struct {
 // 队列化后任务具备：跨重启续跑（原裸 goroutine 会被重启杀掉，执行永久卡 running）、
 // 失败重试、死信留存、消费端并发可控。Enabled=false 时回退为直接 goroutine。
 type QueueConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	Workers             int    `yaml:"workers"`               // worker 数 = 同时消费的任务数
-	MaxRetry            int    `yaml:"max_retry"`             // 失败重试次数，超出进死信
-	Stream              string `yaml:"stream"`                // 任务流
-	DeadStream          string `yaml:"dead_stream"`           // 死信流
-	ConsumerGroup       string `yaml:"consumer_group"`        // 消费者组
-	VisibilityTimeoutSec int   `yaml:"visibility_timeout_sec"` // 超时未确认视为 worker 崩溃，重新认领
+	Enabled              bool   `yaml:"enabled"`
+	Workers              int    `yaml:"workers"`                // worker 数 = 同时消费的任务数
+	MaxRetry             int    `yaml:"max_retry"`              // 失败重试次数，超出进死信
+	Stream               string `yaml:"stream"`                 // 任务流
+	DeadStream           string `yaml:"dead_stream"`            // 死信流
+	ConsumerGroup        string `yaml:"consumer_group"`         // 消费者组
+	VisibilityTimeoutSec int    `yaml:"visibility_timeout_sec"` // 超时未确认视为 worker 崩溃，重新认领
 }
 
 // RateLimitConfig 生成接口限流。
@@ -73,8 +73,9 @@ type RateLimitConfig struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"`
+	Port           int      `yaml:"port"`
+	Mode           string   `yaml:"mode"`
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // CORSConfig 跨域配置；Origins 为空时表示允许所有来源（便于本地开发）
@@ -108,15 +109,15 @@ func (r *RedisConfig) Addr() string {
 }
 
 type JWTConfig struct {
-	Secret      string `yaml:"secret"`
-	ExpireHours int    `yaml:"expire_hours"`
+	Secret       string `yaml:"secret"`
+	CookieDomain string `yaml:"cookie_domain"`
 }
 
 type StorageConfig struct {
-	Type   string          `yaml:"type"`
-	Local  LocalConfig     `yaml:"local"`
-	MinIO  MinIOConfigYaml `yaml:"minio"`
-	ZOS    ZOSConfigYaml   `yaml:"zos"`
+	Type  string          `yaml:"type"`
+	Local LocalConfig     `yaml:"local"`
+	MinIO MinIOConfigYaml `yaml:"minio"`
+	ZOS   ZOSConfigYaml   `yaml:"zos"`
 }
 
 type LocalConfig struct {
@@ -124,14 +125,14 @@ type LocalConfig struct {
 }
 
 type MinIOConfigYaml struct {
-	Endpoint        string `yaml:"endpoint"`
-	AccessKey       string `yaml:"access_key"`
-	SecretKey       string `yaml:"secret_key"`
-	Bucket          string `yaml:"bucket"`
-	UseSSL          bool   `yaml:"use_ssl"`
-	PublicEndpoint  string `yaml:"public_endpoint"`
-	CheckInterval   string `yaml:"check_interval"`
-	CheckTimeout    string `yaml:"check_timeout"`
+	Endpoint       string `yaml:"endpoint"`
+	AccessKey      string `yaml:"access_key"`
+	SecretKey      string `yaml:"secret_key"`
+	Bucket         string `yaml:"bucket"`
+	UseSSL         bool   `yaml:"use_ssl"`
+	PublicEndpoint string `yaml:"public_endpoint"`
+	CheckInterval  string `yaml:"check_interval"`
+	CheckTimeout   string `yaml:"check_timeout"`
 }
 
 // ZOSConfigYaml 天翼云对象存储（ZOS）配置
@@ -251,6 +252,19 @@ func Load(path string) error {
 	// 存储类型环境变量覆盖（docker-compose中设置）
 	if storageType := os.Getenv("STORAGE_TYPE"); storageType != "" {
 		C.Storage.Type = storageType
+	}
+
+	if v := os.Getenv("JWT_SECRET"); v != "" {
+		C.JWT.Secret = v
+	}
+	if v := os.Getenv("AUTH_COOKIE_DOMAIN"); v != "" {
+		C.JWT.CookieDomain = v
+	}
+	if v := os.Getenv("TRUSTED_PROXIES"); v != "" {
+		C.Server.TrustedProxies = splitCSV(v)
+	}
+	if len(C.JWT.Secret) < 32 || ((C.Server.Mode == "release" || os.Getenv("RUN_MODE") == "docker") && C.JWT.Secret == "libtv-mvp-secret-change-in-production") {
+		return fmt.Errorf("JWT_SECRET must contain at least 32 bytes and must be changed in release mode")
 	}
 
 	// CORS 白名单环境变量覆盖（逗号分隔，CORS_ORIGINS=http://a,http://b）

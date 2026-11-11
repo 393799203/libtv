@@ -8,13 +8,12 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"libtv/internal/config"
 	"libtv/internal/engine"
 	"libtv/internal/llm"
+	"libtv/internal/middleware"
 	"libtv/internal/model"
 	"libtv/internal/pkg/response"
 	"libtv/internal/queue"
@@ -27,12 +26,13 @@ import (
 )
 
 type WorkflowHandler struct {
-	execRepo    repository.ExecutionRepo
-	aiTaskRepo  repository.AITaskRepo
-	canvasRepo  repository.CanvasRepo
-	projectRepo repository.ProjectRepo
-	engine      *engine.WorkflowEngine
-	registry    *engine.ExecutorRegistry
+	tokenChecker middleware.UserTokenChecker
+	execRepo     repository.ExecutionRepo
+	aiTaskRepo   repository.AITaskRepo
+	canvasRepo   repository.CanvasRepo
+	projectRepo  repository.ProjectRepo
+	engine       *engine.WorkflowEngine
+	registry     *engine.ExecutorRegistry
 	// genQueue 生成任务队列：非 nil 时生成任务入 Redis Stream 由 worker 消费
 	// （进程重启不丢任务、失败重试、并发受控）；为 nil 时降级为进程内直接起协程
 	genQueue *queue.Queue
@@ -45,6 +45,10 @@ type WorkflowHandler struct {
 	// canvasLocks 按项目串行化画布写入：同一层里多个节点并行收尾会同时做
 	// 读-改-写，不加锁会互相覆盖（一个节点的产物被另一个的旧快照盖掉）
 	canvasLocks sync.Map // projectID -> *sync.Mutex
+}
+
+func (h *WorkflowHandler) SetTokenChecker(checker middleware.UserTokenChecker) {
+	h.tokenChecker = checker
 }
 
 // SetQueue 注入生成任务队列（传 nil 表示降级为进程内执行）
@@ -111,6 +115,11 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 	}
 	if startNodeID == "" {
 		response.Fail(c, http.StatusBadRequest, "缺少 startNodeId：现在只支持单节点执行")
+		return
+	}
+	project, err := h.projectRepo.FindByID(c.Request.Context(), projectID)
+	if err != nil || project.UserID != middleware.GetUserID(c) {
+		response.Fail(c, http.StatusNotFound, "project not found")
 		return
 	}
 
@@ -349,9 +358,18 @@ func (h *WorkflowHandler) HandleQueuedTask(ctx context.Context, t queue.Task) er
 }
 
 func (h *WorkflowHandler) GetExecution(c *gin.Context) {
-	id, _ := strconv.ParseInt(c.Param("execId"), 10, 64)
+	rawID := c.Param("execId")
+	if rawID == "" {
+		rawID = c.Param("id") // Legacy /workflow/executions/:id route.
+	}
+	id, _ := strconv.ParseInt(rawID, 10, 64)
 	exec, err := h.execRepo.FindByID(c.Request.Context(), id)
-	if err != nil {
+	if err != nil || (c.Param("execId") != "" && exec.ProjectID != c.Param("id")) {
+		response.Fail(c, http.StatusNotFound, "execution not found")
+		return
+	}
+	project, err := h.projectRepo.FindByID(c.Request.Context(), exec.ProjectID)
+	if err != nil || project.UserID != middleware.GetUserID(c) {
 		response.Fail(c, http.StatusNotFound, "execution not found")
 		return
 	}
@@ -398,21 +416,17 @@ func (h *WorkflowHandler) GetExecution(c *gin.Context) {
 //
 // 路径: GET /api/projects/:id/workflows/:execId/stream
 func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
-	// 1) 鉴权：query token 优先，header 次之
-	tokenStr := c.Query("t")
-	if tokenStr == "" {
-		authHeader := c.GetHeader("Authorization")
-		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
-	}
-	if tokenStr == "" {
-		response.Fail(c, http.StatusUnauthorized, "missing token")
+	userID := middleware.GetUserID(c)
+	rawClaims, _ := c.Get("auth_claims")
+	claims, ok := rawClaims.(jwt.MapClaims)
+	if userID == "" || !ok || h.tokenChecker == nil {
+		response.Fail(c, http.StatusUnauthorized, "登录已失效，请重新登录")
 		return
 	}
-	if _, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-		return []byte(config.C.JWT.Secret), nil
-	}); err != nil {
-		response.Fail(c, http.StatusUnauthorized, "invalid token")
-		return
+	authenticated := func() bool {
+		exp, err := claims.GetExpirationTime()
+		return err == nil && exp != nil && exp.After(time.Now()) &&
+			h.tokenChecker.CheckTokenValid(c.Request.Context(), userID, claims)
 	}
 
 	execIDStr := c.Param("execId")
@@ -423,7 +437,8 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 	}
 
 	// 确认执行存在（避免订阅一个不存在的 execution）
-	if _, err := h.execRepo.FindByID(c.Request.Context(), execID); err != nil {
+	record, err := h.execRepo.FindByID(c.Request.Context(), execID)
+	if err != nil || record.ProjectID != c.Param("id") {
 		response.Fail(c, http.StatusNotFound, "execution not found")
 		return
 	}
@@ -494,6 +509,9 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 			log.Printf("[SSE] client disconnected: execID=%d", execID)
 			return
 		case <-heartbeat.C:
+			if !authenticated() {
+				return
+			}
 			// 心跳前先查一次执行状态兜底。引擎事件有两种情况会永远收不到：
 			//   ① 本连接建立时执行恰好刚结束（下面 :443 读状态与 :476 订阅之间存在窗口，
 			//      那时终态事件已经发完，之后再也不会有事件）；
@@ -525,7 +543,7 @@ func (h *WorkflowHandler) StreamExecution(c *gin.Context) {
 			}
 			flusher.Flush()
 		case event, ok := <-eventCh:
-			if !ok {
+			if !ok || !authenticated() {
 				return
 			}
 			payload, _ := json.Marshal(event)

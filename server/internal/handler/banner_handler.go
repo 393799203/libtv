@@ -23,6 +23,15 @@ func NewBannerHandler(bannerService *service.BannerService, fileUploadService *s
 
 // ListBanners 获取所有Banner列表（公开）
 func (h *BannerHandler) ListBanners(c *gin.Context) {
+	banners, err := h.bannerService.ListBannersByStatus(c.Request.Context(), true)
+	if err != nil {
+		response.FailWith(c, err)
+		return
+	}
+	response.OK(c, banners)
+}
+
+func (h *BannerHandler) ListAllBanners(c *gin.Context) {
 	// 获取查询参数
 	isActiveStr := c.Query("is_active")
 
@@ -52,6 +61,10 @@ func (h *BannerHandler) GetBanner(c *gin.Context) {
 	banner, err := h.bannerService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		response.FailWith(c, err)
+		return
+	}
+	if !banner.IsActive {
+		response.Fail(c, http.StatusNotFound, "Banner不存在")
 		return
 	}
 	response.OK(c, banner)

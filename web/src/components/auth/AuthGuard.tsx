@@ -5,16 +5,18 @@ import { authPagePath } from '@/utils/authNavigation';
 
 interface AuthGuardProps {
   children: React.ReactNode;
+  adminOnly?: boolean;
 }
 
 /**
  * 路由守卫：需要登录才能访问的页面
  * - 未初始化时显示 loading
- * - 未登录时进入独立登录页，成功后返回完整的原始地址
+ * - 登录成功统一进入首页；后台页面额外要求管理员角色
  */
-export function AuthGuard({ children }: AuthGuardProps) {
+export function AuthGuard({ children, adminOnly = false }: AuthGuardProps) {
   const isInitialized = useAuthStore((s) => s.isInitialized);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const role = useAuthStore((s) => s.user?.role);
   const location = useLocation();
 
   // 未初始化时显示 loading
@@ -28,8 +30,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   // 未登录不渲染子组件
   if (!isAuthenticated) {
-    return <Navigate to={authPagePath('login', location.pathname + location.search + location.hash)} replace />;
+    return <Navigate to={authPagePath('login', '/', location.search)} replace />;
   }
+
+  if (adminOnly && role !== 'admin') return <Navigate to="/" replace />;
 
   return <>{children}</>;
 }

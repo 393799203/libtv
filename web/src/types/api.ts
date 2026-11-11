@@ -23,6 +23,7 @@ export interface PaginationResponse<T> {
 export interface LoginRequest {
   email: string;
   password: string;
+  remember_me?: boolean;
 }
 
 // 注册请求
@@ -30,6 +31,7 @@ export interface RegisterRequest {
   email: string;
   password: string;
   nickname: string;
+  code: string;
   /** 注册来源渠道（wasu=华数 / dianxin=电信）；由注册链接 ?source= 参数带入，缺省 wasu */
   channel?: string;
   referralCode?: string;
@@ -50,11 +52,14 @@ export interface ResetPasswordRequest {
 // 认证响应
 export interface AuthResponse {
   token: string;
+  expires_at?: string;
+  session_expires_at?: string;
   user: {
     id: string;
     email: string;
     nickname: string;
     avatarUrl?: string;
+    avatar_url?: string;
     role?: string;
     /** 剩余积分（AI 调用扣费用） */
     credits?: number;

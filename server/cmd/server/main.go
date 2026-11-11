@@ -123,7 +123,7 @@ func main() {
 	}
 
 	// 自动迁移
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}, &model.PasswordResetToken{}, &model.AssistantLog{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Canvas{}, &model.WorkflowExecution{}, &model.AITask{}, &model.Style{}, &model.StyleFavorite{}, &model.Category{}, &model.ShowCategory{}, &model.Show{}, &model.ShowLike{}, &model.ShowComment{}, &model.Banner{}, &model.UserAsset{}, &model.BillingRecord{}, &model.ModelPrice{}, &model.GenerationHistory{}, &model.PointsPackage{}, &model.PaymentOrder{}, &model.Setting{}, &model.ForumPost{}, &model.ForumReply{}, &model.ProviderTask{}, &model.PasswordResetToken{}, &model.AssistantLog{}, &model.AuthSession{}, &model.RegistrationCode{}, &model.AuthRateBucket{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
 
@@ -202,8 +202,7 @@ func main() {
 	appStorage := initStorage()
 
 	// 初始化 Service
-	// 邮件：注册欢迎邮件用。没配 SMTP（默认）时 Enabled()==false，UserService 会静默跳过，
-	// 注册接口与邮件完全解耦 —— 邮件发不出去不影响任何业务流程。
+	// 邮件用于注册验证、密码重置及欢迎通知。未配置时不允许跳过邮箱验证注册。
 	mailSender := mail.New(mail.Options{
 		Enabled:    config.C.SMTP.Enabled,
 		Host:       config.C.SMTP.Host,
@@ -220,9 +219,10 @@ func main() {
 		log.Printf("[Mail] ✅ SMTP 已启用：%s:%d 发件人=%s 邮件跳转=%s",
 			config.C.SMTP.Host, config.C.SMTP.Port, config.C.SMTP.Username, mailSiteURL())
 	} else {
-		log.Printf("[Mail] 未启用 SMTP（smtp.enabled=false 或缺少 host/from），注册欢迎邮件不会发送")
+		log.Printf("[Mail] 未启用 SMTP（smtp.enabled=false 或缺少 host/from），新用户暂时无法获取注册验证码")
 	}
 	userService := service.NewUserService(userRepo, appStorage, mailSender)
+	userService.SetAuthRepository(repository.NewAuthRepo(db))
 	referralService := service.NewReferralService(db)
 	userService.SetReferralService(referralService)
 	// 找回密码：独立于 UserService（未登录流程），令牌存库不依赖 Redis，
@@ -348,6 +348,7 @@ func main() {
 	projectHandler := handler.NewProjectHandler(projectService)
 	canvasHandler := handler.NewCanvasHandler(canvasService)
 	workflowHandler := handler.NewWorkflowHandler(execRepo, aiTaskRepo, canvasRepo, projectRepo, eng, registry)
+	workflowHandler.SetTokenChecker(userService)
 	uploadHandler := handler.NewUploadHandler(appStorage, fileUploadService, transcodeService, projectRepo, userRepo)
 	// 存量项目封面回填（仅管理员）：有视频抽尾帧、没视频用最后一张图，都没有则保持占位
 	projectCoverHandler := handler.NewProjectCoverHandler(service.NewCoverBackfillService(projectRepo, canvasRepo, generationHistoryRepo, appStorage, imageOpsService))
@@ -357,7 +358,7 @@ func main() {
 	// 点选识别：用户点一下 → 视觉模型说出"那是什么" + 外接框（见 handler.ObjectRecognizeHandler）
 	objectRecognizeHandler := handler.NewObjectRecognizeHandler(llmClient, modelManager, channelService, imageOpsService, billingService, providerTaskService)
 	styleHandler := handler.NewStyleHandler(styleService, categoryService, styleFavoriteService, fileUploadService)
-	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo)
+	showHandler := handler.NewShowHandler(showService, fileUploadService, projectRepo, userService)
 	commentHandler := handler.NewCommentHandler(commentService)
 	forumHandler := handler.NewForumHandler(forumService)
 	// SEO：动态 sitemap（只收录公开可读的作品/帖子，见 handler/seo_handler.go）
@@ -447,6 +448,12 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.Default()
+	if err := r.SetTrustedProxies(config.C.Server.TrustedProxies); err != nil {
+		log.Fatalf("invalid trusted_proxies: %v", err)
+	}
+	// nginx overwrites X-Real-IP; do not accept client-supplied X-Forwarded-For
+	// chains as the source of authentication rate-limit keys.
+	r.RemoteIPHeaders = []string{"X-Real-IP"}
 
 	// 设置 multipart form 内存限制（用于大文件上传）
 	r.MaxMultipartMemory = 100 << 20 // 100MB
@@ -456,7 +463,7 @@ func main() {
 
 	// 代理路由：统一访问MinIO和本地存储
 	r.GET("/media/*filepath", uploadHandler.GetFile)
-	r.DELETE("/media/*filepath", uploadHandler.DeleteFile)
+	r.DELETE("/media/*filepath", middleware.Auth(userService, userService), middleware.RequireAdmin(userService), uploadHandler.DeleteFile)
 
 	// 保留旧的静态文件路由（兼容）
 	r.Static("/uploads", config.C.Storage.Local.BasePath)
@@ -467,12 +474,20 @@ func main() {
 	// 公开路由
 	auth := r.Group("/api/auth")
 	{
-		auth.POST("/register", userHandler.Register)
-		auth.POST("/login", userHandler.Login)
+		auth.Use(func(c *gin.Context) {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+			c.Header("Cache-Control", "no-store")
+			c.Next()
+		})
+		auth.POST("/register", middleware.AuthRateLimit(userService, "register:ip", 10), userHandler.Register)
+		auth.POST("/register-code", middleware.AuthRateLimit(userService, "register-code:ip", 5), userHandler.SendRegistrationCode)
+		auth.POST("/login", middleware.AuthRateLimit(userService, "login:ip", 30), userHandler.Login)
+		auth.POST("/refresh", middleware.AuthCookieGuard(), userHandler.Refresh)
+		auth.POST("/logout", middleware.AuthCookieGuard(), userHandler.Logout)
 		// 找回密码：两条都是未登录可访问的公开接口。
 		// 频次靠 service 层按 IP + 邮箱限流（middleware.RateLimit 只对已登录用户生效，不适用）
-		auth.POST("/forgot-password", passwordResetHandler.ForgotPassword)
-		auth.POST("/reset-password", passwordResetHandler.ResetPassword)
+		auth.POST("/forgot-password", middleware.AuthRateLimit(userService, "forgot:ip", 10), passwordResetHandler.ForgotPassword)
+		auth.POST("/reset-password", middleware.AuthRateLimit(userService, "reset:ip", 10), passwordResetHandler.ResetPassword)
 	}
 
 	// 公开首页展示接口（无需登录）
@@ -480,7 +495,7 @@ func main() {
 	{
 		publicShows.GET("/categories", showHandler.ListCategories)
 		publicShows.GET("", showHandler.ListShows)
-		publicShows.GET("/:id", showHandler.GetShow)
+		publicShows.GET("/:id", middleware.OptionalAuth(userService, userService), showHandler.GetShow)
 		publicShows.GET("/:id/comments", commentHandler.List)                       // 顶级评论列表（公开）
 		publicShows.GET("/comments/:commentId/replies", commentHandler.ListReplies) // 评论的回复列表（公开）
 	}
@@ -528,10 +543,10 @@ func main() {
 
 	// 需要认证的路由（Auth 传入 userService 校验密码版本号，改密码后旧 token 失效）
 	api := r.Group("/api")
-	api.Use(middleware.Auth(userService, userService))
+	api.Use(middleware.Auth(userService, userService), middleware.ManagementAccess(userService))
 	{
 		// 删除项目 canvas 文件夹（需认证）
-		api.DELETE("/upload/canvas/:projectId", uploadHandler.DeleteCanvasDir)
+		api.DELETE("/upload/canvas/:projectId", middleware.RequireProjectOwner(projectRepo, "projectId"), uploadHandler.DeleteCanvasDir)
 
 		// 画布图片派生处理（需认证：会占用服务端 CPU 与对象存储）
 		api.POST("/images/split", imageOpsHandler.Split)         // 宫格切分：一张九宫格/四宫格图 → N 张单图
@@ -553,13 +568,13 @@ func main() {
 		api.GET("/auth/referral/stats", referralHandler.MyStats)
 		api.GET("/admin/referrals", middleware.RequireAdmin(userService), referralHandler.Dashboard)
 		api.GET("/admin/referrals/:id/users", middleware.RequireAdmin(userService), referralHandler.Invitees)
-		api.POST("/auth/refresh", userHandler.Refresh)                  // 滑动续期：剩余寿命不足时换新 token
 		api.PUT("/auth/profile", userHandler.UpdateProfile)             // 更新当前用户个人资料（昵称/头像）
 		api.PUT("/auth/password", userHandler.ChangePassword)           // 修改当前用户密码
 		api.POST("/upload/avatar", uploadHandler.UploadAvatar)          // 上传头像（存 users/<userID>/avatar/）
 		api.POST("/upload/forum-image", uploadHandler.UploadForumImage) // 论坛图片（存 forum/<帖子id>/）
 		api.POST("/upload/forum-video", uploadHandler.UploadForumVideo) // 论坛视频（存 forum/<帖子id>/）
 		api.GET("/users", userHandler.List)                             // 管理员：获取所有用户
+		api.GET("/admin/banners", bannerHandler.ListAllBanners)
 
 		// 论坛：发帖/回复/删除（需登录；删帖删回复本人或管理员皆可）
 		api.POST("/forum/posts", forumHandler.CreatePost)
@@ -569,10 +584,10 @@ func main() {
 		api.DELETE("/forum/replies/:replyId", forumHandler.DeleteReply)
 		// 论坛置顶（仅管理员）
 		api.PUT("/forum/posts/:id/pin", middleware.RequireAdmin(userService), forumHandler.SetPinned)
-		api.PUT("/users/:id/role", userHandler.UpdateRole)    // 管理员：更新用户角色
-		api.DELETE("/users/:id", userHandler.Delete)          // 管理员：删除用户
-		api.POST("/users/:id/recharge", userHandler.Recharge) // 管理员：为用户充值积分
-		api.GET("/models", modelHandler.ListModels)           // 模型清单（按登录用户渠道返回各自渠道模型）
+		api.PUT("/users/:id/role", middleware.RequireAdmin(userService), userHandler.UpdateRole)
+		api.DELETE("/users/:id", middleware.RequireAdmin(userService), userHandler.Delete)
+		api.POST("/users/:id/recharge", middleware.RequireAdmin(userService), userHandler.Recharge)
+		api.GET("/models", modelHandler.ListModels) // 模型清单（按登录用户渠道返回各自渠道模型）
 		// 清晰化渠道 + 档位清单（配置 × 实现注册表驱动：改 enhance.yaml 重启即生效，前端不用发版）
 		// 路径沿用 providers（P0 首版就叫这个），少一次旧前端 404
 		api.GET("/enhance/providers", enhanceHandler.ListChannels)
@@ -613,7 +628,11 @@ func main() {
 		}
 
 		// SSE 工作流流（独立鉴权：query 传 token）
-		r.GET("/api/projects/:id/workflows/:execId/stream", workflowHandler.StreamExecution)
+		r.GET("/api/projects/:id/workflows/:execId/stream", func(c *gin.Context) {
+			if token := c.Query("t"); token != "" {
+				c.Request.Header.Set("Authorization", "Bearer "+token)
+			}
+		}, middleware.Auth(userService, userService), middleware.RequireProjectOwner(projectRepo), workflowHandler.StreamExecution)
 
 		// 工作流（兼容旧路由 /api/workflow/*）；AI 调用入口，先过扣费中间件
 		workflow := api.Group("/workflow")
@@ -773,6 +792,7 @@ func main() {
 	// 扣掉的钱没人退。退出时随 ctx 一起停。
 	watchdogCtx, stopWatchdog := context.WithCancel(context.Background())
 	defer stopWatchdog()
+	userService.StartAuthMaintenance(watchdogCtx)
 	// 交付证据来源：节点产物上传成功后写入的生成历史，看门狗据此区分
 	//「结果已交付、只是状态没写」与「真失败」，避免误判已生成的视频
 	workflowHandler.SetGenerationHistoryService(generationHistoryService)

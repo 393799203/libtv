@@ -25,9 +25,6 @@ const (
 	// 又不至于让一封被转发或泄露的邮件长期可用。
 	PasswordResetTTL = 30 * time.Minute
 
-	// passwordResetMinPasswordLength 与 ChangePassword 的校验保持一致
-	passwordResetMinPasswordLength = 6
-
 	// 限流阈值：同一邮箱每分钟最多 3 封（防对某个用户轰炸邮箱），
 	// 同一 IP 每分钟最多 10 次（防脚本批量扫邮箱）。
 	passwordResetPerEmailPerMinute = 3
@@ -41,7 +38,7 @@ var (
 	ErrResetTokenInvalid = apperror.New(2006, http.StatusBadRequest, "重置链接无效或已过期，请重新获取")
 	ErrResetTooFrequent  = apperror.New(2007, http.StatusTooManyRequests, "操作过于频繁，请稍后再试")
 	ErrResetMailFailed   = apperror.New(2008, http.StatusServiceUnavailable, "重置邮件发送失败，请稍后重试")
-	ErrResetPwdTooShort  = apperror.New(2009, http.StatusBadRequest, "新密码至少6位")
+	ErrResetPwdTooShort  = ErrPasswordPolicy // Compatibility name; all password entry points share one policy.
 	// ErrResetEmailNotFound 邮箱未注册。原实现对此静默返回成功（防枚举），
 	// 现改为明确提示，取舍理由见 RequestReset 内 gorm.ErrRecordNotFound 分支的注释。
 	ErrResetEmailNotFound = apperror.New(2010, http.StatusNotFound, "该邮箱未注册，请检查是否输错，或先去注册")
@@ -140,9 +137,8 @@ func (s *PasswordResetService) RequestReset(ctx context.Context, email, clientIP
 
 // ResetPassword 凭令牌设置新密码。成功后该账号所有旧登录态立即失效。
 func (s *PasswordResetService) ResetPassword(ctx context.Context, token, newPassword string) error {
-	// 密码长度先校验：无效密码没必要浪费一次令牌查询
-	if len(newPassword) < passwordResetMinPasswordLength {
-		return ErrResetPwdTooShort
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -157,6 +153,10 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, token, newPass
 		return err
 	}
 
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
 	// 先抢占令牌、再改密码：并发下同一个链接只有一个请求能抢到，
 	// 避免两个请求拿着同一链接改出两个不同密码（后者覆盖前者，用户莫名其妙登不上）
 	ok, err := s.resetRepo.Consume(ctx, record.ID)
@@ -167,10 +167,6 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, token, newPass
 		return ErrResetTokenInvalid
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
 	// 复用既有实现：写新哈希的同时把 password_version +1，
 	// 使该账号在其它设备上的旧 token 全部失效
 	return s.userRepo.UpdatePasswordHash(ctx, record.UserID, string(hash))

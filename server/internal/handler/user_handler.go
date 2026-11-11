@@ -2,13 +2,11 @@ package handler
 
 import (
 	"libtv/internal/billing"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"libtv/internal/middleware"
-	"libtv/internal/model"
 	"libtv/internal/pkg/response"
 	"libtv/internal/service"
 
@@ -28,8 +26,9 @@ func NewUserHandler(userService *service.UserService, billingService *billing.Se
 
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required"`
 	Nickname string `json:"nickname"`
+	Code     string `json:"code" binding:"required,len=6,numeric"`
 	// Channel 注册来源渠道（wasu=华数 / dianxin=电信）；缺省 wasu。
 	// 由前端从注册链接的 ?source= 参数或其他投放渠道标记带入。
 	Channel      string `json:"channel"`
@@ -37,69 +36,65 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
-}
-
-type AuthResponse struct {
-	Token string     `json:"token"`
-	User  model.User `json:"user"`
+	Email      string `json:"email" binding:"required,email"`
+	Password   string `json:"password" binding:"required"`
+	RememberMe bool   `json:"remember_me"`
 }
 
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.Fail(c, http.StatusBadRequest, "请填写有效的邮箱、密码和 6 位验证码")
 		return
 	}
 
-	user, err := h.userService.RegisterWithChannel(c.Request.Context(), req.Email, req.Password, req.Nickname, req.Channel, req.ReferralCode)
+	user, err := h.userService.RegisterVerified(c.Request.Context(), req.Email, req.Password, req.Nickname, req.Channel, req.ReferralCode, req.Code)
 	if err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.FailWith(c, err)
 		return
 	}
 
-	// 注册即登录：前端注册成功后直接 setAuth(响应)，期望的就是登录接口那套
-	// {token, user} 结构（见 web/src/components/auth/LoginModal.tsx 的 handleRegister）。
-	// 顺带把 last_active_at 填上——新用户不该在后台列表里显示「从未使用」。
-	token, loggedIn, err := h.userService.Login(c.Request.Context(), req.Email, req.Password)
+	session, err := h.userService.StartSession(c.Request.Context(), user.Email, req.Password, false)
 	if err != nil {
-		// 账号已经建好了，不能因为签发 token 失败就让注册白做：
-		// 退化为只返回用户信息，前端会回到登录框让用户手动登录。
-		log.Printf("warning: auto login after register failed email=%s: %v", req.Email, err)
-		response.Created(c, user)
+		response.OK(c, gin.H{"registered": true, "login_required": true})
 		return
 	}
-
-	response.Created(c, AuthResponse{Token: token, User: *loggedIn})
+	setSessionCookie(c, session.RefreshToken, session.Session)
+	response.Created(c, session)
 }
 
 func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, err.Error())
+		response.Fail(c, http.StatusBadRequest, "请输入有效的邮箱和密码")
 		return
 	}
 
-	token, user, err := h.userService.Login(c.Request.Context(), req.Email, req.Password)
+	if err := h.userService.CheckLoginRate(c.Request.Context(), req.Email); err != nil {
+		c.Header("Retry-After", "900")
+		response.FailWith(c, err)
+		return
+	}
+	session, err := h.userService.StartSession(c.Request.Context(), req.Email, req.Password, req.RememberMe)
 	if err != nil {
-		response.Fail(c, http.StatusUnauthorized, err.Error())
+		response.FailWith(c, err)
 		return
 	}
-
-	response.OK(c, AuthResponse{Token: token, User: *user})
+	setSessionCookie(c, session.RefreshToken, session.Session)
+	response.OK(c, session)
 }
 
-// Refresh 会话滑动续期：前端在 token 剩余寿命不足时调用，换回一个新的完整有效期 token。
-// 挂在鉴权中间件之后，所以"能续期"本身就意味着原 token 仍然有效（过期后调用会直接 401）。
+// Refresh exchanges an HttpOnly refresh cookie for a short-lived access token.
+// The server session and its absolute deadline remain unchanged.
 func (h *UserHandler) Refresh(c *gin.Context) {
-	userID := middleware.GetUserID(c)
-	token, user, err := h.userService.RenewToken(c.Request.Context(), userID)
+	raw, _ := c.Cookie(sessionCookieName)
+	session, err := h.userService.RefreshSession(c.Request.Context(), raw)
 	if err != nil {
-		response.Fail(c, http.StatusUnauthorized, "session expired, please login again")
+		response.FailWith(c, err)
 		return
 	}
-	response.OK(c, AuthResponse{Token: token, User: *user})
+	c.Header("Cache-Control", "no-store")
+	response.OK(c, session)
 }
 
 func (h *UserHandler) Me(c *gin.Context) {
@@ -138,7 +133,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 // ChangePasswordRequest 修改密码请求
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	NewPassword string `json:"new_password" binding:"required"`
 }
 
 // ChangePassword 修改当前用户密码
@@ -146,7 +141,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, http.StatusBadRequest, "新密码至少6位")
+		response.Fail(c, http.StatusBadRequest, "请填写原密码和新密码")
 		return
 	}
 
@@ -154,6 +149,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		response.FailWith(c, err)
 		return
 	}
+	setSessionCookie(c, "", nil)
 	response.OKWithMsg(c, "密码修改成功", nil)
 }
 

@@ -149,7 +149,7 @@ export const routes: RouteObject[] = [
           {
             path: 'admin/:tab?',
             element: (
-              <AuthGuard>
+              <AuthGuard adminOnly>
                 <LazyLoad>
                   <AdminPage />
                 </LazyLoad>
