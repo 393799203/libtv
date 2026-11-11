@@ -990,7 +990,7 @@ export default function VideoListPage() {
       </div>
 
       {/* 最近项目（最多展示两行，超出走「我的项目」页）
-          移动端（<768px）不提供这一板块：hidden 即不渲染占位，想看完整列表走「我的项目」页 */}
+          移动端（<768px）不提供创作入口，此板块仅在桌面端显示。 */}
       <section className="home-recent-projects library-shell hidden md:block" aria-labelledby="recent-projects-title">
         <div className="mb-4 flex items-end justify-between">
           <div>

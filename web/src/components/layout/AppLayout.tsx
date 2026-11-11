@@ -128,7 +128,7 @@ export function AppLayout() {
           <nav className="site-navigation" aria-label="主导航">
           <button type="button" className="site-nav-link" aria-current={location.pathname === '/' ? 'page' : undefined}
             onClick={() => navigate('/')}>作品广场</button>
-          {isAuthenticated && <button type="button" className="site-nav-link"
+          {isAuthenticated && !isMobile && <button type="button" className="site-nav-link"
             aria-current={location.pathname === '/projects' ? 'page' : undefined}
             onClick={() => navigate('/projects')}>我的项目</button>}
           <button

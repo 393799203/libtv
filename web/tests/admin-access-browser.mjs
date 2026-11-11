@@ -43,6 +43,16 @@ try {
     }
     await page.getByRole('heading', { name: '作品广场', exact: true }).waitFor();
     assert.equal(new URL(page.url()).pathname, '/');
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      const projects = page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '我的项目', exact: true });
+      if (width < 768) {
+        await projects.waitFor({ state: 'hidden' });
+        assert.equal(await page.locator('.home-recent-projects').isVisible(), false);
+      } else {
+        await projects.waitFor({ state: 'visible' });
+      }
+    }
     if (role === 'user') {
       for (const tab of ['banners','users','shows','styles','referrals','reconcile','channels','packages']) {
         await page.goto(`${base}/admin/${tab}`);

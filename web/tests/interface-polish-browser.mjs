@@ -86,7 +86,7 @@ try {
     assert.equal(await page.locator('img[src*="picsum"]').count(), 0);
     assert.equal(await page.locator('button button,button [role="button"]').count(), 0);
     const navigation = page.getByRole('navigation', { name: '主导航' });
-    for (const name of ['作品广场', '我的项目', '漫蛙社区']) {
+    for (const name of width < 768 ? ['作品广场', '漫蛙社区'] : ['作品广场', '我的项目', '漫蛙社区']) {
       const box = await navigation.getByRole('button', { name, exact: true }).boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= width, `${width}: ${name} must remain visible`);
     }
