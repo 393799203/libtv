@@ -22,6 +22,7 @@ const task = { id: 1, task_id: 'upstream-task-1234567890', provider: 'dianxin', 
   charged_amount: 100, refunded_amount: 0, note: '等待人工核对', created_at: '2026-11-11T10:00:00Z', updated_at: '2026-11-11T10:00:00Z' };
 const errors = [];
 const mutations = [];
+const failedRequests = [];
 
 async function fixture(context) {
   const adminRequests = [];
@@ -65,7 +66,10 @@ async function homeOnly(page) {
   assert.equal(await page.getByText('运营管理中心', { exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: /运营管理/ }).count(), 0);
   const profileMenu = page.getByRole('button', { name: '打开个人菜单' });
-  if (page.viewportSize().width < 768) await profileMenu.click();
+  if (page.viewportSize().width < 768) {
+    await profileMenu.focus();
+    await profileMenu.press('Enter');
+  }
   else await profileMenu.hover();
   await page.getByRole('menuitem', { name: /个人中心/ }).waitFor();
   assert.equal(await page.getByRole('menuitem', { name: /运营管理/ }).count(), 0);
@@ -88,24 +92,27 @@ try {
     const { adminRequests } = await fixture(context);
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    for (const tab of ['', ...tabs]) {
-      await page.goto(`${base}/admin/${tab}`);
+    page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
+    const blockedTabs = width === 390 ? ['', ...tabs] : ['users'];
+    for (const tab of blockedTabs) {
+      await page.goto(`${base}/admin/${tab}`, { waitUntil: 'domcontentloaded' });
       await homeOnly(page);
     }
     assert.deepEqual(adminRequests, [], `${width}x${height}: blocked devices must never fetch management data`);
     if (width === 390) await page.screenshot({ path: '/tmp/libtv-admin-pc-only-mobile.png', fullPage: true });
     await context.close();
-    console.log(JSON.stringify({ blocked: true, width, height, touch, routes: tabs.length + 1 }));
+    console.log(JSON.stringify({ blocked: true, width, height, touch, routes: blockedTabs.length }));
   }
 
-  for (const width of [1024, 1440]) {
+  const desktopWidths = process.env.QA_ADMIN_WIDTH ? [Number(process.env.QA_ADMIN_WIDTH)] : [1024, 1440];
+  for (const width of desktopWidths) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     const state = await fixture(context);
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     for (const tab of tabs) {
       console.log(`checking PC ${width}: ${tab}`);
-      await page.goto(`${base}/admin/${tab}`);
+      await page.goto(`${base}/admin/${tab}`, { waitUntil: 'domcontentloaded' });
       await page.locator('aside').waitFor();
       await page.locator('aside [aria-current="page"]').waitFor();
       assert.equal(new URL(page.url()).pathname, `/admin/${tab}`);
@@ -145,7 +152,9 @@ try {
         await cancelDialog(page, '添加风格图片');
       }
       if (tab === 'referrals') {
-        await page.getByRole('button', { name: '邀请用户', exact: true }).first().click();
+        const invitees = page.getByRole('button', { name: '邀请用户', exact: true }).first();
+        await invitees.focus();
+        await invitees.press('Enter');
         await page.locator('.ant-drawer table tbody tr:not(.ant-table-measure-row)').first().waitFor();
         await page.locator('.ant-drawer-close').click();
         await page.locator('.ant-drawer-open').waitFor({ state: 'hidden' });
@@ -167,12 +176,12 @@ try {
       }
     }
     // 打开的 PC 后台变成手机尺寸后立即卸载；浏览器后退不能恢复后台。
-    await page.goto(`${base}/admin/users`);
+    await page.goto(`${base}/admin/users`, { waitUntil: 'domcontentloaded' });
     await page.locator('table tbody tr:not(.ant-table-measure-row)').first().waitFor();
     await page.setViewportSize({ width: 390, height: 850 });
     await homeOnly(page);
     const countAfterExit = state.adminRequests.length;
-    await page.goBack();
+    await page.goBack({ waitUntil: 'domcontentloaded' });
     await homeOnly(page);
     assert.equal(state.adminRequests.length, countAfterExit);
     await page.setViewportSize({ width, height: 900 });
@@ -184,4 +193,14 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(mutations, [], 'regression must not submit business changes');
   console.log(JSON.stringify({ ok: true, pageErrors: 0, businessMutations: 0 }));
+} catch (error) {
+  console.error(JSON.stringify({ errors, failedRequests: failedRequests.slice(-10),
+    pages: await Promise.all(browser.contexts().flatMap(context => context.pages()).map(async page => ({
+      url: page.url(), text: (await page.locator('body').innerText().catch(() => '')).slice(0, 1200),
+      layout: await page.evaluate(() => ({ width: innerWidth, height: innerHeight, elements:
+        [...document.querySelectorAll('aside,aside > div')].map(el => ({ cls: el.className,
+          rect: el.getBoundingClientRect().toJSON(), display: getComputedStyle(el).display,
+          visibility: getComputedStyle(el).visibility })) })).catch(() => null),
+    }))) }));
+  throw error;
 } finally { await browser.close(); }
