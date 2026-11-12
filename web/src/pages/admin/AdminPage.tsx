@@ -43,11 +43,15 @@ import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { Z } from '@/utils/zLayers';
 import ReferralDashboard from './ReferralDashboard';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { MobileUserList } from './MobileUserList';
 import './adminMobile.css';
+import './adminRecords.css';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'referrals' | 'reconcile' | 'channels' | 'packages';
 
 export default function AdminPage() {
+  const mobile = useIsMobile();
   // 应用内页：不被搜索引擎收录（nginx 的 add_header 到不了这里，见 web/libtv-app.conf 说明）
   usePageMeta({ title: '管理后台', noindex: true });
   const navigate = useNavigate();
@@ -1213,18 +1217,18 @@ export default function AdminPage() {
         {/* ========== 用户管理 Tab ========== */}
         {activeTab === 'users' && (
           <>
-          <div className="flex-1 overflow-y-auto p-3 md:p-6">
+          <div className="admin-user-page flex-1 overflow-y-auto p-3 md:p-6">
+            <div className="admin-record-page-header"><h1>用户管理</h1><p>共 {userTotal} 位用户 · 管理账户、积分与创作资产</p></div>
                 {/* 筛选行：控件尺寸与「上游对账」一致（antd 默认尺寸、宽度用 style）；
                     布局上「共 N 个用户」留在左侧，搜索框 + 角色/渠道筛选 + 刷新整体靠右 */}
                 <div className="admin-user-filters flex flex-wrap items-center gap-2 mb-4">
-                  <span className="hidden lg:inline shrink-0 text-[12px] text-[var(--dv-text-3)] mr-1">共 {userTotal} 个用户</span>
                   {/* 弹性占位：只在 lg 以上需要（宽屏把控件组推到右侧）；
                       窄屏它会同搜索框抢 flex 空间，把搜索框压没 */}
                   <div className="hidden lg:block flex-1" />
                   <Input
                     allowClear
                     prefix={<SearchOutlined className="text-[var(--dv-text-3)]" />}
-                    placeholder="搜索用户名 / 手机号 / 邮箱"
+                    placeholder="搜索昵称或邮箱"
                     aria-label="搜索用户"
                     value={userKeywordInput}
                     onChange={(e) => {
@@ -1296,6 +1300,10 @@ export default function AdminPage() {
               </div>
             ) : (
               <>
+                {mobile ? <MobileUserList users={users} currentUserId={currentUser?.id}
+                  onChanged={() => loadUsers()}
+                  onRecharge={user => { setRechargeUserId(user.id); setRechargeAmount(10000); setRechargeRemark(''); }}
+                  onBilling={user => setBillingUserId(user.id)} /> :
                 <div className="admin-user-records bg-white rounded-xl border border-gray-200 overflow-x-auto">
                   <table className="admin-record-table w-full text-[13px] min-w-[380px] lg:min-w-[1000px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
@@ -1475,13 +1483,14 @@ export default function AdminPage() {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </div>}
                 {/* 分页（一页10条，管理员排前） */}
                 <div className="flex justify-end mt-4">
                   <Pagination
                     current={userPage}
                     pageSize={USER_PAGE_SIZE}
                     total={userTotal}
+                    simple={mobile}
                     showSizeChanger={false}
                     onChange={(p) => loadUsers(p)}
                   />

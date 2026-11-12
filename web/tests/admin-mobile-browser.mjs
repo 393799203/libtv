@@ -21,8 +21,9 @@ const pkg = { id: 1, name: '创作者套餐', price: 99, points: 10000, badge: '
 const task = { id: 1, task_id: 'upstream-very-long-task-123456789012345678901234567890',
   provider: 'dianxin', model: 'test-video-model', task_kind: 'ai.video', exec_id: 1234,
   project_id: 'project-qa', project_name: '用于检查的创作项目', user_id: member.id, user_name: member.nickname,
-  user_email: member.email, node_id: 'node-qa', status: 'submitted', charged_amount: 100, refunded_amount: 0,
-  note: '任务进行中，等待上游返回', created_at: '2026-11-11T10:00:00Z', updated_at: '2026-11-11T10:00:00Z' };
+  user_email: member.email, node_id: 'node-qa', status: 'pending_review', charged_amount: 100, refunded_amount: 0,
+  note: '等待人工核对上游返回和积分扣费。', created_at: '2026-11-11T10:00:00Z', updated_at: '2026-11-11T10:00:00Z' };
+const secondMember = { ...member, id: 'member-qa-2', email: 'studio@example.invalid', nickname: '林间工作室', credits: 12800 };
 const errors = [];
 const mutations = [];
 let emptyUsers = false;
@@ -36,21 +37,22 @@ async function fixture(context) {
     if (req.method() !== 'GET' && path !== '/api/auth/refresh') mutations.push({ path, method: req.method() });
     if (path === '/api/auth/refresh') data = { token: `header.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now()/1000)+900 })).toString('base64url')}.sig`, user };
     else if (path === '/api/auth/me') data = user;
-    else if (path === '/api/users') data = { items: emptyUsers ? [] : [member], total: emptyUsers ? 0 : 21, page: 1 };
+    else if (path === '/api/users') data = { items: emptyUsers ? [] : [member, secondMember], total: emptyUsers ? 0 : 21, page: 1 };
     else if (path === '/api/admin/banners') data = [banner];
     else if (path === '/api/shows/categories' || path === '/api/styles/categories') data = [category];
     else if (path === '/api/shows/pending') data = { items: [{ ...show, id: 'pending-qa', status: 'pending' }], total: 1 };
     else if (path === '/api/shows') data = { items: [show], total: 1 };
     else if (path === '/api/styles') data = { items: [style], total: 1 };
     else if (path === '/api/admin/referrals' || path.endsWith('/users') && path.includes('/referrals/')) data = {
-      items: [referrer], total: 21, page: 1, summary: { ...metric, platform_users: 100, inviters: 10 } };
+      items: [referrer, { ...referrer, ...secondMember, invited_users: 0 }], total: 21, page: 1, summary: { ...metric, platform_users: 100, inviters: 10 } };
     else if (path === '/api/admin/points-packages') data = { items: [pkg] };
     else if (path === '/api/channel/policy') data = { policy: 'per_user' };
     else if (path === '/api/pricing') data = { nodes: [{ node_type: 'video', node_name: '视频生成', billing_type: 'per_second',
       ref_video_discount: 0.6, models: [{ model_id: 'test-video', model_name: '测试视频生成模型长名称', description: '视频生成定价描述',
         price: 10, ref_video_billing: true, ref_video_price: 6, ref_video_price_configured: true }] }] };
-    else if (path === '/api/admin/provider-tasks') data = { items: [task], total: 21, stats: {
-      total: 21, submitted: 1, delivered: 20, pending_review: 0, charged_credits: 2100, refunded: 0, refunded_credits: 0 } };
+    else if (path === '/api/admin/provider-tasks') data = { items: [task, { ...task, id: 2, status: 'delivered',
+      user_name: secondMember.nickname, project_name: '森林旅行分镜', result_url: '/qa/result.webp' }], total: 21, stats: {
+      total: 21, submitted: 0, delivered: 20, pending_review: 1, charged_credits: 2100, refunded: 0, refunded_credits: 0 } };
     else if (path === '/api/billing/records') data = { items: [{ id: 1, type: 'deduct', amount: 100, balance_after: 8888,
       scene: '视频生成', model: 'test-video-model', action: 'ai.video', created_at: '2026-11-11T10:00:00Z', channel: 'dianxin' }], total: 1 };
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 0, msg: 'ok', data }) });
@@ -90,35 +92,41 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${base}/admin/users`);
     console.log(`checking ${width}: users`);
-    await page.locator('.admin-record-table tbody tr').first().waitFor();
+    const userSelector = mobile ? '.admin-user-item' : '.admin-record-table tbody tr';
+    await page.locator(userSelector).first().waitFor();
     const nav = page.getByRole('combobox', { name: '运营模块', exact: true });
     if (mobile) {
       await nav.waitFor();
       assert.equal(await page.locator('.admin-shell > aside').isVisible(), false);
-      const record = page.locator('.admin-record-table tbody tr').first();
-      assert.equal(await record.evaluate(el => getComputedStyle(el).display), 'block');
-      assert.equal(await record.locator('td[data-label="渠道商"]').isVisible(), true);
+      const record = page.locator('.admin-user-item').first();
+      assert.ok((await record.boundingBox()).height < 320, 'closed user records must stay compact');
+      assert.equal(await record.locator('details').getAttribute('open'), null);
+      await record.locator('summary').click();
+      await record.getByRole('combobox', { name: `${member.nickname}的渠道`, exact: true }).waitFor();
+      assert.ok((await record.boundingBox()).height > 320, 'account settings must remain available on demand');
+      await record.locator('summary').click();
       await page.getByRole('button', { name: '打开个人菜单' }).click();
       await page.getByRole('menuitem', { name: '运营管理' }).waitFor();
       await page.getByRole('menuitem', { name: '运营管理' }).click();
       await nav.selectOption('users');
-      await page.locator('.admin-record-table tbody tr').first().waitFor();
+      await page.locator(userSelector).first().waitFor();
     } else {
       assert.equal(await nav.isVisible(), false);
       assert.equal(await page.locator('.admin-shell > aside').isVisible(), true);
     }
     await noOverflow(page, `${width}:users`);
-    await page.getByRole('button', { name: /充值$/ }).click();
+    await page.getByRole('button', { name: /充\s*值$/ }).first().click();
     const recharge = page.getByRole('dialog', { name: '积分充值', exact: true });
     await dialogFits(page, recharge, `${width}:recharge`);
     await recharge.getByRole('button', { name: '取消', exact: true }).click();
     await page.mouse.move(0, 0);
-    await page.getByRole('button', { name: /积分明细$/ }).click();
+    await page.getByRole('button', { name: /积分明细$/ }).first().click();
     const billing = page.getByRole('dialog', { name: '费用明细', exact: true });
     await dialogFits(page, billing, `${width}:billing`);
     await billing.locator('tbody tr').first().waitFor();
     await billing.locator('.ant-modal-close').click();
     await page.mouse.move(0, 0);
+    if (width === 390) await page.screenshot({ path: '/tmp/libtv-admin-mobile-users.png', fullPage: true });
     if (mobile) {
       emptyUsers = true;
       await page.getByRole('textbox', { name: '搜索用户', exact: true }).fill('missing');
@@ -134,15 +142,19 @@ try {
       else await page.goto(`${base}/admin/${tab}`);
       const marker = {
         banners: '.admin-banner-grid', shows: '.admin-video-grid', styles: '.grid-cols-8',
-        referrals: '.admin-responsive-table', reconcile: '.admin-responsive-table',
+        referrals: mobile ? '.admin-referral-item' : '.admin-responsive-table',
+        reconcile: mobile ? '.admin-task-item' : '.admin-responsive-table',
         channels: '.admin-price-row', packages: '.admin-record-table',
       }[tab];
       await page.locator(marker).first().waitFor();
       await page.waitForTimeout(150);
       await noOverflow(page, `${width}:${tab}`);
       if (mobile && ['referrals','reconcile'].includes(tab)) {
-        const first = page.locator('.admin-responsive-table .ant-table-tbody > tr').first();
-        assert.equal(await first.evaluate(el => getComputedStyle(el).display), 'block');
+        const first = page.locator(tab === 'referrals' ? '.admin-referral-item' : '.admin-task-item').first();
+        assert.ok((await first.boundingBox()).height < 340, 'records must not become field-by-field forms');
+        await first.locator('summary').click();
+        await first.locator('.admin-record-detail-body').waitFor();
+        await first.locator('summary').click();
       }
       if (tab === 'banners') {
         await page.getByRole('button', { name: /添加版图$/ }).click();
@@ -163,7 +175,7 @@ try {
         await dialog.getByRole('button', { name: '取消', exact: true }).click();
       }
       if (tab === 'referrals') {
-        await page.getByRole('button', { name: '邀请用户', exact: true }).click();
+        await page.getByRole('button', { name: /^(查看)?邀请用户$/, exact: true }).first().click();
         await page.locator('.admin-referral-drawer .ant-drawer-content-wrapper').waitFor();
         if (mobile) await dialogFits(page, page.locator('.admin-referral-drawer .ant-drawer-content-wrapper'), `${width}:referral-drawer`);
         await page.locator('.admin-referral-drawer .ant-drawer-close').click();
@@ -172,6 +184,15 @@ try {
         const prices = page.locator('.admin-price-row');
         await prices.scrollIntoViewIfNeeded();
         assert.ok(await prices.boundingBox(), 'pricing must be reachable below channel overview');
+      }
+      if (tab === 'reconcile' && mobile) {
+        await page.locator('.admin-task-filter-more > summary').click();
+        await page.locator('.admin-task-item').first().getByRole('button', { name: /退\s*费/ }).click();
+        const refundDialog = page.locator('.ant-modal-confirm');
+        await dialogFits(page, refundDialog, `${width}:refund-confirmation`);
+        await refundDialog.getByRole('button', { name: /取\s*消/ }).click();
+        await page.getByPlaceholder('上游任务号（支持部分匹配）').waitFor();
+        await page.locator('.admin-task-filter-more > summary').click();
       }
       if (tab === 'packages') {
         await page.getByRole('button', { name: /新建套餐$/ }).click();
