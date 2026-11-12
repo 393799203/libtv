@@ -169,9 +169,9 @@ export default function PricingManagement({ channel, ref }: PricingManagementPro
   }), [save]);
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="admin-pricing flex-1 overflow-y-auto">
       {/* 工具栏 */}
-      <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 sticky top-0 z-10">
+      <div className="admin-pricing-toolbar bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 sticky top-0 z-10">
         {/* 说明文案：让它自己占满并换行，不许挤窄右边的按钮 */}
         <div className="flex-1 min-w-0">
           <div className="text-[11px] text-gray-400 mt-0.5">
@@ -216,7 +216,7 @@ export default function PricingManagement({ channel, ref }: PricingManagementPro
           nodes.map((node) => (
             <div key={node.node_type} className="bg-white rounded-xl border border-gray-200 overflow-hidden break-inside-avoid mb-4">
               {/* 分组头 */}
-              <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2.5 bg-gray-50/60">
+              <div className="admin-pricing-group px-5 py-3 border-b border-gray-100 flex items-center gap-2.5 bg-gray-50/60">
                 <span className="text-gray-500 text-[15px]">{NODE_ICONS[node.node_type]}</span>
                 <span className="text-[13px] font-semibold text-gray-800">{node.node_name}</span>
                 {node.billing_type === 'per_call' ? (
@@ -249,6 +249,7 @@ export default function PricingManagement({ channel, ref }: PricingManagementPro
                     const presetRefValue = node.ref_video_discount ? Math.round(baseValue * node.ref_video_discount) : 0;
                     // 输入框通用配置（两类单价用法一致）
                     const numberProps = {
+                      inputMode: 'numeric' as const,
                       size: 'small' as const,
                       min: 0,
                       step: 1,
@@ -258,7 +259,7 @@ export default function PricingManagement({ channel, ref }: PricingManagementPro
                       style: { paddingInline: 6 },
                     };
                     return (
-                    <div key={editKey} className="bg-white px-4 py-2.5 flex items-center gap-2">
+                    <div key={editKey} className="admin-price-row bg-white px-4 py-2.5 flex items-center gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[13px] text-gray-800 font-medium truncate">{m.model_name}</span>
@@ -333,7 +334,8 @@ export default function PricingManagement({ channel, ref }: PricingManagementPro
                               >
                                 <button
                                   type="button"
-                                  className="text-gray-300 hover:text-blue-500 cursor-pointer shrink-0"
+                                  aria-label="恢复参考视频默认价格"
+                                  className="admin-price-reset text-gray-300 hover:text-blue-500 cursor-pointer shrink-0"
                                   onClick={() => {
                                     setRefResets((prev) => ({ ...prev, [refKey]: true }));
                                     setEdits((prev) => {

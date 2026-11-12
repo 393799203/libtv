@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { App, Button, Input, Pagination, Popover, Select, Table, Tag, Tooltip } from 'antd';
+import { App, Button, Input, Pagination, Popover, Select, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   LinkOutlined,
@@ -10,6 +10,8 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
+import { AdminTable } from './AdminTable';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import {
   providerTaskApi,
   type ProviderTask,
@@ -344,6 +346,7 @@ const formatTime = (iso: string) => {
 };
 
 export default function ProviderTaskReconciliation() {
+  const mobile = useIsMobile();
   const { message, modal } = App.useApp();
   const [items, setItems] = useState<ProviderTask[]>([]);
   const [stats, setStats] = useState<ProviderTaskStats | null>(null);
@@ -852,7 +855,7 @@ export default function ProviderTaskReconciliation() {
       <ReconciliationSummary stats={stats} />
 
       {/* 筛选 */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="admin-reconciliation-filters flex flex-wrap items-center gap-2 mb-4">
         <Select
           value={status}
           onChange={(v) => {
@@ -1006,7 +1009,7 @@ export default function ProviderTaskReconciliation() {
         </div>
       </div>
 
-      <Table<ProviderTask>
+      <AdminTable<ProviderTask>
         rowKey="id"
         size="small"
         loading={loading}
@@ -1026,7 +1029,8 @@ export default function ProviderTaskReconciliation() {
           current={page}
           pageSize={pageSize}
           total={total}
-          showSizeChanger
+          simple={mobile}
+          showSizeChanger={!mobile}
           pageSizeOptions={[20, 50, 100]}
           onChange={(p, s) => {
             setPage(p);

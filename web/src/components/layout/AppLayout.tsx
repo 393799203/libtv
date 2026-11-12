@@ -62,6 +62,9 @@ export function AppLayout() {
 
   const userMenuItems: MenuProps['items'] = isMobile
     ? [
+        ...(user?.role === 'admin'
+          ? [{ key: 'admin', icon: <ControlOutlined />, label: '运营管理', onClick: () => navigate('/admin') }]
+          : []),
         { key: 'profile', icon: <SettingOutlined />, label: '个人中心', onClick: () => setShowProfileSettings(true) },
         { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
       ]
@@ -191,7 +194,7 @@ export function AppLayout() {
               积分超市
             </button>
 
-            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+            <Dropdown menu={{ items: userMenuItems }} trigger={isMobile ? ['click'] : ['hover']} placement="bottomRight">
               {/* 移动端只剩头像，把点击区补到 44px；左右内边距收紧，避免头像右边留白比左边宽 */}
               <Button type="text" size="small" aria-label="打开个人菜单" className="!min-h-[40px] !px-1 md:!px-2">
                 {/* 用普通 flex 取代 AntD Space：Space 会给每个子元素套 .ant-space-item，

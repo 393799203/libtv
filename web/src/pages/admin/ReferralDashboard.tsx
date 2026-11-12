@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Button, Drawer, Input, Table, Tag } from 'antd';
+import { Button, Drawer, Input, Tag } from 'antd';
 import { ReloadOutlined, TeamOutlined } from '@ant-design/icons';
 import { referralApi, type ReferralDashboard as DashboardData, type ReferralRow } from '@/services/referralApi';
+import { AdminTable } from './AdminTable';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 const count = (value?: number) => Number(value || 0).toLocaleString('zh-CN');
 const money = (fen?: number) => `¥${(Number(fen || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function ReferralDashboard() {
+  const mobile = useIsMobile();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -61,7 +64,7 @@ export default function ReferralDashboard() {
         }}>刷新统计</Button>
       </div>
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
-        {cards.map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4">
+        {cards.map(([label, value]) => <div key={String(label)} className="admin-referral-summary rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4">
           <div className="text-xs text-[var(--dv-text-3)]">{label}</div>
           <div className="mt-3 text-2xl font-semibold tabular-nums">{value === undefined ? '—' : typeof value === 'number' ? count(value) : value}</div>
         </div>)}
@@ -75,7 +78,7 @@ export default function ReferralDashboard() {
           setLoading(true); setKeyword(value.trim()); setPage(1); setRefresh(v => v + 1);
         }} />
       {failed && <p role="alert" className="mb-3 text-sm text-red-300">邀请统计读取失败，请点击刷新重试。</p>}
-      <Table<ReferralRow> rowKey="id" size="small" loading={loading} dataSource={Array.isArray(data?.items) ? data.items : []}
+      <AdminTable<ReferralRow> rowKey="id" size="small" loading={loading} dataSource={Array.isArray(data?.items) ? data.items : []}
         scroll={{ x: 1600 }} pagination={{ current: page, pageSize: 20, total: data?.total || 0, showSizeChanger: false,
           onChange: value => { setLoading(true); setPage(value); } }}
         columns={[
@@ -89,11 +92,11 @@ export default function ReferralDashboard() {
               setSelected(row); setDetail(null); setDetailPage(1); setDetailFailed(false); setDetailLoading(true);
             }}>邀请用户</Button> },
         ]} />
-      <Drawer title={`${selected?.nickname || selected?.email || ''} · 邀请用户`} open={!!selected} width={1060}
+      <Drawer rootClassName="admin-referral-drawer" title={`${selected?.nickname || selected?.email || ''} · 邀请用户`} open={!!selected} width={mobile ? '100%' : 1060}
         onClose={() => setSelected(null)}>
         <p className="mb-4 text-xs text-[var(--dv-text-3)]">仅显示该推荐人直接邀请的用户及其充值、消费记录。</p>
         {detailFailed && <p role="alert" className="mb-3 text-sm text-red-300">明细读取失败，请重试。</p>}
-        <Table<ReferralRow> rowKey="id" size="small" loading={detailLoading} dataSource={Array.isArray(detail?.items) ? detail.items : []}
+        <AdminTable<ReferralRow> rowKey="id" size="small" loading={detailLoading} dataSource={Array.isArray(detail?.items) ? detail.items : []}
           scroll={{ x: 1350 }} pagination={{ current: detailPage, pageSize: 20, total: detail?.total || 0, showSizeChanger: false,
             onChange: value => { setDetailLoading(true); setDetailPage(value); } }}
           columns={[
