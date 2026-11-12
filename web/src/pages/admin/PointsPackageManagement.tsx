@@ -151,7 +151,7 @@ export default function PointsPackageManagement() {
   return (
     <div className="flex-1 overflow-y-auto">
       {/* 工具栏 */}
-      <div className="admin-packages-toolbar bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 sticky top-0 z-10">
+      <div className="bg-white px-6 py-3 border-b border-gray-100 flex items-center gap-3 sticky top-0 z-10">
         <div className="text-[11px] text-gray-400">
           维护积分超市的套餐卡片；特点每行一条，卡片按行展示；「推荐」的套餐高亮显示
         </div>
@@ -176,8 +176,8 @@ export default function PointsPackageManagement() {
             <div className="text-[14px]">暂无套餐，点击右上角「新建套餐」创建</div>
           </div>
         ) : (
-          <div className="admin-user-records bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="admin-record-table w-full text-left">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-left">
               <thead>
                 <tr className="text-gray-400 text-[12px] border-b border-gray-100 bg-gray-50/60">
                   <th className="px-4 py-2.5 font-normal">套餐名称</th>
@@ -193,20 +193,20 @@ export default function PointsPackageManagement() {
               <tbody>
                 {packages.map((pkg) => (
                   <tr key={pkg.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
-                    <td data-label="套餐名称" className="px-4 py-3 text-[13px] text-gray-700 font-medium">{pkg.name}</td>
-                    <td data-label="售价（元）" className="px-4 py-3 text-[13px] text-gray-600 text-right">¥{pkg.price}</td>
-                    <td data-label="积分" className="px-4 py-3 text-[13px] text-amber-600 text-right font-medium">
+                    <td className="px-4 py-3 text-[13px] text-gray-700 font-medium">{pkg.name}</td>
+                    <td className="px-4 py-3 text-[13px] text-gray-600 text-right">¥{pkg.price}</td>
+                    <td className="px-4 py-3 text-[13px] text-amber-600 text-right font-medium">
                       {pkg.points.toLocaleString()}
                     </td>
-                    <td data-label="角标" className="px-4 py-3 text-[12px] text-gray-500">{pkg.badge || '-'}</td>
-                    <td data-label="推荐" className="px-4 py-3 text-center">
+                    <td className="px-4 py-3 text-[12px] text-gray-500">{pkg.badge || '-'}</td>
+                    <td className="px-4 py-3 text-center">
                       {pkg.recommended ? <Tag color="gold" className="!m-0">推荐</Tag> : <span className="text-gray-300">-</span>}
                     </td>
-                    <td data-label="排序" className="px-4 py-3 text-[13px] text-gray-500 text-center">{pkg.sort_order}</td>
-                    <td data-label="状态" className="px-4 py-3 text-center">
+                    <td className="px-4 py-3 text-[13px] text-gray-500 text-center">{pkg.sort_order}</td>
+                    <td className="px-4 py-3 text-center">
                       <Switch aria-label={`${pkg.name}上架状态`} checkedChildren="上架" unCheckedChildren="下架" checked={pkg.enabled} onChange={() => handleToggleEnabled(pkg)} />
                     </td>
-                    <td data-label="操作" className="px-4 py-3 text-right whitespace-nowrap">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
                       <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(pkg)}>
                         编辑
                       </Button>
@@ -224,7 +224,6 @@ export default function PointsPackageManagement() {
 
       {/* 新建 / 编辑弹窗 */}
       <Modal
-        rootClassName="admin-package-modal"
         title={editState?.editing ? `编辑套餐「${editState.editing.name}」` : '新建套餐'}
         open={editState !== null}
         onCancel={() => setEditState(null)}

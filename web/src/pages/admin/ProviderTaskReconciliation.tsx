@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { App, Button, Input, Pagination, Popover, Select, Tag, Tooltip } from 'antd';
+import { App, Button, Input, Pagination, Popover, Select, Table, Tag, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   LinkOutlined,
-  DownOutlined,
   PictureOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -11,10 +10,6 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
-import { AdminTable } from './AdminTable';
-import { useIsMobile } from '@/hooks/useIsMobile';
-import { MobileTaskList } from './MobileTaskList';
-import { recordCount } from './recordFormat';
 import {
   providerTaskApi,
   type ProviderTask,
@@ -103,27 +98,10 @@ function StatCard({
 
 /** 顶部汇总条本体 */
 export function ReconciliationSummary({ stats }: { stats?: ProviderTaskStats }) {
-  const mobile = useIsMobile();
   const pending = stats?.pending_review ?? 0;
   const manualCredits = stats?.manual_refunded_credits ?? 0;
   const charged = stats?.charged_credits ?? 0;
   const refundedCredits = stats?.refunded_credits ?? 0;
-
-  if (mobile) return <>
-    <dl className="admin-overview" aria-label="对账汇总">
-      {[
-        ['对账记录', stats?.total ?? 0], ['待人工决定', pending],
-        ['已交付', stats?.delivered ?? 0], ['已退费', stats?.refunded ?? 0],
-        ['扣费积分', charged], ['净扣积分', charged - refundedCredits],
-      ].map(([label, value]) => <div key={String(label)}><dt>{label}</dt><dd>{recordCount(Number(value))}</dd></div>)}
-    </dl>
-    <details className="admin-record-explainer"><summary>退费与成本口径</summary><p>
-      自动退费 {stats?.auto_refunded ?? 0} 条，共 {stats?.auto_refunded_credits ?? 0} 积分，上游明确拒绝、不计成本。
-      人工退费 {stats?.manual_refunded ?? 0} 条，真实成本 {manualCredits} 积分，上游可能已计费。
-      已退 {refundedCredits} 积分，扣费合计为毛额，净扣 = 扣费合计 − 已退积分。
-      {(stats?.unknown_refunded_credits ?? 0) > 0 && `另有 ${stats?.unknown_refunded_credits} 积分未区分退费来源，不计入真实成本。`}
-    </p></details>
-  </>;
 
   return (
     <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -366,7 +344,6 @@ const formatTime = (iso: string) => {
 };
 
 export default function ProviderTaskReconciliation() {
-  const mobile = useIsMobile();
   const { message, modal } = App.useApp();
   const [items, setItems] = useState<ProviderTask[]>([]);
   const [stats, setStats] = useState<ProviderTaskStats | null>(null);
@@ -859,7 +836,7 @@ export default function ProviderTaskReconciliation() {
 
   return (
     <div className="flex-1 overflow-auto p-6">
-      <div className="admin-record-page-header"><h1>上游对账</h1><p>核对生成状态、积分与上游实际消耗</p></div>
+      <div className="mb-5"><h1 className="text-xl font-semibold">上游对账</h1><p className="mt-1 text-xs text-[var(--dv-text-3)]">核对生成状态、积分与上游实际消耗</p></div>
       {/* 在线预览：产物地址带后台签发的短期票据，后台代理转发并把响应头改成 inline
           （存储本身返回 attachment，直接点地址只能下载）；播放器复用画布那套沉浸式预览。
           这里刻意是**单击**触发，画布上才是双击。 */}
@@ -876,7 +853,7 @@ export default function ProviderTaskReconciliation() {
       <ReconciliationSummary stats={stats} />
 
       {/* 筛选 */}
-      <div className="admin-reconciliation-filters flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <Select
           value={status}
           onChange={(v) => {
@@ -910,10 +887,6 @@ export default function ProviderTaskReconciliation() {
             { value: 'ai.recognize', label: '点选识别' },
           ]}
         />
-        <details className="admin-task-filter-more" open={mobile ? undefined : true}>
-          <summary>更多筛选{[userId, projectId, taskId, onlyAlert ? 'alert' : ''].filter(Boolean).length > 0
-            ? ` · ${[userId, projectId, taskId, onlyAlert ? 'alert' : ''].filter(Boolean).length} 项已启用` : ''}<DownOutlined aria-hidden /></summary>
-          <div className="admin-task-extra-filters">
         <Input
           value={userIdInput}
           onChange={(e) => setUserIdInput(e.target.value)}
@@ -971,8 +944,6 @@ export default function ProviderTaskReconciliation() {
             { value: 'alert', label: `只看异常${stats?.alerted ? ` (${stats.alerted})` : ''}` },
           ]}
         />
-          </div>
-        </details>
         {/* 两个动作按钮统一靠右、成组（ml-auto 只加在组上：分别加 auto 会让空白被均分，
             「立即核对」会被推到行中间去）。样式分主次：「立即核对」是这一行的主操作，
             用主色实心按钮（与渠道页「主操作=带图标的主色按钮」的约定一致）；
@@ -1036,14 +1007,7 @@ export default function ProviderTaskReconciliation() {
         </div>
       </div>
 
-      {mobile ? <MobileTaskList items={items} loading={loading} refunding={refunding} canRefund={canRefund}
-        statusLabel={row => row.status === 'refunded' && row.refund_source
-          ? row.refund_source === 'auto' ? '自动退费' : '人工退费'
-          : STATUS_META[row.status]?.text || row.status}
-        typeLabel={row => KIND_LABEL[row.task_kind || ''] || '生成任务'}
-        onRefund={refund}
-        onPreview={row => openPreview(row, row.result_url ? 'result' : 'provider')} /> :
-      <AdminTable<ProviderTask>
+      <Table<ProviderTask>
         rowKey="id"
         size="small"
         loading={loading}
@@ -1056,15 +1020,14 @@ export default function ProviderTaskReconciliation() {
         //   该列实际早已是 132，基数一直没跟上；本次只按真实值把它写对，没有动任何别的列宽）
         scroll={{ x: 1332 }}
         locale={{ emptyText: '暂无记录（对账表从本次上线开始记录）' }}
-      />}
+      />
 
       <div className="flex justify-end mt-4">
         <Pagination
           current={page}
           pageSize={pageSize}
           total={total}
-          simple={mobile}
-          showSizeChanger={!mobile}
+          showSizeChanger
           pageSizeOptions={[20, 50, 100]}
           onChange={(p, s) => {
             setPage(p);

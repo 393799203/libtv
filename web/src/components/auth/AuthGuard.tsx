@@ -2,6 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { Spin } from 'antd';
 import { useAuthStore } from '@/stores/authStore';
 import { authPagePath } from '@/utils/authNavigation';
+import { useCanManageOnDevice } from '@/hooks/useCanManageOnDevice';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -18,6 +19,10 @@ export function AuthGuard({ children, adminOnly = false }: AuthGuardProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const role = useAuthStore((s) => s.user?.role);
   const location = useLocation();
+  const canManageOnDevice = useCanManageOnDevice();
+
+  // 在后台挂载、加载数据之前拦截移动设备，窗口缩窄时同样退出后台。
+  if (adminOnly && !canManageOnDevice) return <Navigate to="/" replace />;
 
   // 未初始化时显示 loading
   if (!isInitialized) {

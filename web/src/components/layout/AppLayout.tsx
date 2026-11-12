@@ -16,6 +16,7 @@ import type { MenuProps } from 'antd';
 import { BrandLogo } from '@/components/layout/BrandLogo';
 import { useAuthStore } from '@/stores/authStore';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useCanManageOnDevice } from '@/hooks/useCanManageOnDevice';
 import { ProfileSettingsModal } from '@/components/auth/ProfileSettingsModal';
 import { AssetLibraryModal } from '@/components/auth/AssetLibraryModal';
 import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
@@ -59,12 +60,10 @@ export function AppLayout() {
 
   // 移动端 <768px：用于菜单项这类无法用 CSS 表达的差异
   const isMobile = useIsMobile();
+  const canManageOnDevice = useCanManageOnDevice();
 
   const userMenuItems: MenuProps['items'] = isMobile
     ? [
-        ...(user?.role === 'admin'
-          ? [{ key: 'admin', icon: <ControlOutlined />, label: '运营管理', onClick: () => navigate('/admin') }]
-          : []),
         { key: 'profile', icon: <SettingOutlined />, label: '个人中心', onClick: () => setShowProfileSettings(true) },
         { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true, onClick: handleLogout },
       ]
@@ -168,8 +167,8 @@ export function AppLayout() {
 
         {isAuthenticated ? (
           <div className="site-header-tools flex items-center gap-2">
-            {/* 系统管理入口（仅管理员）。移动端隐藏：390px 头部装不下，且运营管理本身是为 PC 设计的 */}
-            {user?.role === 'admin' && (
+            {/* 运营管理只对 PC 管理员开放，与路由守卫使用同一设备条件。 */}
+            {user?.role === 'admin' && canManageOnDevice && (
               <button
                 type="button"
                 onClick={() => navigate('/admin')}

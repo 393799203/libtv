@@ -43,15 +43,10 @@ import { BillingRecordsModal } from '@/components/auth/BillingRecordsModal';
 import { usePageMeta } from '@/hooks/usePageMeta';
 import { Z } from '@/utils/zLayers';
 import ReferralDashboard from './ReferralDashboard';
-import { useIsMobile } from '@/hooks/useIsMobile';
-import { MobileUserList } from './MobileUserList';
-import './adminMobile.css';
-import './adminRecords.css';
 
 type AdminTab = 'banners' | 'shows' | 'styles' | 'users' | 'referrals' | 'reconcile' | 'channels' | 'packages';
 
 export default function AdminPage() {
-  const mobile = useIsMobile();
   // 应用内页：不被搜索引擎收录（nginx 的 add_header 到不了这里，见 web/libtv-app.conf 说明）
   usePageMeta({ title: '管理后台', noindex: true });
   const navigate = useNavigate();
@@ -758,17 +753,8 @@ export default function AdminPage() {
   ];
 
   return (
-    <div className="admin-shell">
-      <header className="admin-mobile-nav">
-        <label htmlFor="admin-mobile-module">运营管理</label>
-        <select id="admin-mobile-module" aria-label="运营模块" value={activeTab}
-          onChange={event => navigate(`/admin/${event.target.value}`)}>
-          {menuGroups.map(group => <optgroup key={group.label} label={group.label}>
-            {group.items.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
-          </optgroup>)}
-        </select>
-      </header>
-      {/* 手机使用上方模块选择器；平板保留图标侧栏，桌面显示完整名称。 */}
+    <div className="flex h-[calc(100dvh-60px)] min-w-0">
+      {/* PC 后台侧栏，窄窗口折叠为图标。 */}
       <aside className="w-[56px] lg:w-[200px] bg-white border-r border-gray-200 flex flex-col shrink-0">
         <div className="hidden lg:block px-4 py-4 border-b border-gray-100">
           <h2 className="text-[15px] font-semibold text-gray-800">运营管理中心</h2>
@@ -819,7 +805,7 @@ export default function AdminPage() {
       </aside>
 
       {/* 右侧内容区 */}
-      <main className="admin-main flex-1 overflow-hidden flex flex-col bg-gray-50/50">
+      <main className="min-w-0 flex-1 overflow-hidden flex flex-col bg-gray-50/50">
         {/* ========== 首页管理 Tab ========== */}
         {activeTab === 'shows' && (
           <>
@@ -902,7 +888,7 @@ export default function AdminPage() {
                       <div className="text-[14px]">暂无待审核视频</div>
                     </div>
                   ) : (
-                    <div className="admin-video-grid grid grid-cols-4 gap-4">
+                    <div className="grid grid-cols-4 gap-4">
                       {pendingShows.map(show => (
                         <div key={show.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
                           <div className="aspect-[16/9] relative bg-gray-100">
@@ -996,7 +982,7 @@ export default function AdminPage() {
                       <div className="flex items-center justify-between mb-4">
                         <span className="text-[13px] text-gray-500">{shows?.length || 0} 个视频</span>
                       </div>
-                      <div className="admin-video-grid grid grid-cols-4 gap-4">
+                      <div className="grid grid-cols-4 gap-4">
                         {shows.map(show => (
                           <div key={show.id} className="group relative rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
                             <div className="aspect-[16/9] relative bg-gray-100">
@@ -1217,11 +1203,11 @@ export default function AdminPage() {
         {/* ========== 用户管理 Tab ========== */}
         {activeTab === 'users' && (
           <>
-          <div className="admin-user-page flex-1 overflow-y-auto p-3 md:p-6">
-            <div className="admin-record-page-header"><h1>用户管理</h1><p>共 {userTotal} 位用户 · 管理账户、积分与创作资产</p></div>
+          <div className="flex-1 overflow-y-auto p-3 md:p-6">
+            <div className="mb-5"><h1 className="text-xl font-semibold">用户管理</h1><p className="mt-1 text-xs text-[var(--dv-text-3)]">共 {userTotal} 位用户 · 管理账户、积分与创作资产</p></div>
                 {/* 筛选行：控件尺寸与「上游对账」一致（antd 默认尺寸、宽度用 style）；
                     布局上「共 N 个用户」留在左侧，搜索框 + 角色/渠道筛选 + 刷新整体靠右 */}
-                <div className="admin-user-filters flex flex-wrap items-center gap-2 mb-4">
+                <div className="flex flex-wrap items-center gap-2 mb-4">
                   {/* 弹性占位：只在 lg 以上需要（宽屏把控件组推到右侧）；
                       窄屏它会同搜索框抢 flex 空间，把搜索框压没 */}
                   <div className="hidden lg:block flex-1" />
@@ -1300,12 +1286,8 @@ export default function AdminPage() {
               </div>
             ) : (
               <>
-                {mobile ? <MobileUserList users={users} currentUserId={currentUser?.id}
-                  onChanged={() => loadUsers()}
-                  onRecharge={user => { setRechargeUserId(user.id); setRechargeAmount(10000); setRechargeRemark(''); }}
-                  onBilling={user => setBillingUserId(user.id)} /> :
-                <div className="admin-user-records bg-white rounded-xl border border-gray-200 overflow-x-auto">
-                  <table className="admin-record-table w-full text-[13px] min-w-[380px] lg:min-w-[1000px]">
+                <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+                  <table className="w-full text-[13px] min-w-[380px] lg:min-w-[1000px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         {/* 昵称并入邮箱后面（原来单占一列，lg 以下还会整列消失） */}
@@ -1324,12 +1306,12 @@ export default function AdminPage() {
                         const isCurrentUser = currentUser && user.id === currentUser.id;
                         return (
                           <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                            <td data-label="账号" className="min-w-[180px] px-4 py-3">
+                            <td className="min-w-[180px] px-4 py-3">
                               {/* 昵称紧跟邮箱；whitespace-nowrap 保证它不会被拆成
                                   「昵称前半」换行、「昵称后半」再换行；没昵称就不占位。
                                   2026-10-10 反馈「用户名看的不是太明显」：原来 12px/gray-400 太淡，
                                   改成与邮箱同级字号 + 加粗一档 + 深一档灰度，读起来是个名字而不是脚注。 */}
-                              <div><div className="text-gray-800 break-all">
+                              <div className="text-gray-800 break-all">
                                 {user.email}
                                 {user.nickname && (
                                   <span className="ml-1.5 whitespace-nowrap text-[13px] font-medium text-gray-600">
@@ -1342,16 +1324,15 @@ export default function AdminPage() {
                                 邀请者：{user.inviter_nickname || user.inviter_email || '已注销用户'}
                                 {user.inviter_nickname && user.inviter_email && <span className="ml-1 text-gray-400">({user.inviter_email})</span>}
                               </div>}
-                              </div>
                             </td>
-                            <td data-label="项目与资产" className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-gray-500 text-[12px]">
-                              <div><span>项目 {user.project_count || 0}</span>
+                            <td className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-gray-500 text-[12px]">
+                              <span>项目 {user.project_count || 0}</span>
                               <span className="inline-block w-px h-4 bg-gray-200 mx-1.5 align-middle" />
                               <span>图片 {user.asset_image_count || 0}</span>
                               <span className="text-gray-300 mx-1.5">·</span>
-                              <span>视频 {user.asset_video_count || 0}</span></div>
+                              <span>视频 {user.asset_video_count || 0}</span>
                             </td>
-                            <td data-label="角色" className="px-4 py-3">
+                            <td className="px-4 py-3">
                               <Select
                                 value={user.role}
                                 size="small"
@@ -1373,7 +1354,7 @@ export default function AdminPage() {
                                 }}
                               />
                             </td>
-                            <td data-label="渠道商" className="hidden lg:table-cell px-4 py-3">
+                            <td className="hidden lg:table-cell px-4 py-3">
                               <Select
                                 value={user.channel || 'wasu'}
                                 size="small"
@@ -1394,15 +1375,15 @@ export default function AdminPage() {
                                 }}
                               />
                             </td>
-                            <td data-label="剩余积分" className="px-4 py-3 text-gray-800 font-medium">
+                            <td className="px-4 py-3 text-gray-800 font-medium">
                               {user.credits ?? 0}
                             </td>
-                            <td data-label="注册时间" className="hidden lg:table-cell px-4 py-3 text-gray-500">
+                            <td className="hidden lg:table-cell px-4 py-3 text-gray-500">
                               {new Date(user.created_at).toLocaleDateString('zh-CN')}
                             </td>
                             {/* 只展示"最后操作"（带 token 调任意接口的时间）：平台已不再记录"最后登录"。
                                 这列是主要列 —— 窄屏也保留（用户明确要求） */}
-                            <td data-label="最后操作" className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                            <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                               {user.last_active_at
                                 ? new Date(user.last_active_at).toLocaleString('zh-CN', {
                                     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -1410,7 +1391,7 @@ export default function AdminPage() {
                                   })
                                 : '—'}
                             </td>
-                            <td data-label="操作" className="px-4 py-3">
+                            <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <button
                                   onClick={(e) => {
@@ -1483,14 +1464,13 @@ export default function AdminPage() {
                       })}
                     </tbody>
                   </table>
-                </div>}
+                </div>
                 {/* 分页（一页10条，管理员排前） */}
                 <div className="flex justify-end mt-4">
                   <Pagination
                     current={userPage}
                     pageSize={USER_PAGE_SIZE}
                     total={userTotal}
-                    simple={mobile}
                     showSizeChanger={false}
                     onChange={(p) => loadUsers(p)}
                   />
@@ -1508,9 +1488,9 @@ export default function AdminPage() {
           {/* 管理员充值弹窗 */}
           {rechargeUserId && (
             <div style={{ zIndex: Z.modalTop }}
-          className="admin-dialog-overlay fixed inset-0 flex items-center justify-center" onClick={() => setRechargeUserId(null)}>
+          className="fixed inset-0 flex items-center justify-center" onClick={() => setRechargeUserId(null)}>
               <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
-              <div role="dialog" aria-label="积分充值" className="admin-dialog relative bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div role="dialog" aria-label="积分充值" className="relative bg-white rounded-2xl shadow-2xl w-[420px] overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 {/* 弹窗头部 */}
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div className="text-[15px] font-semibold text-gray-800">积分充值</div>
@@ -1616,7 +1596,7 @@ export default function AdminPage() {
                 </div>
               ) : (
                 <>
-                  <div className="admin-banner-grid grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {banners.map(banner => (
                       <div key={banner.id} className="group relative bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                         {/* Banner图片 */}
@@ -1705,9 +1685,9 @@ export default function AdminPage() {
       {/* ========== 首页管理：新建标签弹窗 ========== */}
       {showNewShowCatDialog && (
         <div style={{ zIndex: Z.modalTop }}
-          className="admin-dialog-overlay fixed inset-0 flex items-center justify-center">
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewShowCatDialog(false)} />
-          <div role="dialog" aria-label="新建标签" className="admin-dialog relative w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-10 p-6">
+          <div role="dialog" aria-label="新建标签" className="relative w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-10 p-6">
             <h3 className="text-[14px] font-semibold text-gray-800 mb-4">新建标签</h3>
             <input
               value={newShowCatName}
@@ -1743,9 +1723,9 @@ export default function AdminPage() {
       {/* ========== 新建分类小弹窗 ========== */}
       {showNewCatDialog && (
         <div style={{ zIndex: Z.modalTop }}
-          className="admin-dialog-overlay fixed inset-0 flex items-center justify-center">
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowNewCatDialog(false)} />
-          <div role="dialog" aria-label="新建分类" className="admin-dialog relative w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-10 p-6">
+          <div role="dialog" aria-label="新建分类" className="relative w-[360px] bg-white rounded-xl shadow-xl border border-gray-200 z-10 p-6">
             <h3 className="text-[14px] font-semibold text-gray-800 mb-4">新建分类</h3>
             <input
               value={newCatName}
@@ -1768,14 +1748,14 @@ export default function AdminPage() {
       {/* ========== 添加图片弹窗 ========== */}
       {showAddDialog && (
         <div style={{ zIndex: Z.modalTopAbove }}
-          className="admin-dialog-overlay fixed inset-0 flex items-center justify-center">
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => { setShowAddDialog(false); URL.revokeObjectURL(addPreviewUrl); }} />
-          <div role="dialog" aria-label={editingStyle ? '编辑风格' : '添加风格图片'} className="admin-dialog relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
+          <div role="dialog" aria-label={editingStyle ? '编辑风格' : '添加风格图片'} className="relative w-[520px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
             <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">
               {editingStyle ? '编辑风格' : '添加风格图片'} — {categories?.find(c => c.id === activeCategory)?.name || activeCategory}
             </h3>
             <div className="p-6 space-y-4">
-              <div className="admin-style-form flex gap-4">
+              <div className="flex gap-4">
                 <label className={`w-[150px] h-[200px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors shrink-0 ${addFile ? 'border-green-300 bg-green-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
                   {addPreviewUrl ? (
                     <img src={addPreviewUrl} alt="" className="w-full h-full object-cover rounded-md" />
@@ -1826,9 +1806,9 @@ export default function AdminPage() {
       {/* ========== 版图管理：添加/编辑Banner弹窗 ========== */}
       {showAddBannerDialog && (
         <div style={{ zIndex: Z.modalTop }}
-          className="admin-dialog-overlay fixed inset-0 flex items-center justify-center">
+          className="fixed inset-0 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddBannerDialog(false)} />
-          <div role="dialog" aria-label={editingBanner ? '编辑版图' : '添加版图'} className="admin-dialog relative w-[500px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
+          <div role="dialog" aria-label={editingBanner ? '编辑版图' : '添加版图'} className="relative w-[500px] bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
             <h3 className="text-[15px] font-semibold text-gray-800 px-6 py-4 border-b border-gray-100">
               {editingBanner ? '编辑版图' : '添加版图'}
             </h3>

@@ -1,16 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Button, Drawer, Input, Tag } from 'antd';
+import { Button, Drawer, Input, Table, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { referralApi, type ReferralDashboard as DashboardData, type ReferralRow } from '@/services/referralApi';
-import { AdminTable } from './AdminTable';
-import { useIsMobile } from '@/hooks/useIsMobile';
-import { MobileReferralList } from './MobileReferralList';
 
 const count = (value?: number) => Number(value || 0).toLocaleString('zh-CN');
 const money = (fen?: number) => `¥${(Number(fen || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function ReferralDashboard() {
-  const mobile = useIsMobile();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -59,43 +55,30 @@ export default function ReferralDashboard() {
   const openInvitees = (row: ReferralRow) => {
     setSelected(row); setDetail(null); setDetailPage(1); setDetailFailed(false); setDetailLoading(true);
   };
-  const mobileRows = [
-    ['平台用户', s?.platform_users], ['邀请注册', s?.invited_users],
-    ['推荐人数', s?.inviters], ['邀请付费人数', s?.paying_users],
-    ['成功充值金额', s ? money(s.amount_fen) : undefined], ['净消费积分', s?.net_consumed_points],
-  ];
   return (
-    <div className="admin-referral-page flex-1 overflow-auto p-4 lg:p-6" aria-label="邀请统计看板">
-      <div className="admin-referral-heading mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div className="flex-1 overflow-auto p-4 lg:p-6" aria-label="邀请统计看板">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="text-xl font-semibold">邀请统计</h1><p className="mt-1 text-xs text-[var(--dv-text-3)]">平台邀请关系与充值、消费数据</p></div>
         <Button aria-label="刷新统计" title="刷新统计" icon={<ReloadOutlined />} onClick={() => {
           setLoading(true); if (selected) setDetailLoading(true); setRefresh(v => v + 1);
-        }}>{mobile ? null : '刷新统计'}</Button>
+        }}>刷新统计</Button>
       </div>
-      {mobile ? <dl className="admin-overview">
-        {mobileRows.map(([label, value]) => <div key={String(label)}><dt>{label}</dt>
-          <dd>{value === undefined ? '—' : typeof value === 'number' ? count(value) : value}</dd></div>)}
-      </dl> : <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
-        {cards.map(([label, value]) => <div key={String(label)} className="admin-referral-summary rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4">
+      <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
+        {cards.map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4">
           <div className="text-xs text-[var(--dv-text-3)]">{label}</div>
           <div className="mt-3 text-2xl font-semibold tabular-nums">{value === undefined ? '—' : typeof value === 'number' ? count(value) : value}</div>
         </div>)}
-      </div>}
-      {mobile ? <details className="admin-record-explainer"><summary>统计口径与说明</summary><p>
-        充值金额仅统计支付成功的订单；人工充值或赠送积分单独列出。净消费 = 累计扣费 − 已退积分。
-        上方统计全部邀请用户，搜索只筛选下方推荐人列表。
-      </p></details> : <div className="mb-4 rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4 text-xs leading-6 text-[var(--dv-text-3)]">
+      </div>
+      <div className="mb-4 rounded-xl border border-[var(--dv-border-1)] bg-[var(--dv-surface-1)] p-4 text-xs leading-6 text-[var(--dv-text-3)]">
         充值金额仅统计支付成功的订单，未支付订单不计。人工充值或赠送积分单独列出。净消费 = 累计扣费 − 已退积分。
         上方看板统计全部邀请用户，搜索只筛选下方推荐人列表。
-      </div>}
+      </div>
       <Input.Search className="mb-4 max-w-md" placeholder="搜索推荐人的昵称、邮箱或推荐码" allowClear
         aria-label="搜索推荐人" onSearch={value => {
           setLoading(true); setKeyword(value.trim()); setPage(1); setRefresh(v => v + 1);
         }} />
       {failed && <p role="alert" className="mb-3 text-sm text-red-300">邀请统计读取失败，请点击刷新重试。</p>}
-      {mobile ? <MobileReferralList items={data?.items || []} loading={loading} page={page} total={data?.total || 0}
-        onPage={value => { setLoading(true); setPage(value); }} onInvitees={openInvitees} /> :
-      <AdminTable<ReferralRow> rowKey="id" size="small" loading={loading} dataSource={Array.isArray(data?.items) ? data.items : []}
+      <Table<ReferralRow> rowKey="id" size="small" loading={loading} dataSource={Array.isArray(data?.items) ? data.items : []}
         scroll={{ x: 1600 }} pagination={{ current: page, pageSize: 20, total: data?.total || 0, showSizeChanger: false,
           onChange: value => { setLoading(true); setPage(value); } }}
         columns={[
@@ -108,21 +91,19 @@ export default function ReferralDashboard() {
             <Button size="small" disabled={!row.invited_users} onClick={() => {
               openInvitees(row);
             }}>邀请用户</Button> },
-        ]} />}
-      <Drawer rootClassName="admin-referral-drawer" title={`${selected?.nickname || selected?.email || ''} · 邀请用户`} open={!!selected} width={mobile ? '100%' : 1060}
+        ]} />
+      <Drawer title={`${selected?.nickname || selected?.email || ''} · 邀请用户`} open={!!selected} width={1060}
         onClose={() => setSelected(null)}>
         <p className="mb-4 text-xs text-[var(--dv-text-3)]">仅显示该推荐人直接邀请的用户及其充值、消费记录。</p>
         {detailFailed && <p role="alert" className="mb-3 text-sm text-red-300">明细读取失败，请重试。</p>}
-        {mobile ? <MobileReferralList items={detail?.items || []} loading={detailLoading} page={detailPage} total={detail?.total || 0}
-          onPage={value => { setDetailLoading(true); setDetailPage(value); }} /> :
-        <AdminTable<ReferralRow> rowKey="id" size="small" loading={detailLoading} dataSource={Array.isArray(detail?.items) ? detail.items : []}
+        <Table<ReferralRow> rowKey="id" size="small" loading={detailLoading} dataSource={Array.isArray(detail?.items) ? detail.items : []}
           scroll={{ x: 1350 }} pagination={{ current: detailPage, pageSize: 20, total: detail?.total || 0, showSizeChanger: false,
             onChange: value => { setDetailLoading(true); setDetailPage(value); } }}
           columns={[
             identity,
             { title: '注册时间', dataIndex: 'created_at', width: 120, render: value => new Date(value).toLocaleDateString('zh-CN') },
             ...activity,
-          ]} />}
+          ]} />
       </Drawer>
     </div>
   );

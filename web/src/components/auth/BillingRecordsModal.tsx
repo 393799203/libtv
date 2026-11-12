@@ -121,7 +121,6 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
 
   return (
     <Modal
-      rootClassName="admin-billing-modal"
       title="费用明细"
       open
       onCancel={onClose}
@@ -134,7 +133,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
       }}
     >
       {/* 筛选栏 */}
-      <div className="admin-billing-filters flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-4">
         <Select
           value={filterType}
           onChange={setFilterType}
@@ -182,7 +181,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
       </div>
 
       {/* 表格区域：固定高度避免抖动 */}
-      <div className="admin-billing-records h-[520px] flex flex-col">
+      <div className="h-[520px] flex flex-col">
         {loading ? (
           <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">加载中...</div>
         ) : records.length === 0 ? (
@@ -197,7 +196,7 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
         ) : (
           <>
             <div className="flex-1 overflow-y-auto">
-              <table className="admin-record-table w-full text-left">
+              <table className="w-full text-left">
                 <thead className="sticky top-0 bg-white z-10">
                   <tr className="text-gray-400 text-[12px] border-b border-gray-100">
                     <th className="py-2 font-normal">时间</th>
@@ -213,8 +212,8 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                     const meta = TYPE_META[r.type] || TYPE_META.deduct;
                     return (
                       <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td data-label="时间" className="py-2.5 text-gray-500 text-[12px] whitespace-nowrap">{formatTime(r.created_at)}</td>
-                        <td data-label="类型" className="py-2.5">
+                        <td className="py-2.5 text-gray-500 text-[12px] whitespace-nowrap">{formatTime(r.created_at)}</td>
+                        <td className="py-2.5">
                           <div className="flex items-center gap-1">
                             <Tag color={meta.color} className="!m-0">{meta.label}</Tag>
                             {r.type === 'refund' && (
@@ -236,8 +235,8 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                             )}
                           </div>
                         </td>
-                        <td data-label="场景" className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
-                        <td data-label="模型 / 订单" className="py-2.5 text-gray-500 text-[12px]">
+                        <td className="py-2.5 text-gray-700 text-[13px]">{r.scene || r.remark || r.action || '-'}</td>
+                        <td className="py-2.5 text-gray-500 text-[12px]">
                           {r.order_no ? (
                             /* 充值行：模型列为空，改放支付订单号（对账用）。号很长，截断显示、悬停看全 */
                             <Tooltip
@@ -288,14 +287,13 @@ export function BillingRecordsModal({ onClose, userId }: { onClose: () => void; 
                           )}
                         </td>
                         <td
-                          data-label="积分变动"
                           className={`py-2.5 text-right text-[13px] font-medium whitespace-nowrap ${
                             r.type === 'deduct' ? 'text-red-500' : 'text-green-600'
                           }`}
                         >
                           {r.amount === 0 ? '0' : `${meta.sign}${r.amount}`}
                         </td>
-                        <td data-label="剩余积分" className="py-2.5 text-right text-gray-600 text-[13px] whitespace-nowrap">{r.balance_after}</td>
+                        <td className="py-2.5 text-right text-gray-600 text-[13px] whitespace-nowrap">{r.balance_after}</td>
                       </tr>
                     );
                   })}

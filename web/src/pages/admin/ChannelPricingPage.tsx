@@ -194,9 +194,9 @@ export default function ChannelPricingPage() {
   const activePolicy = POLICY_OPTIONS.find((p) => p.value === policy);
 
   return (
-    <div className="admin-channel-page flex-1 overflow-hidden flex flex-col">
+    <div className="flex-1 overflow-hidden flex flex-col">
       {/* ========== 渠道栏（常驻，不随下方价格区滚动）========== */}
-      <div className="admin-channel-overview bg-white border-b border-gray-100 shrink-0 px-6 pt-3.5 pb-3">
+      <div className="bg-white border-b border-gray-100 shrink-0 px-6 pt-3.5 pb-3">
         <div className="flex items-center gap-2 mb-2.5">
           <span className="text-[13px] font-semibold text-gray-800">渠道概览</span>
           <span className="text-[11px] text-gray-400">
@@ -255,7 +255,7 @@ export default function ChannelPricingPage() {
         </div>
 
         {/* 全局路由策略 */}
-        <div className="admin-routing flex items-start gap-3 mt-3">
+        <div className="flex items-start gap-3 mt-3">
           <div className="shrink-0 pt-2">
             <div className="text-[12px] font-medium text-gray-700 whitespace-nowrap">流量路由</div>
             <div className="text-[11px] text-gray-400 whitespace-nowrap mt-0.5">
