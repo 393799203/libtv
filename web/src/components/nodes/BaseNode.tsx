@@ -30,7 +30,7 @@ function NodeErrorDetail({ info }: { info: DescribedNodeError }) {
       <div className="font-medium text-red-500">{info.title}</div>
       {info.hint ? <div className="mt-1 leading-snug">{info.hint}</div> : null}
       {refund ? <div className="mt-1 text-[11px] opacity-80">{refund}</div> : null}
-      <div className="mt-2 border-t border-current/20 pt-2 text-[11px] opacity-80">
+      {!info.hideDetails && <div className="mt-2 border-t border-current/20 pt-2 text-[11px] opacity-80">
         <div className="mb-0.5">详情（排查用，可直接复制）：</div>
         <div className="max-h-[220px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-snug">
           {info.detail}
@@ -40,7 +40,7 @@ function NodeErrorDetail({ info }: { info: DescribedNodeError }) {
             {info.raw}
           </div>
         ) : null}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -92,7 +92,7 @@ export const BaseNode = memo<BaseNodeProps>(function BaseNode({
     if (status !== 'failed' || !data.error) return null;
     const raw = String(data.error);
     let smallRefs: { label: string; size: string }[] = [];
-    if (/WidthTooSmall|宽度和高度需在|Width must be between/i.test(raw)) {
+    if (/(?:Width|Height)TooSmall|宽度和高度需在|(?:Width|Height) must be between/i.test(raw)) {
       const mentions = (data as { mentions?: { nodeId: string; label?: string }[] }).mentions ?? [];
       const all = useCanvasStore.getState().nodes;
       smallRefs = mentions.flatMap((m) => {

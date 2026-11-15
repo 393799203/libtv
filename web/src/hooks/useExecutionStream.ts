@@ -9,6 +9,7 @@ import { reconcileNodesOnTerminal, pendingNodeIdsOf } from '@/utils/executionTer
 import { canvasApi } from '@/services/canvasApi';
 import { createNode } from '@/utils/nodeFactory';
 import { mediaFieldsFor } from '@/utils/mediaNode';
+import { customerErrorText } from '@/utils/nodeErrorText';
 import type { WSEvent } from '@/types/workflow';
 import type { ImageNodeData, LibTVEdge } from '@/types/canvas';
 
@@ -406,7 +407,7 @@ export function useExecutionStream(
           };
           // ✅ executor 返回 Status=failed 但 err=nil 时，data 带 error 字段（图片/视频节点）
           if (data.error) {
-            message.error(data.error);
+            message.error(customerErrorText(data.error));
             // transient：失败没有产物、画布内容没变 → 不占历史
             useCanvasStore.getState().updateNodeData(event.nodeId, {
               status: 'failed',
@@ -466,7 +467,7 @@ export function useExecutionStream(
             (event.data as { error?: string } | undefined)?.error ||
             (event.data as { message?: string } | undefined)?.message ||
             '节点执行失败';
-          message.error(errMsg);
+          message.error(customerErrorText(errMsg));
           // transient：同上，失败态不进历史
           useCanvasStore.getState().updateNodeData(event.nodeId, {
             status: 'failed',

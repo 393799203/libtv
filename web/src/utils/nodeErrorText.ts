@@ -9,7 +9,7 @@
  * 用户看不懂 content[6] 是什么，也看不懂 WidthTooSmall；但他真正需要知道的只有一句：
  * 「参考图太小了，换一张大一点的」。
  *
- * 这里的规则不是猜的 —— 全部来自线上库里真实出现过的错误文案（14 条历史 + 当天的失败）。
+ * 按线上历史错误的明确错误码或确切原文映射；未知错误保留原文。
  * 原始文案不会被丢掉：它仍然随节点一起返回（detail/raw），给运营排查用。
  */
 
@@ -29,6 +29,8 @@ export interface DescribedNodeError {
   raw: string;
   /** 从原始错误里尽量抽出的「上游原话」，详情里更好读 */
   detail: string;
+  /** 渠道内部问题不在客户界面展示诊断信息。 */
+  hideDetails?: boolean;
   /** 引用素材里尺寸不达标的那些（尺寸类错误才有），能直接点出是谁的问题 */
   smallRefs: { label: string; size: string }[];
 }
@@ -38,6 +40,7 @@ interface Rule {
   test: RegExp;
   title: string;
   hint?: string;
+  internal?: boolean;
 }
 
 /**
@@ -53,7 +56,7 @@ const RULES: Rule[] = [
   },
   {
     kind: 'asset-too-small',
-    test: /WidthTooSmall|宽度和高度需在|Width must be between/i,
+    test: /(?:Width|Height)TooSmall|宽度和高度需在|(?:Width|Height) must be between/i,
     title: '参考图尺寸太小，上游拒收',
     hint: '上游要求参考图的宽和高都在 300–6000 像素之间，换一张更大的图再生成',
   },
@@ -65,14 +68,28 @@ const RULES: Rule[] = [
   },
   {
     kind: 'content-review',
-    test: /(?:Input|Output)(?:Text|Image|Video|Audio)SensitiveContentDetected|DataInspectionFailed|content_policy_violation/i,
+    test: /(?:Input|Output)(?:Text|Image|Video|Audio)SensitiveContentDetected|DataInspectionFailed|content_policy_violation|The request failed because the output image may contain sensitive information/i,
     title: '内容未通过模型审核',
   },
   {
     kind: 'duration-over-limit',
-    test: /video total duration|less than or equal to 15\.2/i,
+    test: /video total duration|less than or equal to 15\.2|参考视频时长[^\n]*超过[^\n]*模型的\s*\d+(?:\.\d+)?秒限制/i,
     title: '视频时长超出模型上限',
-    hint: '这个模型最长约 15 秒，把分镜时长缩短后再生成',
+  },
+  {
+    kind: 'frame-input',
+    test: /首尾帧模式需要 1–2 张图片/,
+    title: '首尾帧模式需要 1–2 张图片',
+  },
+  {
+    kind: 'script-reference-missing',
+    test: /已连接上游剧本节点，但未在提示词中通过@引用使用剧本内容/,
+    title: '提示词尚未引用已连接的剧本',
+  },
+  {
+    kind: 'frame-aspect-ratio',
+    test: /seedance2\.5 首帧\/首尾帧任务仅支持 ratio=adaptive|For first-frame or first-last-frame generation the output ratio follows the first-frame image/i,
+    title: '首尾帧模式的输出比例需跟随首帧',
   },
   {
     kind: 'too-many-refs',
@@ -81,13 +98,25 @@ const RULES: Rule[] = [
   },
   {
     kind: 'invalid-parameter',
-    test: /\bInvalidParameter(?:\.[A-Za-z]+)?\b|\binvalid_parameter\b/,
+    test: /\bInvalidParameter(?:\.[A-Za-z]+)?\b|\binvalid_parameter\b|请求参数不符合要求/,
     title: '请求参数不符合模型要求',
+  },
+  {
+    kind: 'burst-rate-limit',
+    test: /\blimit_burst_rate\b/,
+    title: '请求增长过快，触发上游限流',
+    internal: true,
   },
   {
     kind: 'rate-limit',
     test: /\bThrottling(?:\.[A-Za-z]+)?\b|\bRateLimitExceeded\b|\brate_limit_exceeded\b/,
     title: '请求过于频繁',
+  },
+  {
+    kind: 'model-not-activated',
+    test: /\bmodel_not_activated\b/,
+    title: '当前模型未开通',
+    internal: true,
   },
   {
     kind: 'model-unavailable',
@@ -96,10 +125,41 @@ const RULES: Rule[] = [
     hint: '换一个模型试试；一直不可用请联系管理员',
   },
   {
+    kind: 'upstream-quota-exhausted',
+    test: /\bTokenStatusExhausted\b|该令牌额度已用尽/,
+    title: '上游渠道额度已用尽',
+    internal: true,
+  },
+  {
     kind: 'insufficient-credits',
     test: /积分不足|余额不足|insufficient (balance|credits)/i,
     title: '积分不足，无法生成',
     hint: '请先充值后再生成',
+  },
+  {
+    kind: 'empty-shots',
+    test: /模型未返回分镜镜头/,
+    title: '模型未返回分镜镜头',
+  },
+  {
+    kind: 'invalid-model-output',
+    test: /模型输出的 JSON 格式有误|分镜模型已返回 HTTP 200，但输出不是合法 JSON/,
+    title: '模型返回的分镜格式有误',
+  },
+  {
+    kind: 'unsupported-image-format',
+    test: /元素编辑：这张图的格式无法处理（仅支持 PNG\/JPEG）/,
+    title: '元素编辑仅支持 PNG/JPEG 图片',
+  },
+  {
+    kind: 'image-read-failed',
+    test: /图片读取失败（未调用上游）/,
+    title: '图片读取失败，未调用上游',
+  },
+  {
+    kind: 'upstream-network',
+    test: /connect: network is unreachable/i,
+    title: '无法连接上游服务',
   },
   {
     kind: 'upstream-timeout',
@@ -163,6 +223,12 @@ export function extractUpstreamDetail(raw: string): string {
 export interface DescribeOptions {
   /** 引用素材里尺寸不达标的（由调用方从画布上查出来），尺寸类错误会把它点出来 */
   smallRefs?: { label: string; size: string }[];
+  audience?: 'customer' | 'admin';
+}
+
+/** 仅屏蔽已确认的平台渠道内部故障，其余错误保持原文。 */
+export function customerErrorText(raw: string): string {
+  return RULES.some(rule => rule.internal && rule.test.test(raw)) ? '服务暂不可用' : raw;
 }
 
 export function describeNodeError(rawInput: unknown, options?: DescribeOptions): DescribedNodeError {
@@ -171,8 +237,13 @@ export function describeNodeError(rawInput: unknown, options?: DescribeOptions):
   const smallRefs = options?.smallRefs ?? [];
   const detail = extractUpstreamDetail(raw);
 
-  for (const rule of RULES) {
+  // 内部错误优先，避免外层 HTTP 状态或同一错误串里的泛化描述遮住它。
+  const internal = RULES.find(rule => rule.internal && rule.test.test(raw));
+  for (const rule of internal ? [internal] : RULES) {
     if (!rule.test.test(raw)) continue;
+    if (rule.internal && options?.audience !== 'admin') {
+      return { kind: rule.kind, title: customerErrorText(raw), refund, raw, detail: '', hideDetails: true, smallRefs };
+    }
     let title = rule.title;
     let hint = rule.hint;
     if (rule.kind === 'upstream-status') {
@@ -186,6 +257,11 @@ export function describeNodeError(rawInput: unknown, options?: DescribeOptions):
     if (rule.kind === 'too-many-refs') {
       const limit = raw.match(/at most (\d+) reference[_ ]image/i)?.[1];
       if (limit) hint = `模型最多接受 ${limit} 张参考图`;
+    }
+    if (rule.kind === 'duration-over-limit') {
+      const limit = raw.match(/模型的\s*(\d+(?:\.\d+)?)秒限制/)?.[1]
+        ?? raw.match(/less than or equal to (\d+(?:\.\d+)?)/i)?.[1];
+      if (limit) hint = `模型的总时长上限为 ${limit} 秒`;
     }
     return { kind: rule.kind, title, hint, refund, raw, detail, smallRefs };
   }

@@ -3,6 +3,7 @@ import type { AxiosRequestConfig as RequestConfig, InternalAxiosRequestConfig } 
 import { message } from '@/utils/antdApp';
 import { useAuthStore } from '@/stores/authStore';
 import { tokenExpiresAt } from '@/utils/authSession';
+import { customerErrorText } from '@/utils/nodeErrorText';
 
 declare module 'axios' {
   interface AxiosInstance {
@@ -63,7 +64,8 @@ api.interceptors.response.use(
   response => {
     const { code, msg, message: alternateMessage, data } = response.data;
     if (code !== 0) {
-      const reason = msg || alternateMessage || '请求失败';
+      const rawReason = msg || alternateMessage || '请求失败';
+      const reason = response.config.url?.startsWith('/admin/') ? rawReason : customerErrorText(rawReason);
       message.error(reason);
       return Promise.reject(new Error(reason));
     }
@@ -71,7 +73,9 @@ api.interceptors.response.use(
   },
   async error => {
     const config = error.config as (InternalAxiosRequestConfig & { authRetried?: boolean; silentError?: boolean }) | undefined;
-    if (error.response?.status === 401 && config && !publicAuth(config.url)) {
+    const upstreamReason = error.response?.data?.msg || error.response?.data?.message || error.message || '';
+    const internalChannelFailure = typeof upstreamReason === 'string' && customerErrorText(upstreamReason) !== upstreamReason;
+    if (error.response?.status === 401 && config && !publicAuth(config.url) && !internalChannelFailure) {
       const sentToken = String(config.headers?.Authorization || '').replace(/^Bearer /, '');
       const currentToken = useAuthStore.getState().token;
       // Ignore responses from a previous login after a newer login or logout.
@@ -92,6 +96,15 @@ api.interceptors.response.use(
       }
       expireSession();
       return Promise.reject(error);
+    }
+    // 同步生成调用的弹窗和 catch 中读取的消息也使用客户提示，后台账本不受影响。
+    if (!config?.url?.startsWith('/admin/')) {
+      if (typeof error.message === 'string') error.message = customerErrorText(error.message);
+      for (const key of ['msg', 'message']) {
+        if (typeof error.response?.data?.[key] === 'string') {
+          error.response.data[key] = customerErrorText(error.response.data[key]);
+        }
+      }
     }
     let reason = error.response?.data?.msg || error.response?.data?.message ||
       DEFAULT_ERRORS[error.response?.status] || error.message || '请求失败';

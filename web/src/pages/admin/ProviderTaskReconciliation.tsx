@@ -817,7 +817,7 @@ export default function ProviderTaskReconciliation() {
           <Tooltip
             // 浮层限宽 + 超高可滚动：上游原始报错很长，默认的窄气泡会竖成一条
             title={<div className="text-[12px] leading-5 break-all max-w-[520px] max-h-[320px] overflow-auto">
-              {describeNodeError(v).kind !== 'unknown' && <p className="mb-2">{describeNodeError(v).title}</p>}
+              {describeNodeError(v, { audience: 'admin' }).kind !== 'unknown' && <p className="mb-2">{describeNodeError(v, { audience: 'admin' }).title}</p>}
               {extractUpstreamDetail(v)}
             </div>}
           >
@@ -829,7 +829,7 @@ export default function ProviderTaskReconciliation() {
                 而构建出来的 CSS 里 .block 排在 .line-clamp-2 后面，同权重下会把 -webkit-box
                 覆盖回 block，截断直接失效（表现为备注照样铺满好几行）。 */}
             <span className="text-[11px] text-gray-500 line-clamp-2 break-all cursor-help leading-4">
-              {describeNodeError(v).kind === 'unknown' ? extractUpstreamDetail(v) : describeNodeError(v).title}
+              {describeNodeError(v, { audience: 'admin' }).kind === 'unknown' ? extractUpstreamDetail(v) : describeNodeError(v, { audience: 'admin' }).title}
             </span>
           </Tooltip>
         ) : (

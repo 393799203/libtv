@@ -22,6 +22,7 @@ import { absolutePositionIn } from '@/utils/canvasGroups';
 import { useExecutionStore } from '@/stores/executionStore';
 import { Z } from '@/utils/zLayers';
 import { NodeToolbar } from '@/components/canvas/NodeToolbar';
+import { customerErrorText } from '@/utils/nodeErrorText';
 
 type TextNodeType = Node<TextNodeData, 'text'>;
 
@@ -209,7 +210,7 @@ export const TextNode = memo<NodeProps<TextNodeType>>(function TextNode({ id, da
               <ExclamationCircleOutlined className="text-3xl mb-2" />
               <div className="text-xs font-medium mb-1">生成失败</div>
               <div className="text-[11px] text-red-400 text-center break-all line-clamp-4 max-w-full">
-                {nodeError}
+                {customerErrorText(nodeError)}
               </div>
             </div>
           ) : content ? (
