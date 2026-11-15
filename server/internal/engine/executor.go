@@ -192,13 +192,13 @@ func (t syncTask) write(ctx context.Context, execCtx *ExecutionContext, nodeID, 
 
 // settleFailure 同步调用失败的结算：唯一判定入口 billing.ShouldAutoRefund。
 //
-// 返回给用户的失败原因（文案必须与「钱退没退」一致）：
-//   - 上游明确报错 → 自动退费，文案说「已退还」
-//   - 其余（超时 / 连接断 / 没拿到结果）→ 不自动退，进「待人工决定」，文案说「未自动退还」
+// 上游明确报错自动退费，返回原始错误；其余失败进入人工复核。
+// 退款结果独立记账，不在上游错误中追加退款成功文案。
 //
 // 并在「不自动退」时把这个节点标成不可重试：否则队列重试会**再扣一次费**，
 // 用户就为一次失败付两遍钱（视频路径早有同样的处理，见 isNoRetryVideoFailure）。
 func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, execCtx *ExecutionContext, nodeID string, err error) error {
+	err = llm.WithUpstreamDisplay(err)
 	detail := err.Error()
 	if !billing.ShouldAutoRefund(err) {
 		if execCtx != nil {
@@ -221,7 +221,7 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 			execCtx.MarkNonRetryable()
 		}
 		t.write(ctx, execCtx, nodeID, billing.StatusRefunded, detail+"；该笔扣费此前已退还", t.Charged, "")
-		return fmt.Errorf("%s（本次扣费此前已退还）", detail)
+		return err
 	}
 	// 退费与扣费必须带同一把 charge_key：这样「同一笔生成」的扣费/退费两条账单分录
 	// 才能在对账里被归到一起，金额也能精确核对
@@ -244,11 +244,11 @@ func (t syncTask) settleFailure(ctx context.Context, biller *billing.Service, ex
 	}
 	t.write(ctx, execCtx, nodeID, billing.StatusRefunded, reason, t.Charged, "")
 	// 钱退了也要标记「不自动重试」：队列重试会重新扣一次费，用户就为同一次点击付两遍
-	// （文案说「可直接重新生成」，那也该由用户自己决定要不要再来一次）
+	// 是否重新生成由用户决定。
 	if execCtx != nil {
 		execCtx.MarkNonRetryable()
 	}
-	return fmt.Errorf("%s（本次扣费已退还，可直接重新生成）", detail)
+	return err
 }
 
 // chargeAlreadyDone 这一笔（同一执行 + 同一节点）是不是已经扣过费了。
@@ -320,7 +320,7 @@ func isNoRetryVideoFailure(err error) bool {
 func videoFailureMessage(ctx context.Context, err error) error {
 	// 上游明确拒绝：这类才自动退费
 	if errors.Is(err, llm.ErrUpstreamRejected) {
-		return fmt.Errorf("%w（本次扣费已退还，可直接重新生成）", err)
+		return llm.WithUpstreamDisplay(err)
 	}
 	switch {
 	case errors.Is(err, llm.ErrVideoPollTimeout):
@@ -2625,7 +2625,7 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				log.Printf("[VideoExecutor] 💤 复用失败但不自动退费（上游未明确拒绝，待人工复核）: taskID=%s amount=%d",
 					ref.TaskID, ref.ChargedAmount)
 			} else if ref.ChargedAmount > 0 {
-				reason := billing.AutoRefundReason("上游任务已失效，退还该次扣费并稍后重新生成: " + err.Error())
+				reason := billing.AutoRefundReason(err.Error())
 				// 退费口径取自任务登记（当初扣费时落盘的那一份），与扣费账单一致
 				resumeExtra := billing.ChargeExtra{
 					Resolution:      ref.ChargeResolution,
@@ -2666,16 +2666,13 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				// 管理员可能已经在对账页手动退过这一笔 —— 再自动退一次就是同一笔钱退两遍
 				log.Printf("[VideoExecutor] 这一笔扣费已退过（人工或自动），跳过自动退费: key=%s", ledgerKey)
 				return &NodeOutput{NodeID: node.ID, Status: "failed", Data: map[string]interface{}{
-					"error": fmt.Sprintf("%s（本次扣费此前已退还）", err.Error()),
+					"error": llm.WithUpstreamDisplay(err).Error(),
 				}}, nil
 			}
 			if refundErr := v.refundCharge(ctx, execCtx, taskRef.TaskID, chargedAmount, model, billing.AutoRefundReason(err.Error()), chargeDetail); refundErr != nil {
 				log.Printf("[VideoExecutor] 退费失败: %v", refundErr)
-				// 文案不能与钱矛盾：videoFailureMessage 已经写了「本次扣费已退还」，
-				// 这里退费失败就必须改口（对账行留在待人工复核，管理员会补退）
-				err = errors.New(strings.Replace(err.Error(),
-					"（本次扣费已退还，可直接重新生成）",
-					"（自动退费失败，已提交人工复核，管理员会尽快补退）", 1))
+				// 退款结果在账本独立记录，不改写上游原始错误。
+				err = llm.WithUpstreamDisplay(err)
 			} else {
 				taskRef.RefundSource = billing.RefundSourceAuto
 				v.recordProviderTask(ctx, execCtx, taskRef, billing.StatusRefunded, billing.AutoRefundReason(err.Error()), chargedAmount)

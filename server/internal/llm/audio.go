@@ -117,11 +117,7 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		if UpstreamRejectedStatus(resp.StatusCode) {
-			return nil, fmt.Errorf("%w: TTS API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, string(body))
-		}
-		// 5xx / 408 / 429：上游可能已经受理，按「不确定」处理（不自动退费）
-		return nil, fmt.Errorf("TTS API error (status=%d): %s", resp.StatusCode, string(body))
+		return nil, NewUpstreamError(resp.StatusCode, string(body), UpstreamRejectedStatus(resp.StatusCode))
 	}
 
 	audioData, err := io.ReadAll(resp.Body)

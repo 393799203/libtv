@@ -62,5 +62,7 @@ server/vendor/
 !server/internal/engine/video_references_test.go
 !server/internal/engine/execution_outputs_test.go
 !server/internal/llm/video_references_test.go
+!server/internal/llm/upstream_error_test.go
+!server/internal/billing/error_reason_test.go
 !server/internal/middleware/project_owner_test.go
 !web/tests/*.test.ts

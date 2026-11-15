@@ -10,6 +10,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { MediaPreviewModal } from '@/components/canvas/MediaPreviewModal';
+import { describeNodeError, extractUpstreamDetail } from '@/utils/nodeErrorText';
 import {
   providerTaskApi,
   type ProviderTask,
@@ -815,7 +816,10 @@ export default function ProviderTaskReconciliation() {
           // 备注常常很长（上游原始报错 + 自检写的原因），这里最多显示两行，超出部分放浮层看全文
           <Tooltip
             // 浮层限宽 + 超高可滚动：上游原始报错很长，默认的窄气泡会竖成一条
-            title={<div className="text-[12px] leading-5 break-all max-w-[520px] max-h-[320px] overflow-auto">{v}</div>}
+            title={<div className="text-[12px] leading-5 break-all max-w-[520px] max-h-[320px] overflow-auto">
+              {describeNodeError(v).kind !== 'unknown' && <p className="mb-2">{describeNodeError(v).title}</p>}
+              {extractUpstreamDetail(v)}
+            </div>}
           >
             {/* 用 line-clamp-2 + break-all 而不是 truncate：
                 truncate 是 white-space: nowrap，一旦表格不是固定布局（列宽之和 ≠ scroll.x 时
@@ -825,7 +829,7 @@ export default function ProviderTaskReconciliation() {
                 而构建出来的 CSS 里 .block 排在 .line-clamp-2 后面，同权重下会把 -webkit-box
                 覆盖回 block，截断直接失效（表现为备注照样铺满好几行）。 */}
             <span className="text-[11px] text-gray-500 line-clamp-2 break-all cursor-help leading-4">
-              {v}
+              {describeNodeError(v).kind === 'unknown' ? extractUpstreamDetail(v) : describeNodeError(v).title}
             </span>
           </Tooltip>
         ) : (

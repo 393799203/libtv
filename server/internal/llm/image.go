@@ -240,7 +240,7 @@ func (c *ImageClient) parseOpenAIResponse(ctx context.Context, respBody []byte) 
 
 	if imgResp.Error != nil {
 		// 200 但体内带 error：同样是上游明确拒绝（网关把拒绝包在 200 里返回）
-		return nil, fmt.Errorf("%w: Image API error: %s", ErrUpstreamRejected, imgResp.Error.Message)
+		return nil, NewUpstreamError(200, string(respBody), true)
 	}
 
 	// 上游用量登记（对账成本侧；图片按张/按 token 的口径都原样落库）
@@ -297,11 +297,7 @@ func (c *ImageClient) doPost(ctx context.Context, path string, payload []byte) (
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[ImageGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
-		if UpstreamRejectedStatus(resp.StatusCode) {
-			return nil, fmt.Errorf("%w: Image API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, string(respBody))
-		}
-		// 5xx / 408 / 429：网关或限流，上游可能已经受理了这次生成 —— 不当作「明确拒绝」
-		return nil, fmt.Errorf("Image API error (status=%d): %s", resp.StatusCode, string(respBody))
+		return nil, NewUpstreamError(resp.StatusCode, string(respBody), UpstreamRejectedStatus(resp.StatusCode))
 	}
 
 	return respBody, nil
@@ -435,10 +431,10 @@ func (c *ImageClient) parseDashScopeResponse(ctx context.Context, respBody []byt
 
 	// 200 但体内带 error/message 且没有 choices：网关把拒绝包在 200 里返回
 	if r.Error != nil && r.Error.Message != "" {
-		return nil, fmt.Errorf("%w: Image API error: %s", ErrUpstreamRejected, r.Error.Message)
+		return nil, NewUpstreamError(200, string(respBody), true)
 	}
 	if len(r.Output.Choices) == 0 && r.Message != "" {
-		return nil, fmt.Errorf("%w: Image API error: %s", ErrUpstreamRejected, r.Message)
+		return nil, NewUpstreamError(200, string(respBody), true)
 	}
 
 	// 上游用量登记（对账成本侧）

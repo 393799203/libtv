@@ -264,11 +264,7 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[LLM] http error: status=%d body=%s", resp.StatusCode, string(respBody))
-		if UpstreamRejectedStatus(resp.StatusCode) {
-			return nil, fmt.Errorf("%w: LLM API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, string(respBody))
-		}
-		// 5xx / 408 / 429：上游可能已经受理，按「不确定」处理（不自动退费）
-		return nil, fmt.Errorf("LLM API error (status=%d): %s", resp.StatusCode, string(respBody))
+		return nil, NewUpstreamError(resp.StatusCode, string(respBody), UpstreamRejectedStatus(resp.StatusCode))
 	}
 
 	var chatResp ChatResponse
@@ -279,7 +275,7 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 	if chatResp.Error != nil {
 		log.Printf("[LLM] api error: %s", chatResp.Error.Message)
 		// 200 但体内带 error：同上，属于上游明确拒绝
-		return nil, fmt.Errorf("%w: LLM error: %s", ErrUpstreamRejected, chatResp.Error.Message)
+		return nil, NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 
 	if len(chatResp.Choices) == 0 {

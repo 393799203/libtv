@@ -254,8 +254,9 @@ type VideoResponse struct {
 		URL string `json:"url"` // 视频URL
 	} `json:"output"`
 	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
+		Message string          `json:"message"`
+		Type    string          `json:"type"`
+		Code    json.RawMessage `json:"code"`
 	} `json:"error"`
 	// 兼容直接返回 data 数组的格式
 	Data []struct {
@@ -451,7 +452,7 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] 电信视频创建失败: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("%w: 电信视频API错误 (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 	log.Printf("[VideoGen] 电信视频任务创建成功: 耗时=%s", time.Since(start).Round(time.Millisecond))
 
@@ -462,14 +463,15 @@ func (c *VideoClient) generateDianxinVideo(ctx context.Context, model string, pr
 			ID string `json:"id"`
 		} `json:"data"`
 		Error *struct {
-			Message string `json:"message"`
+			Message string          `json:"message"`
+			Code    json.RawMessage `json:"code"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &createResp); err != nil {
 		return "", fmt.Errorf("解析电信视频响应失败: %w", err)
 	}
 	if createResp.Error != nil {
-		return "", fmt.Errorf("%w: 电信视频API错误: %s", ErrUpstreamRejected, createResp.Error.Message)
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 	taskID := createResp.ID
 	if taskID == "" {
@@ -541,7 +543,8 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 				URL      string `json:"url"`
 			} `json:"output"`
 			Error *struct {
-				Message string `json:"message"`
+				Message string          `json:"message"`
+				Code    json.RawMessage `json:"code"`
 			} `json:"error"`
 			// Usage 上游真实消耗（火山/网关在任务结果里回带）。
 			// 这是对账的成本侧唯一可信来源：跟渠道核账时，看的就是这个数。
@@ -554,8 +557,8 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 		// 用量在任务结果里，成功那一刻登记（轮询可能返回多次，累加也只是同一次调用）
 		recordUpstreamUsage(ctx, task.Usage)
 
-		if task.Error != nil && task.Error.Message != "" {
-			return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, task.Error.Message)
+		if task.Error != nil && (task.Error.Message != "" || parseUpstreamErrorCode(task.Error.Code) != "") {
+			return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 		}
 
 		// 状态字段可能在 data 内
@@ -586,7 +589,7 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 				videoURL = task.Data.ResultURL
 			}
 			if task.Data.FailReason != "" {
-				return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, task.Data.FailReason)
+				return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 			}
 		}
 		if videoURL == "" && task.Output != nil {
@@ -604,7 +607,7 @@ func (c *VideoClient) pollDianxinVideoTask(ctx context.Context, taskID string) (
 			log.Printf("[VideoGen] 电信任务成功但无URL (attempt %d): %s", i+1, string(respBody))
 			continue
 		case "failed", "error":
-			return "", fmt.Errorf("%w: 电信视频任务失败: %s", ErrUpstreamRejected, string(respBody))
+			return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 		default:
 			log.Printf("[VideoGen] 电信任务轮询 (attempt %d): status=%s", i+1, status)
 			// 给用户看的文案统一成中文：上游的英文 status（running/processing/queued）
@@ -717,7 +720,7 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] 电信 wan3.0 创建失败: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("%w: 电信 wan3.0 API错误 (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 	log.Printf("[VideoGen] 电信 wan3.0 任务创建成功: 耗时=%s", time.Since(start).Round(time.Millisecond))
 
@@ -734,17 +737,18 @@ func (c *VideoClient) generateDianxinWanVideo(ctx context.Context, model string,
 		Code    string `json:"code"`
 		Message string `json:"message"`
 		Error   *struct {
-			Message string `json:"message"`
+			Message string          `json:"message"`
+			Code    json.RawMessage `json:"code"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(respBody, &createResp); err != nil {
 		return "", fmt.Errorf("解析电信 wan3.0 响应失败: %w", err)
 	}
-	if createResp.Error != nil && createResp.Error.Message != "" {
-		return "", fmt.Errorf("%w: 电信 wan3.0 API错误: %s", ErrUpstreamRejected, createResp.Error.Message)
+	if createResp.Error != nil && (createResp.Error.Message != "" || parseUpstreamErrorCode(createResp.Error.Code) != "") {
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 	if createResp.Output.Code != "" || createResp.Output.Message != "" {
-		return "", fmt.Errorf("%w: 电信 wan3.0 API错误: %s %s", ErrUpstreamRejected, createResp.Output.Code, createResp.Output.Message)
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 	taskID := createResp.Output.TaskID
 	if taskID == "" {
@@ -813,7 +817,8 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			// 记原文快照；不换算成 token（换算系数是我们猜的，猜出来的「真实消耗」比空着更有害）
 			Usage json.RawMessage `json:"usage"`
 			Error *struct {
-				Message string `json:"message"`
+				Message string          `json:"message"`
+				Code    json.RawMessage `json:"code"`
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(respBody, &task); err != nil {
@@ -823,8 +828,8 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 		// 用量口径登记（wan3.0 是时长/张数，不是 token）
 		recordUpstreamUsage(ctx, task.Usage)
 
-		if task.Error != nil && task.Error.Message != "" {
-			return "", fmt.Errorf("%w: 电信 wan3.0 视频任务失败: %s", ErrUpstreamRejected, task.Error.Message)
+		if task.Error != nil && (task.Error.Message != "" || parseUpstreamErrorCode(task.Error.Code) != "") {
+			return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 		}
 
 		var status, videoURL string
@@ -850,16 +855,7 @@ func (c *VideoClient) pollDianxinWanTask(ctx context.Context, taskID string) (st
 			log.Printf("[VideoGen] 电信 wan3.0 任务成功但无URL (attempt %d): %s", i+1, string(respBody))
 			continue
 		case "failed", "canceled", "cancelled":
-			code, msg := task.Code, task.Message
-			if task.Output != nil {
-				if code == "" {
-					code = task.Output.Code
-				}
-				if msg == "" {
-					msg = task.Output.Message
-				}
-			}
-			return "", fmt.Errorf("%w: 电信 wan3.0 视频任务失败: %s %s", ErrUpstreamRejected, code, msg)
+			return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 		default:
 			log.Printf("[VideoGen] 电信 wan3.0 任务轮询 (attempt %d): status=%s", i+1, status)
 			reportProgress(ctx, "上游生成中", 0)
@@ -1319,7 +1315,7 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[VideoGen] API error: status=%d body=%s", resp.StatusCode, string(respBody))
-		return "", fmt.Errorf("%w: Video API error (status=%d): %s", ErrUpstreamRejected, resp.StatusCode, extractVideoAPIErrorMessage(string(respBody)))
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 
 	var videoResp VideoResponse
@@ -1329,7 +1325,7 @@ func (c *VideoClient) doRequest(ctx context.Context, payload []byte) (string, er
 
 	// 检查错误：创建请求被上游明确拒绝（HTTP 200 但体内带 error）→ 上游没接单，可自动退费
 	if videoResp.Error != nil {
-		return "", fmt.Errorf("%w: Video API error: %s", ErrUpstreamRejected, videoResp.Error.Message)
+		return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 	}
 
 	// 情况1：直接返回视频URL（output.url 或 data[0].url）
@@ -1405,14 +1401,7 @@ func (c *VideoClient) pollVideoTask(ctx context.Context, taskID string) (string,
 			}
 			return "", fmt.Errorf("task succeeded but no result_url")
 		case "FAIL", "FAILED", "FAILURE", "ERROR":
-			reason := taskResp.Data.FailReason
-			if reason == "" {
-				reason = taskResp.Message
-			}
-			if reason == "" {
-				reason = "unknown"
-			}
-			return "", fmt.Errorf("%w: task failed: %s", ErrUpstreamRejected, reason)
+			return "", NewUpstreamError(resp.StatusCode, string(respBody), true)
 		}
 		// PROCESSING → 继续轮询，同时把上游真实进度透出（"62%" → 62）
 		progress := strings.TrimSpace(taskResp.Data.Progress)
@@ -1449,32 +1438,7 @@ func parsePercent(raw string) int {
 //
 // 提取失败时原样返回 body，保证错误信息不丢失
 func extractVideoAPIErrorMessage(body string) string {
-	var outer struct {
-		Message string `json:"message"`
-		Error   *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(body), &outer); err != nil {
-		return body
-	}
-	if outer.Error != nil && outer.Error.Message != "" {
-		return outer.Error.Message
-	}
-	if outer.Message != "" {
-		// message 字段可能是内嵌的 JSON 字符串（网关格式），尝试二次解析
-		var inner struct {
-			Error *struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(outer.Message), &inner); err == nil && inner.Error != nil && inner.Error.Message != "" {
-			return fmt.Sprintf("%s: %s", inner.Error.Code, inner.Error.Message)
-		}
-		return outer.Message
-	}
-	return body
+	return NewUpstreamError(0, body, false).Error()
 }
 
 // findFFprobe 返回 ffprobe 路径

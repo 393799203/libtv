@@ -52,7 +52,7 @@ func (c SyncCall) Write(ctx context.Context, status, note string, refunded int64
 	if c.Ledger == nil || c.ChargeKey == "" {
 		return
 	}
-	note = TruncateNote(note, 240)
+	note = TruncateNote(note, 1000)
 	row := &model.ProviderTask{
 		// 身份是 charge_key；直连接口本来就没有上游任务号，task_id 留空
 		// （以前这里塞的是自造的 sync:xxx 编号，界面还得专门认出来别当任务号展示）
@@ -85,8 +85,9 @@ func (c SyncCall) Write(ctx context.Context, status, note string, refunded int64
 
 // Settle 调用失败后的结算，返回给用户看的错误。
 //
-// 文案必须与「钱退没退」一致：退了就说已退还，没退就说未自动退还、待人工复核。
+// 退款结果独立记账；自动退款成功时返回上游原始错误。
 func (c SyncCall) Settle(ctx context.Context, err error) error {
+	err = llm.WithUpstreamDisplay(err)
 	detail := err.Error()
 	// 退费与扣费同一把 charge_key：对账时两条分录才归得到同一笔
 	extra := ChargeExtra{Resolution: c.Resolution, Seconds: c.Seconds, ChargeKey: c.ChargeKey}
@@ -111,7 +112,7 @@ func (c SyncCall) Settle(ctx context.Context, err error) error {
 		return msg
 	}
 	c.Write(detached(ctx), StatusRefunded, reason, c.Charged)
-	return fmt.Errorf("%s（本次扣费已退还，可直接重新生成）", detail)
+	return err
 }
 
 // detached 对账/退费必须能在原请求 ctx 已取消的情况下落下去

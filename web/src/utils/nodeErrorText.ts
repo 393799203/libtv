@@ -47,6 +47,11 @@ interface Rule {
  */
 const RULES: Rule[] = [
   {
+    kind: 'copyright-restriction',
+    test: /(?:output video|input (?:image|video)).*may be related to copyright restrictions/i,
+    title: '生成内容可能涉及版权限制',
+  },
+  {
     kind: 'asset-too-small',
     test: /WidthTooSmall|宽度和高度需在|Width must be between/i,
     title: '参考图尺寸太小，上游拒收',
@@ -54,9 +59,14 @@ const RULES: Rule[] = [
   },
   {
     kind: 'real-person',
-    test: /InputImageSensitiveContentDetected|may contain real person|含真人/i,
+    test: /InputImageSensitiveContentDetected\.PrivacyInformation|may contain real person|含真人/i,
     title: '参考图被判定为真人照片',
     hint: '上游不接受真人素材，换成卡通 / 插画形象再生成',
+  },
+  {
+    kind: 'content-review',
+    test: /(?:Input|Output)(?:Text|Image|Video|Audio)SensitiveContentDetected|DataInspectionFailed|content_policy_violation/i,
+    title: '内容未通过模型审核',
   },
   {
     kind: 'duration-over-limit',
@@ -66,9 +76,18 @@ const RULES: Rule[] = [
   },
   {
     kind: 'too-many-refs',
-    test: /at most 10 reference_image|reference_image items are allowed/i,
+    test: /at most \d+ reference[_ ]image|reference_image items are allowed/i,
     title: '参考图数量超出上限',
-    hint: '上游最多接受 10 张参考图，删掉多余的连线再生成',
+  },
+  {
+    kind: 'invalid-parameter',
+    test: /\bInvalidParameter(?:\.[A-Za-z]+)?\b|\binvalid_parameter\b/,
+    title: '请求参数不符合模型要求',
+  },
+  {
+    kind: 'rate-limit',
+    test: /\bThrottling(?:\.[A-Za-z]+)?\b|\bRateLimitExceeded\b|\brate_limit_exceeded\b/,
+    title: '请求过于频繁',
   },
   {
     kind: 'model-unavailable',
@@ -121,19 +140,24 @@ function detectRefund(raw: string): NodeErrorRefund {
 /**
  * 从原始错误里尽量抽出上游的原话。
  * 后端把上游响应整个塞进了错误串（有时还被转义过一层），直接展示给运营很难读，
- * 这里做一次 best-effort 解包：优先取最内层的 message，取不到就用原文。
+ * 只去除我们自己加的包装，JSON 里的错误码和请求 ID 不做删减。
  */
 export function extractUpstreamDetail(raw: string): string {
-  // 形如 Video API error (status=400): {"code":"fail_to_fetch_task","message":"{\"error\":…}"}
-  const quoted = raw.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (quoted?.[1]) {
-    let inner = quoted[1].replace(/\\"/g, '"').replace(/\\n/g, ' ').replace(/\\\\/g, '\\');
-    // 里面可能还套着一层 JSON，再抽一次最内层 message
-    const nested = inner.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-    if (nested?.[1]) inner = nested[1].replace(/\\"/g, '"');
-    if (inner.trim()) return inner.trim();
+  let detail = raw.trim();
+  const prefixes = [
+    '上游明确拒绝本次任务，自动退还本次扣费: ', '上游明确拒绝本次任务: ',
+    '电信视频任务失败: ', '电信视频API错误: ', '电信 wan3.0 视频任务失败: ',
+    '电信 wan3.0 API错误: ', 'Video API error: ', 'Image API error: ', 'LLM error: ', 'task failed: ',
+  ];
+  for (;;) {
+    const before = detail;
+    for (const prefix of prefixes) {
+      if (detail.startsWith(prefix)) detail = detail.slice(prefix.length);
+    }
+    if (before === detail) break;
   }
-  return raw.trim();
+  detail = detail.replace(/（本次扣费(?:已退还，可直接重新生成|此前已退还)）$/, '');
+  return detail;
 }
 
 export interface DescribeOptions {
@@ -159,13 +183,16 @@ export function describeNodeError(rawInput: unknown, options?: DescribeOptions):
       // 能指出具体哪张图太小，用户就不用自己去一张张试
       hint = `这几张引用图太小：${smallRefs.map((r) => `${r.label}（${r.size}）`).join('、')}；上游要求宽和高都在 300–6000 像素之间`;
     }
+    if (rule.kind === 'too-many-refs') {
+      const limit = raw.match(/at most (\d+) reference[_ ]image/i)?.[1];
+      if (limit) hint = `模型最多接受 ${limit} 张参考图`;
+    }
     return { kind: rule.kind, title, hint, refund, raw, detail, smallRefs };
   }
 
   return {
     kind: 'unknown',
-    title: '生成失败',
-    hint: '可以重试一次；若一直失败请把下面的详情发给我们',
+    title: detail || '生成失败',
     refund,
     raw,
     detail,

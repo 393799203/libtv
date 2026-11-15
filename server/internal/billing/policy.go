@@ -48,9 +48,9 @@ func ShouldAutoRefund(err error) bool {
 	return err != nil && errors.Is(err, llm.ErrUpstreamRejected)
 }
 
-// AutoRefundReason 自动退费时写进退费账单的原因（对账时能一眼区分自动退 / 人工退）
+// AutoRefundReason 原因只保存错误；自动退款另由 status/refund_source/金额字段记录。
 func AutoRefundReason(detail string) string {
-	return "上游明确拒绝本次任务，自动退还本次扣费: " + detail
+	return llm.CleanUpstreamMessage(detail)
 }
 
 // TruncateNote 把备注截到不超过 maxBytes 字节，且不切断 UTF-8 字符（详见 textcut 包注释）。
