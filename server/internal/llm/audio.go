@@ -67,6 +67,22 @@ type TTSRequest struct {
 	AudioOptions   TTSAudioOption `json:"audio_options"`
 }
 
+func IsMinimaxSpeechModel(model string) bool {
+	return model == "minimax-speech-2.8-turbo" || model == "minimax-speech-2.8-hd"
+}
+
+const MinimaxDefaultVoiceID = "Chinese (Mandarin)_Reliable_Executive"
+
+func ResolveAudioVoice(model, voice string) string {
+	if voice == "" || voice == "default" {
+		if IsMinimaxSpeechModel(model) {
+			return MinimaxDefaultVoiceID
+		}
+		return "Cherry"
+	}
+	return voice
+}
+
 // TTSAudioOption TTS 音频选项
 type TTSAudioOption struct {
 	LanguageHints []string `json:"language_hints"`
@@ -76,17 +92,27 @@ type TTSAudioOption struct {
 // speed: 语速倍率（1.0 为正常）；style: 风格描述；tone: 语气词（如"兴奋"）
 func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice string, speed float64, style string, tone string) ([]byte, error) {
 	// 清理前端自定义标签，构建 instructions（含语速/风格/语气词）
-	processedInput, instructions := convertTTSTags(input, speed, style, tone)
+	processedInput, instructions := input, ""
+	if !IsMinimaxSpeechModel(model) {
+		processedInput, instructions = convertTTSTags(input, speed, style, tone)
+	}
 
-	req := TTSRequest{
+	var req interface{} = TTSRequest{
 		Model:          model,
-		Voice:          voice,
+		Voice:          ResolveAudioVoice(model, voice),
 		Input:          processedInput,
 		Instructions:   instructions,
 		ResponseFormat: "wav",
 		AudioOptions: TTSAudioOption{
 			LanguageHints: []string{"zh"},
 		},
+	}
+	if IsMinimaxSpeechModel(model) {
+		minimax, err := buildMinimaxSpeechRequest(model, strings.TrimSpace(input), voice, speed, tone)
+		if err != nil {
+			return nil, err
+		}
+		req = minimax
 	}
 
 	payload, err := json.Marshal(req)
@@ -95,7 +121,7 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 	}
 
 	apiKey, baseURL := c.creds(ctx)
-	url := fmt.Sprintf("%s/audio/speech", baseURL)
+	url := fmt.Sprintf("%s/audio/speech", strings.TrimRight(baseURL, "/"))
 	log.Printf("[AudioGen] TTS请求: model=%s voice=%s url=%s inputLen=%d processedLen=%d channel=%s", model, voice, url, len(input), len(processedInput), ChannelFrom(ctx))
 	log.Printf("[AudioGen] TTS payload: %s", string(payload))
 
@@ -128,11 +154,20 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 	// 200 但内容不是音频（网关把错误包在 200 里、返回 JSON 报错等）—— 不能当成成功，
 	// 否则会用「成功 + 坏文件」的形式交付并扣费。WAV 一定以 RIFF 开头。
 	if len(audioData) > 0 && !bytes.HasPrefix(audioData, []byte("RIFF")) {
-		snippet := string(audioData)
-		if len(snippet) > 200 {
-			snippet = snippet[:200]
+		// 网关用 200 返回 JSON 拒绝时，保留原文、错误码和请求 ID，并维持明确拒绝的退款分类。
+		var rejection struct {
+			Error    json.RawMessage `json:"error"`
+			Code     json.RawMessage `json:"code"`
+			BaseResp struct {
+				StatusCode int `json:"status_code"`
+			} `json:"base_resp"`
 		}
-		return nil, fmt.Errorf("TTS 返回内容不是音频（status=200，前 200 字节: %s）", snippet)
+		if json.Unmarshal(audioData, &rejection) == nil &&
+			(len(rejection.Error) > 0 && string(rejection.Error) != "null" ||
+				rejection.BaseResp.StatusCode != 0 || parseUpstreamErrorCode(rejection.Code) != "") {
+			return nil, NewUpstreamError(http.StatusOK, string(audioData), true)
+		}
+		return nil, NewUpstreamError(http.StatusOK, string(audioData), false)
 	}
 	if len(audioData) == 0 {
 		return nil, fmt.Errorf("TTS API 返回空音频数据")

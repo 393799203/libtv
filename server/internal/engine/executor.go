@@ -1565,6 +1565,21 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		return nil, fmt.Errorf("parse image node data: %w", err)
 	}
 
+	// 在尺寸计算和扣费前解析退役模型及可用档位；不修改历史画布快照。
+	rawModel := data.Model
+	apiModelID := resolveImageModel(rawModel, execCtx.GetChannel(), i.modelManager)
+	data.Model = apiModelID
+	if rawModel != apiModelID {
+		log.Printf("[ImageExecutor] 图像模型解析: %q -> %s", rawModel, apiModelID)
+	}
+	if execCtx.GetChannel() == llm.ChannelDianxin && llm.IsSeedream5ImageModel(apiModelID) {
+		data.Resolution = "2K"
+		if data.Count > 1 {
+			return &NodeOutput{NodeID: node.ID, Status: "failed",
+				Data: map[string]interface{}{"error": "该模型每次仅支持生成 1 张图片"}}, nil
+		}
+	}
+
 	// 元素编辑（局部重绘）指令：非空就说明这次是"只重画选区"（见 element_edit.go）
 	element := parseElementEdit(data.ElementEdit)
 	var imageRefs imageReferences
@@ -1793,16 +1808,6 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 		log.Printf("[ImageExecutor] 检测到资产节点: nodeID=%s assetType=%s (视图要求由脚本节点生成分镜时自动添加)", node.ID, assetType)
 	} else {
 		log.Printf("[ImageExecutor] 普通图片节点: nodeID=%s", node.ID)
-	}
-
-	// 确定使用的模型 ID（前端已按用户渠道选择，直接使用）；空模型兜底默认图像模型
-	rawModel := data.Model
-	apiModelID := resolveImageModel(rawModel, execCtx.GetChannel(), i.modelManager)
-	if apiModelID != rawModel {
-		log.Printf("[ImageExecutor] ⚠️ 节点没有模型（多为「上传图片」派生的节点），兜底默认图像模型: %s", apiModelID)
-		// 回写 data.Model：下游生成历史（RecordGeneration）与对账都用它记「实际用了哪个模型」，
-		// 继续留空会记成一半空白的记录，事后无从追溯
-		data.Model = apiModelID
 	}
 
 	// 华数TokenHub部分模型有最小像素要求，自动提升分辨率
@@ -2939,14 +2944,11 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 确定模型：计费用逻辑 ID（data.Model），API 调用用渠道解析后的真实 ID
 	model := data.Model
 	if model == "" {
-		model = "qwen3-tts-instruct-flash"
+		model = a.modelManager.DefaultAudioModelID(execCtx.GetChannel())
 	}
 
 	// 确定音色
-	voice := data.Voice
-	if voice == "" || voice == "default" {
-		voice = "Cherry"
-	}
+	voice := llm.ResolveAudioVoice(model, data.Voice)
 
 	// 确定输入文本：优先用 prompt（用户直接在音频节点输入的文本），其次用 text（上游传入）
 	inputText := strings.TrimSpace(data.Prompt)
@@ -2980,6 +2982,15 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 				"error": "没有输入文本，无法生成音频",
 			},
 		}, nil
+	}
+
+	if llm.IsMinimaxSpeechModel(model) {
+		if err := llm.ValidateMinimaxSpeech(inputText); err != nil {
+			return &NodeOutput{NodeID: node.ID, Status: "failed", Data: map[string]interface{}{"error": err.Error()}}, nil
+		}
+		if err := llm.ValidateMinimaxSpeechSettings(data.Speed, data.Tone); err != nil {
+			return &NodeOutput{NodeID: node.ID, Status: "failed", Data: map[string]interface{}{"error": err.Error()}}, nil
+		}
 	}
 
 	log.Printf("[AudioExecutor] nodeID=%s model=%s voice=%s speed=%.2f style=%s tone=%s textLen=%d", node.ID, model, voice, data.Speed, data.Style, data.Tone, len(inputText))
@@ -3165,7 +3176,7 @@ func calculateSizeFromResolutionAndRatio(resolution, aspectRatio string) (int, i
 	return width, height
 }
 
-// resolveImageModel 决定本次实际调用的图像模型：节点填了就用节点的，空则兜底默认图像模型。
+// resolveImageModel 决定本次实际调用的图像模型：旧 Lite 转为 Flash，空则使用渠道默认值。
 //
 // 为什么必须兜底：**上传的图片**节点本身没有模型（web/src/utils/nodeFactory.ts 里
 // image 节点的默认 data.model 是空串），从它派生的参考图节点会把空串一起带过来
@@ -3180,7 +3191,7 @@ func calculateSizeFromResolutionAndRatio(resolution, aspectRatio string) (int, i
 // 而且前端再兜也救不了已经落库的空 model，两处都写反而多一份「默认模型名」的真源。
 func resolveImageModel(model, channel string, mm *llm.ModelManager) string {
 	if model != "" {
-		return model
+		return llm.NormalizeImageModelID(model, channel)
 	}
 	// mm 为 nil 时 DefaultImageModelID 内部会退回 llm.FallbackImageModelID
 	return mm.DefaultImageModelID(channel)
@@ -3221,6 +3232,8 @@ func buildImageToImagePrompt(finalPrompt, viewKind string, hasStyleImage, hasRef
 // 华数TokenHub的 doubao-seedream 系列要求至少 3,686,400 像素
 func getModelMinPixels(modelID string) int {
 	switch {
+	case llm.IsSeedream5ImageModel(modelID):
+		return 921600
 	case strings.HasPrefix(modelID, "doubao-seedream"):
 		return 3686400 // 至少约 1920x1920
 	default:

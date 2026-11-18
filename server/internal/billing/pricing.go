@@ -362,6 +362,85 @@ func (s *PricingService) SeedRefVideoPrices(ctx context.Context) error {
 	return nil
 }
 
+// SeedSeedreamPrices 仅补新模型缺失的价格：Flash 继承同渠道 Lite，5.5 继承同渠道 Pro。
+// 保留默认档和分辨率档的原有区别；已有新模型价格（含显式免费）不覆盖，历史价格不删除。
+func (s *PricingService) SeedSeedreamPrices(ctx context.Context) error {
+	replacements := map[string]string{
+		"doubao-seedream-5.0-lite": "doubao-seedream-5.0-flash",
+		"doubao-seedream-5.0-pro":  "doubao-seedream-5.5",
+	}
+	var rows []model.ModelPrice
+	for _, channel := range s.modelManager.ListChannels() {
+		if channel != llm.ChannelDianxin {
+			continue
+		}
+		existing, err := s.priceRepo.ListAll(ctx, channel)
+		if err != nil {
+			return err
+		}
+		configured := make(map[priceKey]bool, len(existing))
+		for _, row := range existing {
+			configured[priceKey{row.NodeType, row.ModelID, row.Resolution, row.HasReferenceVideo}] = true
+		}
+		for _, row := range existing {
+			target := replacements[row.ModelID]
+			cfg := s.modelManager.FindModelByIDForChannel(channel, target)
+			if target == "" || cfg == nil || row.NodeType != "image" || row.HasReferenceVideo {
+				continue
+			}
+			if row.Resolution != "" && !containsString(cfg.Resolutions, row.Resolution) {
+				continue
+			}
+			key := priceKey{"image", target, row.Resolution, false}
+			if configured[key] {
+				continue
+			}
+			configured[key] = true
+			rows = append(rows, model.ModelPrice{
+				Channel: channel, NodeType: "image", ModelID: target,
+				Resolution: row.Resolution, Price: row.Price,
+			})
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return s.priceRepo.BatchUpsert(ctx, rows)
+}
+
+// SeedMinimaxSpeechPrices 电信首次接入语音时沿用站内现有 Qwen 的每百字单价。
+// 只补缺失项，不改华数价格，也不覆盖电信后续为 Turbo/HD 分别设置的价格。
+func (s *PricingService) SeedMinimaxSpeechPrices(ctx context.Context) error {
+	existing, err := s.priceRepo.ListAll(ctx, llm.ChannelDianxin)
+	if err != nil {
+		return err
+	}
+	configured := map[string]bool{}
+	for _, row := range existing {
+		if row.NodeType == "audio" && row.Resolution == "" && !row.HasReferenceVideo {
+			configured[row.ModelID] = true
+		}
+	}
+	var missing []string
+	for _, id := range []string{"minimax-speech-2.8-turbo", "minimax-speech-2.8-hd"} {
+		if !configured[id] && s.modelManager.FindModelByIDForChannel(llm.ChannelDianxin, id) != nil {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	source, err := s.priceRepo.GetByNodeModel(ctx, llm.ChannelWasu, "audio", "qwen3-tts-instruct-flash")
+	if err != nil {
+		return fmt.Errorf("load initial speech price: %w", err)
+	}
+	var rows []model.ModelPrice
+	for _, id := range missing {
+		rows = append(rows, model.ModelPrice{Channel: llm.ChannelDianxin, NodeType: "audio", ModelID: id, Price: source.Price})
+	}
+	return s.priceRepo.BatchUpsert(ctx, rows)
+}
+
 // RecognizeDefaultPrice 点选识别的默认单价（积分/次）。
 //
 // 为什么是 2：识别是一次真实的视觉模型调用，缩图后约 1~1.8k tokens（实测 905+360 ~

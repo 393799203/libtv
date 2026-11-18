@@ -58,7 +58,7 @@ func decodeUpstreamError(body string, result *UpstreamError, depth int) {
 		result.Message = body
 		return
 	}
-	for _, key := range []string{"request_id", "requestId", "RequestId"} {
+	for _, key := range []string{"request_id", "requestId", "RequestId", "trace_id"} {
 		var value string
 		if json.Unmarshal(obj[key], &value) == nil && value != "" {
 			result.RequestID = value
@@ -66,6 +66,17 @@ func decodeUpstreamError(body string, result *UpstreamError, depth int) {
 	}
 	if code := parseUpstreamErrorCode(obj["code"]); code != "" {
 		result.Code = code
+	}
+	if raw := obj["base_resp"]; len(raw) > 0 {
+		var base struct {
+			Code    json.RawMessage `json:"status_code"`
+			Message string          `json:"status_msg"`
+		}
+		if json.Unmarshal(raw, &base) == nil && parseUpstreamErrorCode(base.Code) != "" {
+			result.Code = parseUpstreamErrorCode(base.Code)
+			result.Message = base.Message
+			return
+		}
 	}
 	for _, key := range []string{"error", "output", "data"} {
 		if raw := obj[key]; len(raw) > 0 && string(raw) != "null" {

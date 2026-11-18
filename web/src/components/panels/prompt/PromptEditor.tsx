@@ -1,7 +1,10 @@
 import { memo, useState, useRef, useCallback, useMemo, useEffect, forwardRef, useImperativeHandle } from 'react';
 import type { UpstreamInput, MentionMarker } from '@/types/prompt';
+import { MINIMAX_INTERJECTIONS, isMinimaxSpeechModel } from '@/configs/audioModels';
 
 interface PromptEditorProps {
+  audioModel?: string;
+  ariaLabel?: string;
   value: string;
   mentions: MentionMarker[];
   placeholder?: string;
@@ -44,6 +47,7 @@ const EDITOR_MIN_HEIGHT = 64;
 const EDITOR_MAX_HEIGHT = 160;
 
 export interface PromptEditorHandle {
+  rememberSelection: () => void;
   /** 在光标位置插入文本 */
   insertTextAtCursor: (text: string) => void;
   /** 在光标位置插入 HTML 标签（用于停顿/语气词）；text 参数未使用，仅为兼容旧调用保留 */
@@ -162,7 +166,7 @@ function extractPlainText(el: HTMLElement): string {
     n.replaceWith(`<#${val}#>`);
   });
   clone.querySelectorAll('.libtv-audio-tone').forEach((n) => {
-    const label = n.getAttribute('data-label') || n.textContent?.match(/\(([^)]+)\)/)?.[1] || '';
+    const label = n.getAttribute('data-value') || n.getAttribute('data-label') || n.textContent?.match(/\(([^)]+)\)/)?.[1] || '';
     n.replaceWith(`(${label})`);
   });
   return domTextWithBreaks(clone);
@@ -170,7 +174,7 @@ function extractPlainText(el: HTMLElement): string {
 
 /** 把 DOM 文本节点中命中的 (语气词) 转为 contenteditable=false 的 span。
  *  只遍历文本节点（跳过 mention / 音频标签内部），避免在序列化 HTML 上做正则破坏标签结构 */
-function applyToneTags(el: HTMLElement): void {
+function applyToneTags(el: HTMLElement, minimax = false): void {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
   const targets: Text[] = [];
   let node: Node | null;
@@ -188,16 +192,18 @@ function applyToneTags(el: HTMLElement): void {
     let changed = false;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
-      if (!TONE_LABELS.includes(m[1])) continue;
+      const action = minimax ? MINIMAX_INTERJECTIONS.find(option => option.value === m![1]) : undefined;
+      if (!action && (minimax || !TONE_LABELS.includes(m[1]))) continue;
       changed = true;
       if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
       const span = document.createElement('span');
       span.className = 'libtv-audio-tag libtv-audio-tone';
       span.contentEditable = 'false';
       span.setAttribute('data-tag-type', 'tone');
+      if (action) span.setAttribute('data-value', action.value);
       const icon = document.createElement('span');
       icon.className = 'libtv-audio-tag-icon';
-      icon.textContent = m[0];
+      icon.textContent = action?.label ?? m[0];
       span.appendChild(icon);
       frag.appendChild(span);
       last = m.index + m[0].length;
@@ -347,6 +353,8 @@ function getMentionFilterAtCursor(el: HTMLElement): string | null {
 }
 
 export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({
+  audioModel,
+  ariaLabel = '提示词',
   value,
   mentions,
   placeholder = '描述你想生成的内容...',
@@ -365,6 +373,29 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   const editorRef = useRef<HTMLDivElement>(null);
+  const insertionRangeRef = useRef<Range | null>(null);
+  const rememberSelection = useCallback(() => {
+    const selection = window.getSelection();
+    if (selection?.rangeCount && editorRef.current?.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+      insertionRangeRef.current = selection.getRangeAt(0).cloneRange();
+    }
+  }, []);
+  const restoreInsertionSelection = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    rememberSelection();
+    el.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    let range = insertionRangeRef.current;
+    if (!range || !el.contains(range.commonAncestorContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+    }
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, [rememberSelection]);
   // @ 引用菜单的跟随定位（viewport 坐标，跟随光标/@ 位置）
   const [mentionMenuPos, setMentionMenuPos] = useState<{ left: number; top: number } | null>(null);
   // 拖拽插入转发 ref（useImperativeHandle 先于 useCallback 定义，用 ref 绕开声明顺序限制）
@@ -520,10 +551,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
 
   // 暴露插入方法给父组件
   useImperativeHandle(ref, () => ({
+    rememberSelection,
     insertTextAtCursor: (text: string) => {
       const el = editorRef.current;
       if (!el) return;
-      el.focus();
+      restoreInsertionSelection();
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount) return;
       const range = sel.getRangeAt(0);
@@ -536,6 +568,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       }
       const node = document.createTextNode(text);
       const insertRange = sel.getRangeAt(0);
+      insertRange.deleteContents();
       insertRange.insertNode(node);
       insertRange.setStartAfter(node);
       insertRange.collapse(true);
@@ -546,7 +579,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     insertTagAtCursor: (html: string) => {
       const el = editorRef.current;
       if (!el) return;
-      el.focus();
+      restoreInsertionSelection();
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount) return;
       const range = sel.getRangeAt(0);
@@ -565,6 +598,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         fragment.appendChild(tmp.firstChild);
       }
       const insertRange = sel.getRangeAt(0);
+      insertRange.deleteContents();
       insertRange.insertNode(fragment);
       insertRange.collapse(false);
       sel.removeAllRanges();
@@ -575,6 +609,11 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
       const el = editorRef.current;
       if (!el) return;
       el.innerHTML = escapeHtml(text);
+      if (isMinimaxSpeechModel(audioModel ?? '')) {
+        el.innerHTML = el.innerHTML.replace(/&lt;#([\d.]+)#&gt;/g, (_match, val) =>
+          `<span class="libtv-audio-tag libtv-audio-pause" contenteditable="false" data-value="${val}"><span class="libtv-audio-tag-icon">停顿 ${val} 秒</span></span>`);
+        applyToneTags(el, true);
+      }
       el.dispatchEvent(new Event('input', { bubbles: true }));
     },
     getValue: () => {
@@ -617,7 +656,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     },
     insertMentionFromDrop: (input, clientX, clientY) => insertMentionFromDropRef.current(input, clientX, clientY),
     previewDropCaret: (clientX, clientY) => previewDropCaretRef.current(clientX, clientY),
-  }), [commitNow]);
+  }), [commitNow, rememberSelection, restoreInsertionSelection, audioModel]);
 
   // 下拉展示所有上游输入（包括已引用的，已引用的显示为已选状态）
   const filteredInputs = useMemo(
@@ -658,7 +697,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     }
     // 停顿标签：<#N#> → 渲染为青色标签
     html = html.replace(/&lt;#([\d.]+)#&gt;/g, (_match, val) =>
-      `<span class="libtv-audio-tag libtv-audio-pause" contenteditable="false" data-tag-type="pause"><span class="libtv-audio-tag-icon">&lt;#${val}#&gt;</span></span>`
+      `<span class="libtv-audio-tag libtv-audio-pause" contenteditable="false" data-tag-type="pause" data-value="${val}"><span class="libtv-audio-tag-icon">${isMinimaxSpeechModel(audioModel ?? '') ? `停顿 ${val} 秒` : `&lt;#${val}#&gt;`}</span></span>`
     );
     // 语气词标签：在 innerHTML 写入后由 applyToneTags 处理（只作用于文本节点，避免正则破坏 mention 属性）
     // 前缀标签（如 720全景）：即使内容为空也要渲染，不能因提前返回而跳过
@@ -674,7 +713,12 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         (html || '<br>');
     }
     return html;
-  }, [value, mentions, upstreamInputs, prefixTag]);
+  }, [value, mentions, upstreamInputs, prefixTag, audioModel]);
+
+  useEffect(() => {
+    const el = editorRef.current;
+    if (el && isMinimaxSpeechModel(audioModel ?? '')) applyToneTags(el, true);
+  }, [audioModel]);
 
   /** 用户输入 */
   const handleInput = useCallback(() => {
@@ -1003,7 +1047,7 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
     const el = editorRef.current;
     if (!el) return;
     el.innerHTML = buildHtml();
-    applyToneTags(el);
+    applyToneTags(el, isMinimaxSpeechModel(audioModel ?? ''));
     applyRangeTags(el, rangeChip);
     if (isFirstSyncRef.current) {
       isFirstSyncRef.current = false;
@@ -1102,7 +1146,10 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         onInput={handleInput}
         onKeyDown={handleKeyDown}
         // 失焦即触发自动暂存（原来靠右下角的「暂存」按钮，用户经常忘点就切走了）
-        onBlur={onBlur ? () => onBlur() : undefined}
+        onBlur={() => { rememberSelection(); onBlur?.(); }}
+        role="textbox"
+        aria-label={ariaLabel}
+        aria-multiline="true"
         onBeforeInput={handleBeforeInput}
         onPaste={handlePaste}
         // 高度区间见 EDITOR_MIN_HEIGHT / EDITOR_MAX_HEIGHT（写在这里而不是 Tailwind 类里，
@@ -1112,7 +1159,8 @@ export const PromptEditor = memo(forwardRef<PromptEditorHandle, PromptEditorProp
         }`}
         // 放大视图：给一个实打实的最小高度（百分比在这里会退化成内容高），
         // 上限放开——总体超过弹窗高度时由弹窗整体滚动，而不是在框里滚。
-        style={isLarge ? { minHeight: '46vh', maxHeight: 'none' } : { minHeight: EDITOR_MIN_HEIGHT, maxHeight: EDITOR_MAX_HEIGHT }}
+        style={{ ...(isLarge ? { minHeight: '46vh', maxHeight: 'none' } : { minHeight: EDITOR_MIN_HEIGHT, maxHeight: EDITOR_MAX_HEIGHT }),
+          whiteSpace: isMinimaxSpeechModel(audioModel ?? '') ? 'pre-wrap' : undefined }}
       />
 
       {/* @ 引用下拉菜单 */}

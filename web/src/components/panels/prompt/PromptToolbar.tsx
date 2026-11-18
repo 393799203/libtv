@@ -7,6 +7,7 @@ import { pricingApi, type NodePriceGroup, type PriceModelItem } from '@/services
 import { useModelStore } from '@/stores/modelStore';
 import { message } from '@/utils/antdApp';
 import { addEnhanceNodeAfter } from '@/utils/enhanceNode';
+import { MINIMAX_EMOTIONS, MINIMAX_VOICE_OPTIONS, isMinimaxSpeechModel } from '@/configs/audioModels';
 
 // 价格列表全局只请求一次（画布上可能同时存在多个工具栏实例）；
 // 失败时清空缓存，允许下次挂载时重试
@@ -125,6 +126,7 @@ interface PromptToolbarProps {
   refVideoSeconds?: number;
   // 音频节点专属：输入字符数（用于计算费用）
   charCount?: number;
+  generationError?: string;
   /**
    * 节点记录的模型渠道（wasu/dianxin）：仅当节点确实保存过该字段时才参与判定。
    * - undefined：节点未记录渠道（新节点，或渠道记录功能上线前的历史节点）
@@ -756,6 +758,7 @@ function groupOptions<T extends { group: string }>(options: T[]): Array<[string,
 
 // 按分组整理音色 / 语气词（模块级常量，无需 useMemo）
 const VOICE_GROUPS = groupOptions(VOICE_OPTIONS);
+const MINIMAX_VOICE_GROUPS = groupOptions(MINIMAX_VOICE_OPTIONS);
 const TONE_GROUPS = groupOptions(TONE_OPTIONS);
 
 export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
@@ -786,10 +789,14 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
   hasRefVideo = false,
   refVideoSeconds = 0,
   charCount = 0,
+  generationError,
   storedModelChannel,
 }) {
   const isVideo = nodeType === 'video';
   const isAudio = nodeType === 'audio';
+  const isMinimaxAudio = isAudio && isMinimaxSpeechModel(selectedModel);
+  const voiceOptions = isMinimaxAudio ? MINIMAX_VOICE_OPTIONS : VOICE_OPTIONS;
+  const voiceGroups = isMinimaxAudio ? MINIMAX_VOICE_GROUPS : VOICE_GROUPS;
   // 当前最终渠道（wasu/dianxin），传给模型选择器做置灰判断
   const currentChannel = useModelStore((s) => s.channel);
   // 当前所选模型是否因渠道变更而不可用（与 ModelSelector 判定一致）：用于拦截生成
@@ -879,7 +886,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
           >
             <SoundOutlined className="text-gray-400 text-xs" />
             <span className={TVAL}>
-              {VOICE_OPTIONS.find((v) => v.value === selectedVoice)?.label || '音色'}
+              {voiceOptions.find((v) => v.value === selectedVoice)?.label || '音色'}
             </span>
             <ChevronIcon className="text-gray-400 w-3 h-3" />
           </button>
@@ -887,7 +894,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
             <>
               <div className="fixed inset-0 z-20" onClick={() => setVoiceOpen(false)} />
               <div className={`${TDROP} w-[160px] max-h-[320px] overflow-y-auto`}>
-                {VOICE_GROUPS.map(([groupName, voices]) => (
+                {voiceGroups.map(([groupName, voices]) => (
                   <div key={groupName}>
                     <div className={TGP}>{groupName}</div>
                     {voices.map((opt) => (
@@ -937,7 +944,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
       )}
 
       {/* 风格选择器（仅音频节点，写入 instructions） */}
-      {isAudio && (
+      {isAudio && !isMinimaxAudio && (
         <div className="relative">
           <button
             onClick={() => setStyleOpen(!styleOpen)}
@@ -967,8 +974,23 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         </div>
       )}
 
+      {isMinimaxAudio && <div className="relative">
+        <button type="button" onClick={() => setToneOpen(!toneOpen)} className={TBTN}>
+          <span className={TVAL}>情绪：{MINIMAX_EMOTIONS.find(option => option.value === selectedTone)?.label || '自动'}</span>
+          <ChevronIcon className="text-gray-400 w-3 h-3" />
+        </button>
+        {toneOpen && <>
+          <div className="fixed inset-0 z-20" onClick={() => setToneOpen(false)} />
+          <div className={`${TDROP} w-[128px]`}>
+            {MINIMAX_EMOTIONS.map(option => <button type="button" key={option.value}
+              className={`${TITEM} ${selectedTone === option.value ? TITEM_ACTIVE : ''}`}
+              onClick={() => { onToneChange?.(option.value); setToneOpen(false); }}>{option.label}</button>)}
+          </div>
+        </>}
+      </div>}
+
       {/* 语气词选择器（仅音频节点，紧邻风格选择器，写入 instructions，不再插入提示词） */}
-      {isAudio && (
+      {isAudio && !isMinimaxAudio && (
         <div className="relative">
           <button
             onClick={() => setToneOpen(!toneOpen)}
@@ -1114,8 +1136,8 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
         <button
           className="h-8 px-3.5 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center hover:from-cyan-400 hover:to-blue-500 active:scale-95 transition-all duration-150 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-cyan-500/25 text-[13px] font-medium tracking-wide"
           onClick={() => onGenerate?.(1)}
-          disabled={isGenerating || modelUnavailable}
-          title={modelUnavailable ? '模型在当前渠道不可用，请先重新选择模型' : undefined}
+          disabled={isGenerating || modelUnavailable || !!generationError}
+          title={modelUnavailable ? '模型在当前渠道不可用，请先重新选择模型' : generationError}
         >
           {isGenerating ? '生成中…' : modelUnavailable ? '请重选模型' : '生成'}
         </button>

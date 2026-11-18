@@ -54,7 +54,7 @@ func NewImageClient(cfg config.AIConfig, providerName string, router ...*Channel
 		router:  r,
 		// 兜底默认模型（业务路径由 ImageExecutor 从 data.Model 传入，此值仅在无 model 参数时使用）；
 		// 与 models.yaml 注册的图像模型保持一致
-		model: "doubao-seedream-5.0-lite",
+		model: FallbackImageModelID,
 		httpCli: &http.Client{
 			Timeout: 180 * time.Second,
 			Transport: &http.Transport{
@@ -172,6 +172,7 @@ func (c *ImageClient) GenerateImageFromImageWithModel(ctx context.Context, model
 // generate 按模型协议分派请求构建与响应解析。
 // images 为空即文生图，非空即图生图（参考图，公网 URL 或 data:base64）。
 func (c *ImageClient) generate(ctx context.Context, model, prompt string, images []string, size string, n int) ([]string, error) {
+	model = NormalizeImageModelID(model, ChannelFrom(ctx))
 	if c.apiStyleFor(ctx, model) == ImageStyleDashScopeMultimodal {
 		return c.generateDashScopeMultimodal(ctx, model, prompt, images, size, n)
 	}

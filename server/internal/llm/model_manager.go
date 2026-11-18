@@ -92,9 +92,21 @@ func (mm *ModelManager) load() error {
 	return nil
 }
 
-// FallbackImageModelID 图像模型的最后兜底（models.yaml 里 image 分类标了 default: true 的那个，
-// 同时也是 ImageClient.model 的初值，见 image.go）——三处必须同名，改默认模型时一起改。
+// FallbackImageModelID 华数图像模型的兜底；电信使用独立的 Flash 默认值。
 const FallbackImageModelID = "doubao-seedream-5.0-lite"
+const DianxinFallbackImageModelID = "doubao-seedream-5.0-flash"
+
+// NormalizeImageModelID 仅在新调用时替换退役模型，不改写历史画布或账单。
+func NormalizeImageModelID(modelID, channel string) string {
+	if channel == ChannelDianxin && modelID == "doubao-seedream-5.0-lite" {
+		return "doubao-seedream-5.0-flash"
+	}
+	return modelID
+}
+
+func IsSeedream5ImageModel(modelID string) bool {
+	return modelID == "doubao-seedream-5.0-flash" || modelID == "doubao-seedream-5.5"
+}
 
 // FallbackLLMModelID 文本模型的最后兜底（models.yaml 里 llm 分类标了 default: true 的那个）。
 // 只在 DefaultLLMModelID 查不到配置时使用；改默认模型时与 models.yaml 一起改。
@@ -116,17 +128,21 @@ const (
 // 配置缺失（manager 为 nil / 该渠道没有 image 分类 / 没有任何 default 标记）时退回
 // FallbackImageModelID，保证兜底一定拿得到一个可用的模型 ID。
 func (mm *ModelManager) DefaultImageModelID(channel string) string {
+	fallback := FallbackImageModelID
+	if channel == ChannelDianxin {
+		fallback = DianxinFallbackImageModelID
+	}
 	// 允许 nil receiver：执行器里的 modelManager 可能是 nil（测试/降级装配），
 	// 调用方不必先判空，兜底逻辑只有一条路径
 	if mm == nil {
-		return FallbackImageModelID
+		return fallback
 	}
 
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()
 
 	if mm.config == nil {
-		return FallbackImageModelID
+		return fallback
 	}
 	// 空渠道按华数处理：与 ListModelsForChannel 的约定保持一致
 	if channel == "" {
@@ -138,7 +154,24 @@ func (mm *ModelManager) DefaultImageModelID(channel string) string {
 			return m.ID
 		}
 	}
-	return FallbackImageModelID
+	return fallback
+}
+
+// DefaultAudioModelID 与节点选模使用同一渠道清单，避免电信空模型误用华数 Qwen。
+func (mm *ModelManager) DefaultAudioModelID(channel string) string {
+	fallback := "qwen3-tts-instruct-flash"
+	if channel == ChannelDianxin {
+		fallback = "minimax-speech-2.8-turbo"
+	}
+	if mm == nil {
+		return fallback
+	}
+	for _, m := range mm.ListModelsForChannel(channel)["audio"] {
+		if m.Default {
+			return m.ID
+		}
+	}
+	return fallback
 }
 
 // DefaultLLMModelID 返回指定渠道下的默认文本模型，供「调用方没有指定模型」时兜底。
@@ -274,7 +307,7 @@ func (mm *ModelManager) FindModelByID(modelID string) *ModelConfig {
 }
 
 // FindModelByIDForChannel 在**指定渠道内**根据 ID 查找模型配置。
-// 华数/电信可能存在同名模型（如 doubao-seedream-5.0-lite、deepseek-v4.1-flash），
+// 华数/电信可能存在同名模型（如 doubao-seedream-5.0-flash、deepseek-v4.1-flash），
 // 此时 FindModelByID 因 map 遍历顺序随机而可能返回另一渠道的配置；
 // 有渠道上下文时（提示词生成、白模解析等）应使用本方法，保证取到当前渠道的配置
 func (mm *ModelManager) FindModelByIDForChannel(channel, modelID string) *ModelConfig {

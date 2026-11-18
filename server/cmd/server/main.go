@@ -255,6 +255,13 @@ func main() {
 	if err := pricingService.SeedRecognizePrices(context.Background()); err != nil {
 		log.Printf("warning: seed recognize prices failed: %v", err)
 	}
+	// 新 Seedream 模型继承同渠道已配置单价，失败则不启动，避免未配置价格的调用免费放行。
+	if err := pricingService.SeedSeedreamPrices(context.Background()); err != nil {
+		log.Fatalf("seed seedream prices: %v", err)
+	}
+	if err := pricingService.SeedMinimaxSpeechPrices(context.Background()); err != nil {
+		log.Fatalf("seed minimax speech prices: %v", err)
+	}
 
 	// 支付宝支付服务（积分超市充值；configs/config.yaml payment.alipay 未配置时支付功能关闭）
 	paymentService, err := service.NewPaymentService(db, billingService, config.C.Payment.Alipay)

@@ -19,6 +19,10 @@ import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canv
 import { PromptUpstreamBar } from './PromptUpstreamBar';
 import { applyRangeToPrompt, reshootRangeText } from '@/utils/reshootPrompt';
 import { ensureVideoPoster, getCachedVideoPoster } from '@/utils/videoPoster';
+import { normalizeImageModel } from '@/utils/imageModel';
+import { isMinimaxSpeechModel, minimaxSpeechValidation, resolveAudioEmotion, resolveAudioVoice } from '@/configs/audioModels';
+import { SpeechPromptTools } from './SpeechPromptTools';
+import { message } from '@/utils/antdApp';
 
 /** 拖动区间时提示词框的刷新节流间隔（毫秒） */
 const RESHOOT_SYNC_THROTTLE_MS = 140;
@@ -384,10 +388,12 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   const initialModel = ('model' in data && (data as { model?: string }).model)
     ? (data as { model: string }).model
     : '';
-  const [selectedModel, setSelectedModel] = useState(initialModel);
+  const [rawSelectedModel, setSelectedModel] = useState(initialModel);
 
   // 当前最终渠道（wasu/dianxin）：写回节点时记录，并用于模型可用性判断
   const currentChannel = useModelStore((s) => s.channel);
+  const selectedModel = nodeType === 'image' ? normalizeImageModel(rawSelectedModel, currentChannel) : rawSelectedModel;
+  const isMinimaxAudio = nodeType === 'audio' && isMinimaxSpeechModel(selectedModel);
   // 节点记录的模型渠道：仅在节点确实保存过该字段时才参与可用性判定。
   // 历史节点（渠道记录功能上线前生成）没有该字段，无法追溯其真实来源 →
   // 此时不做判定（否则"电信渠道下用 cdance 生成的旧节点"会被误判为华数而错误置灰）。
@@ -537,6 +543,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
   // 包括提示词文本 + 上游文本节点内容
   const audioCharCount = useMemo(() => {
     if (nodeType !== 'audio') return 0;
+    if (isMinimaxAudio) {
+      const text = promptText.trim() || upstreamInputs.find(input => input.nodeType === 'text')?.textSnippet?.trim() || '';
+      return [...text].length;
+    }
     let total = promptText.length;
     // 加上上游文本节点的内容
     for (const input of upstreamInputs) {
@@ -545,12 +555,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
       }
     }
     return total;
-  }, [nodeType, promptText, upstreamInputs]);
+  }, [nodeType, isMinimaxAudio, promptText, upstreamInputs]);
+  const speechValidationError = isMinimaxAudio ? minimaxSpeechValidation(promptText) : null;
 
   // 音频节点专属：音色、语速、风格
-  const [selectedVoice, setSelectedVoice] = useState(
+  const [rawSelectedVoice, setSelectedVoice] = useState(
     nodeType === 'audio' ? ((data as AudioNodeData).voice || 'default') : 'default'
   );
+  const selectedVoice = resolveAudioVoice(selectedModel, rawSelectedVoice);
   const [selectedSpeed, setSelectedSpeed] = useState(
     nodeType === 'audio' ? ((data as AudioNodeData).speed || 1.0) : 1.0
   );
@@ -558,9 +570,10 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
     nodeType === 'audio' ? (((data as any).style as string) || '') : ''
   );
   // 音频节点专属：语气词（不再插入提示词，而是独立写入 TTS instructions）
-  const [selectedTone, setSelectedTone] = useState(
+  const [rawSelectedTone, setSelectedTone] = useState(
     nodeType === 'audio' ? (((data as any).tone as string) || '') : ''
   );
+  const selectedTone = resolveAudioEmotion(selectedModel, rawSelectedTone);
 
   /** 用户正在输入（防抖未落库）：这期间不要用画布上的值覆盖框里内容 */
   const pendingInputRef = useRef(false);
@@ -760,6 +773,11 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 发送生成 — 通过 useNodeGeneration 统一入口
   const handleGenerate = useCallback(async (count?: number) => {
+    if (isMinimaxAudio) {
+      const text = (expandedEditorRef.current ?? editorRef.current)?.getValue() ?? promptTextRef.current;
+      const error = minimaxSpeechValidation(text);
+      if (error) { message.error(error); return; }
+    }
     if (!projectId) {
       console.error('projectId 不存在，无法执行工作流');
       return;
@@ -777,7 +795,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
     // 2) 调统一入口（自动：存盘 → 调后端 → 订阅 SSE）
     await generate();
-  }, [projectId, nodeType, buildUpdateData, onUpdate, generate]);
+  }, [projectId, nodeType, buildUpdateData, onUpdate, generate, isMinimaxAudio]);
 
   // 视频节点：时长调整后实时同步到节点 data（避免刷新丢失）；UI 值从 data 派生
   const handleDurationChange = useCallback((duration: number) => {
@@ -866,11 +884,14 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
       {/* 第二层：提示词编辑区（失焦即自动暂存） */}
       <div className={editorSize === 'large' ? 'min-h-[46vh] px-2' : 'flex-1 min-w-0 px-2 relative'}>
+        {isMinimaxAudio && <SpeechPromptTools editor={editorSize === 'large' ? expandedEditorRef : editorRef} />}
         <PromptEditor
           value={promptText}
           mentions={mentions}
-          placeholder={config.placeholder}
-          maxLength={config.maxLength}
+          placeholder={isMinimaxAudio ? '输入配音文本，回车分段' : config.placeholder}
+          maxLength={isMinimaxAudio ? 9999 : config.maxLength}
+          audioModel={nodeType === 'audio' ? selectedModel : undefined}
+          ariaLabel={nodeType === 'audio' ? '配音文本' : '提示词'}
           upstreamInputs={upstreamInputs}
           size={editorSize}
           syncKey={editorSyncKey}
@@ -880,6 +901,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
           onBlur={editorSize === 'default' ? handleSaveDraft : undefined}
           ref={editorHandleRef}
         />
+        {speechValidationError && <p role="alert" className="mt-1 text-xs text-red-300">{speechValidationError}</p>}
       </div>
 
       {/* 第三层：底部工具栏 */}
@@ -912,6 +934,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
         onGenerateAudioChange={handleGenerateAudioChange}
         audioReferenced={nodeType === 'video' && (mentions.some((m) => m.nodeType === 'audio') || hasUpstreamAudio)}
         charCount={audioCharCount}
+        generationError={speechValidationError ?? undefined}
         hasRefVideo={hasRefVideo}
         refVideoSeconds={refVideoSeconds}
       />
