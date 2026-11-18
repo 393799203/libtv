@@ -321,7 +321,7 @@ func jsonStringEnd(raw string, start int) int {
 
 // NewScriptClient 创建用于剧本生成的 LLM 客户端
 func NewScriptClient(cfg config.AIConfig, router ...*ChannelRouter) *Client {
-	return NewClient(cfg, ChannelWasu, router...)
+	return NewClient(cfg, ChannelDianxin, router...)
 }
 
 // cleanJSONMarkdown 清理 LLM 返回中可能包裹的 ```json ... ``` 标记

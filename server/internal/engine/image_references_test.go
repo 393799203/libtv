@@ -193,7 +193,7 @@ func TestImageReferenceMappingMatchesActualWirePayload(t *testing.T) {
 				llm.ChannelWasu: {BaseURL: srv.URL, APIKey: "test"},
 			}}, llm.ChannelWasu)
 			modelsPath := filepath.Join(t.TempDir(), "models.yaml")
-			models := "models:\n  wasu:\n    image:\n      - id: test-image\n        api_style: " + apiStyle + "\n"
+			models := "models:\n  dianxin:\n    image:\n      - id: test-image\n        usage: [image]\n        api_style: " + apiStyle + "\n"
 			if err := os.WriteFile(modelsPath, []byte(models), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -213,7 +213,9 @@ func TestImageReferenceMappingMatchesActualWirePayload(t *testing.T) {
 					{"id":"f1","nodeId":"face","nodeType":"image"}
 				]
 			}`)}
-			_, err = executor.Execute(context.Background(), node, imageReferenceContext())
+			execCtx := imageReferenceContext()
+			execCtx.channel = llm.ChannelDianxin
+			_, err = executor.Execute(context.Background(), node, execCtx)
 			if err == nil || atomic.LoadInt32(&calls) != 1 {
 				t.Fatalf("应只向模拟上游请求一次后停止: calls=%d err=%v", calls, err)
 			}

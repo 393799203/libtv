@@ -104,9 +104,7 @@ func (s *UserService) RegisterWithChannel(ctx context.Context, email, password, 
 		return nil, err
 	}
 
-	if channel != "wasu" {
-		channel = "dianxin" // 默认电信（无 source 走电信）
-	}
+	channel = "dianxin"
 
 	user := &model.User{
 		Email:        email,
@@ -422,25 +420,25 @@ func (s *UserService) TouchActivity(userID string) {
 // GetUserChannel 查询用户 AI 渠道（管理员修改/渠道路由用）
 func (s *UserService) GetUserChannel(ctx context.Context, userID string) (string, error) {
 	if userID == "" {
-		return "wasu", nil
+		return "dianxin", nil
 	}
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "wasu", nil
+			return "dianxin", nil
 		}
 		return "", err
 	}
 	if user.Channel == "" {
-		return "wasu", nil
+		return "dianxin", nil
 	}
-	return user.Channel, nil
+	return "dianxin", nil
 }
 
 // UpdateChannel 更新用户 AI 渠道（管理员操作：wasu/dianxin）
 func (s *UserService) UpdateChannel(ctx context.Context, id, channel string) (*model.User, error) {
-	if channel != "dianxin" && channel != "wasu" {
-		return nil, apperror.New(2006, http.StatusBadRequest, "渠道必须是 wasu 或 dianxin")
+	if channel != "dianxin" {
+		return nil, apperror.New(2006, http.StatusBadRequest, "渠道仅支持电信")
 	}
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {

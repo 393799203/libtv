@@ -53,6 +53,7 @@ func (c *AudioClient) creds(ctx context.Context) (string, string) {
 		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
 			return p.APIKey, p.BaseURL
 		}
+		return "", ""
 	}
 	return c.apiKey, c.baseURL
 }
@@ -121,6 +122,9 @@ func (c *AudioClient) GenerateSpeech(ctx context.Context, model, input, voice st
 	}
 
 	apiKey, baseURL := c.creds(ctx)
+	if apiKey == "" || baseURL == "" {
+		return nil, fmt.Errorf("服务暂不可用")
+	}
 	url := fmt.Sprintf("%s/audio/speech", strings.TrimRight(baseURL, "/"))
 	log.Printf("[AudioGen] TTS请求: model=%s voice=%s url=%s inputLen=%d processedLen=%d channel=%s", model, voice, url, len(input), len(processedInput), ChannelFrom(ctx))
 	log.Printf("[AudioGen] TTS payload: %s", string(payload))

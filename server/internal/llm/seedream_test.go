@@ -17,6 +17,12 @@ func TestSeedreamRegistryAndDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, channel := range []string{ChannelWasu, ChannelDianxin} {
+		if channel == ChannelWasu {
+			if len(mm.ListModelsForChannel(channel)["image"]) != 0 {
+				t.Fatal("retired channel must not expose models")
+			}
+			continue
+		}
 		wantDefault := FallbackImageModelID
 		if channel == ChannelDianxin {
 			wantDefault = DianxinFallbackImageModelID
@@ -56,7 +62,7 @@ func TestSeedreamTextAndReferenceImageWirePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, channel := range []string{ChannelWasu, ChannelDianxin} {
+	for _, channel := range []string{ChannelDianxin} {
 		for _, modelID := range []string{"doubao-seedream-5.5", "doubao-seedream-5.0-flash", "doubao-seedream-5.0-lite", ""} {
 			for _, withReference := range []bool{false, true} {
 				t.Run(channel+"/"+modelID+map[bool]string{false: "/text", true: "/reference"}[withReference], func(t *testing.T) {

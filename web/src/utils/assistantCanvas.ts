@@ -152,8 +152,7 @@ export function checkAssistantGeneration(projectId: string, task: AssistantTask)
     }
     const available = node.type === 'image' ? models.imageModels
       : node.type === 'video' ? models.videoModels : node.type === 'audio' ? models.audioModels : models.llmModels;
-    if (!available.some(m => m.ID === node.data.model && m.Usage.includes(node.type)) ||
-        (node.data.modelProvider || 'wasu') !== models.channel) {
+    if (!available.some(m => m.ID === node.data.model && m.Usage.includes(node.type))) {
       throw new Error(`请先为「${node.data.label}」选择当前渠道可用的模型`);
     }
     const prompt = String(node.data.prompt || '').replace(/\[\[m:[^\]]+\]\]/g, '').trim();

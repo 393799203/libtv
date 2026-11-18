@@ -51,7 +51,7 @@ func TestDefaultImageModelID_MatchesRealConfig(t *testing.T) {
 	if err != nil {
 		t.Skipf("跳过：读不到真实 models.yaml (%v)", err)
 	}
-	for _, channel := range []string{"wasu", "dianxin"} {
+	for _, channel := range []string{"", "dianxin"} {
 		expected := FallbackImageModelID
 		if channel == ChannelDianxin {
 			expected = DianxinFallbackImageModelID

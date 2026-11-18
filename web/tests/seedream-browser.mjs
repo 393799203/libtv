@@ -7,12 +7,13 @@ const browser = await chromium.launch({
 const base = process.env.QA_ORIGIN || 'http://127.0.0.1:3000';
 const errors = [];
 try {
-  for (const channel of ['wasu', 'dianxin']) {
+  for (const userChannel of ['wasu', 'dianxin']) {
+    const channel = 'dianxin';
     for (const storedModel of ['', 'doubao-seedream-5.0-lite']) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
       const page = await context.newPage();
       page.on('pageerror', error => errors.push(error.message));
-      const user = { id: 'seedream-qa', email: 'qa@example.invalid', role: 'user', credits: 100, channel };
+      const user = { id: 'seedream-qa', email: 'qa@example.invalid', role: 'user', credits: 100, channel: userChannel };
       const choices = channel === 'dianxin' ? [
         ['doubao-seedream-5.0-flash', 'Seedream 5.0 Flash'],
         ['doubao-seedream-5.5', 'Seedream 5.5'],
@@ -23,7 +24,7 @@ try {
         Resolutions: channel === 'dianxin' && ID !== 'doubao-seedream-5.0-pro' ? ['2K'] : ['2K', '4K'] }));
       let canvas = { nodes: [{ id: 'image-qa', type: 'image', position: { x: 150, y: 100 }, data: {
         type: 'image', label: '测试图片', prompt: '测试提示词', model: storedModel,
-        modelProvider: channel, status: 'idle', resolution: '4K', aspectRatio: '16:9',
+        modelProvider: userChannel, status: 'idle', resolution: '4K', aspectRatio: '16:9',
       } }], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
       const mutations = [];
       await context.route('**/api/**', async route => {
@@ -61,7 +62,7 @@ try {
       assert.equal(await page.getByText('请重选模型', { exact: true }).count(), 0);
       assert.deepEqual(mutations, [], 'model selection must not execute generation');
       await context.close();
-      console.log(JSON.stringify({ channel, storedModel, electricModelsOnly: true, choicesWorking: true }));
+      console.log(JSON.stringify({ channel, userChannel, storedModel, electricModelsOnly: true, choicesWorking: true }));
     }
   }
   assert.deepEqual(errors, []);

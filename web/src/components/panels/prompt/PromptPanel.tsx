@@ -19,7 +19,7 @@ import type { NodeType, LibTVNodeData, LibTVNode, LibTVEdge } from '@/types/canv
 import { PromptUpstreamBar } from './PromptUpstreamBar';
 import { applyRangeToPrompt, reshootRangeText } from '@/utils/reshootPrompt';
 import { ensureVideoPoster, getCachedVideoPoster } from '@/utils/videoPoster';
-import { normalizeImageModel } from '@/utils/imageModel';
+import { normalizeActiveModel } from '@/utils/imageModel';
 import { isMinimaxSpeechModel, minimaxSpeechValidation, resolveAudioEmotion, resolveAudioVoice } from '@/configs/audioModels';
 import { SpeechPromptTools } from './SpeechPromptTools';
 import { message } from '@/utils/antdApp';
@@ -392,7 +392,7 @@ export const PromptPanel = memo<PromptPanelProps>(function PromptPanel({
 
   // 当前最终渠道（wasu/dianxin）：写回节点时记录，并用于模型可用性判断
   const currentChannel = useModelStore((s) => s.channel);
-  const selectedModel = nodeType === 'image' ? normalizeImageModel(rawSelectedModel, currentChannel) : rawSelectedModel;
+  const selectedModel = normalizeActiveModel(rawSelectedModel);
   const isMinimaxAudio = nodeType === 'audio' && isMinimaxSpeechModel(selectedModel);
   // 节点记录的模型渠道：仅在节点确实保存过该字段时才参与可用性判定。
   // 历史节点（渠道记录功能上线前生成）没有该字段，无法追溯其真实来源 →

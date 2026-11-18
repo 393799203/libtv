@@ -19,7 +19,7 @@ func TestMinimaxRegistryAndChannelDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if mm.DefaultAudioModelID(ChannelDianxin) != "minimax-speech-2.8-turbo" ||
-		mm.DefaultAudioModelID(ChannelWasu) != "qwen3-tts-instruct-flash" {
+		mm.DefaultAudioModelID("") != "minimax-speech-2.8-turbo" {
 		t.Fatal("audio defaults crossed channels")
 	}
 	for _, id := range []string{"minimax-speech-2.8-turbo", "minimax-speech-2.8-hd"} {

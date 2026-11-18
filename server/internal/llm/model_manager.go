@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -92,8 +93,8 @@ func (mm *ModelManager) load() error {
 	return nil
 }
 
-// FallbackImageModelID 华数图像模型的兜底；电信使用独立的 Flash 默认值。
-const FallbackImageModelID = "doubao-seedream-5.0-lite"
+// FallbackImageModelID 统一使用电信 Flash。
+const FallbackImageModelID = "doubao-seedream-5.0-flash"
 const DianxinFallbackImageModelID = "doubao-seedream-5.0-flash"
 
 // NormalizeImageModelID 仅在新调用时替换退役模型，不改写历史画布或账单。
@@ -104,13 +105,44 @@ func NormalizeImageModelID(modelID, channel string) string {
 	return modelID
 }
 
+// NormalizeActiveModelID 仅映射有对应电信版本的退役 ID，不猜测替换不相干的模型。
+func NormalizeActiveModelID(modelID string) string {
+	switch modelID {
+	case "doubao-seedream-5.0-lite":
+		return "doubao-seedream-5.0-flash"
+	case "doubao-seedance-2.0":
+		return "cdance2.0-0807"
+	case "doubao-seedance-2.0-fast":
+		return "cdance2.0-fast-0807"
+	case "doubao-seedance-2.5":
+		return "cdance2.5-0807"
+	case "deepseek-v4-flash":
+		return "deepseek-v4-flash-0731"
+	}
+	return modelID
+}
+
+func (mm *ModelManager) ValidateActiveModel(modelID, usage string) error {
+	if mm == nil {
+		return nil
+	}
+	cfg := mm.FindModelByIDForChannel(ChannelDianxin, modelID)
+	if cfg != nil {
+		for _, item := range cfg.Usage {
+			if item == usage {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("模型不可用，请重新选择模型")
+}
 func IsSeedream5ImageModel(modelID string) bool {
 	return modelID == "doubao-seedream-5.0-flash" || modelID == "doubao-seedream-5.5"
 }
 
 // FallbackLLMModelID 文本模型的最后兜底（models.yaml 里 llm 分类标了 default: true 的那个）。
 // 只在 DefaultLLMModelID 查不到配置时使用；改默认模型时与 models.yaml 一起改。
-const FallbackLLMModelID = "deepseek-v4-flash"
+const FallbackLLMModelID = "deepseek-v4.1-flash"
 
 // 图像模型的上游协议风格（对应 models.yaml 的 api_style 字段）。
 // 判定入口是 ImageAPIStyle，分派点在 image.go 的 generate。
@@ -146,7 +178,7 @@ func (mm *ModelManager) DefaultImageModelID(channel string) string {
 	}
 	// 空渠道按华数处理：与 ListModelsForChannel 的约定保持一致
 	if channel == "" {
-		channel = "wasu"
+		channel = ChannelDianxin
 	}
 	// 注意不要调 ListModelsForChannel：它自己会 RLock，递归读锁在有待写者时会死锁
 	for _, m := range mm.config.Models[channel]["image"] {
@@ -159,10 +191,7 @@ func (mm *ModelManager) DefaultImageModelID(channel string) string {
 
 // DefaultAudioModelID 与节点选模使用同一渠道清单，避免电信空模型误用华数 Qwen。
 func (mm *ModelManager) DefaultAudioModelID(channel string) string {
-	fallback := "qwen3-tts-instruct-flash"
-	if channel == ChannelDianxin {
-		fallback = "minimax-speech-2.8-turbo"
-	}
+	fallback := "minimax-speech-2.8-turbo"
 	if mm == nil {
 		return fallback
 	}
@@ -193,7 +222,7 @@ func (mm *ModelManager) DefaultLLMModelID(channel string) string {
 	}
 	// 空渠道按华数处理：与 ListModelsForChannel 的约定保持一致
 	if channel == "" {
-		channel = "wasu"
+		channel = ChannelDianxin
 	}
 	// 同样不能调 ListModelsForChannel：它自己会 RLock，递归读锁在有待写者时会死锁
 	for _, m := range mm.config.Models[channel]["llm"] {
@@ -242,7 +271,7 @@ func (mm *ModelManager) ListModelsForChannel(channel string) map[string][]ModelC
 	defer mm.mu.RUnlock()
 
 	if channel == "" {
-		channel = "wasu"
+		channel = ChannelDianxin
 	}
 	groups, ok := mm.config.Models[channel]
 	if !ok {
@@ -307,12 +336,12 @@ func (mm *ModelManager) FindModelByID(modelID string) *ModelConfig {
 }
 
 // FindModelByIDForChannel 在**指定渠道内**根据 ID 查找模型配置。
-// 华数/电信可能存在同名模型（如 doubao-seedream-5.0-flash、deepseek-v4.1-flash），
+// 按指定渠道查找模型（历史渠道不再出现在生产配置中）。
 // 此时 FindModelByID 因 map 遍历顺序随机而可能返回另一渠道的配置；
 // 有渠道上下文时（提示词生成、白模解析等）应使用本方法，保证取到当前渠道的配置
 func (mm *ModelManager) FindModelByIDForChannel(channel, modelID string) *ModelConfig {
 	if channel == "" {
-		channel = "wasu"
+		channel = ChannelDianxin
 	}
 	mm.mu.RLock()
 	defer mm.mu.RUnlock()

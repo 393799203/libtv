@@ -11,7 +11,7 @@ import (
 )
 
 // 价格渠道回退值：调用方未指定渠道时按华数（wasu）处理，与 model_prices.channel 默认值一致
-const defaultPriceChannel = "wasu"
+const defaultPriceChannel = "dianxin"
 
 // normalizePriceChannel 渠道归一：空值回退 wasu
 func normalizePriceChannel(channel string) string {

@@ -112,9 +112,6 @@ storage:
 ai:
   # ---- Provider 运行时凭据（对应 models.yaml 中的 providers）----
   providers:
-    wasu:
-      api_key: "sk-jHYp7jAAqZLqLGUffjHrLZBtGaIhLjexdjesHLpq5S84qpC4"
-      base_url: "https://token.wasu.cn/v1"
     dianxin:
       api_key: "d15dd4bcdf524c0d91c39329cbe3a405"
       base_url: "https://ai.ctaigw.cn/v1"

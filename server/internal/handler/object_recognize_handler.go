@@ -108,7 +108,7 @@ func (h *ObjectRecognizeHandler) RecognizeObject(c *gin.Context) {
 
 	userID := middleware.GetUserID(c)
 	// 解析用户最终渠道，视觉模型走对应渠道的 token
-	channel := "wasu"
+	channel := "dianxin"
 	if h.channelService != nil {
 		channel = h.channelService.ResolveUserChannel(c.Request.Context(), userID)
 	}

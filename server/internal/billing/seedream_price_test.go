@@ -128,7 +128,7 @@ func TestSeedreamPricesInheritPerChannelWithoutOverwritingOrRewritingHistory(t *
 				found[m.ModelID]++
 			}
 			if channel == llm.ChannelWasu {
-				if found["doubao-seedream-5.0-lite"] != 2 || found["doubao-seedream-5.5"] != 0 || found["doubao-seedream-5.0-flash"] != 0 {
+				if len(found) != 0 {
 					t.Fatalf("wasu registry changed: %v", found)
 				}
 			} else if found["doubao-seedream-5.0-lite"] != 0 || found["doubao-seedream-5.5"] != 1 || found["doubao-seedream-5.0-flash"] != 1 {
@@ -192,5 +192,50 @@ func TestSeedreamPriceReadFailureDoesNotPartiallySeed(t *testing.T) {
 	repo := &seedreamPriceRepo{fail: true}
 	if err := NewPricingService(mm, repo).SeedSeedreamPrices(context.Background()); err == nil || repo.writes != 0 {
 		t.Fatalf("price read failure must be returned without writes: err=%v writes=%d", err, repo.writes)
+	}
+}
+
+type channelRefundUsers struct {
+	repository.UserRepo
+	credits int64
+}
+
+func (r *channelRefundUsers) AddCredits(_ context.Context, _ string, amount int64) error {
+	r.credits += amount
+	return nil
+}
+
+func (r *channelRefundUsers) GetCredits(context.Context, string) (int64, error) {
+	return r.credits, nil
+}
+
+type channelRefundBills struct {
+	repository.BillingRepo
+	records []model.BillingRecord
+}
+
+func (r *channelRefundBills) Create(_ context.Context, record *model.BillingRecord) error {
+	r.records = append(r.records, *record)
+	return nil
+}
+
+func TestRetiredChannelRefundKeepsOriginalLedgerDimension(t *testing.T) {
+	users := &channelRefundUsers{}
+	bills := &channelRefundBills{}
+	svc := NewService(users, bills, nil, nil)
+	if channelOf(context.Background()) != llm.ChannelDianxin {
+		t.Fatal("new billing default must use electricity channel")
+	}
+	if err := svc.RefundOnChannel("user", 30, ActionImage, "doubao-seedream-5.0-lite",
+		"图片生成", "original error", ChargeExtra{ChargeKey: "original-charge", Resolution: "2K"}, llm.ChannelWasu); err != nil {
+		t.Fatal(err)
+	}
+	if users.credits != 30 || len(bills.records) != 1 {
+		t.Fatalf("refund lost or duplicated: credits=%d records=%v", users.credits, bills.records)
+	}
+	row := bills.records[0]
+	if row.Channel != llm.ChannelWasu || row.Model != "doubao-seedream-5.0-lite" ||
+		row.Amount != 30 || row.ChargeKey != "original-charge" || row.Resolution != "2K" {
+		t.Fatalf("historical refund was rewritten: %+v", row)
 	}
 }

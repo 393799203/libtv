@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -49,8 +48,7 @@ type ChannelRouter struct {
 // providers 为 config.AI.Providers（wasu/dianxin 等渠道的 api_key/base_url）
 func NewChannelRouter(policyFunc ChannelPolicyFunc, providers map[string]config.ProviderConfig) *ChannelRouter {
 	if policyFunc == nil {
-		// 默认：按用户渠道（per_user）
-		policyFunc = func(ctx context.Context) (string, error) { return PolicyPerUser, nil }
+		policyFunc = func(ctx context.Context) (string, error) { return PolicyAllDianxin, nil }
 	}
 	return &ChannelRouter{
 		policyFunc: policyFunc,
@@ -65,28 +63,9 @@ func (r *ChannelRouter) SetPolicyFunc(fn ChannelPolicyFunc) {
 	r.policyFunc = fn
 }
 
-// Resolve 根据全局策略与用户渠道，返回最终实际使用的渠道名
-//   - all_wasu    → 一律 wasu
-//   - all_dianxin → 一律 dianxin
-//   - per_user    → 按用户 channel；用户渠道非法/为空时回退 wasu
+// Resolve 所有新请求固定使用电信，旧用户渠道及旧策略不能重新启用已停用渠道。
 func (r *ChannelRouter) Resolve(ctx context.Context, userChannel string) string {
-	policy, err := r.getPolicyFunc()(ctx)
-	if err != nil {
-		log.Printf("[ChannelRouter] 读取渠道策略失败，按 per_user 处理: %v", err)
-		policy = PolicyPerUser
-	}
-
-	switch policy {
-	case PolicyAllWasu:
-		return ChannelWasu
-	case PolicyAllDianxin:
-		return ChannelDianxin
-	default: // per_user
-		if userChannel == ChannelDianxin {
-			return ChannelDianxin
-		}
-		return ChannelWasu
-	}
+	return ChannelDianxin
 }
 
 // getPolicyFunc 安全读取策略函数引用（SetPolicyFunc 与 Resolve 并发安全）
@@ -98,6 +77,9 @@ func (r *ChannelRouter) getPolicyFunc() ChannelPolicyFunc {
 
 // Provider 返回某渠道的凭据（api_key/base_url）；渠道不存在时返回 false
 func (r *ChannelRouter) Provider(channel string) (config.ProviderConfig, bool) {
+	if channel != ChannelDianxin {
+		return config.ProviderConfig{}, false
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	p, ok := r.providers[channel]
@@ -110,7 +92,9 @@ func (r *ChannelRouter) GetChannelProviders() map[string]config.ProviderConfig {
 	defer r.mu.RUnlock()
 	out := make(map[string]config.ProviderConfig, len(r.providers))
 	for k, v := range r.providers {
-		out[k] = v
+		if k == ChannelDianxin {
+			out[k] = v
+		}
 	}
 	return out
 }
@@ -129,12 +113,14 @@ func WithChannel(ctx context.Context, channel string) context.Context {
 	return context.WithValue(ctx, channelCtxKey{}, channel)
 }
 
-// ChannelFrom 从 context 读取渠道；为空时回退 wasu
+// ChannelFrom 新请求缺省电信；显式历史渠道仍保留，供历史退款按原渠道记账。
 func ChannelFrom(ctx context.Context) string {
-	if v, ok := ctx.Value(channelCtxKey{}).(string); ok && v != "" {
-		return v
+	if ctx != nil {
+		if v, ok := ctx.Value(channelCtxKey{}).(string); ok && v != "" {
+			return v
+		}
 	}
-	return ChannelWasu
+	return ChannelDianxin
 }
 
 // ---------- 内存缓存版策略读取（避免每次请求都查库） ----------
@@ -171,8 +157,8 @@ func CachedPolicyFunc(read func(ctx context.Context) (string, error), ttl time.D
 // ValidatePolicy 校验策略值合法
 func ValidatePolicy(policy string) error {
 	switch policy {
-	case PolicyAllWasu, PolicyAllDianxin, PolicyPerUser:
+	case PolicyAllDianxin:
 		return nil
 	}
-	return fmt.Errorf("非法渠道策略: %s（可选 all_wasu / all_dianxin / per_user）", policy)
+	return fmt.Errorf("渠道策略仅支持 all_dianxin")
 }

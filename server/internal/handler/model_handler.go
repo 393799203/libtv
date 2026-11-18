@@ -26,7 +26,7 @@ func NewModelHandler(modelManager *llm.ModelManager, channelService ...*service.
 // 渠道与执行链路一致：全局策略(all_wasu/all_dianxin) 优先，否则按用户 channel
 func (h *ModelHandler) ListModels(c *gin.Context) {
 	// 默认：未登录或无渠道服务时返回全部（华数/默认渠道）
-	channel := "wasu"
+	channel := "dianxin"
 	if h.channelService != nil {
 		userID := middleware.GetUserID(c)
 		channel = h.channelService.ResolveUserChannel(c.Request.Context(), userID)

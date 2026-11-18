@@ -68,8 +68,8 @@ models:
 		t.Fatalf("应按渠道取默认模型：got %q, want %q", got, "dianxin-image")
 	}
 	// 空渠道按华数处理（与 ListModelsForChannel 的约定一致）
-	if got := resolveImageModel("", "", mm); got != "wasu-image" {
-		t.Fatalf("空渠道应退回华数清单：got %q, want %q", got, "wasu-image")
+	if got := resolveImageModel("", "", mm); got != "dianxin-image" {
+		t.Fatalf("空渠道应退回电信清单：got %q, want %q", got, "dianxin-image")
 	}
 }
 
@@ -105,8 +105,8 @@ models:
 			if got != llm.FallbackImageModelID {
 				t.Fatalf("兜底模型应为 %q，得到 %q", llm.FallbackImageModelID, got)
 			}
-			if got != "doubao-seedream-5.0-lite" {
-				t.Fatalf("华数兜底模型必须仍为 doubao-seedream-5.0-lite，得到 %q", got)
+			if got != "doubao-seedream-5.0-flash" {
+				t.Fatalf("兜底模型必须为 doubao-seedream-5.0-flash，得到 %q", got)
 			}
 		})
 	}

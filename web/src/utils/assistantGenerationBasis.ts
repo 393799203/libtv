@@ -51,7 +51,7 @@ function nodeInput(node: LibTVNode, target: boolean): Record<string, unknown> {
   if (!target) return outputOf(node);
   const d = node.data;
   const input = Object.fromEntries((INPUT_FIELDS[node.type] || []).map(key => [key, d[key]]));
-  input.modelProvider = d.modelProvider || 'wasu';
+  input.modelProvider = 'dianxin';
   if ('mentions' in input) input.mentions = mentionsOf(node);
   if (node.type === 'video') {
     // Cached filmstrips and probed duration are UI metadata; the selected range

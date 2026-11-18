@@ -71,7 +71,7 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 	}
 
 	// 解析用户最终渠道（全局策略 + 用户渠道），供视觉模型走对应 token
-	channel := "wasu"
+	channel := "dianxin"
 	if h.channelService != nil {
 		channel = h.channelService.ResolveUserChannel(c.Request.Context(), middleware.GetUserID(c))
 	}
@@ -79,11 +79,7 @@ func (h *PrevizHandler) AnalyzeScene(c *gin.Context) {
 	// 默认视觉模型（快/便宜）；按渠道取不同默认（电信=deepseek-v4.1-flash 多模态，华数=Seed 2.1 Turbo）
 	modelID := req.Model
 	if modelID == "" {
-		if channel == "dianxin" {
-			modelID = "deepseek-v4.1-flash"
-		} else {
-			modelID = "doubao-seed-2.1-turbo"
-		}
+		modelID = "deepseek-v4.1-flash"
 	}
 
 	// 模型 ID 映射：前端传 ID，需在当前渠道内转换为 model_id

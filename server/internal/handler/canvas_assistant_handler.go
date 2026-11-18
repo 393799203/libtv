@@ -101,7 +101,7 @@ func (h *CanvasAssistantHandler) Chat(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	channel := "wasu"
+	channel := "dianxin"
 	if h.channels != nil {
 		channel = h.channels.ResolveUserChannel(c.Request.Context(), userID)
 	}

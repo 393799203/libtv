@@ -159,7 +159,7 @@ const ModelSelector = memo(function ModelSelector({
   models,
   value,
   onChange,
-  channel = 'wasu',
+  channel = 'dianxin',
   storedModelChannel,
 }: {
   models: ModelOption[];
@@ -180,7 +180,7 @@ const ModelSelector = memo(function ModelSelector({
   const unavailable = !!value && (
     !currentModel
     || (currentModel.provider && currentModel.provider !== channel)
-    || (storedModelChannel !== undefined && storedModelChannel !== channel)
+    || (storedModelChannel !== undefined && !['wasu', 'dianxin'].includes(storedModelChannel))
   );
 
   return (
@@ -804,7 +804,7 @@ export const PromptToolbar = memo<PromptToolbarProps>(function PromptToolbar({
     const m = models.find((x) => x.value === selectedModel);
     if (!m) return true;
     if (m.provider && m.provider !== currentChannel) return true;
-    if (storedModelChannel !== undefined && storedModelChannel !== currentChannel) return true;
+    if (storedModelChannel !== undefined && !['wasu', 'dianxin'].includes(storedModelChannel)) return true;
     return false;
   })();
   const [durationOpen, setDurationOpen] = useState(false);

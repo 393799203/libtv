@@ -138,7 +138,7 @@ func NewPricingService(modelManager *llm.ModelManager, priceRepo repository.Mode
 // 支持参考视频计费的模型（ref_video_billing）额外带一档「带参考视频」单价
 func (s *PricingService) ListPrices(ctx context.Context, channel string) (*PriceListResult, error) {
 	if channel == "" {
-		channel = "wasu"
+		channel = llm.ChannelDianxin
 	}
 	records, err := s.priceRepo.ListAll(ctx, channel)
 	if err != nil {
@@ -231,7 +231,7 @@ func (s *PricingService) SavePrices(ctx context.Context, channel string, items [
 		return ErrInvalidPriceConfig
 	}
 	if channel == "" {
-		channel = "wasu"
+		channel = llm.ChannelDianxin
 	}
 
 	// 汇总该渠道 models.yaml 中的模型（ID → 配置），拒绝为不存在的模型或跨渠道模型配置价格
@@ -408,8 +408,8 @@ func (s *PricingService) SeedSeedreamPrices(ctx context.Context) error {
 	return s.priceRepo.BatchUpsert(ctx, rows)
 }
 
-// SeedMinimaxSpeechPrices 电信首次接入语音时沿用站内现有 Qwen 的每百字单价。
-// 只补缺失项，不改华数价格，也不覆盖电信后续为 Turbo/HD 分别设置的价格。
+// SeedMinimaxSpeechPrices 保留首次接入的 26 积分/100 字预设，补价不再依赖退役渠道。
+// 已配置的 Turbo/HD 价格（含 0）不覆盖。
 func (s *PricingService) SeedMinimaxSpeechPrices(ctx context.Context) error {
 	existing, err := s.priceRepo.ListAll(ctx, llm.ChannelDianxin)
 	if err != nil {
@@ -430,13 +430,9 @@ func (s *PricingService) SeedMinimaxSpeechPrices(ctx context.Context) error {
 	if len(missing) == 0 {
 		return nil
 	}
-	source, err := s.priceRepo.GetByNodeModel(ctx, llm.ChannelWasu, "audio", "qwen3-tts-instruct-flash")
-	if err != nil {
-		return fmt.Errorf("load initial speech price: %w", err)
-	}
 	var rows []model.ModelPrice
 	for _, id := range missing {
-		rows = append(rows, model.ModelPrice{Channel: llm.ChannelDianxin, NodeType: "audio", ModelID: id, Price: source.Price})
+		rows = append(rows, model.ModelPrice{Channel: llm.ChannelDianxin, NodeType: "audio", ModelID: id, Price: 26})
 	}
 	return s.priceRepo.BatchUpsert(ctx, rows)
 }

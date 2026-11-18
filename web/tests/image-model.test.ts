@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeImageModel } from '../src/utils/imageModel.ts';
+import { normalizeActiveModel, normalizeImageModel } from '../src/utils/imageModel.ts';
 import { PROMPT_PANEL_CONFIGS } from '../src/configs/promptConfig.ts';
 import { isMinimaxSpeechModel, minimaxSpeechValidation, resolveAudioEmotion, resolveAudioVoice } from '../src/configs/audioModels.ts';
 
@@ -10,7 +10,20 @@ test('retired Lite resolves to Flash while explicit image choices remain intact'
   for (const id of ['', 'doubao-seedream-5.5', 'doubao-seedream-5.0-flash', 'doubao-seedream-5.0-pro', 'future-image']) {
     assert.equal(normalizeImageModel(id, 'dianxin'), id);
   }
-  assert.equal(PROMPT_PANEL_CONFIGS.image.defaultModel, 'doubao-seedream-5.0-lite');
+  assert.equal(PROMPT_PANEL_CONFIGS.image.defaultModel, 'doubao-seedream-5.0-flash');
+});
+
+test('retired channel model IDs only map to their electric counterparts', () => {
+  for (const [old, active] of [
+    ['doubao-seedream-5.0-lite', 'doubao-seedream-5.0-flash'],
+    ['doubao-seedance-2.0', 'cdance2.0-0807'],
+    ['doubao-seedance-2.0-fast', 'cdance2.0-fast-0807'],
+    ['doubao-seedance-2.5', 'cdance2.5-0807'],
+    ['deepseek-v4-flash', 'deepseek-v4-flash-0731'],
+  ]) assert.equal(normalizeActiveModel(old), active);
+  for (const value of ['qwen3-tts-instruct-flash', 'qwen-image-3.0', 'future-model', '']) {
+    assert.equal(normalizeActiveModel(value), value);
+  }
 });
 
 test('speech controls validate native pauses and only offer supported emotions', () => {

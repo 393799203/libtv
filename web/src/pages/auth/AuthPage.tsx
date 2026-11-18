@@ -75,12 +75,11 @@ function AuthPageForm() {
           remember_me: values.remember_me ?? false,
         });
       } else {
-        const source = new URLSearchParams(window.location.search).get('source');
         const registration = await authApi.register({
           email: values.email.trim(),
           password: values.password,
           nickname: values.nickname || '',
-          channel: source === 'wasu' ? 'wasu' : 'dianxin',
+          channel: 'dianxin',
           referralCode: normalizeReferralCode(params.get('ref') || '') || undefined,
           code: values.code || '',
         });

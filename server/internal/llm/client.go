@@ -220,6 +220,8 @@ func (c *Client) doChatRequest(ctx context.Context, model string, payload []byte
 	if c.router != nil {
 		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
 			apiKey, baseURL = p.APIKey, p.BaseURL
+		} else {
+			return nil, fmt.Errorf("服务暂不可用")
 		}
 	}
 

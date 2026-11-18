@@ -206,6 +206,8 @@ func Load(path string) error {
 	if err := yaml.Unmarshal(data, &C); err != nil {
 		return fmt.Errorf("parse config file: %w", err)
 	}
+	// 即便加载了旧配置，也不能恢复已停用的华数凭据。
+	delete(C.AI.Providers, "wasu")
 
 	// 支持环境变量覆盖（用于 Docker 环境）
 	if host := os.Getenv("DB_HOST"); host != "" {

@@ -121,6 +121,8 @@ try {
         await page.locator('table tbody tr:not(.ant-table-measure-row)').first().waitFor();
       }
       if (tab === 'users') {
+        assert.equal(await page.getByRole('combobox', { name: '筛选渠道' }).count(), 0);
+        assert.equal(await page.getByRole('columnheader', { name: '渠道商' }).count(), 0);
         await page.getByRole('button', { name: /充\s*值$/ }).first().click();
         await cancelDialog(page, '积分充值');
         await page.mouse.move(0, 0);
@@ -165,7 +167,12 @@ try {
         await page.locator('.ant-modal-confirm').getByRole('button', { name: /取\s*消/ }).click();
         await page.locator('.ant-modal-confirm').waitFor({ state: 'hidden' });
       }
-      if (tab === 'channels') await page.getByText('测试视频生成模型', { exact: true }).waitFor();
+      if (tab === 'channels') {
+        await page.getByText('测试视频生成模型', { exact: true }).waitFor();
+        for (const text of ['华数', '全部走华数', '按各自渠道', '流量路由', '渠道概览']) {
+          assert.equal(await page.getByText(text, { exact: true }).count(), 0);
+        }
+      }
       if (tab === 'packages') {
         await page.getByRole('button', { name: /新建套餐$/ }).click();
         await cancelDialog(page, '新建套餐');

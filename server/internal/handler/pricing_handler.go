@@ -31,6 +31,10 @@ func NewPricingHandler(pricingService *billing.PricingService, channelService ..
 //     这样电信用户看到的扣费金额按电信模型价格计算，华数用户按华数价格
 func (h *PricingHandler) List(c *gin.Context) {
 	channel := c.Query("channel")
+	if channel != "" && channel != "dianxin" {
+		response.Fail(c, http.StatusBadRequest, "该渠道已停用")
+		return
+	}
 	if channel == "" && h.channelService != nil {
 		userID := middleware.GetUserID(c)
 		channel = h.channelService.ResolveUserChannel(c.Request.Context(), userID)
@@ -56,6 +60,10 @@ func (h *PricingHandler) Save(c *gin.Context) {
 		return
 	}
 	channel := req.Channel
+	if channel != "" && channel != "dianxin" {
+		response.Fail(c, http.StatusBadRequest, "该渠道已停用")
+		return
+	}
 	if channel == "" && h.channelService != nil {
 		channel = h.channelService.ResolveUserChannel(c.Request.Context(), middleware.GetUserID(c))
 	}

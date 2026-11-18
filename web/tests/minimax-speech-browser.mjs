@@ -25,7 +25,7 @@ async function caretAfter(editor, phrase) {
 
 try {
   for (const [channel, storedModel] of [
-    ['dianxin', 'minimax-speech-2.8-turbo'], ['dianxin', 'minimax-speech-2.8-hd'], ['wasu', 'qwen3-tts-instruct-flash'],
+    ['dianxin', 'minimax-speech-2.8-turbo'], ['dianxin', 'minimax-speech-2.8-hd'],
   ]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();

@@ -201,7 +201,7 @@ func channelOf(ctx context.Context) string {
 	if ch := llm.ChannelFrom(ctx); ch != "" {
 		return ch
 	}
-	return "wasu"
+	return llm.ChannelDianxin
 }
 
 // legacyChannelPrefixes 历史账单把渠道拼在模型名前（wasu-xxx / dianxin-xxx）。

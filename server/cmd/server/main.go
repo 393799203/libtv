@@ -271,6 +271,17 @@ func main() {
 
 	// 初始化 LLM 客户端（多渠道 token 路由：wasu=华数 / dianxin=电信，后台三档切换）
 	settingRepo := repository.NewSettingRepo(db)
+	// 统一当前路由配置；历史账单、对账、价格和画布快照不参与迁移。
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.User{}).
+			Where("channel IS NULL OR channel <> ?", llm.ChannelDianxin).
+			UpdateColumn("channel", llm.ChannelDianxin).Error; err != nil {
+			return err
+		}
+		return repository.NewSettingRepo(tx).Set(context.Background(), llm.SettingKeyChannelPolicy, llm.PolicyAllDianxin)
+	}); err != nil {
+		log.Fatalf("initialize electric channel: %v", err)
+	}
 
 	// 微信支付（APIv3）配置与业务服务：与支付宝平级并存
 	// 配置来源**只有服务器一处**：config.yaml 的 payment.wxpay 段 + WXPAY_* 环境变量
@@ -282,21 +293,20 @@ func main() {
 	channelRouter := llm.NewChannelRouter(nil, config.C.AI.Providers)
 	channelService := service.NewChannelService(settingRepo, userRepo, channelRouter)
 	// 渠道路由读取全局策略（带 5s 缓存：后台切换后最多 5s 生效）
-	channelRouter.SetPolicyFunc(llm.CachedPolicyFunc(channelService.GetPolicy, 5*time.Second))
 
 	llmClient := llm.NewScriptClient(config.C.AI, channelRouter)
-	imageClient := llm.NewImageClient(config.C.AI, "wasu", channelRouter)
+	imageClient := llm.NewImageClient(config.C.AI, llm.ChannelDianxin, channelRouter)
 	// 注入模型管理器：ImageClient 靠它按 (渠道, 模型) 解析接口协议（models.yaml 的 api_style），
 	// 决定走 OpenAI 兼容的 /images/generations 还是 DashScope 多模态生成
 	// （Qwen-Image 2.0 Pro 属于后者）。不注入也能跑，只是一律按 OpenAI 兼容处理。
 	imageClient.SetModelManager(modelManager)
 	// 上游视频任务轮询预算（config.yaml 的 video 段）：必须显著小于执行超时，
 	// 否则执行 ctx 先到期，失败退费与收尾会被 deadline 掐掉
-	videoClient := llm.NewVideoClient(config.C.AI, "wasu", llm.VideoPollConfig{
+	videoClient := llm.NewVideoClient(config.C.AI, llm.ChannelDianxin, llm.VideoPollConfig{
 		Interval: time.Duration(config.C.Video.PollIntervalSec) * time.Second,
 		Timeout:  time.Duration(config.C.Video.PollTimeoutSec) * time.Second,
 	}, channelRouter)
-	audioClient := llm.NewAudioClient(config.C.AI, "wasu", channelRouter)
+	audioClient := llm.NewAudioClient(config.C.AI, llm.ChannelDianxin, channelRouter)
 
 	// 文件上传服务（Template Method：哈希去重 + StatObject + PutObject）
 	fileUploadService := service.NewFileUploadService(appStorage)

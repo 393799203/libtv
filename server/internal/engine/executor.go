@@ -633,7 +633,7 @@ func (ec *ExecutionContext) GetChannel() string {
 	ec.mu.RLock()
 	defer ec.mu.RUnlock()
 	if ec.channel == "" {
-		return "wasu"
+		return llm.ChannelDianxin
 	}
 	return ec.channel
 }
@@ -1224,6 +1224,13 @@ func (t *TextExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx *
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；文本模型按次计费）
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
+	data.Model = llm.NormalizeActiveModelID(data.Model)
+	if data.Model == "" {
+		data.Model = llm.FallbackLLMModelID
+	}
+	if err := t.modelManager.ValidateActiveModel(data.Model, "text"); err != nil {
+		return nil, err
+	}
 
 	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
 	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
@@ -1415,6 +1422,13 @@ func (s *ScriptExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx
 	// 注入用户渠道（全局策略+用户渠道）后再计费：账单「渠道-模型」前缀与实际调用渠道一致
 	ctx = llm.WithChannel(ctx, execCtx.GetChannel())
 	// 扣费校验：通过后才调用 LLM（账单记录模型与场景；剧本使用文本模型按次计费）
+	data.Model = llm.NormalizeActiveModelID(data.Model)
+	if data.Model == "" {
+		data.Model = llm.FallbackLLMModelID
+	}
+	if err := s.modelManager.ValidateActiveModel(data.Model, "script"); err != nil {
+		return nil, err
+	}
 	// 先问「这一笔是不是已经扣过」再扣费 —— 顺序反了会真丢钱：
 	// 先扣再查的话，重复投递（队列重投 / worker 被杀重领 / 重启续跑）会把钱扣两遍，
 	// 而查到的旧金额只是把对账行写成 0，账面完全看不出多扣过一笔。
@@ -1569,6 +1583,9 @@ func (i *ImageExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	rawModel := data.Model
 	apiModelID := resolveImageModel(rawModel, execCtx.GetChannel(), i.modelManager)
 	data.Model = apiModelID
+	if err := i.modelManager.ValidateActiveModel(apiModelID, "image"); err != nil {
+		return nil, err
+	}
 	if rawModel != apiModelID {
 		log.Printf("[ImageExecutor] 图像模型解析: %q -> %s", rawModel, apiModelID)
 	}
@@ -2437,7 +2454,12 @@ func (v *VideoExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	// 确定模型：计费用逻辑 ID（data.Model），API 调用用渠道解析后的真实 ID
 	model := data.Model
 	if model == "" {
-		model = "doubao-seedance-2.0-fast"
+		model = "cdance2.0-fast-0807"
+	}
+	model = llm.NormalizeActiveModelID(model)
+	data.Model = model
+	if err := v.modelManager.ValidateActiveModel(model, "video"); err != nil {
+		return nil, err
 	}
 
 	// 视频节点直接使用前端传来的分辨率（480p/720p/1080p/4K）
@@ -2945,6 +2967,9 @@ func (a *AudioExecutor) Execute(ctx context.Context, node WorkflowNode, execCtx 
 	model := data.Model
 	if model == "" {
 		model = a.modelManager.DefaultAudioModelID(execCtx.GetChannel())
+	}
+	if err := a.modelManager.ValidateActiveModel(model, "audio"); err != nil {
+		return nil, err
 	}
 
 	// 确定音色

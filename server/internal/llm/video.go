@@ -179,6 +179,7 @@ func (c *VideoClient) creds(ctx context.Context) (string, string) {
 		if p, ok := c.router.Provider(ChannelFrom(ctx)); ok && p.APIKey != "" {
 			return p.APIKey, p.BaseURL
 		}
+		return "", ""
 	}
 	return c.apiKey, c.baseURL
 }
@@ -307,48 +308,13 @@ func (c *VideoClient) GenerateVideo(ctx context.Context, model string, prompt st
 		ratio = "16:9"
 	}
 
-	// 电信渠道：两组彼此独立的协议
-	//   wan3.0-video → DashScope 异步任务（services/aigc/video-generation/video-synthesis + tasks/{id}）
-	//   cdance 系列  → 火山异步任务（contents/generations/tasks）
-	if ChannelFrom(ctx) == ChannelDianxin {
-		if strings.Contains(model, "wan3.0") {
-			return c.generateDianxinWanVideo(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
-		}
-		// cdance（火山协议）：用调用方给的原始分辨率，空的就**不发这个字段**（走上游默认）。
-		// 上面那个 "1080p" 兜底是给华数/万相路径的：cdance2.0-fast/mini 只支持 480p/720p，
-		// 把空值兜成 1080p 会直接吃上游拒单。
-		return c.generateDianxinVideo(ctx, model, prompt, duration, requestedResolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
+	if c.router != nil && !c.router.IsChannelAvailable(ChannelFrom(ctx)) {
+		return "", fmt.Errorf("服务暂不可用")
 	}
-
-	// 华数渠道：复用已提交任务（重启续跑直接接着查结果，不重新下发）
-	if h := AsyncTaskHolder(ctx); h != nil {
-		if h.Model == "" {
-			h.Model = model
-		}
-		if h.TaskID != "" {
-			log.Printf("[VideoGen] ♻ 复用已提交的华数任务: taskID=%s（跳过重复下发）", h.TaskID)
-			return c.pollVideoTask(ctx, h.TaskID)
-		}
-	}
-
-	var payload []byte
-	var err error
 	if strings.Contains(model, "wan3.0") {
-		payload, err = c.buildWanRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
-	} else {
-		payload, err = c.buildSeedanceRequest(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
+		return c.generateDianxinWanVideo(ctx, model, prompt, duration, resolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 	}
-	if err != nil {
-		return "", err
-	}
-
-	videoURL, err := c.doRequest(ctx, payload)
-	if err != nil {
-		return "", err
-	}
-
-	log.Printf("[VideoGen] ✅ 视频生成成功: url=%s", videoURL)
-	return videoURL, nil
+	return c.generateDianxinVideo(ctx, model, prompt, duration, requestedResolution, ratio, imageURLs, videoURLs, audioURLs, videoMode, generateAudio)
 }
 
 // ==================== 电信（天翼云）视频协议 ====================

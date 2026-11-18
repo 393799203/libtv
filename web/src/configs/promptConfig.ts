@@ -120,7 +120,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   image: {
     // previz：白模预演的静帧可作构图参考（锁构图）
     acceptedInputs: ['image', 'text', 'script', 'previz'],
-    defaultModel: 'doubao-seedream-5.0-lite',  // 默认模型 ID（豆包 Seedream 5.0 Lite）
+    defaultModel: 'doubao-seedream-5.0-flash',
     defaultResolution: '2K',
     defaultAspectRatio: '16:9',
     availableModels: [],  // 空数组，由组件从 Store 动态获取
@@ -131,7 +131,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   video: {
     // previz：白模预演的白片可作视频参考（走位/动作/镜头以此为准）
     acceptedInputs: ['image', 'video', 'text', 'script', 'audio', 'previz'],
-    defaultModel: 'doubao-seedance-2.0-fast',  // 默认模型 ID（seedance2.0 fast）
+    defaultModel: 'cdance2.0-fast-0807',
     defaultResolution: '720p',
     defaultAspectRatio: '16:9',
     availableModels: [],
@@ -141,7 +141,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   },
   text: {
     acceptedInputs: ['text', 'script', 'image'],
-    defaultModel: 'deepseek-v4-flash',
+    defaultModel: 'deepseek-v4.1-flash',
     defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],
@@ -151,7 +151,7 @@ export const PROMPT_PANEL_CONFIGS: Record<NodeType, PromptPanelConfig> = {
   },
   audio: {
     acceptedInputs: ['text', 'script'],
-    defaultModel: 'audio-default',
+    defaultModel: 'minimax-speech-2.8-turbo',
     defaultResolution: '2K',
     defaultAspectRatio: 'adaptive',
     availableModels: [],

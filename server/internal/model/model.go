@@ -24,7 +24,7 @@ type User struct {
 	PasswordVersion int    `gorm:"not null;default:0" json:"-"`
 	Role            string `gorm:"size:20;default:'user';not null" json:"role"` // user / admin
 	// Channel 用户所属 AI Token 渠道：wasu=华数 / dianxin=电信（默认 wasu，后台可改）
-	Channel string `gorm:"size:20;default:'wasu';not null;index" json:"channel"`
+	Channel string `gorm:"size:20;default:'dianxin';not null;index" json:"channel"`
 	// Credits 剩余积分：AI 调用前由扣费中间件校验并原子扣减（见 service/billing_service.go）
 	Credits   int64     `gorm:"not null;default:0" json:"credits"`
 	CreatedAt time.Time `json:"created_at"`
@@ -469,7 +469,7 @@ func (BillingRecord) TableName() string { return "billing_records" }
 type ModelPrice struct {
 	ID int64 `gorm:"primaryKey;autoIncrement" json:"id"`
 	// Channel AI Token 渠道：wasu=华数 / dianxin=电信
-	Channel  string `gorm:"size:20;not null;default:'wasu';uniqueIndex:idx_price_channel_node_model_res,priority:1" json:"channel"`
+	Channel  string `gorm:"size:20;not null;default:'dianxin';uniqueIndex:idx_price_channel_node_model_res,priority:1" json:"channel"`
 	NodeType string `gorm:"size:20;not null;uniqueIndex:idx_price_channel_node_model_res,priority:2" json:"node_type"` // 节点类型：text/script/image/video/audio
 	ModelID  string `gorm:"size:100;not null;uniqueIndex:idx_price_channel_node_model_res,priority:3" json:"model_id"` // 模型 ID（对应 models.yaml 的 id）
 	// Resolution 分辨率（视频节点：480p/720p/1080p/4k，其他节点为空）

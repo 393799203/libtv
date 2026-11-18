@@ -4,7 +4,6 @@ import { UploadOutlined, PictureOutlined, VideoCameraOutlined } from '@ant-desig
 import { useCanvasStore } from '@/stores/canvasStore';
 import { uploadImage } from '@/services/uploadApi';
 import { pricingApi } from '@/services/pricingApi';
-import { channelApi } from '@/services/channelApi';
 import { previzApi, type AnalyzedSceneObject } from '@/services/previzApi';
 import { usePrevizStore } from './previzStore';
 import { refreshCredits } from '@/utils/refreshCredits';
@@ -14,11 +13,6 @@ type SourceTab = 'upload' | 'image' | 'video';
 
 // 视觉模型选项（按当前渠道）：华数=Seed 2.1（turbo快/pro准）+ DeepSeek V4.1 Flash（多模态），
 // 电信=多模态（DeepSeek V4.1 Flash / GLM-5.3 Flash）
-const MODEL_OPTIONS_WASU = [
-  { value: 'doubao-seed-2.1-turbo', label: 'Seed 2.1 Turbo（默认，快/便宜）' },
-  { value: 'doubao-seed-2.1-pro', label: 'Seed 2.1 Pro（更准）' },
-  { value: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash（多模态）' },
-];
 const MODEL_OPTIONS_DIANXIN = [
   { value: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash（默认，多模态）' },
   { value: 'glm-5.3-flash', label: 'GLM-5.3 Flash（多模态）' },
@@ -37,25 +31,13 @@ export function AIBuildModal({
 
   const [sourceTab, setSourceTab] = useState<SourceTab>('upload');
   const [imageUrl, setImageUrl] = useState(''); // 最终用于解析的图片 URL
-  const [model, setModel] = useState('doubao-seed-2.1-turbo');
+  const [model, setModel] = useState('deepseek-v4.1-flash');
   // 当前渠道的视觉模型选项（挂载时按最终渠道获取，保证默认模型与渠道一致）
-  const [modelOptions, setModelOptions] = useState(MODEL_OPTIONS_WASU);
+  const modelOptions = MODEL_OPTIONS_DIANXIN;
   // 白模解析各模型单价（价格管理页「白模解析」分组；未配置/加载失败则隐藏）
   const [previzPrices, setPrevizPrices] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    // 按当前最终渠道设置视觉模型选项与默认值（电信=GLM-5.3 Flash / 华数=Seed 2.1）
-    channelApi.getMyChannel().then((res) => {
-      const ch = res?.channel || 'wasu';
-      if (ch === 'dianxin') {
-        setModelOptions(MODEL_OPTIONS_DIANXIN);
-        setModel('deepseek-v4.1-flash');
-      } else {
-        setModelOptions(MODEL_OPTIONS_WASU);
-        setModel('doubao-seed-2.1-turbo');
-      }
-    }).catch(() => {});
-
     pricingApi
       .list()
       .then((res) => {

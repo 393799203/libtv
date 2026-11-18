@@ -18,8 +18,8 @@ function fetchModelsWithChannel(): Promise<ModelsData> {
   if (!modelsPromise) {
     modelsPromise = (async () => {
       // 先取当前最终渠道（全局策略 + 用户渠道），再拉对应渠道模型
-      const my = await channelApi.getMyChannel().catch(() => ({ channel: 'wasu' as ChannelName }));
-      const channel = my?.channel || 'wasu';
+      await channelApi.getMyChannel();
+      const channel: ChannelName = 'dianxin';
       const models = await getModels();
       return {
         image: models.image || [],
@@ -55,7 +55,7 @@ export const useModelStore = create<ModelStore>((set) => ({
   videoModels: [],
   llmModels: [],
   audioModels: [],
-  channel: 'wasu',
+  channel: 'dianxin',
   isLoading: false,
   error: null,
 

@@ -51,9 +51,7 @@ func (h *ChannelHandler) GetPolicy(c *gin.Context) {
 	}
 	response.OK(c, gin.H{
 		"policy":      policy,
-		"all_wasu":    llm.PolicyAllWasu,
 		"all_dianxin": llm.PolicyAllDianxin,
-		"per_user":    llm.PolicyPerUser,
 	})
 }
 

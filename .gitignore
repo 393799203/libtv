@@ -67,6 +67,7 @@ server/vendor/
 !server/internal/billing/seedream_price_test.go
 !server/internal/llm/seedream_test.go
 !server/internal/llm/model_manager_test.go
+!server/internal/llm/single_channel_test.go
 !server/internal/llm/minimax_speech_test.go
 !server/internal/engine/image_model_fallback_test.go
 !server/internal/engine/audio_validation_test.go

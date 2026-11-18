@@ -32,7 +32,6 @@ import {
 import { styleApi, type StyleItem, type CategoryItem } from '@/services/styleApi';
 import { showApi, type ShowItem, type ShowCategoryItem } from '@/services/showApi';
 import { userApi, type UserItem } from '@/services/userApi';
-import { channelApi } from '@/services/channelApi';
 import { bannerApi, type BannerItem } from '@/services/bannerApi';
 import { useAuthStore } from '@/stores/authStore';
 import AddShowDialog from '@/components/AddShowDialog';
@@ -88,7 +87,7 @@ export default function AdminPage() {
   const [userKeyword, setUserKeyword] = useState('');
   // 角色 / 渠道筛选（'' 表示不限），对应筛选行上的两个 Select
   const [userRole, setUserRole] = useState('');
-  const [userChannel, setUserChannel] = useState('');
+  const userChannel = '';
   const [userTotal, setUserTotal] = useState(0);      // 用户总数（分页用）
   const [billingUserId, setBillingUserId] = useState<string | null>(null); // 查看哪个用户的积分明细
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null); // 充值弹窗目标用户
@@ -745,7 +744,7 @@ export default function AdminPage() {
         // 渠道与价格：原来藏在「商务配置」的子页签里，且拆成「价格管理」「渠道管理」两页 ——
         // 但渠道本来就是一个维度（价格按渠道独立配置），判断「切成全电信会怎样」要来回三个页面，
         // 所以合成一页并独立成一级菜单
-        { key: 'channels', icon: <DollarOutlined />, label: '渠道与价格' },
+        { key: 'channels', icon: <DollarOutlined />, label: '模型价格' },
         // 套餐管理：原来也是「商务配置」的子页签，商务配置整体去掉后独立成一级菜单
         { key: 'packages', icon: <ShoppingCartOutlined />, label: '套餐管理' },
       ],
@@ -1252,24 +1251,6 @@ export default function AdminPage() {
                       { value: 'admin', label: '管理员' },
                     ]}
                   />
-                  {/* 渠道商筛选：'' = 不限；选中即查询（回到第 1 页并带上当前其它筛选条件） */}
-                  <Select
-                    allowClear
-                    placeholder="渠道商"
-                    aria-label="筛选渠道"
-                    value={userChannel}
-                    onChange={(v) => {
-                      const next = v || '';
-                      setUserChannel(next);
-                      loadUsers(1, userKeyword, userRole, next);
-                    }}
-                    className="!w-[88px] lg:!w-[120px]"
-                    options={[
-                      { value: '', label: '全部' },
-                      { value: 'wasu', label: '华数' },
-                      { value: 'dianxin', label: '电信' },
-                    ]}
-                  />
                   {/* 只留图标（悬停 title 提示），避免文字把右侧筛选组撑长 */}
                   <Button
                     icon={<ReloadOutlined />}
@@ -1294,7 +1275,6 @@ export default function AdminPage() {
                         <th className="min-w-[180px] px-4 py-3 text-left font-medium text-gray-600">用户（ID / 邮箱 / 昵称）</th>
                         <th className="hidden lg:table-cell min-w-[110px] px-4 py-3 text-left font-medium text-gray-600">数据统计(项目|资产)</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">角色</th>
-                        <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">渠道商</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">剩余积分</th>
                         <th className="hidden lg:table-cell px-4 py-3 text-left font-medium text-gray-600">注册时间</th>
                         <th className="px-4 py-3 text-left font-medium text-gray-600">最后操作</th>
@@ -1346,27 +1326,6 @@ export default function AdminPage() {
                                   userApi.updateRole(user.id, value as 'user' | 'admin')
                                     .then(() => {
                                       message.success('角色已更新');
-                                      loadUsers();
-                                    })
-                                    .catch(() => {
-                                      // HTTP 错误已由 api.ts 拦截器统一 message.error()
-                                    });
-                                }}
-                              />
-                            </td>
-                            <td className="hidden lg:table-cell px-4 py-3">
-                              <Select
-                                value={user.channel || 'wasu'}
-                                size="small"
-                                style={{ width: 100 }}
-                                options={[
-                                  { value: 'wasu', label: '华数' },
-                                  { value: 'dianxin', label: '电信' },
-                                ]}
-                                onChange={(value) => {
-                                  channelApi.updateUserChannel(user.id, value as 'wasu' | 'dianxin')
-                                    .then(() => {
-                                      message.success('渠道已更新');
                                       loadUsers();
                                     })
                                     .catch(() => {
